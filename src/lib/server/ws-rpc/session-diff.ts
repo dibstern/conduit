@@ -12,7 +12,10 @@ import {
 	FolderTimeline,
 	isPruned,
 } from "../../domain/daemon/Services/folder-timeline.js";
-import { SessionDiff } from "../../domain/daemon/Services/session-diff.js";
+import {
+	SessionDiff,
+	type SessionDiffSession,
+} from "../../domain/daemon/Services/session-diff.js";
 import { WorkingTreeEdits } from "../../domain/daemon/Services/working-tree-edits.js";
 import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
 import { readSessionWorktreeOwnership } from "../../domain/relay/Services/session-worktree-deletion.js";
@@ -33,7 +36,11 @@ const available = <I, S>(tag: Context.Key<I, S>) =>
 	);
 const sessionDiff = available(SessionDiff);
 
-/** The turn's recorded run capture, once its run-end checkpoint has settled, and whether it was pruned. */
+/** A turn's list waits this long for a capture still recording before it answers pending. */
+const SETTLE_WAIT_MS = 5_000;
+
+/** The turn's recorded run capture, once its run-end checkpoint has settled, and whether it was
+ *  pruned; or, while the capture still records past the wait, its run as pending. */
 const turnCapture = (sessionId: string, turnId: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -44,7 +51,12 @@ const turnCapture = (sessionId: string, turnId: string) =>
 		const runId = turn?.run_id;
 		if (!runId) return undefined;
 		const timeline = yield* Effect.serviceOption(FolderTimeline);
-		if (Option.isSome(timeline)) yield* timeline.value.settled(runId);
+		if (Option.isSome(timeline)) {
+			const settled = yield* timeline.value
+				.settled(runId)
+				.pipe(Effect.timeoutOption(SETTLE_WAIT_MS));
+			if (Option.isNone(settled)) return { pending: runId };
+		}
 		const [row] = yield* sql<{
 			data: string;
 			sequence: number;
@@ -52,12 +64,12 @@ const turnCapture = (sessionId: string, turnId: string) =>
 			WHERE session_id = ${sessionId} AND type = 'run.changes_captured'
 			AND json_extract(data, '$.runId') = ${runId} LIMIT 1`;
 		if (!row) return undefined;
-		return {
-			capture: yield* Schema.decodeUnknownEffect(
-				Schema.fromJsonString(RunChangesCapturedSchema),
-			)(row.data),
-			pruned: yield* isPruned(sessionId, row.sequence),
-		};
+		const capture = yield* Schema.decodeUnknownEffect(
+			Schema.fromJsonString(RunChangesCapturedSchema),
+		)(row.data);
+		return (yield* isPruned(sessionId, row.sequence))
+			? { capture, pruned: true as const }
+			: { capture };
 	});
 
 const parseJson = (text: string | null): unknown => {
@@ -115,10 +127,11 @@ const scopeRecords = (sessionId: string, scope: SessionDiffScope) =>
 				? yield* toolCallChanges(sessionId, scope.toolId)
 				: undefined;
 		const turnId = scope.kind === "turn" ? scope.turnId : toolCall?.addedIn;
-		const captured = turnId ? yield* turnCapture(sessionId, turnId) : undefined;
+		const captured:
+			| Pick<SessionDiffSession, "capture" | "pruned" | "pending">
+			| undefined = turnId ? yield* turnCapture(sessionId, turnId) : undefined;
 		return {
-			...(captured ? { capture: captured.capture } : {}),
-			...(captured?.pruned ? { pruned: true as const } : {}),
+			...captured,
 			...(toolCall ? { toolCall } : {}),
 		};
 	});
@@ -156,18 +169,42 @@ const sessionFolders = (sessionId: string, scope: SessionDiffScope) =>
 		};
 	});
 
+/** A scope's revisions as it resolves now, and the run whose capture it still waits on. */
+const scopeFeed = (request: {
+	readonly sessionId: string;
+	readonly scope: SessionDiffScope;
+}) =>
+	Effect.gen(function* () {
+		const diff = yield* sessionDiff;
+		const session = yield* sessionFolders(request.sessionId, request.scope);
+		return {
+			pending: session.pending,
+			feed: diff
+				.changes(session, request.scope)
+				.pipe(Stream.map((revision) => ({ revision }))),
+		};
+	}).pipe(Effect.catch(mapRpcFailure("SubscribeSessionDiff")));
+
 export const subscribeSessionDiff = (request: {
 	readonly sessionId: string;
 	readonly scope: SessionDiffScope;
 }) =>
 	Stream.unwrap(
 		Effect.gen(function* () {
-			const diff = yield* sessionDiff;
-			const session = yield* sessionFolders(request.sessionId, request.scope);
-			return diff
-				.changes(session, request.scope)
-				.pipe(Stream.map((revision) => ({ revision })));
-		}).pipe(Effect.catch(mapRpcFailure("SubscribeSessionDiff"))),
+			const { pending, feed } = yield* scopeFeed(request);
+			const timeline = yield* Effect.serviceOption(FolderTimeline);
+			if (pending === undefined || Option.isNone(timeline)) return feed;
+			// Once the capture lands or is abandoned the timeline no longer holds
+			// the run, so the scope resolves settled and follows that listing.
+			return feed.pipe(
+				Stream.interruptWhen(timeline.value.settled(pending)),
+				Stream.concat(
+					Stream.unwrap(
+						scopeFeed(request).pipe(Effect.map(({ feed }) => feed)),
+					),
+				),
+			);
+		}),
 	);
 
 /** An edit of the unstaged scope, against the session's folders as the server resolves them. */

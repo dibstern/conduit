@@ -70,6 +70,8 @@ export class SessionDiffView {
 				readonly folders: readonly DiffFolder[];
 				/** The turn's run was never captured, so there is nothing to list. */
 				readonly notCaptured?: true;
+				/** Turn scope: the run's capture is still recording; a new revision follows. */
+				readonly pending?: true;
 				/** Turn scope: the capture's content was evicted; files and counts remain. */
 				readonly pruned?: true;
 				/** A tool call's listing: where its Tool File Changes came from. */
@@ -206,6 +208,7 @@ export class SessionDiffView {
 				kind: "listed",
 				folders,
 				...(listing.notCaptured && { notCaptured: listing.notCaptured }),
+				...(listing.pending && { pending: listing.pending }),
 				...(listing.pruned && { pruned: listing.pruned }),
 				...(listing.source && { source: listing.source }),
 			};

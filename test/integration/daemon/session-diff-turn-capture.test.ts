@@ -41,6 +41,7 @@ const git = (directory: string, ...args: string[]) =>
 
 /** A listing as the turn footer reads it. */
 const shape = (listing: SessionDiffListing) => ({
+	...(listing.pending ? { pending: true } : {}),
 	...(listing.notCaptured ? { notCaptured: true } : {}),
 	folders: listing.folders.map((folder) =>
 		"files" in folder
@@ -144,14 +145,23 @@ describe("Turn diff capture states through the built daemon", () => {
 			/** Runs one turn that writes `path` while its run is open; answers its turn id. */
 			turn: async (path: string) => {
 				rmSync(release, { force: true });
+				const assistant = (message: Record<string, unknown>) =>
+					message["type"] === "transcript_message" &&
+					message["sessionId"] === session &&
+					message["role"] === "assistant";
+				// An earlier turn's message can still update after its send returns.
+				const earlier = new Set(
+					browser.frames
+						.map(({ message }) => message)
+						.filter(assistant)
+						.map((message) => message["id"]),
+				);
 				const cursor = browser.frames.length;
 				const sending = browser.send(session, `Write ${path}.`);
 				void sending.catch(() => {});
+				// The new turn's reply follows its start checkpoint, which runs before the provider.
 				await browser.waitFor(
-					(frame) =>
-						frame["type"] === "transcript_message" &&
-						frame["sessionId"] === session &&
-						frame["role"] === "assistant",
+					(message) => assistant(message) && !earlier.has(message["id"]),
 					cursor,
 				);
 				writeFileSync(join(repo, path), `${path}\n`);
@@ -202,6 +212,96 @@ describe("Turn diff capture states through the built daemon", () => {
 				).map(({ data }) => JSON.parse(data) as { runId: string }),
 		};
 	}
+
+	it("shows a slow capture as pending, then its diff or its gap, to every browser that follows it", async () => {
+		evidenceFile = "test-results/f02e9-17-pending.json";
+		const { fixture, repo, browser, store, lock, turn, list, follow } =
+			await start(3);
+		const first = await turn("first.txt");
+		expect(shape(await list(first))).toEqual({
+			folders: [[["first.txt", "added"]]],
+		});
+
+		// The first capture made the session's store. Waiting on its ref lock
+		// with no retry limit, a capture is held until git's own deadline.
+		git(store, "config", "core.filesRefLockTimeout", "-1");
+		writeFileSync(lock, "");
+		const second = await turn("second.txt");
+		// Ends while the second capture is held, so its capture queues behind it.
+		const third = await turn("third.txt");
+		const secondFeed = follow(browser, second);
+		const thirdFeed = follow(browser, third);
+		const reconnected = await fixture.connect();
+		const thirdAgain = follow(reconnected, third);
+		const [secondPending, thirdPending] = await Promise.all([
+			list(second),
+			list(third),
+		]);
+		evidence["secondPending"] = secondPending;
+		evidence["thirdPending"] = thirdPending;
+		expect(shape(secondPending)).toEqual({ pending: true, folders: [] });
+		expect(shape(thirdPending)).toEqual({ pending: true, folders: [] });
+		expect(
+			await Promise.all([
+				secondFeed.next(),
+				thirdFeed.next(),
+				thirdAgain.next(),
+			]),
+		).toEqual([
+			secondPending.revision,
+			thirdPending.revision,
+			thirdPending.revision,
+		]);
+
+		// Git's deadline ends the held packaging: the second turn reads its gap.
+		const secondLanded = await list(second, await secondFeed.next());
+		evidence["secondLanded"] = secondLanded;
+		expect(shape(secondLanded)).toEqual({ folders: ["timeout"] });
+		expect(secondLanded.revision).not.toBe(secondPending.revision);
+		expect(thirdFeed.waiting()).toBe(0);
+
+		// The third capture packages once the lock goes, with only its own file.
+		rmSync(lock);
+		const thirdRevision = await thirdFeed.next();
+		expect(await thirdAgain.next()).toBe(thirdRevision);
+		const thirdLanded = await list(third, thirdRevision);
+		evidence["thirdLanded"] = thirdLanded;
+		expect(shape(thirdLanded)).toEqual({
+			folders: [[["third.txt", "added"]]],
+		});
+		expect(thirdLanded.folders[0]?.folder).toBe(repo);
+	});
+
+	it("reads a capture the daemon restarted under as Not captured", async () => {
+		evidenceFile = "test-results/f02e9-17-abandoned.json";
+		const { fixture, store, lock, turn, list, runOf, capturedEvents } =
+			await start(3);
+		const first = await turn("first.txt");
+		expect(shape(await list(first))).toEqual({
+			folders: [[["first.txt", "added"]]],
+		});
+		git(store, "config", "core.filesRefLockTimeout", "-1");
+		writeFileSync(lock, "");
+		await turn("second.txt");
+		// Queued behind the held second capture, this one cannot land before
+		// two of git's deadlines pass, long after the restart.
+		const third = await turn("third.txt");
+		const pending = await list(third);
+		evidence["pending"] = pending;
+		expect(shape(pending)).toEqual({ pending: true, folders: [] });
+		// The daemon dies mid-capture and comes back.
+		await fixture.kill();
+		await fixture.restart();
+		rmSync(lock, { force: true });
+		const abandoned = await list(third);
+		evidence["abandoned"] = abandoned;
+		expect(shape(abandoned)).toEqual({ notCaptured: true, folders: [] });
+		expect(abandoned.revision).not.toBe(pending.revision);
+		// Nothing recorded the abandoned capture, before the restart or after.
+		const runs = capturedEvents().map((event) => event.runId);
+		evidence["capturedRuns"] = runs;
+		expect(runs).not.toContain(runOf(third));
+	});
 
 	it("records a gap when packaging a capture fails, and the next turn captures on its own", async () => {
 		evidenceFile = "test-results/f02e9-17-packaging-gap.json";

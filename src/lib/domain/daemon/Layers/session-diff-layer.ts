@@ -507,7 +507,9 @@ export const makeSessionDiff = Effect.gen(function* () {
 			const scopeKey = JSON.stringify(scope);
 			const recalled = recall(session.id, scopeKey, revision);
 			if (recalled) return recalled;
-			const notCaptured = scope.kind === "turn" && !session.capture;
+			const uncaptured = scope.kind === "turn" && !session.capture;
+			const pending = uncaptured && session.pending !== undefined;
+			const notCaptured = uncaptured && !pending;
 			const pruned = scope.kind === "turn" && session.capture && session.pruned;
 			const folders: readonly Listed[] = yield* listScope(session, scope);
 			const listed = createHash("sha256")
@@ -516,6 +518,9 @@ export const makeSessionDiff = Effect.gen(function* () {
 						session.id,
 						scopeKey,
 						session.toolCall?.source,
+						// Neither lists folders, so only the flag tells them apart.
+						notCaptured,
+						pending,
 						folders.map(revisionOf),
 					]),
 				)
@@ -525,6 +530,7 @@ export const makeSessionDiff = Effect.gen(function* () {
 				revision: listed,
 				folders: folders.map(listingOf),
 				...(notCaptured ? { notCaptured: true as const } : {}),
+				...(pending ? { pending: true as const } : {}),
 				...(pruned ? { pruned: true as const } : {}),
 				...(session.toolCall ? { source: session.toolCall.source } : {}),
 			} satisfies SessionDiffListing;

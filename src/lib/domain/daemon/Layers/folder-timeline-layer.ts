@@ -25,7 +25,6 @@ const GRACE_MS = 15 * 60_000;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 /** A start checkpoint delays the run, so it gets less than a full git deadline. */
 const START_BUDGET_MS = 3_000;
-const SETTLE_WAIT_MS = 5_000;
 /** A run that changes more paths than this records a gap instead. */
 const MAX_CHANGES = 5_000;
 const SESSION_REF = "refs/conduit/session";
@@ -718,11 +717,7 @@ export const makeFolderTimeline = (configDir: string) =>
 			settled: (runId) =>
 				Effect.gen(function* () {
 					const live = runs.get(runId);
-					if (live)
-						yield* Deferred.await(live.done).pipe(
-							Effect.timeout(SETTLE_WAIT_MS),
-							Effect.ignore,
-						);
+					if (live) yield* Deferred.await(live.done);
 				}),
 			forget: (sessionId) =>
 				Effect.gen(function* () {
