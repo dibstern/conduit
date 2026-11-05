@@ -92,7 +92,6 @@ describe("per-project relay stays retired (82tn.16)", () => {
 		// Every remaining file that names the relay; all are relay.
 		expect(tally(server, named(relayNames))).toEqual(
 			new Map([
-				["src/lib/daemon/project-registry.ts", 10],
 				[`${daemon}/Layers/auto-settle-layer.ts`, 2],
 				[`${daemon}/Layers/daemon-foreground.ts`, 3],
 				[`${daemon}/Layers/daemon-layers.ts`, 8],
