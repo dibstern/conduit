@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
 import {
+	cpSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
 	rmSync,
+	watch,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,7 +31,13 @@ import { SessionGit } from "../../../src/lib/domain/daemon/Services/session-git.
 // flagged, or runs in different folders are; a joined run records its own
 // capture; settled returns before the capture is recorded; forget leaves the
 // session's objects or run pins behind; collect drops a live run's pin or
-// keeps an orphan's.
+// keeps an orphan's. After a restart: a run whose end checkpoint was lost
+// reads Not captured with no reason, or is captured from the folder as it is
+// now; a capture waiting at a crash or shutdown is lost (a shutdown unpinned
+// it), or takes in files the user or a later run wrote since; a capture packaged before the crash fails on its
+// half-written chain or records twice over two restarts; a recorded or deleted
+// session's run is captured again; a run still running is captured or loses
+// its pins; a pin the old code wrote breaks recovery.
 const GIT_KEYS = [
 	"GIT_DIR",
 	"GIT_INDEX_FILE",
@@ -109,6 +117,64 @@ const end = (runId: string) =>
 
 const pins = (store: string) =>
 	git(store, "for-each-ref", "--format=%(refname)", "refs/conduit/runs");
+
+/** Resolves once `done` holds, checked on each change in `directory`; the test's timeout bounds it. */
+const changed = (directory: string, done: () => boolean) =>
+	new Promise<void>((resolve) => {
+		const check = () => {
+			if (!done()) return;
+			watcher.close();
+			resolve();
+		};
+		const watcher = watch(directory, check).on("error", () => watcher.close());
+		check();
+	});
+
+const timelineDir = () => join(root, "config", "folder-timeline");
+/** The timeline's stores as a crash at this instant leaves them. */
+const image = (name: string) =>
+	cpSync(timelineDir(), join(root, name), { recursive: true });
+const restore = (name: string) => {
+	rmSync(timelineDir(), { recursive: true, force: true });
+	cpSync(join(root, name), timelineDir(), { recursive: true });
+};
+
+/** Startup recovery given each pinned run's fate; waits for the ended runs' captures. */
+const recover = (
+	fates: Record<string, "ended" | "running" | "done">,
+	beforeRecord: Effect.Effect<void> = Effect.void,
+) =>
+	Effect.gen(function* () {
+		const timeline = yield* FolderTimeline;
+		const asked: string[] = [];
+		const recorded: { sessionId: string; capture: RunChangesCaptured }[] = [];
+		yield* timeline.recover(
+			(sessionId, runId) =>
+				Effect.sync(() => {
+					asked.push(`${sessionId}/${runId}`);
+					return fates[runId] ?? "done";
+				}),
+			(sessionId, capture) =>
+				beforeRecord.pipe(
+					Effect.andThen(
+						Effect.sync(() => recorded.push({ sessionId, capture })),
+					),
+				),
+		);
+		yield* Effect.forEach(
+			Object.keys(fates).filter((runId) => fates[runId] === "ended"),
+			timeline.settled,
+			{ discard: true },
+		);
+		return { asked: asked.sort(), recorded };
+	});
+
+const pathsOf = (recorded: readonly { capture: RunChangesCaptured }[]) =>
+	recorded.map(({ capture }) =>
+		capture.folders.map((folder) =>
+			"changes" in folder ? folder.changes.map(({ path }) => path) : folder,
+		),
+	);
 
 it("captures each folder's changed paths, survives a user rebase and gc, and forget prunes the session", async () => {
 	const app = repository("app", {
@@ -452,4 +518,193 @@ it("ends a run at its end checkpoint even while an earlier capture is still reco
 		}),
 	);
 	expect(outcome).toEqual({ third: ["during.txt"], secondShared: false });
+});
+
+it("after a restart records a gap for a run whose end checkpoint was lost, keeps a running run live, and skips an old pin", async () => {
+	const app = repository("app", { "a.txt": "a\n" });
+	const lib = repository("lib", { "b.txt": "b\n" });
+	const stores = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			yield* timeline.runStarted({
+				sessionId: "s1",
+				runId: "r1",
+				directories: [app],
+			});
+			yield* timeline.runStarted({
+				sessionId: "s2",
+				runId: "r2",
+				directories: [lib],
+			});
+			return {
+				app: (yield* timeline.snapshot(app)).store,
+				lib: (yield* timeline.snapshot(lib)).store,
+			};
+		}),
+	);
+	// The daemon died before r1's end checkpoint; the old code pinned bare trees.
+	writeFileSync(join(app, "a.txt"), "after the crash\n");
+	git(
+		stores.app,
+		"update-ref",
+		"refs/conduit/runs/old/0",
+		git(app, "rev-parse", "HEAD^{tree}"),
+	);
+	const outcome = await run(
+		Effect.gen(function* () {
+			const recovered = yield* recover({ r1: "ended", r2: "running" });
+			const pinned = { app: pins(stores.app), lib: pins(stores.lib) };
+			writeFileSync(join(lib, "b.txt"), "r2 wrote this\n");
+			return { ...recovered, pinned, r2: yield* end("r2") };
+		}),
+	);
+	expect(outcome.asked).toEqual(["s1/r1", "s2/r2"]);
+	expect(outcome.recorded).toEqual([
+		{
+			sessionId: "s1",
+			capture: {
+				runId: "r1",
+				folders: [
+					{
+						directory: app,
+						gap: "failed",
+						message: expect.stringContaining("restarted"),
+					},
+				],
+			},
+		},
+	]);
+	expect(outcome.pinned).toEqual({
+		app: "refs/conduit/runs/old/0",
+		lib: "refs/conduit/runs/r2/0",
+	});
+	expect(pathsOf(outcome.r2)).toEqual([[["b.txt"]]]);
+});
+
+it("after a shutdown finishes the captures that were waiting, from the folder as each run left it", async () => {
+	const app = repository("app", { "a.txt": "a\n" });
+	const other = repository("other", { "o.txt": "o\n" });
+	const stores = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			const entered = yield* Deferred.make<void>();
+			// r0's capture holds s1's store until the crash.
+			yield* timeline.runStarted({
+				sessionId: "s1",
+				runId: "r0",
+				directories: [other],
+			});
+			yield* timeline
+				.runEnded("r0", () =>
+					Deferred.succeed(entered, undefined).pipe(
+						Effect.andThen(Effect.never),
+					),
+				)
+				.pipe(Effect.forkChild);
+			yield* Deferred.await(entered);
+			yield* timeline.runStarted({
+				sessionId: "s1",
+				runId: "r1",
+				directories: [app],
+			});
+			yield* timeline.runStarted({
+				sessionId: "s2",
+				runId: "r2",
+				directories: [app],
+			});
+			const store = (yield* timeline.snapshot(app)).store;
+			writeFileSync(join(app, "r1.txt"), "r1\n");
+			yield* end("r1").pipe(Effect.forkChild);
+			yield* Effect.promise(() =>
+				changed(join(store, "refs", "conduit", "runs", "r1"), () =>
+					git(
+						store,
+						"for-each-ref",
+						"--format=%(contents:subject)",
+						"refs/conduit/runs/r1/",
+					).includes('"end"'),
+				),
+			);
+			// A later run in the folder writes before the daemon shuts down,
+			// which interrupts r0's and r1's captures.
+			writeFileSync(join(app, "r2.txt"), "r2\n");
+			return { app: store, other: (yield* timeline.snapshot(other)).store };
+		}),
+	);
+	// The user edits while the daemon is down.
+	writeFileSync(join(app, "user.txt"), "user\n");
+	const outcome = await run(
+		recover({ r0: "done", r1: "ended", r2: "running" }),
+	);
+	expect(outcome.asked).toEqual(["s1/r0", "s1/r1", "s2/r2"]);
+	expect(outcome.recorded.map(({ sessionId }) => sessionId)).toEqual(["s1"]);
+	expect(pathsOf(outcome.recorded)).toEqual([[["r1.txt"]]]);
+	expect(outcome.recorded[0]?.capture.folders[0]).toMatchObject({
+		shared: true,
+	});
+	expect(pins(stores.app)).toBe("refs/conduit/runs/r2/0");
+	expect(pins(stores.other)).toBe("");
+});
+
+it("after two restarts records a capture packaged before the crash once, after its session was evicted, and drops a deleted session's run", async () => {
+	const app = repository("app", { "a.txt": "a\n" });
+	const lib = repository("lib", { "b.txt": "b\n" });
+	const stores = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			yield* timeline.runStarted({
+				sessionId: "s1",
+				runId: "r1",
+				directories: [app],
+			});
+			yield* timeline.runStarted({
+				sessionId: "s3",
+				runId: "r3",
+				directories: [lib],
+			});
+			writeFileSync(join(app, "r1.txt"), "r1\n");
+			// Packed and chained, then the daemon dies before the event is written.
+			yield* timeline.runEnded("r1", () =>
+				Effect.sync(() => image("packaged")),
+			);
+			return {
+				app: (yield* timeline.snapshot(app)).store,
+				lib: (yield* timeline.snapshot(lib)).store,
+			};
+		}),
+	);
+	restore("packaged");
+	const first = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			// Eviction's own startup recovery goes first and removes s1's store.
+			yield* timeline.evict("s1", Effect.succeed(true));
+			const recovered = yield* recover(
+				{ r1: "ended", r3: "done" },
+				// Crashes again before the event is written.
+				Effect.sync(() => image("recorded")),
+			);
+			return { ...recovered, store: timeline.sessionStore("s1") };
+		}),
+	);
+	expect(first.asked).toEqual(["s1/r1", "s3/r3"]);
+	expect(pathsOf(first.recorded)).toEqual([[["r1.txt"]]]);
+	const folder = first.recorded[0]?.capture.folders[0];
+	if (!folder || !("after" in folder)) throw new Error("Not captured");
+	rmSync(join(first.store, "objects", "info", "alternates"), { force: true });
+	expect(git(first.store, "ls-tree", "-r", "--name-only", folder.after)).toBe(
+		"r1.txt",
+	);
+	expect(pins(stores.lib)).toBe("");
+
+	restore("recorded");
+	const second = await run(recover({ r1: "ended" }));
+	expect(second.recorded).toEqual(first.recorded);
+	expect(pins(stores.app)).toBe("");
+
+	// Recorded this time: the next restart only unpins it.
+	restore("recorded");
+	const third = await run(recover({ r1: "done" }));
+	expect(third).toEqual({ asked: ["s1/r1"], recorded: [] });
+	expect(pins(stores.app)).toBe("");
 });
