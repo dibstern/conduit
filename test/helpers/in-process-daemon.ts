@@ -45,6 +45,7 @@ import { RelayCacheTag } from "../../src/lib/domain/daemon/Services/relay-cache.
 import { EventRetentionTag } from "../../src/lib/domain/persistence/Services/event-retention.js";
 import { verifyReplayParity } from "../../src/lib/persistence/replay-parity.js";
 import { sdkDefaultClaudeConfigDir } from "../../src/lib/provider/claude/claude-sdk-env.js";
+import { ProjectShellEnvResolver } from "../../src/lib/provider/project-shell-env.js";
 import type { createProjectRelayLayers } from "../../src/lib/relay/project-relay-layers.js";
 import type { ClaudeSdkSeam } from "../../src/lib/types.js";
 import type { OpenCodeRecording } from "../e2e/fixtures/recorded/types.js";
@@ -133,6 +134,25 @@ type DaemonServices = ManagedRuntime.ManagedRuntime.Services<DaemonRuntime>;
 type ProjectServices = ManagedRuntime.ManagedRuntime.Services<
 	ReturnType<typeof createProjectRelayLayers>["relayManagedRuntime"]
 >;
+
+/** Shell capture stand-in: a fixed environment, readiness from the test. */
+export class FixedShellEnv extends ProjectShellEnvResolver {
+	constructor(
+		private readonly fixed: Readonly<Record<string, string>>,
+		private readonly ready: (
+			directory: string,
+		) => Promise<boolean> = async () => true,
+	) {
+		super({ env: fixed });
+	}
+	override register() {}
+	override getSnapshot() {
+		return { env: this.fixed, declared: {} };
+	}
+	override waitUntilReady(directory: string) {
+		return this.ready(directory);
+	}
+}
 
 export type DaemonProject = Awaited<ReturnType<typeof createDaemonProject>>;
 

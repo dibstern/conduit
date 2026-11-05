@@ -229,7 +229,6 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["test/e2e/helpers/e2e-harness.ts", 1],
 				["test/helpers/project-relay.ts", 2],
 				["test/integration/relay/sse-aware-poller-gating.test.ts", 1],
-				["test/unit/domain/relay/opencode-runtime-ingress-effect.test.ts", 1],
 			]),
 		);
 	});

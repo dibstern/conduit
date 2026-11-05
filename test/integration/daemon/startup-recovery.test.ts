@@ -16,10 +16,10 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
-import { ProjectShellEnvResolver } from "../../../src/lib/provider/project-shell-env.js";
 import {
 	createDaemonProject,
 	type DaemonProject,
+	FixedShellEnv,
 } from "../../helpers/in-process-daemon.js";
 import {
 	makeMockOpenCodeAPI,
@@ -159,23 +159,6 @@ it("retires the prompts a crash left pending on Claude sessions and leaves OpenC
 			),
 	);
 });
-
-/** Shell capture stand-in: a fixed environment, readiness from the test. */
-class FixedShellEnv extends ProjectShellEnvResolver {
-	constructor(
-		private readonly fixed: Readonly<Record<string, string>>,
-		private readonly ready: (directory: string) => Promise<boolean>,
-	) {
-		super({ env: fixed });
-	}
-	override register() {}
-	override getSnapshot() {
-		return { env: this.fixed, declared: {} };
-	}
-	override waitUntilReady(directory: string) {
-		return this.ready(directory);
-	}
-}
 
 const tempProjectDir = () =>
 	realpathSync(mkdtempSync(join(tmpdir(), "sr-project-")));
@@ -438,7 +421,7 @@ for (const native of [
 								return Option.some(client);
 							}),
 					},
-					shellEnv: new FixedShellEnv({}, async () => true),
+					shellEnv: new FixedShellEnv({}),
 				},
 			);
 		} finally {
