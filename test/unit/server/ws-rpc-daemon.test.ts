@@ -71,7 +71,7 @@ describe("daemon RPC handlers", () => {
 				if (!added.savedSlug) throw new Error("Missing added project slug");
 				expect(
 					yield* client.GetProjects({ projectSlug: added.savedSlug }),
-				).toMatchObject({ current: added.savedSlug });
+				).toMatchObject({ projectSlug: added.savedSlug });
 				expect(
 					(yield* client.GetProjects({ projectSlug: "missing" })).projects,
 				).toMatchObject([{ slug: added.savedSlug }]);

@@ -820,7 +820,6 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						Effect.provide(shellContext),
 						Effect.map((projects) => ({
 							projectSlug: request.projectSlug,
-							...(request.projectSlug ? { current: request.projectSlug } : {}),
 							projects,
 						})),
 					),
@@ -847,7 +846,6 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 					return {
 						kind,
 						projectSlug: request.projectSlug,
-						...(request.projectSlug ? { current: request.projectSlug } : {}),
 						projects,
 						savedSlug: project.slug,
 						warnings,
@@ -905,7 +903,6 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							).pipe(Effect.ignore);
 						return {
 							projectSlug: request.projectSlug,
-							...(request.projectSlug ? { current: request.projectSlug } : {}),
 							projects: yield* projectList,
 						};
 					}),

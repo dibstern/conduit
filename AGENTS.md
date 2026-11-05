@@ -14,8 +14,8 @@ NEVER stash changes, you are interrupting other sessions and work.
 - `src/bin/cli.ts` is the thin CLI entrypoint; `src/bin/cli-core.ts` routes commands.
 - `conduit serve` runs the server in the foreground. CLI commands use the browser RPC contract over a protected Unix socket; `conduit service install` optionally keeps the server running at login.
 - `src/lib/daemon/daemon.ts` owns process lifecycle, persisted config, the shared HTTP and IPC servers, project registration, and provider runtime coordination.
-- One daemon can host many projects. Each project gets its own relay stack mounted under `/p/<slug>`.
-- `src/lib/relay/relay-stack.ts` builds the per-project relay around provider adapters, `SessionManagerService`, `WebSocketHandler`, pollers, and PTY wiring.
+- One daemon can host many projects. Browsers reach every project through one `/rpc` socket; each RPC names its `projectSlug`, and the server keeps no current project. `/p/<slug>` URLs are links that open the app.
+- The per-project relay (`src/lib/relay/relay-stack.ts`) is being retired (82tn.16): it still builds each project's OpenCode client, status poller, schedulers, `WebSocketHandler` and PTY wiring. `test/unit/daemon/relay-retired.guard.test.ts` pins what remains; do not add to it.
 - `src/lib/server/*` handles the shared HTTP and WebSocket edge; `src/lib/handlers/*` dispatch browser messages into focused domain handlers.
 - The SQLite event store is the source of truth for sessions and messages. Provider adapters are stateless execution engines that stream events into the store.
 
@@ -28,7 +28,7 @@ Read `docs/agent-guide/architecture.md` before changing daemon behavior, project
 - `src/lib/domain/`: Effect service and Layer owners, organized by daemon, relay, provider, persistence, and server domain.
 - `src/lib/contracts/`: implementation-free shared schemas and protocol declarations.
 - `src/lib/server/`: HTTP and WebSocket server, router, static files, push.
-- `src/lib/relay/`: provider event pipeline, pollers, PTY upstream wiring.
+- `src/lib/relay/`: the per-project relay being retired (82tn.16): provider event pipeline, pollers, PTY upstream wiring.
 - `src/lib/persistence/`: SQLite event store, projectors, migrations.
 - `src/lib/provider/`: Provider adapters (OpenCode, Claude SDK).
 - `src/lib/session/`: session orchestration and status polling.

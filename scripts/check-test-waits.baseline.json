@@ -1371,9 +1371,6 @@
 	"test/unit/daemon/local-trace-artifact.test.ts": {
 		"polling": 1
 	},
-	"test/unit/daemon/project-registry.test.ts": {
-		"polling": 24
-	},
 	"test/unit/daemon/project-shell-env-lifecycle.test.ts": {
 		"polling": 2
 	},

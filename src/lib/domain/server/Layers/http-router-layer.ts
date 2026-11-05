@@ -3,11 +3,7 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { Context, Effect, HashMap, Layer, Option, Ref, Scope } from "effect";
-import {
-	HttpRouter,
-	type HttpServerRequest,
-	type HttpServerResponse,
-} from "effect/http";
+import { HttpRouter } from "effect/http";
 import type { AuthManager } from "../../../auth.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
@@ -16,7 +12,6 @@ import {
 	effectRouterWithOriginCheck,
 	HealthProvider,
 	type HttpAttachmentReader,
-	ProjectApiDelegateProvider,
 	ProjectsProvider,
 	PushProvider,
 	type RouterProjectInfo,
@@ -74,11 +69,6 @@ export interface StandaloneHttpRouterOptions {
 	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
 	readonly readAttachment?: HttpAttachmentReader | undefined;
-	readonly delegateApiRequest?: (
-		slug: string,
-		subPath: string,
-		req: HttpServerRequest.HttpServerRequest,
-	) => Effect.Effect<HttpServerResponse.HttpServerResponse, Error>;
 	readonly getPort: () => number;
 	readonly getIsTls: () => boolean;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
@@ -92,11 +82,6 @@ interface HttpRouterRequestHandlerOptions {
 	readonly staticDir: string;
 	readonly getProjects: () => Effect.Effect<RouterProjectInfo[]>;
 	readonly readAttachment?: HttpAttachmentReader | undefined;
-	readonly delegateApiRequest?: (
-		slug: string,
-		subPath: string,
-		req: HttpServerRequest.HttpServerRequest,
-	) => Effect.Effect<HttpServerResponse.HttpServerResponse, Error>;
 	readonly getHealthResponse?: () => Effect.Effect<object>;
 	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
 	readonly caRootPath?: string | undefined;
@@ -116,15 +101,6 @@ const makeHttpRouterLayer = (options: HttpRouterRequestHandlerOptions) => {
 		routerLayer = Layer.merge(
 			routerLayer,
 			Layer.succeed(AttachmentsProvider, { read: options.readAttachment }),
-		);
-	}
-
-	if (options.delegateApiRequest != null) {
-		routerLayer = Layer.merge(
-			routerLayer,
-			Layer.succeed(ProjectApiDelegateProvider, {
-				delegateApiRequest: options.delegateApiRequest,
-			}),
 		);
 	}
 
@@ -246,9 +222,6 @@ export const makeStandaloneHttpRouterRequestHandler = (
 			staticDir: options.staticDir,
 			getProjects: () => Effect.sync(options.getProjects),
 			readAttachment: options.readAttachment,
-			delegateApiRequest:
-				options.delegateApiRequest ??
-				(() => Effect.fail(new Error("Project API route not found"))),
 			pushManager: options.pushManager,
 			caRootPath: options.caRootPath,
 			caCertDer: options.caCertDer,
