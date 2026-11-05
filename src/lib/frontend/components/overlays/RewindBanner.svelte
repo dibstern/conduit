@@ -2,7 +2,6 @@
   Rewind selection and confirmation. A rewind lands at once and the Head Log undoes it (82tn.51).
 -->
 <script lang="ts">
-	import { selection } from "../../stores/selection.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import {
@@ -15,15 +14,9 @@
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import { rewindTo } from "../../stores/head-moves.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
-	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Surface from "../ui/Surface.svelte";
-
-	let {
-		onRewind,
-	}: {
-		onRewind?: (uuid: string, mode: string) => void;
-	} = $props();
 
 	const restoresFiles = $derived(
 		sessionState.currentId !== null
@@ -66,41 +59,19 @@
 	}
 
 	function handleConfirm(): void {
-		const uuid = uiState.rewindSelectedUuid;
 		const sessionId = sessionState.currentId;
-		const projectSlug = selection.scope?.project;
-		if (!uuid || !sessionId || !projectSlug) return;
-		const mode = restoresFiles ? "both" : "conversation";
-		const message = chatState.messages.find((message) => message.uuid === uuid);
-		if (!message || !("messageId" in message) || !message.messageId) {
-			exitRewindMode();
+		const messageId = selectedMessageId;
+		if (!uiState.rewindSelectedUuid || !sessionId) return;
+		exitRewindMode();
+		if (!messageId) {
 			showToast(
 				"This message cannot be rewound to yet. Its provider ID is not available.",
 				{ variant: "warn" },
 			);
 			return;
 		}
-
-		void rpc("RewindSession", {
-			sessionId,
-			messageId: message.messageId,
-		})
-			.then((result) => {
-				if (
-					!result.ok ||
-					sessionState.currentId !== result.sessionId ||
-					selection.scope?.project !== projectSlug
-				) {
-					return;
-				}
-				onRewind?.(uuid, mode);
-			})
-			.catch((error) => {
-				if (sessionState.currentId === sessionId && selection.scope?.project === projectSlug)
-					toastFailure("Could not rewind the conversation.", "warn")(error);
-			});
-
-		exitRewindMode();
+		// A head move like the transcript's (82tn.51): it lands at once and the Head Log undoes it.
+		void rewindTo(sessionId, messageId);
 	}
 
 	function handleKeydown(e: KeyboardEvent): void {
@@ -144,7 +115,7 @@
 		</h3>
 
 		<p class="mb-3 text-sm text-text-secondary">
-			This message and everything after it will be removed. You can undo it later.
+			This message and everything after it will be removed. Every move can be undone from the Head Log.
 		</p>
 		<p class="mb-5 text-sm text-text-secondary">
 			{filesPruned

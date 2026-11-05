@@ -13,6 +13,12 @@ export const headLog = $state<{ sessionId: string | undefined }>({
 
 export type { HeadFork, HeadLogEntry } from "../../contracts/ws-rpc.js";
 
+/** Back to before a message, sending nothing: the rewind dialog's move. */
+export const rewindTo = (
+	sessionId: string,
+	messageId: string,
+): Promise<boolean> => moveHead(sessionId, { _tag: "rewind", messageId });
+
 /** Back to before a message, sending `resend` from there: edit-and-resend, or regenerate. */
 export const resendFrom = (
 	sessionId: string,

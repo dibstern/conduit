@@ -311,7 +311,8 @@ test.describe("rewind confirmation", () => {
 	test("shows the server refusal", async ({ page }, testInfo) => {
 		const rpc = await mockWsRpc(page, {
 			stubs: {
-				RewindSession: () => {
+				// 82tn.51: the dialog's rewind is a head move, refused at its preview.
+				PreviewHeadMove: () => {
 					throw new WsRpcError({ message: "That message cannot be rewound." });
 				},
 			},
@@ -325,9 +326,9 @@ test.describe("rewind confirmation", () => {
 		await page.goto("http://rpc.test/");
 		await page.addScriptTag({ type: "module", content: browserCode });
 		await page.getByRole("button", { name: "Rewind", exact: true }).click();
-		await rpc.waitForRequest(({ tag }) => tag === "RewindSession");
+		await rpc.waitForRequest(({ tag }) => tag === "PreviewHeadMove");
 		const toast = page.getByTestId("toast");
-		await expect(toast).toContainText("Could not rewind the conversation.");
+		await expect(toast).toContainText("Could not move the conversation.");
 		await expect(toast).toContainText("That message cannot be rewound.");
 		await attachScreen(page, testInfo);
 	});

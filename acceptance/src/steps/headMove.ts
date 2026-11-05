@@ -34,8 +34,8 @@ export const headMoveHandlers: StepHandler[] = [
 					});
 					return { ok: true, sessionId, handedOff: false };
 				},
-				RewindSession: refuse,
-				UndoRewind: refuse,
+				PreviewHeadMove: refuse,
+				CommitHeadMove: refuse,
 			});
 		},
 	},
