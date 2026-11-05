@@ -1099,7 +1099,8 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 						]),
 			],
 			{
-				cwd: this.projectDir,
+				// A test may remove the project folder to restart without it.
+				cwd: existsSync(this.projectDir) ? this.projectDir : this.root,
 				env: (this.environment = {
 					...options.serviceEnvironment,
 					// Bootstrap once, including configs replaced by a fixture before start.
