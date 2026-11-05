@@ -4,7 +4,6 @@
 
 import { Data, Effect, Option, Result, Schema } from "effect";
 import type { SqlError } from "effect/sql/SqlError";
-import { mapQuestionFields } from "../bridges/question-bridge.js";
 import { OpenCodeEventSchema } from "../contracts/providers/opencode-sdk.js";
 import type { OpenCodeConnectionStatus } from "../contracts/ws-rpc.js";
 import {
@@ -56,7 +55,7 @@ import type {
 	SessionPermissionMode,
 } from "../shared-types.js";
 import { tagWithSessionId } from "../shared-types.js";
-import type { PendingPermission, RelayMessage } from "../types.js";
+import type { RelayMessage } from "../types.js";
 import { applyPipelineResultEffect, processEvent } from "./event-pipeline.js";
 import type { Translator } from "./event-translator.js";
 import { resolveNotifications } from "./notification-policy.js";
@@ -68,7 +67,6 @@ import {
 	isPartUpdatedEvent,
 	isPermissionRepliedEvent,
 	isPtyEvent,
-	isQuestionAskedEvent,
 	isSessionErrorEvent,
 } from "./opencode-events.js";
 import type { OpenCodeEventContext, SSEStreamEvents } from "./sse-stream.js";
@@ -475,81 +473,6 @@ function opencodeModeCoversAsk(
 	return false;
 }
 
-/**
- * The ding a permission request deserves. Browsers see the card itself through
- * the approvals subscription (ni8.9); this is only what the push says.
- *
- * Returning the approval instead of pushing it is what lets the caller choose
- * the sender: the live relay is the Effect wiring, and only the Effect sender
- * takes a durable delivery claim (ni8.23 delta 1, P2-8).
- */
-function permissionAskedPush(
-	event: SSEEvent,
-	eventSessionId: string | undefined,
-	pending: PendingPermission | null,
-	promptId?: string,
-): Approval {
-	if (pending) {
-		return {
-			_tag: "permission",
-			sessionId: pending.sessionId,
-			requestId: pending.requestId,
-			toolName: pending.toolName,
-			toolInput: pending.toolInput,
-		};
-	}
-	// Bridge rejected (missing id/permission) — still worth a ding. The id on
-	// the raw event is the alert identity even when the bridge would not take
-	// it; without one every rejected request in a turn would collapse into the
-	// same claim.
-	const props = event.properties as Record<string, unknown>;
-	const id = typeof props["id"] === "string" ? props["id"] : "unknown";
-	const tool =
-		typeof props["permission"] === "string" ? props["permission"] : "A tool";
-	return {
-		_tag: "permission",
-		sessionId: eventSessionId ?? "",
-		requestId: (promptId ?? id) as PermissionId,
-		toolName: tool,
-		toolInput: {},
-	};
-}
-
-/**
- * The ding for a question the model just asked.
- *
- * The identity comes off the event. The previous version sent `toolId: ""` for
- * every question, which made two different questions in one turn the same
- * alert: the ledger claimed the first and swallowed the second, and the user
- * was never told about it (ni8.23 delta 1, P2-8).
- */
-function questionAskedPush(
-	deps: SSEWiringDeps,
-	event: SSEEvent,
-	eventSessionId: string | undefined,
-	promptId?: string,
-): Approval {
-	deps.log.debug(`question.asked: event received`);
-	if (!isQuestionAskedEvent(event)) {
-		const id = "id" in event.properties ? event.properties.id : undefined;
-		deps.log.warn(
-			`question.asked without an id or questions — sending available request details`,
-		);
-		return {
-			_tag: "question",
-			sessionId: eventSessionId ?? "",
-			toolId: promptId ?? (typeof id === "string" ? id : ""),
-			questions: [],
-		};
-	}
-	return {
-		_tag: "question",
-		sessionId: eventSessionId ?? "",
-		toolId: promptId ?? event.properties.id,
-		questions: mapQuestionFields(event.properties.questions),
-	};
-}
-
 const refreshLineageAfterUpdateEffect = (deps: SSEWiringDeps) =>
 	Effect.gen(function* () {
 		const sessionService = yield* projectSessionManager;
@@ -772,35 +695,12 @@ export const handleSSEEventEffect = (
 					);
 				}
 			}
-			if (!autoApproved) {
-				const pending = input
-					? yield* pendingInteractions.recordPermissionRequest({
-							...input,
-							requestId: (prompt?.id ?? input.requestId) as PermissionId,
-						})
-					: null;
-				const pushManager = deps.pushManager;
-				if (pushManager)
-					yield* sendPushForEventEffect(
-						pushManager,
-						permissionAskedPush(event, eventSessionId, pending, prompt?.id),
-						deps.log,
-						buildPushContext(deps.slug, pending?.sessionId ?? eventSessionId),
-					);
-			}
-		}
-		if (event.type === "question.asked") {
-			const askMsg = yield* Effect.sync(() =>
-				questionAskedPush(deps, event, eventSessionId, prompt?.id),
-			);
-			const pushManager = deps.pushManager;
-			if (pushManager)
-				yield* sendPushForEventEffect(
-					pushManager,
-					askMsg,
-					deps.log,
-					buildPushContext(deps.slug, eventSessionId),
-				);
+			// The ding and the push come from the daemon's ask alerts (82tn.12).
+			if (!autoApproved && input)
+				yield* pendingInteractions.recordPermissionRequest({
+					...input,
+					requestId: (prompt?.id ?? input.requestId) as PermissionId,
+				});
 		}
 		if (isPermissionRepliedEvent(event)) {
 			yield* pendingInteractions.markPermissionReplied(

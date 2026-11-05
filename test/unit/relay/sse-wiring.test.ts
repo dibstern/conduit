@@ -233,66 +233,6 @@ describe("handleSSEEventEffect", () => {
 		).toHaveBeenCalledWith("perm-1");
 	});
 
-	it("sends push notification for permission.asked", async () => {
-		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
-			sendToAll: vi
-				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
-				.mockResolvedValue({
-					delivered: ["device-1"],
-					expired: [],
-					failed: [],
-				}),
-		});
-		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-
-		const event: OpenCodeEvent = {
-			type: "permission.asked",
-			properties: { id: "perm-1", permission: "Bash", sessionID: "s1" },
-		};
-		await runSSEEvent(deps, event);
-
-		assert.exists(mockPush, "expected push service");
-		expect(mockPush.sendToAll).toHaveBeenCalledWith({
-			type: "permission_request",
-			title: "Permission Needed",
-			body: "Bash needs approval",
-			tag: "perm-perm-1",
-			slug: "test-project",
-			sessionId: "s1",
-			alertId: "s1:permission:perm-1",
-		});
-	});
-
-	it("sends push notification for question.asked", async () => {
-		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
-			sendToAll: vi
-				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
-				.mockResolvedValue({
-					delivered: ["device-1"],
-					expired: [],
-					failed: [],
-				}),
-		});
-		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-
-		const event: OpenCodeEvent = {
-			type: "question.asked",
-			properties: { id: "q-1", sessionID: "s1", questions: [] },
-		};
-		await runSSEEvent(deps, event);
-
-		assert.exists(mockPush, "expected push service");
-		expect(mockPush.sendToAll).toHaveBeenCalledWith({
-			type: "ask_user",
-			title: "Question from Agent",
-			body: "Agent has a question for you.",
-			tag: "opencode-ask",
-			slug: "test-project",
-			sessionId: "s1",
-			alertId: "s1:question:q-1",
-		});
-	});
-
 	it("does not send push for anonymous done status hints", async () => {
 		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
 			sendToAll: vi

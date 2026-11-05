@@ -1,6 +1,6 @@
 // The approvals subscription (ni8.9): the project's pending permissions and
-// questions, folded into the permissions store, with an alert for each one the
-// browser had not seen pending before.
+// questions, folded into the permissions store. The ding for a new ask comes
+// from the daemon's alert feed, which covers every project (82tn.12).
 
 import { Effect, Fiber, Stream } from "effect";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
@@ -9,13 +9,7 @@ import { supervise } from "../transport/supervise.js";
 import {
 	applyApprovalEnvelope,
 	clearAllPermissions,
-	isApprovalPending,
 } from "./permissions.svelte.js";
-import { triggerNotifications } from "./ws-notifications.js";
-
-// An approval answered within this window (a rule auto-approved it, or another
-// tab answered first) never alerts. The cross-tab receipt makes it fire once.
-const ALERT_GRACE_MS = 1_000;
 
 let attachGeneration = 0;
 let approvalsFiber: Fiber.Fiber<void, unknown> | null = null;
@@ -42,20 +36,8 @@ export function attachApprovals(project: string): void {
 						supervise(subscriptions.approvals(), () => {}),
 						(change) =>
 							Effect.sync(() => {
-								if (generation !== attachGeneration) return;
-								for (const approval of applyApprovalEnvelope(change)) {
-									const id =
-										approval._tag === "permission"
-											? approval.requestId
-											: approval.toolId;
-									setTimeout(() => {
-										if (
-											generation === attachGeneration &&
-											isApprovalPending(id)
-										)
-											void triggerNotifications(approval);
-									}, ALERT_GRACE_MS);
-								}
+								if (generation === attachGeneration)
+									applyApprovalEnvelope(change);
 							}),
 					),
 				),
