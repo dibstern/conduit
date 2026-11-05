@@ -19,6 +19,7 @@ import { composerPickerHandlers } from "./steps/composerPicker.js";
 import { composerSendAtResetHandlers } from "./steps/composerSendAtReset.js";
 import { composerSetGoalHandlers } from "./steps/composerSetGoal.js";
 import { composerWordsHandlers } from "./steps/composerWords.js";
+import { crossProjectAsksHandlers } from "./steps/crossProjectAsks.js";
 import { cursorAuthHandlers } from "./steps/cursorAuth.js";
 import { cursorForkHandlers } from "./steps/cursorFork.js";
 import { cursorModelParametersHandlers } from "./steps/cursorModelParameters.js";
@@ -119,6 +120,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...duoFoldedChipsHandlers,
 	...sessionRowsHandlers,
 	...projectTreeHandlers,
+	...crossProjectAsksHandlers,
 	...rightPaneHandlers,
 	...serversHandlers,
 	...sessionDiffHandlers,
