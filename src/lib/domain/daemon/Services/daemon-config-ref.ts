@@ -9,6 +9,7 @@
 import { Context, Effect, Layer, Ref } from "effect";
 import type { CursorUsageBinding } from "../../../contracts/account.js";
 import type { UsageLimitsSetting } from "../../../contracts/limit-recovery.js";
+import type { SnapshotBudget } from "../../../contracts/session-diff.js";
 import type { AvatarChoice } from "../../../contracts/user-avatar.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
@@ -36,6 +37,7 @@ export interface DaemonRuntimeConfig {
 	readonly autoDeleteArchivedAfterDays?: number | null;
 	readonly worktreeCleanup?: WorktreeCleanup;
 	readonly usageLimits?: UsageLimitsSetting;
+	readonly snapshotBudget?: SnapshotBudget;
 	readonly cursorUsageBinding?: CursorUsageBinding;
 	readonly keepAwakeCommand: string | undefined;
 	readonly keepAwakeArgs: string[] | undefined;
@@ -97,6 +99,7 @@ export const makeDaemonConfigFromOptions = (options: {
 	autoDeleteArchivedAfterDays?: number | null;
 	worktreeCleanup?: WorktreeCleanup;
 	usageLimits?: UsageLimitsSetting;
+	snapshotBudget?: SnapshotBudget;
 	cursorUsageBinding?: CursorUsageBinding;
 	keepAwakeCommand?: string;
 	keepAwakeArgs?: string[];
@@ -130,6 +133,9 @@ export const makeDaemonConfigFromOptions = (options: {
 	worktreeCleanup: options.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
 	...(options.usageLimits !== undefined && {
 		usageLimits: options.usageLimits,
+	}),
+	...(options.snapshotBudget !== undefined && {
+		snapshotBudget: options.snapshotBudget,
 	}),
 	...(options.cursorUsageBinding !== undefined && {
 		cursorUsageBinding: options.cursorUsageBinding,

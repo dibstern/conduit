@@ -104,7 +104,7 @@ const addNotes = (existed: boolean | undefined) => {
 };
 
 const withTier = (
-	fields: Omit<SessionDiffFile, "tier" | "insertions" | "deletions" | "binary">,
+	fields: Omit<Extract<SessionDiffFile, { tier: "tooLarge" }>, "tier">,
 	body: Body | undefined,
 ): SessionDiffFile => {
 	if (fields.bytes > SESSION_DIFF_TOO_LARGE_BYTES)

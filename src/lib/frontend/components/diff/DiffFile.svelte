@@ -48,6 +48,7 @@
 	// Git's patch for these is a hash, a commit pair or only a header, so the row says what changed instead.
 	const patchless = $derived(
 		file.tier === "tooLarge" ||
+			file.tier === "pruned" ||
 			file.binary ||
 			file.kind === "lfs" ||
 			file.kind === "submodule" ||
@@ -234,6 +235,12 @@
 		{/each}
 		{#if file.tier === "tooLarge"}
 			<span class="shrink-0 text-text-dimmer">{formatFileSize(file.bytes)}</span>
+		{:else if file.tier === "pruned"}
+			{#if file.insertions !== undefined}
+				<span class="shrink-0 font-mono text-success">+{file.insertions}</span>
+				<span class="shrink-0 font-mono text-error">−{file.deletions ?? 0}</span>
+			{/if}
+			<span data-testid="session-diff-pruned" class="shrink-0 text-text-dimmer">Pruned</span>
 		{:else if file.binary}
 			<span class="shrink-0 text-text-dimmer">Binary</span>
 		{:else}
@@ -247,6 +254,8 @@
 			<span>Too large to diff.</span>
 			<TextButton underline="always" class="text-xs" onclick={() => openFileViewer(file.path, folder)}>Open in Files</TextButton>
 		</div>
+	{:else if file.tier === "pruned"}
+		<p class="px-3 pb-2 text-xs text-text-dimmer">Its content was removed to keep snapshots within the disk budget.</p>
 	{:else if file.kind === "submodule"}
 		<p class="px-3 pb-2 font-mono text-xs text-text-dimmer">
 			Commit {[file.before, file.after].flatMap((id) => (id ? [id.slice(0, 7)] : [])).join(" → ")}
