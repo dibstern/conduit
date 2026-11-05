@@ -112,9 +112,8 @@ describe("daemon project readiness and socket routing", () => {
 			expect(createProjectRelayMock).not.toHaveBeenCalled();
 			let attachmentSettled = false;
 			const attachment = sendRpcRequest(join(tmpDir, "relay.sock"), {
-				_tag: "AttachProject",
+				_tag: "GetCommands",
 				projectSlug: slug,
-				originId: "waiting-client",
 			}).finally(() => {
 				attachmentSettled = true;
 			});
@@ -130,10 +129,7 @@ describe("daemon project readiness and socket routing", () => {
 			).toBe("registering");
 
 			releaseRelay();
-			expect(await attachment).toEqual({
-				projectSlug: slug,
-				sessionSlug: null,
-			});
+			expect(await attachment).toMatchObject({ projectSlug: slug });
 
 			await vi.waitFor(() => {
 				expect(
@@ -216,9 +212,8 @@ describe("daemon project readiness and socket routing", () => {
 			expect(createProjectRelayMock).not.toHaveBeenCalled();
 			await expect(
 				sendRpcRequest(join(tmpDir, "relay.sock"), {
-					_tag: "AttachProject",
+					_tag: "GetCommands",
 					projectSlug: slug,
-					originId: "failed-client",
 				}),
 			).rejects.toMatchObject({
 				_tag: "WsRpcError",

@@ -88,8 +88,8 @@ export const routerState = $state({
 	sessionNotFound: false,
 });
 
-/** The project this tab is attached to, from the AttachProject reply or a
- *  ViewSession that crossed projects. Tab state: each tab attaches its own. */
+/** The project this tab marks: chosen locally by the selection, or by a
+ *  ViewSession that crossed projects. Tab state: each tab marks its own. */
 export const attachedProjectState = $state({
 	slug: null as string | null,
 });

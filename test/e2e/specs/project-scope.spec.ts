@@ -71,7 +71,6 @@ async function setupWithProjectManagement(
 			messageCount: 0,
 		},
 	];
-	// The daemon answers AttachProject with the project it attached.
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			GetFileTree: (params) => ({
@@ -117,23 +116,6 @@ async function setupWithProjectManagement(
 					hasMore,
 					nextCursor:
 						hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null,
-				};
-			},
-			AttachProject: async (params) => {
-				// A cold load without ?p attaches the daemon's default project.
-				if (
-					!("projectSlug" in params) ||
-					typeof params.projectSlug !== "string"
-				)
-					return {
-						projectSlug: "myapp",
-						sessionSlug: "sessionId" in params ? "myapp" : null,
-					};
-				// Attach must overlap paging to expose socket-reconnect and cancellation races.
-				await new Promise((resolve) => setTimeout(resolve, 300));
-				return {
-					projectSlug: String(params["projectSlug"]),
-					sessionSlug: null,
 				};
 			},
 			SaveProject: (params) => {
@@ -579,7 +561,7 @@ test("clearing the scope after adding a project lists every project's sessions",
 	await addProject(page, "/src/new-project");
 	await control.rpc.waitForRequest(
 		(request) =>
-			request.tag === "AttachProject" &&
+			request.tag === "GetFileTree" &&
 			request.payload["projectSlug"] === "new-project",
 	);
 	await expect(page.getByTestId("session-scope-chip")).toHaveText(
@@ -651,11 +633,6 @@ test("switching projects while the list pages does not fail the switch", async (
 		await page
 			.getByRole("menuitemradio", { name: new RegExp(`^${target}\\b`) })
 			.click();
-		await control.rpc.waitForRequest(
-			(request) =>
-				request.tag === "AttachProject" &&
-				request.payload["projectSlug"] === target,
-		);
 		await expect(page.getByTestId("session-scope-chip")).toHaveText(target);
 		await expect
 			.poll(() =>
@@ -675,10 +652,10 @@ test("switching projects while the list pages does not fail the switch", async (
 			}),
 		).toBeVisible();
 	}
-	await expect(page.getByText("Failed to switch projects")).toHaveCount(0);
+	await expect(page.getByText(/^Failed to /)).toHaveCount(0);
 });
 
-test("switching projects attaches once and loads the new project's file tree", async ({
+test("switching projects loads the new project's file tree on the same connection", async ({
 	page,
 	baseURL,
 }) => {
@@ -697,14 +674,6 @@ test("switching projects attaches once and loads the new project's file tree", a
 	await expect(sessions).toContainText("Library session");
 	await expect(page.locator(".connect-overlay")).toBeHidden();
 	expect(control.rpc.connections).toBe(connectionsBefore);
-	const attaches = control.rpc
-		.getRequests()
-		.filter(
-			(request) =>
-				request.tag === "AttachProject" &&
-				request.payload["projectSlug"] === "mylib",
-		);
-	expect(attaches).toHaveLength(1);
 	await expect(page.getByText("Failed to load file tree")).toHaveCount(0);
 });
 

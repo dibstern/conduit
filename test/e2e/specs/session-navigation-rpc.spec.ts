@@ -83,10 +83,6 @@ async function setup(
 				hasMore: false,
 				nextCursor: null,
 			}),
-			AttachProject: (payload) => ({
-				projectSlug,
-				sessionSlug: "sessionId" in payload ? projectSlug : null,
-			}),
 			...stubs,
 		},
 	});
@@ -148,7 +144,7 @@ async function setup(
 	return { rpc, relay };
 }
 
-test("cold session navigation reuses attach resolution; warm navigation needs no resolution", async ({
+test("cold session navigation resolves once; warm navigation needs no resolution", async ({
 	page,
 	harness,
 }, testInfo) => {
@@ -164,21 +160,16 @@ test("cold session navigation reuses attach resolution; warm navigation needs no
 	const placement = (requests: typeof cold) =>
 		requests
 			.filter((request) =>
-				["AttachProject", "ResolveSession", "SubscribeSessionDetail"].includes(
-					request.tag,
-				),
+				["ResolveSession", "SubscribeSessionDetail"].includes(request.tag),
 			)
 			.map((request) => request.tag);
 	const coldOutput = testInfo.outputPath("cold-navigation-requests.json");
 	await writeFile(coldOutput, `${JSON.stringify(cold, null, 2)}\n`);
 	await testInfo.attach("cold-navigation-requests", { path: coldOutput });
-	expect(placement(cold)).toEqual(["AttachProject", "SubscribeSessionDetail"]);
+	expect(placement(cold)).toEqual(["ResolveSession", "SubscribeSessionDetail"]);
 	expect(
-		cold.find((request) => request.tag === "AttachProject")?.payload,
+		cold.find((request) => request.tag === "ResolveSession")?.payload,
 	).toMatchObject({ sessionId: seed });
-	expect(
-		cold.find((request) => request.tag === "AttachProject")?.payload,
-	).not.toHaveProperty("projectSlug");
 
 	rpc.removeShellRow(seed);
 	await expect(page).toHaveURL(new RegExp(`/s/${survivor}$`));
@@ -195,20 +186,17 @@ test("cold session navigation reuses attach resolution; warm navigation needs no
 	await testInfo.attach("session-navigation-rpc", { path: output });
 });
 
-test("a cold session link waits for attach placement before scoped reads", async ({
+test("a cold session link waits for its resolve before scoped reads", async ({
 	page,
 	harness,
 }, testInfo) => {
-	let finishAttach!: (reply: {
-		projectSlug: string;
-		sessionSlug: string;
-	}) => void;
+	let finishResolve!: (reply: { projectSlug: string }) => void;
 	const { rpc } = await setup(
 		page,
 		{
-			AttachProject: () =>
+			ResolveSession: () =>
 				new Promise((resolve) => {
-					finishAttach = resolve;
+					finishResolve = resolve;
 				}),
 			GetFileList: (payload) => ({
 				projectSlug,
@@ -219,11 +207,10 @@ test("a cold session link waits for attach placement before scoped reads", async
 		[],
 	);
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}?p=${projectSlug}`);
-	const attach = await rpc.waitForRequest(
-		(request) => request.tag === "AttachProject",
+	const resolve = await rpc.waitForRequest(
+		(request) => request.tag === "ResolveSession",
 	);
-	expect(attach.payload).toMatchObject({ sessionId: seed });
-	expect(attach.payload).not.toHaveProperty("projectSlug");
+	expect(resolve.payload).toMatchObject({ sessionId: seed });
 	await page.getByTestId("views-rail-files").click();
 	await expect(page.getByTestId("side-pane-files")).toBeVisible();
 	await expect(page.locator("#sidebar-panel-files")).toBeVisible();
@@ -235,7 +222,6 @@ test("a cold session link waits for attach placement before scoped reads", async
 	expect(
 		beforePlacement.filter((request) =>
 			[
-				"ResolveSession",
 				"ViewSession",
 				"SubscribeSessionDetail",
 				"SubscribeSessionTodos",
@@ -250,18 +236,15 @@ test("a cold session link waits for attach placement before scoped reads", async
 			].includes(request.tag),
 		),
 	).toEqual([]);
-	finishAttach({ projectSlug, sessionSlug: projectSlug });
+	finishResolve({ projectSlug });
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await rpc.waitForRequest(
 		(request) => request.tag === "SubscribeSessionDetail",
 	);
 	await expect(page.locator("#file-tree")).toContainText("placed-session.ts");
 	expect(
-		rpc.getRequests().filter((request) => request.tag === "AttachProject"),
-	).toHaveLength(1);
-	expect(
 		rpc.getRequests().filter((request) => request.tag === "ResolveSession"),
-	).toHaveLength(0);
+	).toHaveLength(1);
 	expect(
 		rpc.getRequests().filter((request) => request.tag === "ViewSession"),
 	).toHaveLength(1);
@@ -273,36 +256,27 @@ test("a cold session link waits for attach placement before scoped reads", async
 	await testInfo.attach("cold-session-placement", { path: output });
 });
 
-test("a failed cold attach still reports the failure after the shell reveals its owner", async ({
+test("a failed cold resolve still reports the failure after the shell reveals its owner", async ({
 	page,
 	harness,
 }, testInfo) => {
-	let rejectAttach!: (error: WsRpcError) => void;
-	let attachAttempts = 0;
+	let rejectResolve!: (error: WsRpcError) => void;
 	const { rpc } = await setup(
 		page,
 		{
-			AttachProject: (payload) => {
-				if (attachAttempts++ > 0)
-					return {
-						projectSlug:
-							("projectSlug" in payload ? payload.projectSlug : null) ??
-							projectSlug,
-						sessionSlug: null,
-					};
-				return new Promise<never>((_resolve, reject) => {
-					rejectAttach = reject;
-				});
-			},
+			ResolveSession: () =>
+				new Promise<never>((_resolve, reject) => {
+					rejectResolve = reject;
+				}),
 		},
 		[],
 	);
 	const url = `${harness.relayBaseUrl}/s/${seed}`;
 	await page.goto(url);
-	const attach = await rpc.waitForRequest(
-		(request) => request.tag === "AttachProject",
+	const resolve = await rpc.waitForRequest(
+		(request) => request.tag === "ResolveSession",
 	);
-	expect(attach.payload).toMatchObject({ sessionId: seed });
+	expect(resolve.payload).toMatchObject({ sessionId: seed });
 	rpc.setShellRows([
 		{
 			id: seed,
@@ -320,9 +294,11 @@ test("a failed cold attach still reports the failure after the shell reveals its
 	await expect(
 		page.locator(`#session-list [data-session-id="${seed}"]`),
 	).toContainText("Unavailable session");
-	rejectAttach(new WsRpcError({ message: "Project is unavailable" }));
+	// The revealed row places the session, so it opens before the resolve fails.
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	rejectResolve(new WsRpcError({ message: "Project is unavailable" }));
 	await expect(
-		page.getByText("Failed to switch projects", { exact: true }),
+		page.getByText("Failed to open session", { exact: true }),
 	).toBeVisible();
 	await expect(
 		page.getByText("Project is unavailable", { exact: true }),
@@ -333,64 +309,48 @@ test("a failed cold attach still reports the failure after the shell reveals its
 			new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
 	);
 	expect(
-		rpc.getRequests().filter(({ tag }) => tag === "AttachProject"),
-	).toEqual([attach]);
-	expect(
-		rpc.getRequests().filter(({ tag }) => tag === "SubscribeSessionDetail"),
-	).toEqual([]);
-	const output = testInfo.outputPath("failed-cold-session-attach.json");
+		rpc.getRequests().filter(({ tag }) => tag === "ResolveSession"),
+	).toEqual([resolve]);
+	const output = testInfo.outputPath("failed-cold-session-resolve.json");
 	await writeFile(
 		output,
 		`${JSON.stringify({ requests: rpc.getRequests(), route: page.url() }, null, 2)}\n`,
 	);
-	await testInfo.attach("failed-cold-session-attach", { path: output });
+	await testInfo.attach("failed-cold-session-resolve", { path: output });
 	await page.locator(`#session-list [data-session-id="${survivor}"]`).click();
 	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
 	await page.locator(`#session-list [data-session-id="${seed}"]`).click();
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	expect(
-		rpc.getRequests().filter(({ tag }) => tag === "AttachProject"),
-	).toHaveLength(3);
+		rpc.getRequests().filter(({ tag }) => tag === "ResolveSession"),
+	).toEqual([resolve]);
 });
 
-test("a cold attach retries after a dropped socket reconnects without navigation", async ({
+test("a cold resolve retries after a dropped socket reconnects without navigation", async ({
 	page,
 	harness,
 }, testInfo) => {
 	const { rpc } = await setup(
 		page,
-		{ AttachProject: () => new Promise<never>(() => {}) },
+		{ ResolveSession: () => new Promise<never>(() => {}) },
 		[],
 	);
 	const url = `${harness.relayBaseUrl}/s/${seed}`;
 	await page.goto(url);
-	const attach = await rpc.waitForRequest(
-		(request) => request.tag === "AttachProject",
+	const resolve = await rpc.waitForRequest(
+		(request) => request.tag === "ResolveSession",
 	);
-	expect(attach.payload).toMatchObject({ sessionId: seed });
-	rpc.setShellRows([
-		{
-			id: seed,
-			title: "Reconnecting session",
-			status: "idle",
-			projectSlug: otherProject,
-		},
-	]);
-	await expect(
-		page.locator(`#session-list [data-session-id="${seed}"]`),
-	).toContainText("Reconnecting session");
-	rpc.setStubs({
-		AttachProject: () => ({ projectSlug: otherProject, sessionSlug: null }),
-	});
+	expect(resolve.payload).toMatchObject({ sessionId: seed });
+	rpc.setStubs({ ResolveSession: () => ({ projectSlug: otherProject }) });
 	const connections = rpc.connections;
 	rpc.closeSockets({ code: 1012, reason: "Server restarting" });
 	await expect.poll(() => rpc.connections).toBeGreaterThan(connections);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await expect(page).toHaveURL(url);
 	expect(
-		rpc.getRequests().filter(({ tag }) => tag === "AttachProject"),
+		rpc.getRequests().filter(({ tag }) => tag === "ResolveSession"),
 	).toHaveLength(2);
-	await testInfo.attach("reconnected-cold-session-attach.json", {
+	await testInfo.attach("reconnected-cold-session-resolve.json", {
 		body: JSON.stringify({ requests: rpc.getRequests(), route: page.url() }),
 		contentType: "application/json",
 	});
@@ -402,7 +362,6 @@ test("an unknown session link goes home with a not-found notice", async ({
 }) => {
 	const unknown = "session-unknown";
 	const { rpc } = await setup(page, {
-		AttachProject: () => ({ projectSlug, sessionSlug: null }),
 		ResolveSession: () => ({ projectSlug: null }),
 	});
 	await page.goto(`${harness.relayBaseUrl}/s/${unknown}`);
@@ -562,32 +521,14 @@ test("a warm unplaced route sends no file reads while the previous directory is 
 	);
 });
 
-test("a delayed project attach keeps the target session's transcript and files", async ({
+test("opening another project's session shows its transcript and files with no project round trip", async ({
 	page,
 	harness,
 }, testInfo) => {
 	const target = "session-other-project";
-	let finishAttach!: (reply: {
-		projectSlug: string;
-		sessionSlug: null;
-	}) => void;
 	const { rpc } = await setup(
 		page,
 		{
-			AttachProject: (payload) => {
-				if (
-					("projectSlug" in payload && payload.projectSlug === otherProject) ||
-					("sessionId" in payload && payload.sessionId === target)
-				) {
-					return new Promise((resolve) => {
-						finishAttach = resolve;
-					});
-				}
-				return {
-					projectSlug,
-					sessionSlug: "sessionId" in payload ? projectSlug : null,
-				};
-			},
 			GetFileTree: (payload) => ({
 				projectSlug:
 					"sessionId" in payload && payload.sessionId === target
@@ -653,22 +594,7 @@ test("a delayed project attach keeps the target session's transcript and files",
 		.locator(`#session-list [data-session-id="${target}"]`)
 		.click({ position: { x: 48, y: 12 } });
 	await expect(page).toHaveURL(new RegExp(`/s/${target}$`));
-	await rpc.waitForRequest(
-		(request) =>
-			request.tag === "AttachProject" &&
-			(request.payload["projectSlug"] === otherProject ||
-				request.payload["sessionId"] === target),
-	);
-	const pendingAttach = [...rpc.getRequests()];
-	expect(
-		pendingAttach.filter(
-			(request) =>
-				["SubscribeSessionDetail", "GetFileTree"].includes(request.tag) &&
-				request.payload["sessionId"] === target,
-		),
-	).toEqual([]);
-	finishAttach({ projectSlug: otherProject, sessionSlug: null });
-	// The attach reply is what releases the target's scoped reads.
+	// The row names the target's project, so the browser marks it locally.
 	await rpc.waitForRequest(
 		(request) =>
 			request.tag === "SubscribeSessionDetail" &&
@@ -684,29 +610,33 @@ test("a delayed project attach keeps the target session's transcript and files",
 		"Target project transcript",
 	);
 	await expect(page.locator("#file-tree")).toContainText("target-session.ts");
-	const output = testInfo.outputPath("delayed-project-attach.json");
+	expect(
+		rpc
+			.getRequests()
+			.filter(
+				({ tag, payload }) =>
+					tag === "ResolveSession" && payload["sessionId"] === target,
+			),
+	).toEqual([]);
+	const output = testInfo.outputPath("other-project-session.json");
 	await writeFile(
 		output,
-		`${JSON.stringify({ pendingAttach, route: page.url(), requests: rpc.getRequests() }, null, 2)}\n`,
+		`${JSON.stringify({ route: page.url(), requests: rpc.getRequests() }, null, 2)}\n`,
 	);
-	await testInfo.attach("delayed-project-attach", { path: output });
+	await testInfo.attach("other-project-session", { path: output });
 });
 
-test("choosing a project scope from home attaches that project", async ({
+test("choosing a project scope from home marks that project with no round trip", async ({
 	page,
 	harness,
 }) => {
-	const { rpc } = await setup(page, {
-		AttachProject: (payload) => ({
-			projectSlug:
-				"projectSlug" in payload
-					? (payload.projectSlug ?? projectSlug)
-					: projectSlug,
-			sessionSlug: null,
-		}),
-	});
+	const { rpc } = await setup(page);
 	await page.goto(`${harness.relayBaseUrl}/`);
-	await rpc.waitForRequest((request) => request.tag === "AttachProject");
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "GetFileTree" &&
+			request.payload["projectSlug"] === projectSlug,
+	);
 	await page.getByTestId("session-scope-chip").click();
 	await page
 		.getByRole("menuitemradio", { name: new RegExp(`^${otherProject}\\b`) })
@@ -714,16 +644,10 @@ test("choosing a project scope from home attaches that project", async ({
 	await expect(page).toHaveURL(`${harness.relayBaseUrl}/?p=${otherProject}`);
 	await rpc.waitForRequest(
 		(request) =>
-			request.tag === "AttachProject" &&
+			request.tag === "GetFileTree" &&
 			request.payload["projectSlug"] === otherProject,
 	);
 	await expect(page.getByTestId("session-scope-chip")).toHaveText(otherProject);
-	expect(
-		rpc
-			.getRequests()
-			.filter((request) => request.tag === "AttachProject")
-			.at(-1)?.payload,
-	).not.toHaveProperty("sessionId");
 });
 
 test("a first send from home places the session in the chosen draft project", async ({
@@ -731,13 +655,6 @@ test("a first send from home places the session in the chosen draft project", as
 	harness,
 }) => {
 	const { rpc } = await setup(page, {
-		AttachProject: (payload) => ({
-			projectSlug:
-				"projectSlug" in payload
-					? (payload.projectSlug ?? projectSlug)
-					: projectSlug,
-			sessionSlug: null,
-		}),
 		GetModels: (payload) => ({
 			projectSlug:
 				"projectSlug" in payload ? payload.projectSlug : otherProject,
@@ -771,11 +688,6 @@ test("a first send from home places the session in the chosen draft project", as
 	);
 	await rpc.waitForRequest(
 		(request) =>
-			request.tag === "AttachProject" &&
-			request.payload["projectSlug"] === projectSlug,
-	);
-	await rpc.waitForRequest(
-		(request) =>
 			request.tag === "GetModels" &&
 			request.payload["projectSlug"] === otherProject,
 	);
@@ -789,11 +701,6 @@ test("a first send from home places the session in the chosen draft project", as
 	await rpc.waitForRequest(
 		(request) =>
 			request.tag === "ViewSession" && request.payload["sessionId"] === created,
-	);
-	await rpc.waitForRequest(
-		(request) =>
-			request.tag === "AttachProject" &&
-			request.payload["projectSlug"] === otherProject,
 	);
 	expect(
 		rpc.getRequests().filter((request) => request.tag === "ResolveSession"),

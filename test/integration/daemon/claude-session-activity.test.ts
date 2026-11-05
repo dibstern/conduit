@@ -245,20 +245,18 @@ describe("Session activity over a Claude background shell and its wake", () => {
 		);
 		const alerts: Record<string, unknown>[] = [];
 		const alertFiber = Effect.runFork(
-			Stream.runForEach(
-				watcher.rpc.SubscribeAlerts({ projectSlug: "process-test" }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag !== "alert") return;
-						// Whether the sidebar had shown Claude's wake turn before this alert.
-						const afterTheWake = watcher.frames.some(
-							({ message }) =>
-								message["type"] === "session_row" &&
-								message["id"] === envelope.sessionId &&
-								message["wakeRun"] != null,
-						);
-						alerts.push({ ...envelope, afterTheWake });
-					}),
+			Stream.runForEach(watcher.rpc.SubscribeAlerts({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag !== "alert") return;
+					// Whether the sidebar had shown Claude's wake turn before this alert.
+					const afterTheWake = watcher.frames.some(
+						({ message }) =>
+							message["type"] === "session_row" &&
+							message["id"] === envelope.sessionId &&
+							message["wakeRun"] != null,
+					);
+					alerts.push({ ...envelope, afterTheWake });
+				}),
 			),
 		);
 		const browser = await fixture.connect();

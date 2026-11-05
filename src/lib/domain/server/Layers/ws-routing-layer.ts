@@ -13,16 +13,12 @@ import {
 	Ref,
 } from "effect";
 import { WsRpcError } from "../../../contracts/ws-rpc.js";
-import * as Failure from "../../../effect/failure-classification.js";
 import {
 	getClientIp,
 	isOwnOrigin,
 	parseCookies,
 } from "../../../server/http-utils.js";
-import type {
-	AttachDaemonProject,
-	ResolveRpcContext,
-} from "../../../server/ws-rpc.js";
+import type { ResolveRpcContext } from "../../../server/ws-rpc.js";
 import {
 	makeRoutedWsRpcWebSocketHandler,
 	type RpcWebSocketHandlerShape,
@@ -33,10 +29,8 @@ import { HttpServerRefTag } from "../../daemon/Layers/relay-factory-layer.js";
 import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../../daemon/Services/daemon-pubsub.js";
-import { resolveDaemonSession } from "../../daemon/Services/daemon-session-reader.js";
 import type { DaemonStateTag } from "../../daemon/Services/daemon-state.js";
 import {
-	allProjects,
 	getProject,
 	markError,
 	markReady,
@@ -44,7 +38,7 @@ import {
 	touchLastUsed as touchProjectLastUsed,
 } from "../../daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../daemon/Services/relay-cache.js";
-import { SessionDirectory } from "../../daemon/Services/session-directory.js";
+import type { SessionDirectory } from "../../daemon/Services/session-directory.js";
 import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";
 
 const RELAY_WAIT_TIMEOUT_MS = 10_000;
@@ -283,8 +277,6 @@ export const WebSocketRoutingLive: Layer.Layer<
 		const auth = yield* AuthManagerTag;
 		const relayRouter = yield* WebSocketRelayRouterTag;
 		const daemonHandlers = yield* DaemonWsRpcHandlersTag;
-		const projectRegistry = yield* ProjectRegistryTag;
-		const directory = yield* SessionDirectory;
 		const shutdownSignal = yield* ShutdownSignalTag;
 		const context = yield* Effect.context<never>();
 		const server = yield* Ref.get(httpServerRef);
@@ -295,75 +287,6 @@ export const WebSocketRoutingLive: Layer.Layer<
 			);
 		}
 
-		const resolveRelay = (slug: string) =>
-			Effect.gen(function* () {
-				yield* relayRouter.ensureRelayStarted(slug);
-				const relay = yield* relayRouter.waitForRelay(
-					slug,
-					RELAY_WAIT_TIMEOUT_MS,
-				);
-				yield* relayRouter.touchLastUsed(slug);
-				return relay;
-			});
-
-		const toRpcUnavailable = (slug: string, cause: unknown) =>
-			new WsRpcError({
-				message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
-			});
-
-		const resolveRpcRelay = (slug: string) =>
-			resolveRelay(slug).pipe(
-				Failure.mapEffectFailures((error) => toRpcUnavailable(slug, error)),
-				Effect.catchDefect((cause) =>
-					Effect.fail(toRpcUnavailable(slug, cause)),
-				),
-			);
-
-		// Resolve the session's project, then the registered hint, then the
-		// most recent project for AttachProject.
-		const resolveAttachSlug = (hints: {
-			readonly projectSlug?: string | undefined;
-			readonly sessionId?: string | undefined;
-		}) =>
-			Effect.gen(function* () {
-				const projects = yield* allProjects;
-				const sessionSlug = hints.sessionId
-					? yield* resolveDaemonSession(hints.sessionId).pipe(
-							Effect.provideService(SessionDirectory, directory),
-						)
-					: null;
-				if (hints.sessionId && sessionSlug === null)
-					return yield* new WsRpcError({
-						code: "unknown-session",
-						message: `Unknown session: ${hints.sessionId}`,
-					});
-				const slug =
-					sessionSlug ??
-					projects.find((project) => project.slug === hints.projectSlug)
-						?.slug ??
-					projects[0]?.slug ??
-					null;
-				return { slug, sessionSlug };
-			}).pipe(Effect.provideService(ProjectRegistryTag, projectRegistry));
-
-		const attachProject: AttachDaemonProject = (payload) =>
-			resolveAttachSlug(payload).pipe(
-				Failure.mapEffectFailures((error) =>
-					error instanceof WsRpcError
-						? error
-						: new WsRpcError({
-								message: `AttachProject failed: ${formatCause(error)}`,
-							}),
-				),
-				Effect.tap(({ slug }) =>
-					slug === null ? Effect.void : resolveRpcRelay(slug),
-				),
-				Effect.map(({ slug, sessionSlug }) => ({
-					projectSlug: slug,
-					sessionSlug,
-				})),
-			);
-
 		const rpcHandler = yield* makeRoutedWsRpcWebSocketHandler(
 			(slug) => resolveProjectRpcContext(relayRouter, slug),
 			daemonHandlers,
@@ -373,7 +296,6 @@ export const WebSocketRoutingLive: Layer.Layer<
 					shutdownSignal,
 					tag === "Shutdown" ? "stop" : "restart",
 				).pipe(Effect.asVoid),
-			attachProject,
 		);
 
 		const routeUpgrade = (

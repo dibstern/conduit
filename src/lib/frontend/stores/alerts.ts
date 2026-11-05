@@ -65,41 +65,32 @@ export const applyAlert = (alert: Alert): void => {
 		});
 };
 
-let viewed: string | null = null;
-let generation = 0;
-let fiber: Fiber.Fiber<void, never> | null = null;
-
-/** Follow `project`'s alerts until the attached project moves; `null` stops. */
-export function viewAlerts(project: string | null): void {
-	if (viewed === project) return;
-	viewed = project;
-	const currentGeneration = ++generation;
-	const old = fiber;
-	fiber = null;
-	void (old ? runTransportEffect(Fiber.interrupt(old)) : Promise.resolve())
-		.catch(() => undefined)
-		.then(async () => {
-			if (currentGeneration !== generation || !project) return;
-			const runtime = await getRuntime();
-			if (currentGeneration !== generation) return;
-			const next = runtime.runFork(
-				Effect.flatMap(WsRpcClients, (clients) =>
-					Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
-						Stream.runForEach(
-							supervise(
-								Stream.suspend(() => subscriptions.alerts()),
-								() => undefined,
-							),
-							(envelope) =>
-								Effect.sync(() => {
-									if (currentGeneration !== generation) return;
-									if (envelope._tag === "alert") applyAlert(envelope);
-								}),
+/** Follow every project's alerts until the returned stop is called. */
+export function followAlerts(): () => void {
+	let live = true;
+	let fiber: Fiber.Fiber<void, never> | null = null;
+	void getRuntime().then((runtime) => {
+		if (!live) return;
+		fiber = runtime.runFork(
+			Effect.flatMap(WsRpcClients, (clients) =>
+				Effect.flatMap(clients.forProject(""), ({ subscriptions }) =>
+					Stream.runForEach(
+						supervise(
+							Stream.suspend(() => subscriptions.alerts()),
+							() => undefined,
 						),
+						(envelope) =>
+							Effect.sync(() => {
+								if (envelope._tag === "alert") applyAlert(envelope);
+							}),
 					),
 				),
-			);
-			if (currentGeneration === generation) fiber = next;
-			else runtime.runFork(Fiber.interrupt(next));
-		});
+			),
+		);
+	});
+	return () => {
+		live = false;
+		if (fiber)
+			void runTransportEffect(Fiber.interrupt(fiber)).catch(() => undefined);
+	};
 }

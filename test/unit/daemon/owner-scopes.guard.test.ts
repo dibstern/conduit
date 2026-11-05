@@ -312,10 +312,10 @@ describe("one alert feed and pollers held by tabs (82tn.12)", () => {
 		);
 	});
 
-	it("a tab hears every project's alerts", () => {
-		expect(read("src/lib/server/event-delivery.ts")).toMatch(
-			/SubscribeAlerts: \(request, producer\) =>\s*projectAudience\(request, producer\)\.pipe\(Effect\.andThen\(globalAudience\)\)/,
-		);
+	it("a tab hears every project's alerts and asks (82tn.13)", () => {
+		const delivery = read("src/lib/server/event-delivery.ts");
+		expect(delivery).toMatch(/SubscribeAlerts: globalAudience,/);
+		expect(delivery).toMatch(/SubscribeApprovals: globalAudience,/);
 	});
 
 	it("only tabs viewing a session hold its message poller", () => {

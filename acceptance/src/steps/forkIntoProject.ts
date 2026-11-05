@@ -127,11 +127,12 @@ export const forkIntoProjectHandlers: StepHandler[] = [
 				.poll(() =>
 					requireRpcControl(world.page)
 						.getRequests()
+						// The tab marks the fork's project itself (82tn.13); its
+						// terminal feed then names that project.
 						.some(
 							(request) =>
-								request.tag === "AttachProject" &&
-								(request.payload["projectSlug"] === target ||
-									request.payload["sessionId"] === sessionId),
+								request.tag === "SubscribePtys" &&
+								request.payload["projectSlug"] === target,
 						),
 				)
 				.toBe(true);

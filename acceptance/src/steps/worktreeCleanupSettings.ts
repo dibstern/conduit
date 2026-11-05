@@ -77,7 +77,6 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 			const rpc = requireRpcControl(world.page);
 			rpc.setStubs({
 				GetProjects: () => ({ projects: [] }),
-				AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
 			});
 			rpc.setProjects({ projects: [] });
 			await expect(world.page.getByTestId("project-tree-header")).toHaveCount(

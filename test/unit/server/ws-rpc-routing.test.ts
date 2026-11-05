@@ -133,7 +133,7 @@ describe("routed RPC server", () => {
 	);
 
 	it.effect(
-		"serves a named project's approvals, a subagent's included, and no other project's",
+		"a standalone relay serves its own project's approvals, a subagent's included, and no other project's",
 		() =>
 			Effect.gen(function* () {
 				const contexts = new Map<string, Context.Context<unknown>>();
@@ -205,19 +205,23 @@ describe("routed RPC server", () => {
 				}
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 					Effect.provide(
-						makeRoutedWsRpcServerLayer((slug) => {
-							const context = contexts.get(slug);
-							return context
-								? Effect.succeed(context)
-								: Effect.fail(
-										new WsRpcError({ message: `Unknown project ${slug}` }),
-									);
-						}).pipe(Layer.provide(sessionDirectory)),
+						makeRoutedWsRpcServerLayer(
+							(slug) => {
+								const context = contexts.get(slug);
+								return context
+									? Effect.succeed(context)
+									: Effect.fail(
+											new WsRpcError({ message: `Unknown project ${slug}` }),
+										);
+							},
+							undefined,
+							"project-b",
+						).pipe(Layer.provide(sessionDirectory)),
 						{ local: true },
 					),
 				);
 				const envelopes = yield* client
-					.SubscribeApprovals({ projectSlug: "project-b" })
+					.SubscribeApprovals({})
 					.pipe(Stream.take(2), Stream.runCollect);
 				const [snapshot, synchronized] = Array.from(envelopes);
 				expect(synchronized).toEqual({ _tag: "synchronized" });
@@ -237,72 +241,6 @@ describe("routed RPC server", () => {
 						}),
 					]),
 				);
-			}),
-	);
-
-	it.effect(
-		"AttachProject replies with the daemon's resolved project without resolving a relay context",
-		() =>
-			Effect.gen(function* () {
-				const resolve = vi.fn(() =>
-					Effect.fail(new WsRpcError({ message: "unexpected relay context" })),
-				);
-				const attachProject = vi.fn(() =>
-					Effect.succeed({
-						projectSlug: "project-c",
-						sessionSlug: "project-c",
-					}),
-				);
-				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-					Effect.provide(
-						makeRoutedWsRpcServerLayer(
-							resolve,
-							undefined,
-							undefined,
-							attachProject,
-						).pipe(Layer.provide(sessionDirectory)),
-						{ local: true },
-					),
-				);
-				expect(
-					yield* client.AttachProject({
-						projectSlug: "project-b",
-						originId: "daemon-client",
-					}),
-				).toEqual({ projectSlug: "project-c", sessionSlug: "project-c" });
-				expect(attachProject).toHaveBeenCalledWith(
-					expect.objectContaining({
-						projectSlug: "project-b",
-						originId: "daemon-client",
-					}),
-					expect.anything(),
-				);
-				expect(resolve).not.toHaveBeenCalled();
-			}),
-	);
-
-	it.effect(
-		"AttachProject on a standalone relay replies with its own project",
-		() =>
-			Effect.gen(function* () {
-				const context = yield* Layer.build(
-					makeTestHandlerLayer({
-						config: makeMockConfig({ slug: "initial" }),
-					}).pipe(Layer.provideMerge(RpcSubscriptionScopeLive)),
-				);
-				const resolve = vi.fn(() => Effect.succeed(context));
-				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-					Effect.provide(
-						makeRoutedWsRpcServerLayer(resolve, undefined, "initial").pipe(
-							Layer.provide(sessionDirectory),
-						),
-						{ local: true },
-					),
-				);
-				expect(
-					yield* client.AttachProject({ originId: "relay-client" }),
-				).toEqual({ projectSlug: "initial", sessionSlug: null });
-				expect(resolve).toHaveBeenCalledWith("initial");
 			}),
 	);
 

@@ -74,7 +74,7 @@ export const splitScene: SceneDefinition = {
 			sendMockShellSnapshot(page, shellSnapshot.sessions);
 			await mockWsRpc(page, {
 				handlers: {
-					AttachProject: () => ({ projectSlug: "saas-landing" }),
+					ResolveSession: () => ({ projectSlug: "saas-landing" }),
 					ListDaemonSessions: () => ({
 						sessions: [],
 						availability: [],

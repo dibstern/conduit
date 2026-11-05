@@ -2537,9 +2537,9 @@ export class ProcessBrowser {
 	private failure: Error | undefined;
 	private ptys: Fiber.Fiber<void, unknown> | undefined;
 	private approvals: Fiber.Fiber<void, unknown> | undefined;
-	// The card feed in use; a feed replaced by `open` is retired, so its end
-	// is not a failure and its late envelopes are dropped.
-	private approvalsFeed = { retired: false };
+	// The terminal feed in use; one moved by `followPtys` is retired, so its
+	// end is not a failure and its late envelopes are dropped.
+	private ptysFeed = { retired: false };
 	private projectSettings: Fiber.Fiber<void, unknown> | undefined;
 	private instanceFeed: Fiber.Fiber<void, unknown> | undefined;
 	private sessions: Fiber.Fiber<void, unknown> | undefined;
@@ -2650,12 +2650,21 @@ export class ProcessBrowser {
 	 * Follow the project's terminals as the browser does. Each SubscribePtys
 	 * envelope is recorded as a `{ type: "pty", ...envelope }` frame.
 	 */
-	private async followPtys(): Promise<void> {
+	async followPtys(projectSlug = this.projectSlug): Promise<void> {
 		const cursor = this.frames.length;
+		// A feed moved to another project is retired, as the browser's is.
+		this.ptysFeed.retired = true;
+		const previous = this.ptys;
+		if (previous) await this.runtime.runPromise(Fiber.interrupt(previous));
+		const feed = { retired: false };
+		this.ptysFeed = feed;
 		this.ptys = this.watch(
-			this.rpc.SubscribePtys({ projectSlug: this.projectSlug }),
+			this.rpc.SubscribePtys({ projectSlug }),
 			(envelope) =>
-				Effect.sync(() => this.record({ type: "pty", ...envelope })),
+				Effect.sync(() => {
+					if (!feed.retired) this.record({ type: "pty", ...envelope });
+				}),
+			feed,
 		);
 		await this.waitFor(
 			(message) =>
@@ -2670,26 +2679,20 @@ export class ProcessBrowser {
 	// `approval_removed` its resolution.
 	private async watchApprovals(): Promise<void> {
 		const cursor = this.frames.length;
-		const feed = { retired: false };
-		this.approvalsFeed = feed;
-		this.approvals = this.watch(
-			this.rpc.SubscribeApprovals({ projectSlug: this.projectSlug }),
-			(envelope) =>
-				Effect.sync(() => {
-					if (feed.retired) return;
-					this.record({ type: "approvals", ...envelope });
-					const items =
-						envelope._tag === "snapshot"
-							? envelope.rows
-							: envelope._tag === "upsert"
-								? [envelope.item]
-								: [];
-					for (const item of items)
-						this.record({ ...item, type: `${item._tag}_pending` });
-					if (envelope._tag === "remove")
-						this.record({ type: "approval_removed", id: envelope.id });
-				}),
-			feed,
+		this.approvals = this.watch(this.rpc.SubscribeApprovals({}), (envelope) =>
+			Effect.sync(() => {
+				this.record({ type: "approvals", ...envelope });
+				const items =
+					envelope._tag === "snapshot"
+						? envelope.rows
+						: envelope._tag === "upsert"
+							? [envelope.item]
+							: [];
+				for (const item of items)
+					this.record({ ...item, type: `${item._tag}_pending` });
+				if (envelope._tag === "remove")
+					this.record({ type: "approval_removed", id: envelope.id });
+			}),
 		);
 		await this.waitFor(
 			(message) =>
@@ -2773,10 +2776,8 @@ export class ProcessBrowser {
 	async followAlerts(): Promise<void> {
 		const cursor = this.frames.length;
 		this.detailFibers.add(
-			this.watch(
-				this.rpc.SubscribeAlerts({ projectSlug: this.projectSlug }),
-				(envelope) =>
-					Effect.sync(() => this.record({ ...envelope, type: "alert" })),
+			this.watch(this.rpc.SubscribeAlerts({}), (envelope) =>
+				Effect.sync(() => this.record({ ...envelope, type: "alert" })),
 			),
 		);
 		await this.waitFor(
@@ -3091,22 +3092,15 @@ export class ProcessBrowser {
 	}
 
 	/**
-	 * Open a session as the browser's Open does: attach its project, move the
-	 * card feed there when the project changes (the browser clears and
-	 * resubscribes on attach), then view it.
+	 * Open a session as the browser's Open does: learn its project from the
+	 * session, then view it. The card feed is every project's, so nothing
+	 * moves (82tn.13).
 	 */
 	async open(sessionId: string): Promise<void> {
 		const { projectSlug } = await this.run(
-			this.rpc.AttachProject({ sessionId, originId: this.originId }),
+			this.rpc.ResolveSession({ sessionId }),
 		);
-		if (projectSlug !== null && projectSlug !== this.projectSlug) {
-			this.approvalsFeed.retired = true;
-			const previous = this.approvals;
-			this.approvals = undefined;
-			if (previous) await this.runtime.runPromise(Fiber.interrupt(previous));
-			this.projectSlug = projectSlug;
-			await this.watchApprovals();
-		}
+		if (projectSlug !== null) this.projectSlug = projectSlug;
 		await this.view(sessionId);
 	}
 

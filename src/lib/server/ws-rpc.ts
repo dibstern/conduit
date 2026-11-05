@@ -283,18 +283,6 @@ export type ResolveRpcContext = (
 	WsRpcError
 >;
 
-export type AttachDaemonProject = (payload: {
-	readonly originId: string;
-	readonly projectSlug?: string | undefined;
-	readonly sessionId?: string | undefined;
-}) => Effect.Effect<
-	{
-		readonly projectSlug: string | null;
-		readonly sessionSlug: string | null;
-	},
-	WsRpcError
->;
-
 export type DaemonRpcName =
 	| keyof typeof daemonOnlyHandlers
 	| "GetProjects"
@@ -379,6 +367,17 @@ export type DaemonRpcHandlers = {
 		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeShell">>,
 	) => Stream.Stream<ShellEnvelope, WsRpcError>;
 	readonly SubscribeServerStatus: () => Stream.Stream<ServerStatus, WsRpcError>;
+	/** Every project's asks, for every tab (82tn.13). */
+	readonly SubscribeApprovals: (
+		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeApprovals">>,
+	) => Stream.Stream<
+		Rpc.SuccessChunk<Rpc.ExtractTag<WsRpcs, "SubscribeApprovals">>,
+		WsRpcError
+	>;
+	readonly SubscribeAlerts: () => Stream.Stream<
+		Rpc.SuccessChunk<Rpc.ExtractTag<WsRpcs, "SubscribeAlerts">>,
+		WsRpcError
+	>;
 	readonly SubscribeInputDraft?: (
 		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeInputDraft">>,
 	) => Stream.Stream<InputDraftEnvelope, WsRpcError>;
@@ -396,7 +395,6 @@ export const makeRoutedWsRpcServerLayer = <
 	resolveContext: ResolveRpcContext,
 	daemonHandlers?: D,
 	defaultProjectSlug?: string,
-	attachProject?: AttachDaemonProject,
 ) =>
 	Layer.unwrap(
 		Effect.gen(function* () {
@@ -529,7 +527,6 @@ export const makeRoutedWsRpcServerLayer = <
 						: never
 				>;
 			};
-			if (attachProject) handlers.AttachProject = attachProject;
 			if (daemonHandlers) {
 				const routeCreateSession = routeHandler(unaryHandlers.CreateSession);
 				handlers.CreateSession = (
@@ -655,7 +652,9 @@ export const makeRoutedWsRpcServerLayer = <
 									() => handler(request),
 									name === "SubscribeShell" ||
 										name === "SubscribeInputDraft" ||
-										name === "SubscribeDrafts"
+										name === "SubscribeDrafts" ||
+										name === "SubscribeApprovals" ||
+										name === "SubscribeAlerts"
 										? defaultProjectSlug
 										: undefined,
 								);

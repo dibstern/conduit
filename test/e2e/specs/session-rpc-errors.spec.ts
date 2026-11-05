@@ -79,7 +79,6 @@ async function openSession(
 				nextCursor: null,
 			}),
 			...stubs,
-			AttachProject: () => ({ projectSlug, sessionSlug: projectSlug }),
 		},
 	});
 	await mockRelayWebSocket(page, {
