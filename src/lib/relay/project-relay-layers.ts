@@ -178,10 +178,11 @@ import { SessionWorkspaceHintReactorLive } from "../domain/relay/Services/sessio
 import { SessionWorkspaceHintStateTag } from "../domain/relay/Services/session-workspace-hint-state.js";
 import { SSEStreamLive } from "../domain/relay/Services/sse-stream-service.js";
 import {
-	LocalPtyServiceLive,
+	LocalPtyServiceOrOwn,
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
 import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
+import { DEFAULT_CONFIG_DIR } from "../env.js";
 import { realWorkspacePath } from "../git/worktrees.js";
 import type { CommitAndSignalProject } from "../persistence/effect/commit-and-signal.js";
 import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
@@ -942,9 +943,9 @@ export function createProjectRelayLayers({
 			Layer.mergeAll(openCodeInstancesLayer, configLayer, loggerLayer),
 		),
 	);
-	const localPtyServiceLayer = LocalPtyServiceLive.pipe(
-		Layer.provide(Layer.merge(configLayer, loggerLayer)),
-	);
+	const localPtyServiceLayer = LocalPtyServiceOrOwn(
+		config.configDir ?? DEFAULT_CONFIG_DIR,
+	).pipe(Layer.provide(Layer.merge(daemonContextLayer, loggerLayer)));
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(

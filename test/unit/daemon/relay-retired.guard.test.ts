@@ -129,6 +129,8 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"resolveOrphanedClaudePermissions",
 			"makeOrphanedClaudePermissions",
 			"PermissionTimeoutLive",
+			"makeLocalPtyServiceLive",
+			"makeHostedTerminalsLive",
 		]);
 		expect(tally(server, named(services))).toEqual(
 			new Map([
@@ -136,9 +138,13 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/domain/persistence/Services/run-ledger-scheduler.ts", 1],
 				["src/lib/domain/persistence/Services/event-retention-scheduler.ts", 1],
 				// Each one's import and its one build.
-				[`${daemon}/Layers/daemon-layers.ts`, 10],
+				[`${daemon}/Layers/daemon-layers.ts`, 12],
 				// Permission timeouts: one loop over every registered project, not one per relay.
 				[`${daemon}/Layers/permission-timeout-layer.ts`, 1],
+				// The PTY host's client: one for the daemon, which also closes a removed project's
+				// terminals; its definition, and a standalone relay's own.
+				[`${daemon}/Layers/hosted-terminals-layer.ts`, 3],
+				["src/lib/domain/relay/Services/terminal-service.ts", 2],
 				// Orphaned Claude asks: cleared for every registered project when the daemon starts, not at relay start.
 				[
 					"src/lib/domain/relay/Services/resolve-orphaned-claude-permissions.ts",

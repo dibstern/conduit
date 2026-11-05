@@ -175,6 +175,7 @@ import {
 	DaemonWsRpcHandlersTag,
 } from "./daemon-ws-rpc-layer.js";
 import { FolderTimelineEvictionLive } from "./folder-timeline-eviction-layer.js";
+import { makeHostedTerminalsLive } from "./hosted-terminals-layer.js";
 import { KeepAwakeLive } from "./keep-awake-layer.js";
 import { MessageSurfacingSettingsLive } from "./message-surfacing-settings-layer.js";
 import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
@@ -1100,9 +1101,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		DaemonTurnsLive,
 		ProviderTurnsLive,
 	).pipe(Layer.provideMerge(withEviction));
-	const withOrchestration = Layer.merge(
+	const withOrchestration = Layer.mergeAll(
 		DaemonOrchestrationLive,
 		PermissionTimeoutLive,
+		makeHostedTerminalsLive(configDir),
 	).pipe(Layer.provideMerge(withSessionManager));
 	const registries = RelayFactoryLive(
 		configDir,
