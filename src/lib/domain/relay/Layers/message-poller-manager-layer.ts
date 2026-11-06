@@ -1,4 +1,4 @@
-import { Effect, FiberSet, Layer, Option, Scope } from "effect";
+import { Effect, FiberSet, Layer, Option } from "effect";
 import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type { Message } from "../../../instance/sdk-types.js";
@@ -36,12 +36,8 @@ export const makeMessagePollerManagerLive = (
 			const config = yield* ConfigTag;
 			const log = yield* LoggerTag;
 			const sessionClient = yield* makeSessionOpenCodeClient;
-			const readsScope = yield* Scope.fork(yield* Effect.scope);
-			const run = yield* FiberSet.makeRuntimePromise<
-				never,
-				Message[],
-				unknown
-			>().pipe(Effect.provideService(Scope.Scope, readsScope));
+			const reads = yield* FiberSet.make<Message[], unknown>();
+			const run = yield* FiberSet.runtimePromise(reads)<never>();
 			const pollerLog = log.child("poller-mgr");
 			const manager = new MessagePollerManager({
 				client: {
@@ -75,11 +71,11 @@ export const makeMessagePollerManagerLive = (
 				}),
 			});
 
-			yield* Effect.addFinalizer((exit) =>
+			yield* Effect.addFinalizer(() =>
 				Effect.gen(function* () {
 					// Stop timers, interrupt scoped reads, then wait for their callbacks to settle.
 					const draining = manager.drain();
-					yield* Scope.close(readsScope, exit);
+					yield* FiberSet.clear(reads);
 					yield* Effect.tryPromise({
 						try: () => draining,
 						catch: (cause) => cause,

@@ -231,8 +231,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/provider/runner/runner-entry-lifecycle.ts", 1],
 				["src/lib/provider/runner/runner-provider-instance.ts", 1],
 				["src/lib/provider/runner/send-scope.ts", 1],
-				// relay
-				["src/lib/domain/relay/Layers/message-poller-manager-layer.ts", 1],
+				// The HTTP edge's per-request scope.
 				["src/lib/domain/server/Layers/http-router-layer.ts", 1],
 			]),
 		);
