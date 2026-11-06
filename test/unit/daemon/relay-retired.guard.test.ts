@@ -107,7 +107,6 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				[`${daemon}/Layers/daemon-ws-rpc-layer.ts`, 4],
 				[`${daemon}/Layers/opencode-instances-layer.ts`, 2],
 				[`${daemon}/Layers/provider-adapters-layer.ts`, 3],
-				[`${daemon}/Layers/relay-factory-layer.ts`, 10],
 				[`${daemon}/Layers/worktree-cleanup-layer.ts`, 2],
 				[`${daemon}/Services/daemon-handle.ts`, 5],
 				[`${daemon}/Services/project-registry-service.ts`, 5],
@@ -143,12 +142,12 @@ describe("per-project relay stays retired (82tn.16)", () => {
 
 	it("opens a registered project in its generation, never through a relay (lane 16q)", () => {
 		// Startup, the SSE consumer and the status poller run in the project's
-		// generation; only the relay factory itself still names a relay's maker.
+		// generation; the relay factory is gone (lane 16r), and only the relay
+		// stack still names a relay's maker.
 		expect(
 			tally(server, named(new Set(["RelayFactoryTag", "startProjectRelay"]))),
 		).toEqual(
 			new Map([
-				[`${daemon}/Layers/relay-factory-layer.ts`, 4],
 				[`${relay}/relay-stack.ts`, 2],
 				[`${relay}/project-relay-startup.ts`, 1],
 			]),

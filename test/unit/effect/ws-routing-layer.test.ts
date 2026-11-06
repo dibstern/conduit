@@ -4,7 +4,6 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Option, Ref, Scope } from "effect";
 import { expect, type Mock, vi } from "vitest";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
-import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -24,6 +23,7 @@ import {
 	WebSocketRoutingLive,
 	WebSocketUpgradeError,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
+import { HttpServerRefTag } from "../../../src/lib/domain/server/Services/http-server-ref.js";
 import { WsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";

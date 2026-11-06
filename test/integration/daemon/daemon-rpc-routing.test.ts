@@ -19,7 +19,6 @@ import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -41,6 +40,7 @@ import {
 	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
+import { HttpServerRefTag } from "../../../src/lib/domain/server/Services/http-server-ref.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";

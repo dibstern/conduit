@@ -14,6 +14,7 @@ import type {
 } from "../../../persistence/effect/live.js";
 import type { SessionStateProjectionNotifierTag } from "../../../persistence/effect/session-state-projection-notifier.js";
 import { daemonStorePath } from "../../../persistence/project-storage.js";
+import type { PollerGatingConfig } from "../../../relay/monitoring-types.js";
 import type { RpcSubscriptionScopeTag } from "../../../server/ws-rpc.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
 import type { AgentServiceTag } from "../../relay/Services/agent-service.js";
@@ -61,7 +62,6 @@ import type { SSEStreamTag } from "../../relay/Services/sse-stream-service.js";
 import type { OpenCodeTerminalServiceTag } from "../../relay/Services/terminal-service.js";
 import type { ToolContentServiceTag } from "../../relay/Services/tool-content-service.js";
 import type { ProjectShellEnvTag } from "../Layers/project-shell-env-layer.js";
-import type { PollerTimings } from "../Layers/relay-factory-layer.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonEvent, type DaemonEventBusTag } from "./daemon-pubsub.js";
 import {
@@ -169,7 +169,15 @@ export class ProjectServices extends Context.Service<
 	}
 >()("ProjectServices") {}
 
-/** The daemon's view of one registered project, as its calls (and its relay) read it. */
+/** Test seam: shortened poll intervals and SSE grace/staleness (milliseconds). */
+export interface PollerTimings {
+	readonly pollerGatingConfig?: Partial<PollerGatingConfig>;
+	readonly statusPollerInterval?: number;
+	readonly messagePollerInterval?: number;
+	readonly messagePollerSseSilence?: number;
+}
+
+/** The daemon's view of one registered project, as its calls read it. */
 export const projectConfig = (
 	project: Pick<StoredProject, "slug" | "folders">,
 	daemon: {

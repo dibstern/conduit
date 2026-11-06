@@ -40,10 +40,16 @@ import {
 } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
-import { RelayFactoryTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { OwnerScopes } from "../../../src/lib/domain/daemon/Services/owner-scopes.js";
-import { addWithoutRelay } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	addWithoutRelay,
+	ProjectRegistryTag,
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	type ProjectParts,
+	ProjectServices,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import {
 	type SessionManagerService,
@@ -54,7 +60,12 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { runnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
-import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
+
+/** A project opened in its generation, with the context its calls run in. */
+interface Opened {
+	readonly slug: string;
+	readonly context: Context.Context<ProjectParts>;
+}
 
 const artifacts = join(process.cwd(), "test-results");
 const evidence: {
@@ -129,9 +140,7 @@ const start = async (scenario: string) => {
 			smartDefault: false,
 		}).pipe(Layer.provide(NodePath.layer)),
 	);
-	const relays = new Map<ProjectRelay, string>();
 	cleanups.push(async () => {
-		for (const relay of relays.keys()) await relay.stop();
 		await daemon.dispose();
 		rmSync(root, { recursive: true, force: true });
 	});
@@ -142,27 +151,26 @@ const start = async (scenario: string) => {
 	};
 	const register = (slug: string) =>
 		daemon.runPromise(addWithoutRelay(project(slug), { silent: true }));
-	const relay = async (slug: string) => {
-		const created = await daemon.runPromise(
-			Effect.flatMap(RelayFactoryTag, (factory) =>
-				factory.create(project(slug)),
+	/** Open the project, as a tab or a folder change does; `stop` closes it. */
+	const relay = async (slug: string): Promise<Opened> => ({
+		slug,
+		context: await daemon.runPromise(
+			Effect.flatMap(ProjectServices, (projects) => projects.open(slug)),
+		),
+	});
+	const stop = (target: Opened) =>
+		daemon.runPromise(
+			Effect.flatMap(ProjectServices, (projects) =>
+				projects.close(target.slug),
 			),
 		);
-		relays.set(created, slug);
-		return created;
-	};
-	const stop = async (target: ProjectRelay) => {
-		relays.delete(target);
-		await target.stop();
-	};
-	const stateOf = async (target: ProjectRelay) =>
-		Option.getOrThrow(
-			Context.getOption(
-				await target.effectRuntime.runtime.context(),
-				SessionManagerStateTag,
-			),
-		);
-	const snapshot = async (target: ProjectRelay) => {
+	const run = <A, E>(
+		target: Opened,
+		use: Effect.Effect<A, E, ProjectParts | SessionManagerServiceTag>,
+	) => daemon.runPromise(Effect.provide(use, target.context));
+	const stateOf = async (target: Opened) =>
+		Context.get(target.context, SessionManagerStateTag);
+	const snapshot = async (target: Opened) => {
 		const state = await Effect.runPromise(Ref.get(await stateOf(target)));
 		return {
 			parents: Object.fromEntries(HashMap.toEntries(state.cachedParentMap)),
@@ -170,7 +178,7 @@ const start = async (scenario: string) => {
 			sessionCount: state.lastKnownSessionCount,
 		};
 	};
-	const seed = async (target: ProjectRelay, count: number) =>
+	const seed = async (target: Opened, count: number) =>
 		Effect.runPromise(
 			Ref.update(await stateOf(target), (state) => ({
 				...state,
@@ -179,17 +187,18 @@ const start = async (scenario: string) => {
 				lastKnownSessionCount: count,
 			})),
 		);
-	const activity = async (target: ProjectRelay) =>
+	const activity = async (target: Opened) =>
 		Object.fromEntries(
 			HashMap.toEntries(
 				(await Effect.runPromise(Ref.get(await stateOf(target)))).lastMessageAt,
 			),
 		);
 	const sessions = (
-		target: ProjectRelay,
+		target: Opened,
 		...rows: ReadonlyArray<{ id: string; parentId?: string }>
 	) =>
-		target.effectRuntime.runtime.runPromise(
+		run(
+			target,
 			Effect.flatMap(makeCommitAndSignal, (commit) =>
 				commit(
 					rows.map(({ id, parentId }) =>
@@ -204,12 +213,12 @@ const start = async (scenario: string) => {
 			),
 		);
 	const manager = <A, E>(
-		target: ProjectRelay,
+		target: Opened,
 		use: (service: SessionManagerService) => Effect.Effect<A, E>,
 	) =>
-		target.effectRuntime.runtime.runPromise(
+		daemon.runPromise(
 			Effect.flatMap(SessionManagerServiceTag, (service) =>
-				use(service.forProject(relays.get(target) ?? "")),
+				use(service.forProject(target.slug)),
 			),
 		);
 	/** "open" while the session's owner scope takes resources, else the close reason. */
@@ -232,6 +241,7 @@ const start = async (scenario: string) => {
 		register,
 		relay,
 		stop,
+		run,
 		snapshot,
 		seed,
 		activity,
@@ -294,7 +304,8 @@ describe("daemon-owned session manager state", () => {
 		const daemon = await start("one-delete-across-relays");
 		await daemon.register("alpha");
 		const first = await daemon.relay("alpha");
-		await first.effectRuntime.runtime.runPromise(
+		await daemon.run(
+			first,
 			Effect.flatMap(makeCommitAndSignal, (commit) =>
 				commit([
 					canonicalEvent("session.created", "doomed", {
@@ -306,8 +317,9 @@ describe("daemon-owned session manager state", () => {
 			),
 		);
 		const second = await daemon.relay("alpha");
-		const remove = (target: ProjectRelay) =>
-			target.effectRuntime.runtime.runPromise(
+		const remove = (target: Opened) =>
+			daemon.run(
+				target,
 				Effect.flatMap(SessionManagerServiceTag, (service) =>
 					service
 						.forProject("alpha")
@@ -394,10 +406,15 @@ describe("daemon-owned session manager state", () => {
 	it("fails a write whose session scope cannot open, unless the session has no row yet", async () => {
 		const daemon = await start("hold-fails-closed");
 		await daemon.register("alpha");
+		await daemon.register("beta");
 		const alpha = await daemon.relay("alpha");
-		// beta is never registered, so its session's scope cannot open.
-		const beta = await daemon.relay("beta");
-		await daemon.sessions(beta, { id: "stray" });
+		await daemon.sessions(await daemon.relay("beta"), { id: "stray" });
+		// beta leaves the registry (its owner scope stays), so its session's scope cannot open.
+		await daemon.daemon.runPromise(
+			Effect.flatMap(ProjectRegistryTag, (registry) =>
+				Ref.update(registry, HashMap.remove("beta")),
+			),
+		);
 		const write = (sessionId: string) =>
 			daemon.manager(alpha, (service) =>
 				service
@@ -462,13 +479,8 @@ describe("daemon-owned session manager state", () => {
 		await daemon.sessions(alpha, { id: "a1" });
 		await daemon.sessions(beta, { id: "b1" });
 		const owned = await daemon.daemon.runPromise(SessionManagerServiceTag);
-		const held = async (target: ProjectRelay) =>
-			Option.getOrThrow(
-				Context.getOption(
-					await target.effectRuntime.runtime.context(),
-					SessionManagerServiceTag,
-				),
-			);
+		const held = (target: Opened) =>
+			daemon.run(target, SessionManagerServiceTag);
 		const ids = (projectId: string) =>
 			daemon.daemon.runPromise(
 				owned
@@ -482,7 +494,8 @@ describe("daemon-owned session manager state", () => {
 		};
 		const listed = { alpha: await ids("alpha"), beta: await ids("beta") };
 		// alpha's relay deletes beta's session by naming beta.
-		const deletedThroughAlpha = await alpha.effectRuntime.runtime.runPromise(
+		const deletedThroughAlpha = await daemon.run(
+			alpha,
 			Effect.flatMap(SessionManagerServiceTag, (service) =>
 				service.forProject("beta").deleteSession("b1", { keepWorktrees: true }),
 			),

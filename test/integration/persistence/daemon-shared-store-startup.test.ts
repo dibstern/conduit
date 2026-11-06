@@ -10,7 +10,6 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
@@ -30,11 +29,6 @@ import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.
 import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import { makeProviderAdaptersLive } from "../../../src/lib/domain/daemon/Layers/provider-adapters-layer.js";
-import {
-	HttpServerRefTag,
-	RelayFactoryLive,
-	RelayFactoryTag,
-} from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
@@ -192,47 +186,43 @@ function startup(root: string, projects: readonly StoredProject[]) {
 		Layer.provide(Layer.merge(store, registry)),
 	);
 	return ManagedRuntime.make(
-		RelayFactoryLive(root).pipe(
+		makeProviderAdaptersLive(root).pipe(
 			Layer.provideMerge(
-				makeProviderAdaptersLive(root).pipe(
-					Layer.provideMerge(
-						Layer.mergeAll(
-							store,
-							registry,
-							directory,
-							Layer.succeed(PortWatcher)({
-								mark: () => Effect.succeed({ kind: "unclaimed" } as const),
-								known: () => true,
-							}),
-							Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
-							Layer.succeed(CursorAccountResources)(
-								cursorAccountResourcesFixture(createCursorSdkPort()),
-							),
-							Layer.effect(SessionActivityTag, makeSessionActivity),
-							DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
-							makeOpenCodeRuntimeStateLive(),
-							DaemonEventBusLive,
-							SessionEventBusLive,
-							ConfigPersistenceNoopLive,
-							InstanceHealthCheckLive,
-							Layer.succeed(PortScannerTag)({
-								getKnownPorts: () => Effect.succeed(new Set<number>()),
-								scanNow: () =>
-									Effect.succeed({ discovered: [], lost: [], active: [] }),
-							}),
-							Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
-							Layer.succeed(PushManagerTag)({
-								subscribe: () => Effect.void,
-								unsubscribe: () => Effect.void,
-								broadcast: () => Effect.void,
-								getPublicKey: Effect.succeed(undefined),
-								addSubscription: () => Effect.void,
-								removeSubscription: () => Effect.void,
-								sendToAll: () => Effect.void,
-								getLegacyManager: Effect.succeed(Option.none()),
-							}),
-						),
+				Layer.mergeAll(
+					store,
+					registry,
+					directory,
+					Layer.succeed(PortWatcher)({
+						mark: () => Effect.succeed({ kind: "unclaimed" } as const),
+						known: () => true,
+					}),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+					Layer.succeed(CursorAccountResources)(
+						cursorAccountResourcesFixture(createCursorSdkPort()),
 					),
+					Layer.effect(SessionActivityTag, makeSessionActivity),
+					DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
+					makeOpenCodeRuntimeStateLive(),
+					DaemonEventBusLive,
+					SessionEventBusLive,
+					ConfigPersistenceNoopLive,
+					InstanceHealthCheckLive,
+					Layer.succeed(PortScannerTag)({
+						getKnownPorts: () => Effect.succeed(new Set<number>()),
+						scanNow: () =>
+							Effect.succeed({ discovered: [], lost: [], active: [] }),
+					}),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
+					Layer.succeed(PushManagerTag)({
+						subscribe: () => Effect.void,
+						unsubscribe: () => Effect.void,
+						broadcast: () => Effect.void,
+						getPublicKey: Effect.succeed(undefined),
+						addSubscription: () => Effect.void,
+						removeSubscription: () => Effect.void,
+						sendToAll: () => Effect.void,
+						getLegacyManager: Effect.succeed(Option.none()),
+					}),
 				),
 			),
 		),
@@ -304,15 +294,8 @@ describe("daemon shared-store startup", () => {
 				]);
 				await runtime.runPromise(
 					Effect.gen(function* () {
-						// The factory checks availability before opening a store or writing its owner.
-						yield* Ref.set(yield* HttpServerRefTag, createServer());
-						const factory = yield* RelayFactoryTag;
-						for (let retry = 0; retry < 2; retry++) {
-							expect(yield* Effect.result(factory.create(beta))).toMatchObject({
-								_tag: "Failure",
-								failure: { _tag: "RelayFactoryError", reason },
-							});
-						}
+						// Opening an unavailable project is refused before it writes:
+						// project-services.test.ts "refuses to open an unavailable project".
 						const sql = yield* SqlClient.SqlClient;
 						expect(
 							yield* sql`SELECT id FROM sessions WHERE project_id = 'beta'`,

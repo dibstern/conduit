@@ -106,6 +106,10 @@ import {
 	WebSocketRelayRouterLive,
 	WebSocketRoutingLive,
 } from "../../server/Layers/ws-routing-layer.js";
+import {
+	HttpServerRefLive,
+	HttpServerRefTag,
+} from "../../server/Services/http-server-ref.js";
 import { PushNotificationManagerLive } from "../../server/Services/push-service.js";
 import {
 	commitDaemonRuntimeConfig,
@@ -153,6 +157,7 @@ import {
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import {
+	type PollerTimings,
 	type ProjectParts,
 	ProjectServices,
 } from "../Services/project-services.js";
@@ -210,11 +215,6 @@ import {
 	ProjectShellEnvWiringLive,
 } from "./project-shell-env-layer.js";
 import { makeProviderAdaptersLive } from "./provider-adapters-layer.js";
-import {
-	HttpServerRefTag,
-	type PollerTimings,
-	RelayFactoryLive,
-} from "./relay-factory-layer.js";
 import { SessionPrefetchLive } from "./session-prefetch-layer.js";
 import {
 	StorageMonitorLive,
@@ -1152,14 +1152,8 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		claudeSdk: options.claudeSdk,
 		pollerTimings: options.pollerTimings,
 	}).pipe(Layer.provideMerge(withOrchestration));
-	const registries = RelayFactoryLive(
-		configDir,
-		options.claudeSdk,
-		options.pollerTimings,
-	).pipe(Layer.provideMerge(withProjectServices));
-
 	const withRelayCache = makeRelayCacheLayer().pipe(
-		Layer.provideMerge(registries),
+		Layer.provideMerge(withProjectServices),
 	);
 
 	const withKeepAwake = makeKeepAwakeLive(options.keepAwake).pipe(
@@ -1171,7 +1165,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 
 	// Tier 3: Servers (imperative lifecycle)
 	const httpRequestHandler = makeDaemonHttpRouterLive(options.staticDir);
-	const http = HttpServerLive.pipe(Layer.provideMerge(httpRequestHandler));
+	// The listening server is the server layer's, as t3code's HTTP layer owns
+	// its server (apps/server/src/server.ts:305-320).
+	const http = HttpServerLive.pipe(
+		Layer.provideMerge(httpRequestHandler),
+		Layer.provideMerge(HttpServerRefLive),
+	);
 
 	const tailscale = TailscaleServeLive.pipe(
 		Layer.provideMerge(TailscaleCliLive),

@@ -12,7 +12,6 @@ import {
 	makeHttpServerLive,
 	makeOnboardingServerLive,
 } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
-import { HttpServerRefLive } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import {
 	EnsureCertsTag,
 	TlsCertLive,
@@ -24,6 +23,7 @@ import {
 	type DaemonRuntimeConfig,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonHttpRequestHandlerTag } from "../../../src/lib/domain/server/Layers/http-router-layer.js";
+import { HttpServerRefLive } from "../../../src/lib/domain/server/Services/http-server-ref.js";
 import { makeTestTlsCerts } from "../../helpers/tls-cert-fixture.js";
 
 const fixtureCerts = makeTestTlsCerts();

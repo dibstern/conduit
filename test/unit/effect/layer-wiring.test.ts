@@ -29,10 +29,6 @@ import {
 	ShutdownSignalTag,
 } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
-import {
-	HttpServerRefTag,
-	RelayFactoryTag,
-} from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { StorageMonitorTag } from "../../../src/lib/domain/daemon/Layers/storage-monitor-layer.js";
 import { TlsCertTag } from "../../../src/lib/domain/daemon/Layers/tls-cert-layer.js";
 import { VersionCheckerTag } from "../../../src/lib/domain/daemon/Layers/version-checker-layer.js";
@@ -56,6 +52,7 @@ import {
 	ProjectRegistryTag,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
+import { HttpServerRefTag } from "../../../src/lib/domain/server/Services/http-server-ref.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 const makeMockOptions = (): DaemonLiveOptions => {
@@ -296,15 +293,12 @@ describe("makeDaemonLive wiring", () => {
 		}).pipe(Effect.provide(makeDaemonLayer(options)));
 	});
 
-	it.effect("provides RelayFactoryTag and HttpServerRefTag (Tier 2)", () =>
+	it.effect("provides HttpServerRefTag beside the HTTP server (Tier 3)", () =>
 		Effect.gen(function* () {
-			const factory = yield* RelayFactoryTag;
-			expect(factory.create).toBeDefined();
-
 			const serverRef = yield* HttpServerRefTag;
 			const server = yield* Ref.get(serverRef);
 			// The server lifecycle layer populates the ref after startup so
-			// relay and WS routing code share the actual upgrade-capable server.
+			// WS routing attaches to the actual upgrade-capable server.
 			expect(server).not.toBeNull();
 			expect(server?.listening).toBe(true);
 		}).pipe(Effect.provide(makeDaemonLayer())),

@@ -17,7 +17,6 @@ import type {
 import { makeRoutedWsRpcWebSocketHandler } from "../../../server/ws-rpc-handler.js";
 import { ShutdownSignalTag } from "../../daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersTag } from "../../daemon/Layers/daemon-ws-rpc-layer.js";
-import { HttpServerRefTag } from "../../daemon/Layers/relay-factory-layer.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
@@ -58,6 +57,7 @@ import { InstanceManagementServiceLive } from "../../relay/Services/instance-man
 import { ProjectManagementServiceLive } from "../../relay/Services/project-management-service.js";
 import { ScanServiceLive } from "../../relay/Services/scan-service.js";
 import type { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
+import { HttpServerRefTag } from "../Services/http-server-ref.js";
 import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";
 
 export class WebSocketUpgradeError extends Data.TaggedError(

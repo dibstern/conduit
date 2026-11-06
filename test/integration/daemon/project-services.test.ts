@@ -16,6 +16,7 @@
  */
 import { execFileSync } from "node:child_process";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
@@ -29,8 +30,8 @@ import { Context, Effect, Layer, ManagedRuntime, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it } from "vitest";
 import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
-import { RelayFactoryTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonStoreAvailability } from "../../../src/lib/domain/daemon/Services/daemon-store-availability.js";
 import {
 	addWithoutRelay,
 	remove,
@@ -46,6 +47,7 @@ import { SSEStreamTag } from "../../../src/lib/domain/relay/Services/sse-stream-
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 const artifacts = join(process.cwd(), "test-results");
@@ -118,16 +120,16 @@ const start = (scenario: string) => {
 		running.add(daemon as ManagedRuntime.ManagedRuntime<unknown, unknown>);
 		const register = (slug: string) =>
 			daemon.runPromise(addWithoutRelay(project(slug), { silent: true }));
-		/** Write sessions through a short-lived relay, then stop it. */
-		const seed = async (slug: string, ...ids: ReadonlyArray<string>) => {
-			const relay = await daemon.runPromise(
-				Effect.flatMap(RelayFactoryTag, (factory) =>
-					factory.create(project(slug)),
-				),
-			);
-			await relay.effectRuntime.runtime.runPromise(
-				Effect.flatMap(makeCommitAndSignal, (commit) =>
-					commit(
+		/** Write sessions in the project's context; the project is not opened. */
+		const seed = (slug: string, ...ids: ReadonlyArray<string>) =>
+			daemon.runPromise(
+				Effect.gen(function* () {
+					const projects = yield* ProjectServices;
+					const context = yield* projects.forProject(slug);
+					const commit = yield* makeCommitAndSignal.pipe(
+						Effect.provide(context),
+					);
+					yield* commit(
 						ids.map((id) =>
 							canonicalEvent("session.created", id, {
 								sessionId: id,
@@ -135,11 +137,9 @@ const start = (scenario: string) => {
 								title: id,
 							}),
 						),
-					),
-				),
+					).pipe(Effect.provide(context));
+				}),
 			);
-			await relay.stop();
-		};
 		const manager = <A, E>(
 			slug: string,
 			use: (service: SessionManagerService) => Effect.Effect<A, E>,
@@ -172,7 +172,7 @@ const start = (scenario: string) => {
 			running.delete(daemon as ManagedRuntime.ManagedRuntime<unknown, unknown>);
 			await daemon.dispose();
 		};
-		return { daemon, register, seed, manager, listed, rows, stop };
+		return { daemon, configDir, register, seed, manager, listed, rows, stop };
 	};
 	return { boot };
 };
@@ -227,6 +227,37 @@ describe("82tn.16: the daemon builds each project's context", () => {
 		evidence.observed = observed;
 		expect(observed.refused).toMatch(/Project "alpha" is not registered/);
 		expect(observed.rows).toEqual([{ id: "s1", project_id: "alpha" }]);
+	});
+
+	it("refuses to open an unavailable project and writes nothing for it", async () => {
+		// Lane 16r, row 168: the relay factory's availability check, now `open`'s.
+		const daemon = start("unavailable").boot();
+		await daemon.register("beta");
+		const reason = "History import failed (corrupt)";
+		const attempts = await daemon.daemon.runPromise(
+			Effect.gen(function* () {
+				(yield* DaemonStoreAvailability).set("beta", reason);
+				const projects = yield* ProjectServices;
+				return [
+					yield* Effect.flip(projects.open("beta")),
+					yield* Effect.flip(projects.open("beta")),
+				].map(({ _tag, reason }) => ({ _tag, reason }));
+			}),
+		);
+		const observed = {
+			attempts,
+			storage: existsSync(projectStorageDir(daemon.configDir, "beta")),
+			rows: await daemon.rows(),
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			attempts: [
+				{ _tag: "ProjectServicesError", reason },
+				{ _tag: "ProjectServicesError", reason },
+			],
+			storage: false,
+			rows: [],
+		});
 	});
 
 	it("opens a project in its generation and removal ends its stream", async () => {

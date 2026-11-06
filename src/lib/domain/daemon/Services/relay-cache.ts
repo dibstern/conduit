@@ -31,7 +31,6 @@ import type {
 import type { PersistenceEffectError } from "../../../persistence/effect/live.js";
 import type { ConnectionHealth } from "../../../types.js";
 import type { SessionManagerError } from "../../relay/Services/session-manager-error.js";
-import type { RelayFactoryError } from "../Layers/relay-factory-layer.js";
 import type { ProjectNotFound } from "./project-registry-service.js";
 
 /** A running relay instance for a project slug. */
@@ -87,15 +86,11 @@ export class RelayCreationInvalidatedError extends Data.TaggedError(
 /** Factory function that creates a Relay for the given slug. */
 export type RelayFactory = (
 	slug: string,
-) => Effect.Effect<
-	Relay,
-	Error | ProjectNotFound | RelayFactoryError | PersistenceEffectError
->;
+) => Effect.Effect<Relay, Error | ProjectNotFound | PersistenceEffectError>;
 
 type RelayCacheError =
 	| Error
 	| ProjectNotFound
-	| RelayFactoryError
 	| PersistenceEffectError
 	| RelayCreationInvalidatedError;
 

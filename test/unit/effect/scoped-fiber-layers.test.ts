@@ -11,7 +11,6 @@ import { Deferred, Effect, Exit, HashMap, Layer, Ref, Scope } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
-import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import {
 	prefetchSessionCounts,
 	SessionPrefetchLive,
@@ -35,6 +34,7 @@ import {
 	ProjectRpcContextsTag,
 	WebSocketRoutingLive,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
+import { HttpServerRefTag } from "../../../src/lib/domain/server/Services/http-server-ref.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";

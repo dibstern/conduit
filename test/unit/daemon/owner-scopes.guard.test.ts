@@ -303,9 +303,6 @@ describe("one alert feed and pollers held by tabs (82tn.12)", () => {
 		expect(read(`${root}/Layers/daemon-layers.ts`)).toContain(
 			"Layer.merge(AlertsLive)",
 		);
-		expect(read(`${root}/Layers/relay-factory-layer.ts`)).toContain(
-			"Context.make(AlertsTag, alerts.value)",
-		);
 		const relay = read("src/lib/relay/project-relay-layers.ts");
 		// The import and the standalone fallback, nothing else.
 		expect(relay.match(/\bAlertsLive\b/g)).toHaveLength(2);

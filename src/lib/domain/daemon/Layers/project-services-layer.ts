@@ -114,6 +114,7 @@ import type { OpenCodeSessionIds } from "../Services/opencode-session-ids.js";
 import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
 import {
+	type PollerTimings,
 	type ProjectGenerationParts,
 	ProjectServices,
 	ProjectServicesError,
@@ -128,7 +129,6 @@ import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js
 import type { WorktreeServiceTag } from "../Services/worktree-service.js";
 import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
 import { startProject } from "./project-startup.js";
-import type { PollerTimings } from "./relay-factory-layer.js";
 
 /**
  * Builds each registered project's context on request, from the registry and

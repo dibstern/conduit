@@ -68,7 +68,6 @@ import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it } from "vitest";
 import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
-import { RelayFactoryTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
 	addWithoutRelay,
@@ -244,12 +243,20 @@ const start = (scenario: string) => {
 					),
 				),
 			);
-		const relay = (slug: string) =>
-			daemon.runPromise(
-				Effect.flatMap(RelayFactoryTag, (factory) =>
-					factory.create(project(slug)),
-				),
+		/** Open the project, as a tab or a folder change does; `stop` closes it. */
+		const relay = async (slug: string) => {
+			const context = await daemon.runPromise(
+				Effect.flatMap(ProjectServices, (projects) => projects.open(slug)),
 			);
+			return {
+				run: <A, E, R>(use: Effect.Effect<A, E, R>) =>
+					daemon.runPromise(Effect.provide(use, context as Context.Context<R>)),
+				stop: () =>
+					daemon.runPromise(
+						Effect.flatMap(ProjectServices, (projects) => projects.close(slug)),
+					),
+			};
+		};
 		const sql = <A>(
 			use: (sql: SqlClient.SqlClient) => Effect.Effect<A, unknown>,
 		) => daemon.runPromise(Effect.flatMap(SqlClient.SqlClient, use));
@@ -323,7 +330,7 @@ describe("82tn.16: each project's ingestion side lives with the project", () => 
 		const daemon = start("relay-replaced").boot();
 		await daemon.register("alpha");
 		const first = await daemon.relay("alpha");
-		await first.effectRuntime.runtime.runPromise(
+		await first.run(
 			Effect.flatMap(PendingInteractionServiceTag, (pending) =>
 				pending.recordPermissionRequest({
 					requestId: "perm-1" as PermissionId,
@@ -341,7 +348,7 @@ describe("82tn.16: each project's ingestion side lives with the project", () => 
 				.pipe(Effect.map((rows) => rows.map(({ requestId }) => requestId))),
 		);
 		const observed = {
-			relay: await second.effectRuntime.runtime.runPromise(pending),
+			relay: await second.run(pending),
 			project: await daemon.inProject("alpha", pending),
 		};
 		await second.stop();
@@ -360,9 +367,7 @@ describe("82tn.16: each project's ingestion side lives with the project", () => 
 				const activity = yield* SessionActivityTag;
 				yield* activity.view("viewed");
 				yield* Effect.promise(() =>
-					relay.effectRuntime.runtime.runPromise(
-						Effect.andThen(turn("viewed"), turn("unviewed")),
-					),
+					relay.run(Effect.andThen(turn("viewed"), turn("unviewed"))),
 				);
 				return [
 					...(yield* PubSub.takeUpTo(subscribed, Number.POSITIVE_INFINITY)),
@@ -379,7 +384,7 @@ describe("82tn.16: each project's ingestion side lives with the project", () => 
 		const first = harness.boot();
 		await first.register("alpha");
 		const relay = await first.relay("alpha");
-		await relay.effectRuntime.runtime.runPromise(
+		await relay.run(
 			Effect.flatMap(ProviderRuntimeIngestionTag, (ingestion) =>
 				ingestion.ingest(created("s1")),
 			),
@@ -408,14 +413,13 @@ const titleParts = Effect.all({
 	titles: SessionTitleServiceTag,
 });
 
-/** The same parts as the relay's runtime holds them (its type predates them). */
+/** The same parts as the opened project's context holds them. */
 const relayParts = <A, R>(
-	relay: { readonly effectRuntime: { readonly runtime: unknown } },
+	relay: {
+		readonly run: <A, E, R>(use: Effect.Effect<A, E, R>) => Promise<A>;
+	},
 	parts: Effect.Effect<A, never, R>,
-) =>
-	(
-		relay.effectRuntime.runtime as ManagedRuntime.ManagedRuntime<R, never>
-	).runPromise(parts);
+) => relay.run(parts);
 
 describe("82tn.16: each project's settings and titles live with the project", () => {
 	it("serves a project's settings and titles with no relay open", async () => {
