@@ -29,6 +29,7 @@ import type { PollerGatingConfig } from "../../../relay/monitoring-types.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
+import { RateLimiterTag } from "../../relay/Layers/rate-limiter-layer.js";
 import { AlertsTag } from "../../relay/Services/alerts.js";
 import {
 	DaemonSessionQueryServiceError,
@@ -262,6 +263,7 @@ export const RelayFactoryLive = (
 			const providerTurns = yield* Effect.serviceOption(ProviderTurns);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
+			const sendLimiter = yield* Effect.serviceOption(RateLimiterTag);
 			const alerts = yield* Effect.serviceOption(AlertsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
 				? sharedDrafts.value
@@ -652,6 +654,11 @@ export const RelayFactoryLive = (
 										)
 										.pipe(
 											Context.add(Subprocess, subprocess),
+											Context.merge(
+												Option.isSome(sendLimiter)
+													? Context.make(RateLimiterTag, sendLimiter.value)
+													: Context.empty(),
+											),
 											Context.merge(
 												Option.isSome(alerts)
 													? Context.make(AlertsTag, alerts.value)

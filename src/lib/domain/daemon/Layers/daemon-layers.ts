@@ -67,6 +67,7 @@ import {
 } from "../../persistence/Services/event-retention-scheduler.js";
 import { makePortWatcherLive } from "../../persistence/Services/port-watcher.js";
 import { makeRunLedgerSchedulerLive } from "../../persistence/Services/run-ledger-scheduler.js";
+import { RateLimiterLive } from "../../relay/Layers/rate-limiter-layer.js";
 import { SessionWorkspaceLive } from "../../relay/Layers/session-workspace-layer.js";
 import { makeStatusPollerCoreLive } from "../../relay/Layers/status-poller-layer.js";
 import { AlertsLive } from "../../relay/Services/alerts.js";
@@ -1106,6 +1107,17 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		DaemonOrchestrationLive,
 		PermissionTimeoutLive,
 		makeHostedTerminalsLive(configDir),
+		// One send limiter for the daemon, keyed by tab, as t3code keeps its limits
+		// server-wide (apps/server/src/server.ts:375). Process-fake benchmarks lift it.
+		RateLimiterLive({
+			maxRequests:
+				process.env["NODE_ENV"] === "test" &&
+				process.send &&
+				process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"]
+					? 10_000
+					: 5,
+			windowMs: 10_000,
+		}),
 	).pipe(Layer.provideMerge(withSessionManager));
 	// Each project's context comes from the registry, not from its relay (82tn.16).
 	const withProjectServices = makeProjectServicesLive({

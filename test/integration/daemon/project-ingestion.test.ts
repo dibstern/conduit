@@ -71,6 +71,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { RateLimiterTag } from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { DirectoryListingServiceTag } from "../../../src/lib/domain/relay/Services/directory-listing-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -618,5 +619,29 @@ describe("82tn.16: each project's terminals live with the project", () => {
 		const after = await daemon.inProject("alpha", OpenCodeTerminalServiceTag);
 		evidence.observed = { same: before === after };
 		expect(evidence.observed).toEqual({ same: false });
+	});
+});
+
+describe("82tn.16: one send limiter for the daemon", () => {
+	it("keeps a tab's send window across a relay replaced while registered", async () => {
+		const daemon = start("send-limit-relay-replaced").boot();
+		await daemon.register("alpha");
+		const send = Effect.flatMap(RateLimiterTag, (limiter) =>
+			Effect.map(limiter.checkLimit("tab-1"), ({ allowed }) => allowed),
+		);
+		const sendsIn = async (count: number) => {
+			const relay = await daemon.relay("alpha");
+			const allowed: boolean[] = [];
+			for (let sent = 0; sent < count; sent++)
+				allowed.push(await relayParts(relay, send));
+			await relay.stop();
+			return allowed;
+		};
+		const observed = { first: await sendsIn(5), second: await sendsIn(1) };
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			first: [true, true, true, true, true],
+			second: [false],
+		});
 	});
 });

@@ -85,6 +85,7 @@ import {
 	makeProjectOpenCodeIngressLive,
 } from "../domain/relay/Layers/project-ingestion-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
+import { RateLimiterTag } from "../domain/relay/Layers/rate-limiter-layer.js";
 import {
 	makeProjectRelayConfigLive,
 	ProjectRelayLoggerLive,
@@ -994,6 +995,12 @@ export function createProjectRelayLayers({
 		config.daemonConfigContext ?? Context.empty(),
 		SessionManagerOwner,
 	);
+	// One send limiter for the daemon, keyed by tab, as t3code keeps one server-wide
+	// (apps/server/src/server.ts:375); a standalone relay keeps its own.
+	const sharedLimiter = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		RateLimiterTag,
+	);
 	const relayStateAndBridges = Layer.provideMerge(
 		makeRelayStateLive({
 			sessionEventBusLayer,
@@ -1029,6 +1036,11 @@ export function createProjectRelayLayers({
 			...(Option.isSome(sharedOverrides) && {
 				overridesStateLayer: Layer.succeedContext(
 					Context.make(OverridesStateTag, sharedOverrides.value),
+				),
+			}),
+			...(Option.isSome(sharedLimiter) && {
+				rateLimiterLayer: Layer.succeedContext(
+					Context.make(RateLimiterTag, sharedLimiter.value),
 				),
 			}),
 			...(testSendLimit !== undefined && { testSendLimit }),

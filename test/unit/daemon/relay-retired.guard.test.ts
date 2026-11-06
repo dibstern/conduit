@@ -133,6 +133,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"PermissionTimeoutLive",
 			"makeLocalPtyServiceLive",
 			"makeHostedTerminalsLive",
+			"RateLimiterLive",
 		]);
 		expect(tally(server, named(services))).toEqual(
 			new Map([
@@ -143,7 +144,11 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/domain/relay/Services/goal-stuck-stop.ts", 1],
 				["src/lib/domain/relay/Services/session-workspace-hint.ts", 1],
 				// Each one's import and its one build.
-				[`${daemon}/Layers/daemon-layers.ts`, 16],
+				[`${daemon}/Layers/daemon-layers.ts`, 18],
+				// The send limiter: one for the daemon, keyed by tab (lane 16o); its definition, and a
+				// standalone relay's own.
+				["src/lib/domain/relay/Layers/rate-limiter-layer.ts", 1],
+				["src/lib/domain/relay/Layers/relay-layer.ts", 2],
 				// Permission timeouts: one loop over every registered project, not one per relay.
 				[`${daemon}/Layers/permission-timeout-layer.ts`, 1],
 				// The PTY host's client: one for the daemon, which also closes a removed project's

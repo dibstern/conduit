@@ -42,7 +42,7 @@ import {
 	makeSessionTitleServiceLive,
 	type SessionTitleServiceTag,
 } from "../Services/session-title-service.js";
-import { RateLimiterLive } from "./rate-limiter-layer.js";
+import { RateLimiterLive, type RateLimiterTag } from "./rate-limiter-layer.js";
 
 /**
  * Composed Layer providing all Effect-native state Tags.
@@ -76,6 +76,8 @@ export const makeRelayStateLive = (
 		readonly alertsLayer?: Layer.Layer<AlertsTag>;
 		/** Daemon relays share the project's status snapshot with the daemon. */
 		readonly statusSnapshotLayer?: Layer.Layer<RelayStatusSnapshotTag>;
+		/** Daemon relays count sends against the daemon's one limiter. */
+		readonly rateLimiterLayer?: Layer.Layer<RateLimiterTag>;
 	} = {},
 ) => {
 	const sessionEventBusLayer =
@@ -118,10 +120,11 @@ export const makeRelayStateLive = (
 		// Instance management state
 		makeOpenCodeRuntimeStateLive(),
 		// Rate limiter (scoped — cleanup fiber runs every 60s)
-		RateLimiterLive({
-			maxRequests: options.testSendLimit ?? 5,
-			windowMs: 10_000,
-		}),
+		options.rateLimiterLayer ??
+			RateLimiterLive({
+				maxRequests: options.testSendLimit ?? 5,
+				windowMs: 10_000,
+			}),
 	);
 };
 
