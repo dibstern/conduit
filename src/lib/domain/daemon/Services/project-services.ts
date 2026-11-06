@@ -38,6 +38,7 @@ import type {
 	OpenCodeFileServiceTag,
 	OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceTag,
+	PollerManagerTag,
 	PtyManagerTag,
 	TranslatorTag,
 } from "../../relay/Services/services.js";
@@ -97,7 +98,9 @@ export type ProjectGenerationParts =
 	| OpenCodeSettingsServiceTag
 	// Recaps and goal summaries (lane 16o).
 	| RecapServiceTag
-	| GoalSummaryServiceTag;
+	| GoalSummaryServiceTag
+	// The message poller (lane 16p).
+	| PollerManagerTag;
 
 /** Everything a call naming the project runs with, built by the daemon. */
 export type ProjectParts =

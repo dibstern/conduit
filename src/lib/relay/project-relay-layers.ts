@@ -78,7 +78,7 @@ import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import type { EventRetentionTag } from "../domain/persistence/Services/event-retention.js";
 import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { makeRunLedgerSchedulerLive } from "../domain/persistence/Services/run-ledger-scheduler.js";
-import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
+import { MessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import {
 	AgentLivenessLive,
 	makeProjectIngestionLive,
@@ -171,6 +171,7 @@ import {
 	OpenCodeSettingsServiceLive,
 	OpenCodeSettingsServiceTag,
 	type OrchestrationEngineTag,
+	PollerManagerTag,
 	PtyManagerTag,
 	SessionCompactionsTag,
 	SessionRetriesTag,
@@ -870,19 +871,18 @@ export function createProjectRelayLayers({
 		},
 	);
 	// Polling must not restart an idle-stopped OpenCode.
-	const messagePollerManagerLayer = Layer.unwrap(
-		Effect.map(SessionActivityTag, ({ hasViewers }) =>
-			makeMessagePollerManagerLive({ hasViewers }),
-		),
-	).pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				activityLayer,
-				sessionWorkspaceLayer,
-				openCodeInstancesLayer,
-				persistenceEffectLayer,
-				configLayer,
-				loggerLayer,
+	const messagePollerManagerLayer = fromProject(
+		Context.pick(PollerManagerTag),
+		MessagePollerManagerLive.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					activityLayer,
+					sessionWorkspaceLayer,
+					openCodeInstancesLayer,
+					persistenceEffectLayer,
+					configLayer,
+					loggerLayer,
+				),
 			),
 		),
 	);

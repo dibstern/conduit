@@ -93,6 +93,7 @@ import {
 	AgentLivenessTag,
 	OpenCodeFileServiceTag,
 	OpenCodeSettingsServiceTag,
+	PollerManagerTag,
 	TranslatorTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
@@ -105,6 +106,7 @@ import {
 	WebSocketRelayRouterTag,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { MessagePollerManager } from "../../../src/lib/relay/message-poller-impl.js";
 import {
 	makeRoutedWsRpcServerLayer,
 	WsRpcGroup,
@@ -757,6 +759,36 @@ describe("82tn.16: each project's recaps and goal summaries live with the projec
 	});
 });
 
+/** A browser tab: its own routed RPC client, as its socket is routed, open until `close`. */
+const openTab = Effect.gen(function* () {
+	const scope = yield* Scope.make();
+	const router = yield* WebSocketRelayRouterTag;
+	const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+		Effect.provide(
+			makeRoutedWsRpcServerLayer((slug) =>
+				resolveProjectRpcContext(router, slug),
+			),
+		),
+		Scope.provide(scope),
+	);
+	return {
+		/** Opens the session's detail stream, as a tab showing it does. */
+		show: (sessionId: string) =>
+			Effect.gen(function* () {
+				const live = yield* Deferred.make<void>();
+				yield* client.SubscribeSessionDetail({ sessionId }).pipe(
+					Stream.tap(() => Deferred.succeed(live, undefined)),
+					Stream.runDrain,
+					Effect.forkIn(scope),
+				);
+				yield* Deferred.await(live);
+			}),
+		pick: (sessionId: string, originId: string) =>
+			client.ViewSession({ sessionId, originId }),
+		close: Scope.close(scope, Exit.void),
+	};
+});
+
 /**
  * Lane 16p (audit.md rows 126-130): one daemon record of which tabs view which
  * session, and which session each tab picked last in each project, as t3code
@@ -764,36 +796,6 @@ describe("82tn.16: each project's recaps and goal summaries live with the projec
  * (apps/server/src/orchestration-v2/CommandOutputHub.ts:170-191).
  */
 describe("82tn.16: the daemon records which tabs view which session", () => {
-	/** A browser tab: its own routed RPC client, as its socket is routed, open until `close`. */
-	const openTab = Effect.gen(function* () {
-		const scope = yield* Scope.make();
-		const router = yield* WebSocketRelayRouterTag;
-		const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-			Effect.provide(
-				makeRoutedWsRpcServerLayer((slug) =>
-					resolveProjectRpcContext(router, slug),
-				),
-			),
-			Scope.provide(scope),
-		);
-		return {
-			/** Opens the session's detail stream, as a tab showing it does. */
-			show: (sessionId: string) =>
-				Effect.gen(function* () {
-					const live = yield* Deferred.make<void>();
-					yield* client.SubscribeSessionDetail({ sessionId }).pipe(
-						Stream.tap(() => Deferred.succeed(live, undefined)),
-						Stream.runDrain,
-						Effect.forkIn(scope),
-					);
-					yield* Deferred.await(live);
-				}),
-			pick: (sessionId: string, originId: string) =>
-				client.ViewSession({ sessionId, originId }),
-			close: Scope.close(scope, Exit.void),
-		};
-	});
-
 	it("keeps a tab's pick across a relay replaced while registered", async () => {
 		const daemon = start("pick-relay-replaced").boot();
 		await daemon.register("alpha");
@@ -912,5 +914,94 @@ describe("82tn.16: the daemon records which tabs view which session", () => {
 		);
 		evidence.observed = observed;
 		expect(observed).toEqual({ dropped: false, picked: "s1", viewed: true });
+	});
+});
+
+/**
+ * Lane 16p (audit.md rows 131-135): one message poller per project, built with the
+ * project's generation and reading the daemon's viewer record, as t3code keeps one
+ * server-wide owner per concern whose entries leave with their scope
+ * (apps/server/src/orchestration-v2/CommandOutputHub.ts:170-191).
+ */
+describe("82tn.16: one message poller per project", () => {
+	it("keeps one poller across a relay replaced while registered, and a removed project's stops", async () => {
+		const daemon = start("poller-relay-replaced").boot();
+		await daemon.register("alpha");
+		const cold = await daemon.inProject("alpha", PollerManagerTag);
+		cold.startPolling("s1");
+		const sameIn = async () => {
+			const relay = await daemon.relay("alpha");
+			const held = await relayParts(relay, PollerManagerTag);
+			await relay.stop();
+			return held === cold;
+		};
+		const firstRelay = await sameIn();
+		const replacedRelay = await sameIn();
+		const pollingWithNoRelay = cold.isPolling("s1");
+		await daemon.daemon.runPromise(remove("alpha"));
+		const pollingAfterRemove = cold.isPolling("s1");
+		await daemon.register("alpha");
+		const readded = await daemon.inProject("alpha", PollerManagerTag);
+		const observed = {
+			firstRelay,
+			replacedRelay,
+			pollingWithNoRelay,
+			pollingAfterRemove,
+			readdedIsFresh: readded !== cold,
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			firstRelay: true,
+			replacedRelay: true,
+			pollingWithNoRelay: true,
+			pollingAfterRemove: false,
+			readdedIsFresh: true,
+		});
+	});
+
+	it("keeps two projects' polling apart when they share a folder", async () => {
+		const daemon = start("poller-shared-folder").boot();
+		await daemon.register("alpha");
+		await daemon.register("beta");
+		const alpha = await daemon.inProject("alpha", PollerManagerTag);
+		const beta = await daemon.inProject("beta", PollerManagerTag);
+		alpha.startPolling("s1");
+		const observed = {
+			distinct: alpha !== beta,
+			alpha: alpha.isPolling("s1"),
+			beta: beta.isPolling("s1"),
+		};
+		alpha.stopPolling("s1");
+		evidence.observed = observed;
+		expect(observed).toEqual({ distinct: true, alpha: true, beta: false });
+	});
+
+	it("counts a session as viewed only while a tab shows it", async () => {
+		const daemon = start("poller-viewers").boot();
+		await daemon.register("alpha");
+		await daemon.inProject("alpha", turn("viewed"));
+		const poller = await daemon.inProject("alpha", PollerManagerTag);
+		const viewers = (sessionId: string) =>
+			poller instanceof MessagePollerManager
+				? poller.hasViewers(sessionId)
+				: "not a MessagePollerManager";
+		const observed = await daemon.daemon.runPromise(
+			Effect.gen(function* () {
+				const before = viewers("viewed");
+				const tab = yield* openTab;
+				yield* tab.show("viewed");
+				const shown = viewers("viewed");
+				const other = viewers("unviewed");
+				yield* tab.close;
+				return { before, shown, other, after: viewers("viewed") };
+			}),
+		);
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			before: false,
+			shown: true,
+			other: false,
+			after: false,
+		});
 	});
 });
