@@ -6,6 +6,7 @@ import {
 	createReplayHarness,
 	type ReplayHarness,
 } from "../../e2e/helpers/e2e-harness.js";
+import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
 import {
 	createDaemonProject,
 	type DaemonProject,
@@ -97,6 +98,101 @@ it("recorded native fork copies never keep the first fresh input queued", async 
 		db.close();
 	}
 }, 60_000);
+
+it("a recorded OpenCode 1.19 fork binds the fork OpenCode named and holds its copies once", async () => {
+	// Recorded by test/e2e/provider/opencode-fork-wire-capture.test.ts (82tn.81).
+	const recorded = loadOpenCodeRecording("opencode-native-fork");
+	const nativeFork = recorded.interactions.flatMap((i) =>
+		i.kind === "rest" && /\/fork$/.test(i.path.split("?")[0] ?? "")
+			? [(i.responseBody as { id: string }).id]
+			: [],
+	);
+	harness = await createDaemonProject("opencode-native-fork");
+	const client = await harness.connectWsClient();
+	await client.waitForInitialState();
+	// The project opens on the session the recording created.
+	const parentId = client.getActiveSessionId();
+	if (!parentId) throw new Error("No session to fork");
+	for (const prompt of ["Remember fork-one.", "Remember fork-two."]) {
+		await client.sendMessage(prompt, { sessionId: parentId });
+		await client.waitForTurnEnd(parentId, 15_000);
+	}
+	const db = new Database(harness.eventsDbPath, { readonly: true });
+	const transcript = (sessionId: string) =>
+		db
+			.prepare(
+				"SELECT role, text FROM messages WHERE session_id = ? ORDER BY rowid",
+			)
+			.all(sessionId)
+			.map((row) => {
+				const { role, text } = row as { role: string; text: string };
+				return `${role}: ${text}`;
+			});
+	let forkId = "";
+	try {
+		const kept = db
+			.prepare(
+				"SELECT id FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY rowid LIMIT 1",
+			)
+			.get(parentId) as { id: string };
+		// The replay's user rows carry Conduit's ids and the recording's, so pin the
+		// source's rows rather than their text: the fork must leave them alone.
+		const parentBefore = transcript(parentId);
+		forkId = String(
+			(await client.forkSession({ sessionId: parentId, messageId: kept.id }))[
+				"id"
+			],
+		);
+		expect([forkId]).toEqual(nativeFork);
+		await client.sendMessage("Now fork-three.", { sessionId: forkId });
+		await client.waitForTurnEnd(forkId, 15_000);
+		await client.waitForTranscriptMessage(
+			(message) =>
+				message.role === "assistant" &&
+				(message.parts ?? []).some(
+					(part) => part.type === "text" && part.text === "Heard fork-three.",
+				),
+			forkId,
+		);
+		expect(transcript(forkId)).toEqual([
+			"user: Remember fork-one.",
+			"assistant: Heard fork-one.",
+			"user: Now fork-three.",
+			"assistant: Heard fork-three.",
+		]);
+		expect(transcript(parentId)).toEqual(parentBefore);
+		expect(
+			db
+				.prepare("SELECT id FROM sessions")
+				.all()
+				.map((row) => (row as { id: string }).id)
+				.sort(),
+		).toEqual([parentId, forkId].sort());
+	} finally {
+		const dir = process.env["CONDUIT_TEST_ARTIFACT_DIR"] ?? "test-results";
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "opencode-native-fork-replay.json"),
+			JSON.stringify(
+				{
+					opencodeVersion: recorded.opencodeVersion,
+					parentId,
+					forkId,
+					sessions: db
+						.prepare(
+							"SELECT id, provider_sid, fork_point_event FROM sessions ORDER BY id",
+						)
+						.all(),
+					parent: transcript(parentId),
+					fork: forkId ? transcript(forkId) : [],
+				},
+				null,
+				2,
+			),
+		);
+		db.close();
+	}
+});
 
 it.each([
 	{
