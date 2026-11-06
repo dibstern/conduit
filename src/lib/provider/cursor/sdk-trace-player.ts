@@ -131,9 +131,14 @@ export function createTraceCursorSdkPort(
 	let contents: string | undefined;
 	let rows: TraceRow[] = [];
 	const stores = new WeakMap<CursorStore, string>();
-	const statePath = (storePath: string) => join(storePath, "trace-state.json");
-	const readState = (storePath: string): TraceAgentState | undefined => {
-		const file = statePath(storePath);
+	// One file per agent, as Cursor's store keeps each agent's runs apart.
+	const statePath = (storePath: string, agentId: string) =>
+		join(storePath, `trace-state-${agentId}.json`);
+	const readState = (
+		storePath: string,
+		agentId: string,
+	): TraceAgentState | undefined => {
+		const file = statePath(storePath, agentId);
 		if (!existsSync(file)) return undefined;
 		const value: unknown = JSON.parse(readFileSync(file, "utf8"));
 		if (
@@ -156,7 +161,7 @@ export function createTraceCursorSdkPort(
 	};
 	const writeState = (storePath: string, state: TraceAgentState) => {
 		mkdirSync(storePath, { recursive: true, mode: 0o700 });
-		const file = statePath(storePath);
+		const file = statePath(storePath, state.id);
 		const temporary = `${file}.${process.pid}.tmp`;
 		writeFileSync(temporary, JSON.stringify(state), {
 			mode: 0o600,
@@ -310,8 +315,8 @@ export function createTraceCursorSdkPort(
 	): CursorAgent => {
 		let closed: Promise<void> | undefined;
 		const closeDelayMs = playback.closeDelayMs ?? 0;
-		const prior = readState(options.storePath);
-		if (prior && (prior.id !== id || prior.cwd !== options.cwd)) {
+		const prior = readState(options.storePath, id);
+		if (prior && prior.cwd !== options.cwd) {
 			throw new CursorSdkFailure({
 				operation: "agent.resume",
 				reason: "Cursor agent_not_found: resume cwd changed",
@@ -321,8 +326,12 @@ export function createTraceCursorSdkPort(
 			const queued = rows.find(
 				(row) => row.kind === "store.runs.before_send",
 			)?.data;
+			// A recorded queued run belongs to the agent it was recorded for.
 			const active = Array.isArray(queued)
-				? queued.map(persistedRun).find((run) => run !== undefined)
+				? queued
+						.filter((run) => object(run) && (run["agentId"] ?? id) === id)
+						.map(persistedRun)
+						.find((run) => run !== undefined)
 				: undefined;
 			writeState(options.storePath, {
 				id,
@@ -343,7 +352,7 @@ export function createTraceCursorSdkPort(
 					});
 				}
 				reload();
-				const state = readState(options.storePath);
+				const state = readState(options.storePath, id);
 				if (!state)
 					throw new CursorSdkFailure({
 						operation: "agent.send",
@@ -575,7 +584,7 @@ export function createTraceCursorSdkPort(
 							if (runStatus(result["status"])) status = result["status"];
 							return result;
 						} finally {
-							const latest = readState(options.storePath);
+							const latest = readState(options.storePath, id);
 							if (latest)
 								writeState(options.storePath, {
 									...latest,
@@ -746,8 +755,7 @@ export function createTraceCursorSdkPort(
 		},
 		async getActiveRun(agentId, store) {
 			const storePath = stores.get(store);
-			const state = storePath ? readState(storePath) : undefined;
-			return state?.id === agentId ? state.activeRun : undefined;
+			return storePath ? readState(storePath, agentId)?.activeRun : undefined;
 		},
 		async deleteAgent(agentId, _cwd, store) {
 			const storePath = stores.get(store);
@@ -756,15 +764,13 @@ export function createTraceCursorSdkPort(
 					operation: "agent.delete",
 					reason: "Cursor requires an open conduit-owned store",
 				});
-			const state = readState(storePath);
-			if (state?.id === agentId) {
-				unlinkSync(statePath(storePath));
-			}
+			if (readState(storePath, agentId))
+				unlinkSync(statePath(storePath, agentId));
 		},
 		async primeSandbox() {
 			result("sandbox.prime");
 		},
-		async createAgent(options, _credential, store, customTools) {
+		async createAgent(options, _credential, _store, customTools) {
 			const created = result("created");
 			if (!object(created) || typeof created["agentId"] !== "string") {
 				throw new CursorSdkFailure({
@@ -772,11 +778,13 @@ export function createTraceCursorSdkPort(
 					reason: "Cursor trace contains no captured agent",
 				});
 			}
-			// A trace replays one captured agent id; a new agent still starts with no runs.
-			const storePath = stores.get(store);
-			if (storePath && readState(storePath)?.id === created["agentId"])
-				unlinkSync(statePath(storePath));
-			return agent(created["agentId"], options, customTools);
+			// Cursor names every new agent afresh and never reuses an id in a store
+			// (SDK 1.0.40 createAgent: `agentId ?? agent-<uuid>`). Replay keeps the
+			// captured id for the store's first agent and numbers later ones.
+			let id = created["agentId"];
+			for (let n = 2; existsSync(statePath(options.storePath, id)); n++)
+				id = `${created["agentId"]}-${n}`;
+			return agent(id, options, customTools);
 		},
 		async resumeAgent(id, options, _credential, _store, customTools) {
 			return agent(id, options, customTools);

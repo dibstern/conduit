@@ -529,7 +529,7 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 						readFileSync(
 							join(
 								cursorSessionStorePath(fixture.configDir, forkId),
-								"trace-state.json",
+								`trace-state-${readCursorSessionIdentity(fixture.configDir, forkId)?.agentId}.json`,
 							),
 							"utf8",
 						),
