@@ -826,11 +826,22 @@ export const createOpenCodeSession = (
  * of them when it is omitted. Resolve the boundary id before publishing creation;
  * its timestamp follows the fork's stored copy when that row is projected.
  */
+/** A test holds an OpenCode fork at `step`, so it can stop the daemon there (82tn.81). */
+const forkPause = (step: "forked" | "bound") =>
+	Effect.suspend(() =>
+		process.env["NODE_ENV"] === "test" &&
+		process.env["CONDUIT_TEST_OPENCODE_FORK_PAUSE_AT"] === step
+			? Effect.never
+			: Effect.void,
+	);
+
 export const forkOpenCodeSession = (
 	parentSessionId: string,
 	account: Account,
 	messageId?: string,
 	side?: { title: string; inputId: string },
+	/** The fork's id, named by a caller that made its worktree first (82tn.54); otherwise OpenCode's. */
+	sessionId?: string,
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
@@ -873,111 +884,126 @@ export const forkOpenCodeSession = (
 		// the messages before its messageID, so name the one after the boundary.
 		const cutBefore = parentHistory?.[boundaryIndex + 1]?.id;
 
-		// No retry: fork is not idempotent — retrying could produce duplicates.
-		const session = yield* Effect.tryPromise(() =>
-			api.session.fork(parentSessionId, {
-				...(cutBefore !== undefined && { messageID: cutBefore }),
-			}),
-		).pipe(
-			Effect.mapError(
-				(cause) =>
-					new SessionCommandError({
-						operation: "session.forked.upstream",
-						cause,
-					}),
-			),
-		);
-		const title = side
-			? sideThreadTitle(side.title)
-			: normalizeSessionTitle(session.title);
-		if (side) {
-			// OpenCode's later session.updated events must carry the same title.
-			// The Ask rules land before session.created is applied.
-			yield* Effect.tryPromise(() =>
-				api.session.update(session.id, {
-					title,
-					permission: sideThreadPermissionRules("ask"),
+		const ids = yield* Effect.serviceOption(OpenCodeSessionIds);
+		const commitAndSignal = yield* makeCommitAndSignal;
+		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+		const overrides = yield* Effect.serviceOption(OverridesStateTag);
+		// OpenCode names the fork and re-ids every copy it makes (82tn.81). The fork and its
+		// binding are one step inside the id map's gate, so the copies' events wait for the
+		// binding instead of adopting the fork, and a crash between them leaves no session.
+		const forkAndBind = Effect.gen(function* () {
+			// No retry: fork is not idempotent — retrying could produce duplicates.
+			const native = yield* Effect.tryPromise(() =>
+				api.session.fork(parentSessionId, {
+					...(cutBefore !== undefined && { messageID: cutBefore }),
 				}),
 			).pipe(
 				Effect.mapError(
 					(cause) =>
 						new SessionCommandError({
-							operation: "session.forked.title",
+							operation: "session.forked.upstream",
 							cause,
-							message: "Could not set the Side Thread title",
 						}),
 				),
 			);
-		}
-
-		// A fork inherits its parent's provider. Forking is an OpenCode
-		// operation, so an unreadable parent can only mean the read model is not
-		// wired here at all — in which case nothing is projected anyway.
-		// The fork's newest message is its copy of the boundary. Its id, not the
-		// parent's, orders the fork's own transcript at that boundary.
-		const forkTip = yield* Effect.tryPromise(() =>
-			api.session.messagesPage(session.id, { limit: 1 }),
-		).pipe(
-			Effect.map((messages) => messages.at(-1)),
-			Effect.catch((error) =>
-				Effect.logWarning(
-					`Could not determine fork point for ${session.id}: ${String(error)}`,
-				).pipe(Effect.as(undefined)),
-			),
-		);
-		let forkPointEvent = forkTip?.id ?? messageId;
-		if (forkPointEvent === undefined && readQueryOption._tag === "Some") {
-			const parentMessages =
-				yield* readQueryOption.value.getSessionMessagesWithParts(
-					parentSessionId,
+			yield* forkPause("forked");
+			// Until the binding lands, the fork is addressed by its native id.
+			const session = { ...native, id: sessionId ?? native.id };
+			const title = side
+				? sideThreadTitle(side.title)
+				: normalizeSessionTitle(native.title);
+			if (side) {
+				// OpenCode's later session.updated events must carry the same title.
+				// The Ask rules land before session.created is applied.
+				yield* Effect.tryPromise(() =>
+					api.session.update(native.id, {
+						title,
+						permission: sideThreadPermissionRules("ask"),
+					}),
+				).pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionCommandError({
+								operation: "session.forked.title",
+								cause,
+								message: "Could not set the Side Thread title",
+							}),
+					),
 				);
-			// A lagging projection cannot replace a known provider boundary.
-			forkPointEvent = parentMessages.at(-1)?.id;
-		}
+			}
 
-		const commitAndSignal = yield* makeCommitAndSignal;
-		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
-		const overrides = yield* Effect.serviceOption(OverridesStateTag);
-		const publish = commitAndSignal.write((project) =>
-			Effect.gen(function* () {
-				yield* applySessionCommand(
-					{
-						type: "session.created",
-						data: {
-							sessionId: session.id,
-							title,
-							provider: account.id,
-							driver: "opencode",
-							...forkPlacement(parentSessionId, Boolean(side)),
-							...(side
-								? {
-										permissionMode: "ask" as const,
-										startInputId: side.inputId,
-									}
-								: {}),
-							...(forkPointEvent === undefined ? {} : { forkPointEvent }),
-							...(forkTip?.time?.created === undefined
-								? {}
-								: { forkPointTimestamp: forkTip.time.created }),
-							inheritsHistory: false,
-							providerSessionId: session.id,
-						},
-					},
-					{ pick, project },
-				);
-				if (workspace._tag === "Some")
-					yield* workspace.value.inherit(session.id, parentSessionId, {
-						project,
-					});
-				if (side && overrides._tag === "Some")
-					yield* setPermissionMode(session.id, "ask").pipe(
-						Effect.provideService(OverridesStateTag, overrides.value),
+			// A fork inherits its parent's provider. Forking is an OpenCode
+			// operation, so an unreadable parent can only mean the read model is not
+			// wired here at all — in which case nothing is projected anyway.
+			// The fork's newest message is its copy of the boundary. Its id, not the
+			// parent's, orders the fork's own transcript at that boundary.
+			const forkTip = yield* Effect.tryPromise(() =>
+				api.session.messagesPage(native.id, { limit: 1 }),
+			).pipe(
+				Effect.map((messages) => messages.at(-1)),
+				Effect.catch((error) =>
+					Effect.logWarning(
+						`Could not determine fork point for ${native.id}: ${String(error)}`,
+					).pipe(Effect.as(undefined)),
+				),
+			);
+			let forkPointEvent = forkTip?.id ?? messageId;
+			if (forkPointEvent === undefined && readQueryOption._tag === "Some") {
+				const parentMessages =
+					yield* readQueryOption.value.getSessionMessagesWithParts(
+						parentSessionId,
 					);
-			}),
+				// A lagging projection cannot replace a known provider boundary.
+				forkPointEvent = parentMessages.at(-1)?.id;
+			}
+
+			const publish = commitAndSignal.write((project) =>
+				Effect.gen(function* () {
+					yield* applySessionCommand(
+						{
+							type: "session.created",
+							data: {
+								sessionId: session.id,
+								title,
+								provider: account.id,
+								driver: "opencode",
+								...forkPlacement(parentSessionId, Boolean(side)),
+								...(side
+									? {
+											permissionMode: "ask" as const,
+											startInputId: side.inputId,
+										}
+									: {}),
+								...(forkPointEvent === undefined ? {} : { forkPointEvent }),
+								...(forkTip?.time?.created === undefined
+									? {}
+									: { forkPointTimestamp: forkTip.time.created }),
+								inheritsHistory: false,
+								providerSessionId: native.id,
+							},
+						},
+						{ pick, project },
+					);
+					if (workspace._tag === "Some")
+						yield* workspace.value.inherit(session.id, parentSessionId, {
+							project,
+						});
+					if (side && overrides._tag === "Some")
+						yield* setPermissionMode(session.id, "ask").pipe(
+							Effect.provideService(OverridesStateTag, overrides.value),
+						);
+				}),
+			);
+			yield* workspace._tag === "Some"
+				? workspace.value.withLaunch(session.id, publish)
+				: publish;
+			return { ...session, ...(side ? { title } : {}), forkPointEvent };
+		});
+		// Interrupting between the fork and its binding would release the gate with the fork unbound.
+		const { forkPointEvent, ...session } = yield* Effect.uninterruptible(
+			ids._tag === "Some" ? ids.value.binding(forkAndBind) : forkAndBind,
 		);
-		yield* workspace._tag === "Some"
-			? workspace.value.withLaunch(session.id, publish)
-			: publish;
+		yield* forkPause("bound");
 		const forkPointTimestamp =
 			readQueryOption._tag === "Some"
 				? (yield* readQueryOption.value.getSession(session.id))
@@ -986,7 +1012,6 @@ export const forkOpenCodeSession = (
 
 		return {
 			...session,
-			...(side ? { title } : {}),
 			forkMessageId: forkPointEvent,
 			...(forkPointTimestamp == null ? {} : { forkPointTimestamp }),
 		};
@@ -1123,6 +1148,7 @@ const forkSessionInWorkspace = (
 				account,
 				messageId,
 				options?.side,
+				options?.sessionId,
 			).pipe(Effect.provideService(OpenCodeAPITag, api));
 			const creationGate = yield* Effect.serviceOption(
 				OpenCodeSessionCreationGateTag,

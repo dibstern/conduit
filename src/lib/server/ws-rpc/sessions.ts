@@ -1000,11 +1000,7 @@ export const sessionsHandlers = {
 				_tag: "Id",
 				id: request.instanceId ?? session.provider,
 			});
-			// A native OpenCode fork takes its id from the server, so no worktree can be named for it.
-			if (
-				!PROVIDER_SESSION_CAPABILITIES[account.driver].supportsNewWorktree ||
-				PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
-			)
+			if (!PROVIDER_SESSION_CAPABILITIES[account.driver].supportsNewWorktree)
 				return yield* new WorkspaceMoveError({
 					path: config.projectDir,
 					reason: "unsupported-provider",
