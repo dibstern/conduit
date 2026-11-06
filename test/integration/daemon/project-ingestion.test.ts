@@ -83,6 +83,8 @@ import {
 } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	AgentLivenessTag,
+	OpenCodeFileServiceTag,
+	OpenCodeSettingsServiceTag,
 	TranslatorTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
@@ -669,5 +671,38 @@ describe("82tn.16: workspace hint dismissals live with the daemon", () => {
 		await relay.stop();
 		evidence.observed = observed;
 		expect(observed).toEqual({ relaySees: 3 });
+	});
+});
+
+describe("82tn.16: each project's OpenCode file and catalog readers live with the project", () => {
+	const readers = Effect.all({
+		files: OpenCodeFileServiceTag,
+		settings: OpenCodeSettingsServiceTag,
+	});
+	it("serves them with no relay open, and a replaced relay reads the same ones", async () => {
+		const daemon = start("opencode-readers").boot();
+		await daemon.register("alpha");
+		const cold = await daemon.inProject("alpha", readers);
+		const catalog = await daemon.inProject(
+			"alpha",
+			cold.settings.listCatalog({ startIfStopped: false }),
+		);
+		const sameIn = async () => {
+			const relay = await daemon.relay("alpha");
+			const held = await relayParts(relay, readers);
+			await relay.stop();
+			return held.files === cold.files && held.settings === cold.settings;
+		};
+		const observed = {
+			catalog,
+			firstRelay: await sameIn(),
+			replacedRelay: await sameIn(),
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			catalog: { commands: [], skills: [] },
+			firstRelay: true,
+			replacedRelay: true,
+		});
 	});
 });

@@ -196,6 +196,8 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"AgentServiceLive",
 			"OpenCodeTerminalServiceLive",
 			"makePtyRuntimeLive",
+			"OpenCodeFileServiceLive",
+			"OpenCodeSettingsServiceLive",
 		]);
 		expect(tally(server, named(builders))).toEqual(
 			new Map([
@@ -203,8 +205,8 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				// with its ingestion side (82tn.16 slice 4) and its settings and
 				// titles (slice 5), and its tool details, directory listing and agent
 				// liveness (slice 7), and its turns, inbox and agent service, and its
-				// terminals (lane 16o).
-				[`${daemon}/Layers/project-services-layer.ts`, 30],
+				// terminals and OpenCode file and catalog readers (lane 16o).
+				[`${daemon}/Layers/project-services-layer.ts`, 34],
 				// The ingestion side's definitions: pending interactions, alert ledger,
 				// provider ingestion, the OpenCode ingress with its history ports, and
 				// agent liveness.
@@ -229,12 +231,12 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				// Definitions, and a store opened without the daemon.
 				["src/lib/domain/relay/Services/session-manager-service.ts", 3],
 				["src/lib/domain/relay/Services/relay-status-snapshot.ts", 3],
-				["src/lib/domain/relay/Services/services.ts", 1],
+				["src/lib/domain/relay/Services/services.ts", 3],
 				["src/lib/persistence/effect/live.ts", 2],
 				// relay: a standalone relay's own copies, which a relay of a registered
 				// project builds only when the daemon cannot build the project.
 				["src/lib/domain/relay/Layers/relay-layer.ts", 7],
-				[`${relay}/project-relay-layers.ts`, 32],
+				[`${relay}/project-relay-layers.ts`, 36],
 			]),
 		);
 	});

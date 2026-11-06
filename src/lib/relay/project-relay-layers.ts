@@ -160,10 +160,11 @@ import {
 	LiveTaskListTag,
 	type LoggerTag,
 	OpenCodeFileServiceLive,
+	OpenCodeFileServiceTag,
 	OpenCodeModelServiceLive,
 	OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceLive,
-	type OpenCodeSettingsServiceTag,
+	OpenCodeSettingsServiceTag,
 	type OrchestrationEngineTag,
 	PtyManagerTag,
 	SessionCompactionsTag,
@@ -777,8 +778,11 @@ export function createProjectRelayLayers({
 		Context.pick(AgentLivenessTag),
 		AgentLivenessLive.pipe(Layer.provide(providerOrchestrationLayer)),
 	);
-	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
-		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
+	const openCodeFileServiceLayer = fromProject(
+		Context.pick(OpenCodeFileServiceTag),
+		OpenCodeFileServiceLive.pipe(
+			Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
+		),
 	);
 	const openCodeModelServiceLayer = fromProject(
 		Context.pick(OpenCodeModelServiceTag),
@@ -793,8 +797,11 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
-	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
-		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
+	const openCodeSettingsServiceLayer = fromProject(
+		Context.pick(OpenCodeSettingsServiceTag),
+		OpenCodeSettingsServiceLive.pipe(
+			Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
+		),
 	);
 	// Daemon relays feed from the daemon's per-project OpenCode streams (82tn.16).
 	const projectStreamsLayer = Option.match(

@@ -33,7 +33,9 @@ import type {
 	AgentLivenessTag,
 	ConfigTag,
 	ConnectPtyUpstreamTag,
+	OpenCodeFileServiceTag,
 	OpenCodeModelServiceTag,
+	OpenCodeSettingsServiceTag,
 	PtyManagerTag,
 	TranslatorTag,
 } from "../../relay/Services/services.js";
@@ -87,7 +89,10 @@ export type ProjectGenerationParts =
 	// Terminals (lane 16o).
 	| OpenCodeTerminalServiceTag
 	| PtyManagerTag
-	| ConnectPtyUpstreamTag;
+	| ConnectPtyUpstreamTag
+	// OpenCode file and catalog readers (lane 16o).
+	| OpenCodeFileServiceTag
+	| OpenCodeSettingsServiceTag;
 
 /** Everything a call naming the project runs with, built by the daemon. */
 export type ProjectParts =

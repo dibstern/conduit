@@ -46,7 +46,9 @@ import {
 import {
 	ConfigTag,
 	LoggerTag,
+	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
+	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	TranslatorTag,
 } from "../../relay/Services/services.js";
@@ -351,6 +353,13 @@ export const makeProjectServicesLive = (options: {
 											),
 										),
 									);
+									// Stateless OpenCode readers; each call reads the folder then.
+									const openCodeReaders = yield* Layer.build(
+										Layer.merge(
+											OpenCodeFileServiceLive,
+											OpenCodeSettingsServiceLive,
+										).pipe(Layer.provide(Layer.succeedContext(projectBase))),
+									);
 									const parts = Context.mergeAll(
 										persistence,
 										models,
@@ -360,6 +369,7 @@ export const makeProjectServicesLive = (options: {
 										readers,
 										inbox,
 										terminals,
+										openCodeReaders,
 									).pipe(
 										Context.add(ProviderTurnServiceTag, turns),
 										Context.add(
