@@ -24,6 +24,10 @@
  *    differing.
  * 7. A mask hides more than its class: a difference planted in any part still differs once masked.
  * 8. Masks depend on their order: each reads the step as recorded and edits only the masked copy.
+ *
+ * 9. A step ends before its file reads do, so a busy libuv pool moves the read's work into a later
+ *    step (Node's fs/promises readFile is listed by no `getActiveResourcesInfo`): a replay whose
+ *    pool is held at each Claude send's capability-cache read equals one whose pool is free.
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -36,7 +40,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { LEDGER_EFFECT_TYPES } from "../../../../src/lib/persistence/effect/run-ledger-arm.js";
 import type { landedUnitRows } from "../../../../src/lib/provider/run-ledger/run-ledger-unit-rows.js";
 import { writeTraceArtifact } from "./harness.js";
@@ -62,6 +66,22 @@ interface Difference {
 	readonly main: unknown;
 	readonly build: unknown;
 }
+
+/** Failure 9: while `held`, each fs/promises readFile first fills libuv's pool with ~50ms jobs. */
+const pool = vi.hoisted(() => ({ held: false }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+	const real = await importOriginal<typeof import("node:fs/promises")>();
+	const { pbkdf2 } = await import("node:crypto");
+	const readFile = new Proxy(real.readFile, {
+		apply: (target, self, args) => {
+			if (pool.held)
+				for (let i = 0; i < Number(process.env["UV_THREADPOOL_SIZE"] ?? 4); i++)
+					pbkdf2("", "", 600_000, 32, "sha256", () => {});
+			return Reflect.apply(target, self, args);
+		},
+	});
+	return { ...real, readFile, default: { ...real, readFile } };
+});
 
 const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
@@ -341,6 +361,21 @@ describe("Run ledger: main's units beside the ledger build", () => {
 		const first = await replayTrace(trace, provider);
 		const second = await replayTrace(trace, provider);
 		expect(compare(first.snapshots, second.snapshots)).toEqual([]);
+	});
+
+	it.each([
+		"generated claude 5",
+		"catalogue R5",
+	])("%s: a step waits for its file reads however busy libuv's pool is", async (id) => {
+		const entry = traces.find(({ trace }) => trace.id === id);
+		expect(entry).toBeDefined();
+		if (entry === undefined) return;
+		const free = await replayTrace(entry.trace, entry.provider);
+		pool.held = true;
+		const held = await replayTrace(entry.trace, entry.provider).finally(() => {
+			pool.held = false;
+		});
+		expect(compare(free.snapshots, held.snapshots)).toEqual([]);
 	});
 
 	it.each(

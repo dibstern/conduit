@@ -17,6 +17,7 @@
  * 5. Teardown calls (a closing query's interrupt) count as unanswered: calls are judged after the
  *    last step settles, before the stack closes.
  */
+import { createHook } from "node:async_hooks";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -173,6 +174,17 @@ const stopping = (command: BrowserCommand) =>
 	command.rpc === "CancelSession" ||
 	command.rpc === "input.sendNow" ||
 	command.rpc === "ReloadProviderSession";
+
+/** fs requests on an FSReqCallback, from creation until their callback has run (enabled per replay). */
+const fileCallbacks = new Set<number>();
+const fileCallbackHook = createHook({
+	init: (id, type) => {
+		if (type === "FSREQCALLBACK") fileCallbacks.add(id);
+	},
+	after: (id) => {
+		fileCallbacks.delete(id);
+	},
+});
 
 /** Replays `trace` as `provider`'s wire; `drop` removes steps, for the gate's red check. */
 export function replayTrace(
@@ -479,6 +491,8 @@ export function replayTrace(
 	// scheduler stays on the real setImmediate). Faked only around the steps, the stack's own timers
 	// (a 6h sweep, a 30s and two 1s timeouts) ran on the real clock across the steps of this and the
 	// next replay, and fired at whichever step the machine's load put them in.
+	fileCallbacks.clear();
+	fileCallbackHook.enable();
 	vi.useFakeTimers({
 		toFake: [
 			"setTimeout",
@@ -513,11 +527,13 @@ export function replayTrace(
 			// moves it to the step's trace time, then 600ms past its action, beyond the reactor's 500ms
 			// polls (orchestration-side-effect-reactor.ts 291), in 5ms ticks, draining the stack's ready
 			// work before each tick, so whatever a step's timers release lands in that step.
-			// Ready work: Effect's scheduler queues setImmediate, and the stack's fs calls (FSReqPromise)
-			// finish on libuv's pool, so drained once neither is pending.
+			// Ready work: Effect's scheduler queues setImmediate, and the stack's fs calls finish on
+			// libuv's pool, so drained once neither is pending. fs/promises readFile and writeFile
+			// (FSReqCallback) are listed by no getActiveResourcesInfo, so fileCallbacks counts them.
 			const drain = Effect.promise(async () => {
 				do await new Promise<void>((resolve) => setImmediate(resolve));
 				while (
+					fileCallbacks.size > 0 ||
 					process
 						.getActiveResourcesInfo()
 						.some((kind) => kind === "Immediate" || kind.startsWith("FSReq"))
@@ -752,6 +768,7 @@ export function replayTrace(
 			Effect.ensuring(
 				Effect.sync(() => {
 					vi.useRealTimers();
+					fileCallbackHook.disable();
 					__setProbeOverrideForTesting(undefined);
 					rmSync(scratch, { recursive: true, force: true });
 				}),
