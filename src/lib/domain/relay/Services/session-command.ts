@@ -76,6 +76,7 @@ import type { SessionPermissionMode } from "../../../shared-types.js";
 import { assertNever } from "../../../utils.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
+import { OpenCodeSessionIds } from "../../daemon/Services/opencode-session-ids.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { DraftChange } from "./input-drafts.js";
 import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
@@ -732,8 +733,9 @@ export const normalizeSessionTitle = (title?: string): string => {
  * Create a session on an OpenCode server and record it locally.
  *
  * The one mutation that cannot be expressed as a command on its own: OpenCode
- * chooses the session id unless a worktree launch reserves it, and a command
- * needs that id before it can be built.
+ * names the native session, a session Conduit already named (draft, worktree
+ * launch) keeps its id and binds OpenCode's (82tn.80), and a command needs the
+ * id before it can be built.
  * So the direct `api.session.create` call lives here, next to the sync adapter,
  * and applying `session.created` is folded into the same function rather than
  * left to the caller.
@@ -756,14 +758,16 @@ export const createOpenCodeSession = (
 		const settings =
 			pick ?? (yield* loadServerSessionPick("opencode", provider));
 
+		const ids = yield* Effect.serviceOption(OpenCodeSessionIds);
 		const create = Effect.gen(function* () {
 			// No retry: create is not idempotent — retrying could produce duplicates.
-			const session = yield* Effect.tryPromise(() =>
+			// OpenCode names the native session; a session Conduit already named
+			// keeps its id and binds OpenCode's (82tn.80), otherwise it adopts it.
+			const native = yield* Effect.tryPromise(() =>
 				// "Untitled" keeps OpenCode's own titler off sessions Conduit titles.
 				api.session.create({
 					title: normalizeSessionTitle(title),
 					...(directory === undefined ? {} : { directory }),
-					...(reservedSessionId === undefined ? {} : { id: reservedSessionId }),
 				}),
 			).pipe(
 				Effect.mapError(
@@ -775,6 +779,7 @@ export const createOpenCodeSession = (
 				),
 			);
 
+			const session = { ...native, id: reservedSessionId ?? native.id };
 			yield* applySessionCommand(
 				{
 					type: "session.created",
@@ -783,7 +788,7 @@ export const createOpenCodeSession = (
 						title: normalizeSessionTitle(session.title),
 						provider,
 						driver: "opencode",
-						providerSessionId: session.id,
+						providerSessionId: native.id,
 						...(permissionMode === undefined ? {} : { permissionMode }),
 					},
 				},
@@ -796,12 +801,13 @@ export const createOpenCodeSession = (
 
 			return session;
 		});
+		const bound = ids._tag === "Some" ? ids.value.binding(create) : create;
 		const creationGate = yield* Effect.serviceOption(
 			OpenCodeSessionCreationGateTag,
 		);
 		return yield* creationGate._tag === "Some"
-			? creationGate.value.withPermits(1)(create)
-			: create;
+			? creationGate.value.withPermits(1)(bound)
+			: bound;
 	}).pipe(
 		Effect.annotateLogs("operation", "createOpenCodeSession"),
 		Effect.withSpan("session.createOpenCodeSession"),
@@ -1240,7 +1246,7 @@ const forkSessionInWorkspace = (
 				: undefined;
 		const fork = yield* Effect.gen(function* () {
 			if (!native) {
-				// OpenCode's session id is the conduit session's id.
+				// OpenCode names the seeded fork's native session; the fork binds it (82tn.80).
 				const id =
 					options?.sessionId ??
 					(openCode ? `ses_${randomUUID().replaceAll("-", "")}` : randomUUID());
@@ -1412,90 +1418,91 @@ const forkSessionInWorkspace = (
 		const forkPointEvent = source.boundary.messageId;
 		// Persist the source and cut before announcing the child. Launch preparation
 		// resolves a native transcript or hands off the copied canonical history.
-		const publish = commitAndSignal.write((project) =>
-			Effect.gen(function* () {
-				yield* requireLiveCreationRefs({
-					sessionId: id,
-					title,
-					provider,
-					...forkPlacement(parentSessionId, Boolean(side)),
-				});
-				// Validate the cut under the same transaction that copies rows.
-				const current = yield* readForkSource(parentSessionId, {
-					messageId: source.boundary.messageId,
-					sideThread: false,
-				}).pipe(
-					Effect.catchTag("ForkRefusal", (refusal) =>
-						Effect.fail(forkRefusalError(parentSessionId, refusal)),
-					),
-					Effect.provideService(SqlClient.SqlClient, sql.value),
-				);
-				const created = yield* eventStore.value.appendBatch([
-					canonicalEvent(
-						"session.created",
-						id,
-						{
-							sessionId: id,
-							title,
-							provider,
-							...(fork.providerSessionId !== undefined
-								? { providerSessionId: fork.providerSessionId }
-								: {}),
-							...forkPlacement(parentSessionId, Boolean(side)),
-							...(side
-								? {
-										permissionMode: "ask" as const,
-										startInputId: side.inputId,
-									}
-								: {}),
-							forkPointEvent,
-							forkPointTimestamp: current.boundary.createdAt,
-							forkPointMessageId: current.boundary.messageId,
-							inheritsHistory: true,
-						} satisfies Extract<
-							SessionCommand,
-							{ type: "session.created" }
-						>["data"],
-						{
-							provider,
-							createdAt: Date.now(),
-							metadata: { source: "relay" },
-						},
-					),
-					...sessionPickEvents(id, pick),
-				]);
-				yield* project(created);
-				// Another project's fork starts at that project's main folder.
-				if (workspace._tag === "Some" && !options?.intoProject)
-					yield* workspace.value.inherit(id, parentSessionId, {
-						project,
+		const publish = (providerSessionId = fork.providerSessionId) =>
+			commitAndSignal.write((project) =>
+				Effect.gen(function* () {
+					yield* requireLiveCreationRefs({
+						sessionId: id,
+						title,
+						provider,
+						...forkPlacement(parentSessionId, Boolean(side)),
 					});
-				yield* inheritSurfacingMarks(parentSessionId, id).pipe(
-					Effect.provideService(SqlClient.SqlClient, sql.value),
-				);
-				yield* inheritRead(parentSessionId, id).pipe(
-					Effect.provideService(SqlClient.SqlClient, sql.value),
-				);
-				if (fork.saveProviderState) yield* fork.saveProviderState();
-				// Ask applies before the row is announced, so no send can reach the
-				// Side Thread first.
-				if (side) yield* setPermissionMode(id, "ask");
-				return current.boundary;
-			}),
-		);
+					// Validate the cut under the same transaction that copies rows.
+					const current = yield* readForkSource(parentSessionId, {
+						messageId: source.boundary.messageId,
+						sideThread: false,
+					}).pipe(
+						Effect.catchTag("ForkRefusal", (refusal) =>
+							Effect.fail(forkRefusalError(parentSessionId, refusal)),
+						),
+						Effect.provideService(SqlClient.SqlClient, sql.value),
+					);
+					const created = yield* eventStore.value.appendBatch([
+						canonicalEvent(
+							"session.created",
+							id,
+							{
+								sessionId: id,
+								title,
+								provider,
+								...(providerSessionId !== undefined
+									? { providerSessionId }
+									: {}),
+								...forkPlacement(parentSessionId, Boolean(side)),
+								...(side
+									? {
+											permissionMode: "ask" as const,
+											startInputId: side.inputId,
+										}
+									: {}),
+								forkPointEvent,
+								forkPointTimestamp: current.boundary.createdAt,
+								forkPointMessageId: current.boundary.messageId,
+								inheritsHistory: true,
+							} satisfies Extract<
+								SessionCommand,
+								{ type: "session.created" }
+							>["data"],
+							{
+								provider,
+								createdAt: Date.now(),
+								metadata: { source: "relay" },
+							},
+						),
+						...sessionPickEvents(id, pick),
+					]);
+					yield* project(created);
+					// Another project's fork starts at that project's main folder.
+					if (workspace._tag === "Some" && !options?.intoProject)
+						yield* workspace.value.inherit(id, parentSessionId, {
+							project,
+						});
+					yield* inheritSurfacingMarks(parentSessionId, id).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql.value),
+					);
+					yield* inheritRead(parentSessionId, id).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql.value),
+					);
+					if (fork.saveProviderState) yield* fork.saveProviderState();
+					// Ask applies before the row is announced, so no send can reach the
+					// Side Thread first.
+					if (side) yield* setPermissionMode(id, "ask");
+					return current.boundary;
+				}),
+			);
 		// OpenCode's session exists before the fork is announced, and the target's
 		// stream waits on the creation gate until conduit owns the id. The seed
 		// follows publication, which copies the turns it carries.
 		const creationGate = yield* Effect.serviceOption(
 			OpenCodeSessionCreationGateTag,
 		);
+		const ids = yield* Effect.serviceOption(OpenCodeSessionIds);
 		const seeded = openCode
 			? Effect.gen(function* () {
-					yield* Effect.tryPromise(() =>
+					const bind = Effect.tryPromise(() =>
 						openCode.api.session.create({
 							title,
 							directory: openCode.directory,
-							id,
 						}),
 					).pipe(
 						Effect.mapError(
@@ -1505,8 +1512,11 @@ const forkSessionInWorkspace = (
 									cause,
 								}),
 						),
+						Effect.flatMap((native) => publish(native.id)),
 					);
-					const published = yield* publish;
+					const published = yield* ids._tag === "Some"
+						? ids.value.binding(bind)
+						: bind;
 					const inherited =
 						(yield* readOption.value.getSessionMessagesWithParts(id)).filter(
 							(message) => message.is_inherited === 1,
@@ -1529,7 +1539,7 @@ const forkSessionInWorkspace = (
 					);
 					return published;
 				})
-			: publish;
+			: publish();
 		const launch =
 			openCode && creationGate._tag === "Some"
 				? creationGate.value.withPermits(1)(seeded)

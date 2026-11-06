@@ -55,6 +55,22 @@ function sdkProof(fixture: ProcessHarness) {
 		.map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+// A worktree launch names the session; OpenCode names its own (82tn.80).
+function nativeOf(fixture: ProcessHarness, sessionId: string): string {
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
+	try {
+		return (
+			db
+				.prepare(
+					"SELECT COALESCE(provider_sid, id) AS native FROM sessions WHERE id = ?",
+				)
+				.get(sessionId) as { native: string }
+		).native;
+	} finally {
+		db.close();
+	}
+}
+
 function store(fixture: ProcessHarness, sessionId: string) {
 	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
@@ -210,7 +226,7 @@ describe("82tn.15: running sessions resume after restart", () => {
 			fixture
 				.opencodeRequests()
 				.filter(({ url }) =>
-					url.includes(`/session/${sessionId}/prompt_async`),
+					url.includes(`/session/${nativeOf(fixture, sessionId)}/prompt_async`),
 				);
 
 		// Claude worktree: an approval left pending.
@@ -242,7 +258,9 @@ describe("82tn.15: running sessions resume after restart", () => {
 				fixture
 					.opencodeRequestBodies()
 					.find(
-						({ path }) => path === `/session/${session.sessionId}/prompt_async`,
+						({ path }) =>
+							path ===
+							`/session/${nativeOf(fixture, session.sessionId)}/prompt_async`,
 					)?.body ?? "{}",
 			) as { messageID?: string };
 			if (!messageID) throw new Error("prompt_async without a message id");
@@ -255,7 +273,7 @@ describe("82tn.15: running sessions resume after restart", () => {
 					properties: {
 						info: {
 							id: messageID,
-							sessionID: session.sessionId,
+							sessionID: nativeOf(fixture, session.sessionId),
 							role: "user",
 							time: { created: Date.now() },
 						},
@@ -268,7 +286,7 @@ describe("82tn.15: running sessions resume after restart", () => {
 			sessions.openCodeWorktree.directory,
 			{
 				id: "restart-worktree-permission",
-				sessionID: sessions.openCodeWorktree.sessionId,
+				sessionID: nativeOf(fixture, sessions.openCodeWorktree.sessionId),
 				permission: "bash",
 				patterns: ["echo restart"],
 				metadata: {},
@@ -295,7 +313,7 @@ describe("82tn.15: running sessions resume after restart", () => {
 						properties: {
 							info: {
 								id: `msg_reply_${session.sessionId}`,
-								sessionID: session.sessionId,
+								sessionID: nativeOf(fixture, session.sessionId),
 								role: "assistant",
 								parentID: userIds.get(session.sessionId),
 								time: {
@@ -315,7 +333,7 @@ describe("82tn.15: running sessions resume after restart", () => {
 						properties: {
 							part: {
 								id: `prt_reply_${session.sessionId}`,
-								sessionID: session.sessionId,
+								sessionID: nativeOf(fixture, session.sessionId),
 								messageID: `msg_reply_${session.sessionId}`,
 								type: "text",
 								text,

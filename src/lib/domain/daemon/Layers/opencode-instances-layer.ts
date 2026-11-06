@@ -54,6 +54,7 @@ import {
 	OpenCodeInstancesTag,
 	OpenCodeUnavailable,
 } from "../Services/opencode-instances-service.js";
+import { OpenCodeSessionIds } from "../Services/opencode-session-ids.js";
 import {
 	createOpenCodeReconciler,
 	type OpenCodePayload,
@@ -189,6 +190,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				options.idleTimeoutMs ?? (yield* instanceIdleTimeoutFromEnv);
 			const borrowIdleTimeoutMs = yield* borrowIdleTimeoutFromEnv;
 			const context = yield* Effect.context<R | Start | Stop>();
+			const sessionIds = yield* Effect.serviceOption(OpenCodeSessionIds);
 			const scope = yield* Effect.scope;
 			const gate = yield* Semaphore.make(1);
 			// One in-flight start per instance, joined by every `use`.
@@ -687,6 +689,14 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						endpoint.processIdentity ?? endpoint.url,
 					),
 					controlReplaySafe: endpoint.processIdentity !== undefined,
+					sessionIds:
+						sessionIds._tag === "Some"
+							? {
+									native: sessionIds.value.native,
+									conduit: (nativeId: string) =>
+										sessionIds.value.conduit(instanceId, nativeId),
+								}
+							: undefined,
 				});
 			};
 
