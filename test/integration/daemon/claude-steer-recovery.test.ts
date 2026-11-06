@@ -203,6 +203,23 @@ describe("Claude pending steer recovery through the process seam", () => {
 				state: "steering",
 			}),
 		);
+		// The runner holds the steer (`run.dispatched`) before it transmits it. Until then it cannot
+		// have reached the agent, so recovery rightly requeues it rather than placing it as sent.
+		// test-waits-allow polling: the daemon is another process; its hold reports only in its store.
+		await vi.waitFor(() => {
+			const db = new Database(running.daemonStorePath(), { readonly: true });
+			try {
+				expect(
+					db
+						.prepare(
+							"SELECT 1 FROM events WHERE session_id = ? AND type = 'run.dispatched' AND json_extract(data, '$.commandId') = ?",
+						)
+						.get(sessionId, steerId),
+				).toBeDefined();
+			} finally {
+				db.close();
+			}
+		}, 10_000);
 		const before = inbox(harness, sessionId);
 		// SDK output can precede the daemon's runner-started IPC mark. Read the
 		// PID that consumed this prompt rather than an obsolete prewarm mark.
