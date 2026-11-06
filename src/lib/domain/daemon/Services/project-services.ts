@@ -18,6 +18,7 @@ import type { AgentServiceTag } from "../../relay/Services/agent-service.js";
 import type { AlertLedgerTag } from "../../relay/Services/alert-ledger.js";
 import type { ContinuationTag } from "../../relay/Services/continuation.js";
 import type { DirectoryListingServiceTag } from "../../relay/Services/directory-listing-service.js";
+import type { GoalSummaryServiceTag } from "../../relay/Services/goal-summary-service.js";
 import type {
 	OpenCodeHistoryReconcileTag,
 	OpenCodeProcessLinkTag,
@@ -28,6 +29,7 @@ import type { PendingInteractionServiceTag } from "../../relay/Services/pending-
 import type { ProjectSettingsTag } from "../../relay/Services/project-settings.js";
 import type { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
 import type { ProviderTurnServiceTag } from "../../relay/Services/provider-turn-service.js";
+import type { RecapServiceTag } from "../../relay/Services/recap-service.js";
 import type { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
 import type {
 	AgentLivenessTag,
@@ -92,7 +94,10 @@ export type ProjectGenerationParts =
 	| ConnectPtyUpstreamTag
 	// OpenCode file and catalog readers (lane 16o).
 	| OpenCodeFileServiceTag
-	| OpenCodeSettingsServiceTag;
+	| OpenCodeSettingsServiceTag
+	// Recaps and goal summaries (lane 16o).
+	| RecapServiceTag
+	| GoalSummaryServiceTag;
 
 /** Everything a call naming the project runs with, built by the daemon. */
 export type ProjectParts =

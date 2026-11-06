@@ -32,6 +32,7 @@ import { makePtyRuntimeLive } from "../../relay/Layers/pty-manager-layer.js";
 import { AgentServiceLive } from "../../relay/Services/agent-service.js";
 import type { AlertsTag } from "../../relay/Services/alerts.js";
 import { DirectoryListingServiceLive } from "../../relay/Services/directory-listing-service.js";
+import { makeGoalSummaryServiceLive } from "../../relay/Services/goal-summary-service.js";
 import type { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { OpenCodeSessionCreationGateTag } from "../../relay/Services/opencode-runtime-ingress-service.js";
 import { ProjectSettingsLive } from "../../relay/Services/project-settings.js";
@@ -39,6 +40,7 @@ import {
 	ProviderTurnServiceTag,
 	ProviderTurns,
 } from "../../relay/Services/provider-turn-service.js";
+import { makeRecapServiceLive } from "../../relay/Services/recap-service.js";
 import {
 	makeRelayStatusSnapshot,
 	RelayStatusSnapshotTag,
@@ -76,6 +78,7 @@ import { ToolContentServiceLive } from "../../relay/Services/tool-content-servic
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import type { CategorySet } from "../Services/category-set.js";
+import { ConfigSnapshotTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonOrchestration } from "../Services/daemon-orchestration.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
@@ -122,6 +125,8 @@ export const makeProjectServicesLive = (options: {
 			const environments = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
 			);
+			// Goal summaries read the daemon's config from memory when it has one (82tn.18).
+			const configSnapshot = yield* Effect.serviceOption(ConfigSnapshotTag);
 			// A relay's calls ran with the SDK its process uses; a cold project's must too.
 			const testSdk = (yield* loadClaudeSdkTestModule.pipe(Effect.orDie))
 				?.claudeSdk;
@@ -360,6 +365,31 @@ export const makeProjectServicesLive = (options: {
 											OpenCodeSettingsServiceLive,
 										).pipe(Layer.provide(Layer.succeedContext(projectBase))),
 									);
+									// Recaps and goal summaries hold in-flight work and a cache, so one
+									// per project outlives a replaced relay; their one-shot query is the
+									// daemon's, which honours the process test module.
+									const summaries = yield* Layer.build(
+										Layer.merge(
+											makeRecapServiceLive({
+												queryFactory: daemon.claudeSdk.titleQuery,
+											}),
+											makeGoalSummaryServiceLive({
+												queryFactory: daemon.claudeSdk.titleQuery,
+											}),
+										).pipe(
+											Layer.provide(
+												Layer.succeedContext(
+													Option.isSome(configSnapshot)
+														? Context.add(
+																projectBase,
+																ConfigSnapshotTag,
+																configSnapshot.value,
+															)
+														: projectBase,
+												),
+											),
+										),
+									);
 									const parts = Context.mergeAll(
 										persistence,
 										models,
@@ -370,6 +400,7 @@ export const makeProjectServicesLive = (options: {
 										inbox,
 										terminals,
 										openCodeReaders,
+										summaries,
 									).pipe(
 										Context.add(ProviderTurnServiceTag, turns),
 										Context.add(

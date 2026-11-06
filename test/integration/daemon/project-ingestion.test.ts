@@ -74,6 +74,7 @@ import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/sess
 import { RateLimiterTag } from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { DirectoryListingServiceTag } from "../../../src/lib/domain/relay/Services/directory-listing-service.js";
+import { GoalSummaryServiceTag } from "../../../src/lib/domain/relay/Services/goal-summary-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectSettingsTag } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -81,6 +82,7 @@ import {
 	ProviderTurnServiceTag,
 	ProviderTurns,
 } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
+import { RecapServiceTag } from "../../../src/lib/domain/relay/Services/recap-service.js";
 import {
 	AgentLivenessTag,
 	OpenCodeFileServiceTag,
@@ -703,6 +705,41 @@ describe("82tn.16: each project's OpenCode file and catalog readers live with th
 			catalog: { commands: [], skills: [] },
 			firstRelay: true,
 			replacedRelay: true,
+		});
+	});
+});
+
+describe("82tn.16: each project's recaps and goal summaries live with the project", () => {
+	const summaries = Effect.all({
+		recaps: RecapServiceTag,
+		goals: GoalSummaryServiceTag,
+	});
+	it("serves them with no relay open, a replaced relay reads the same ones, and a re-added project gets fresh ones", async () => {
+		const daemon = start("recap-goal-summary").boot();
+		await daemon.register("alpha");
+		const cold = await daemon.inProject("alpha", summaries);
+		const sameIn = async () => {
+			const relay = await daemon.relay("alpha");
+			const held = await relayParts(relay, summaries);
+			await relay.stop();
+			return held.recaps === cold.recaps && held.goals === cold.goals;
+		};
+		const firstRelay = await sameIn();
+		const replacedRelay = await sameIn();
+		await daemon.daemon.runPromise(remove("alpha"));
+		await daemon.register("alpha");
+		const readded = await daemon.inProject("alpha", summaries);
+		const observed = {
+			firstRelay,
+			replacedRelay,
+			readdedIsFresh:
+				readded.recaps !== cold.recaps && readded.goals !== cold.goals,
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			firstRelay: true,
+			replacedRelay: true,
+			readdedIsFresh: true,
 		});
 	});
 });
