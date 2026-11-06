@@ -126,6 +126,24 @@ describe("per-project relay stays retired (82tn.16)", () => {
 		);
 	});
 
+	it("runs a project's RPCs on the daemon's project context, never a relay's", () => {
+		// Lane 16p: no RPC waits for a relay or reads its context. The cache entry
+		// still carries the relay's context for relay-only test reads until S6.
+		const relayRpc = new Set([
+			"rpcWsHandler",
+			"waitForRelay",
+			"resolveProjectRpcContext",
+		]);
+		expect(tally(server, named(relayRpc))).toEqual(
+			new Map([
+				[`${daemon}/Layers/daemon-layers.ts`, 2],
+				[`${daemon}/Services/relay-cache.ts`, 1],
+				[`${relay}/project-relay-startup.ts`, 4],
+				[`${relay}/relay-stack.ts`, 8],
+			]),
+		);
+	});
+
 	it("builds daemon-wide services once, in the daemon's layers", () => {
 		const services = new Set([
 			"makePortWatcherLive",

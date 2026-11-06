@@ -2,34 +2,33 @@
 
 import type http from "node:http";
 import type net from "node:net";
-import {
-	Context,
-	Data,
-	Deferred,
-	Duration,
-	Effect,
-	Exit,
-	Layer,
-	Ref,
-} from "effect";
+import { Context, Data, Deferred, Effect, Exit, Layer, Ref } from "effect";
 import { WsRpcError } from "../../../contracts/ws-rpc.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import {
 	getClientIp,
 	isOwnOrigin,
 	parseCookies,
 } from "../../../server/http-utils.js";
-import type { ResolveRpcContext } from "../../../server/ws-rpc.js";
-import {
-	makeRoutedWsRpcWebSocketHandler,
-	type RpcWebSocketHandlerShape,
-} from "../../../server/ws-rpc-handler.js";
+import type {
+	RpcSubscriptionScopeTag,
+	WsRpcServerLayer,
+} from "../../../server/ws-rpc.js";
+import { makeRoutedWsRpcWebSocketHandler } from "../../../server/ws-rpc-handler.js";
 import { ShutdownSignalTag } from "../../daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersTag } from "../../daemon/Layers/daemon-ws-rpc-layer.js";
 import { HttpServerRefTag } from "../../daemon/Layers/relay-factory-layer.js";
+import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
+import { DaemonOrchestration } from "../../daemon/Services/daemon-orchestration.js";
 import { DaemonEventBusTag } from "../../daemon/Services/daemon-pubsub.js";
+import {
+	listArchivedSessions,
+	listDaemonSessions,
+} from "../../daemon/Services/daemon-session-reader.js";
 import type { DaemonStateTag } from "../../daemon/Services/daemon-state.js";
+import { persistenceStoreContext } from "../../daemon/Services/project-read-database.js";
 import {
 	getProject,
 	markError,
@@ -37,15 +36,29 @@ import {
 	ProjectRegistryTag,
 	touchLastUsed as touchProjectLastUsed,
 } from "../../daemon/Services/project-registry-service.js";
+import {
+	type ProjectParts,
+	ProjectServices,
+} from "../../daemon/Services/project-services.js";
+import { ProviderAdapters } from "../../daemon/Services/provider-adapters.js";
 import { RelayCacheTag } from "../../daemon/Services/relay-cache.js";
+import type { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import type { SessionDirectory } from "../../daemon/Services/session-directory.js";
+import type { Usage } from "../../daemon/Services/usage.js";
+import type { UserAvatar } from "../../daemon/Services/user-avatar.js";
+import type { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
+import type { RateLimiterTag } from "../../relay/Layers/rate-limiter-layer.js";
+import type { AlertsTag } from "../../relay/Services/alerts.js";
+import {
+	DaemonSessionQueryServiceError,
+	DaemonSessionQueryServiceTag,
+} from "../../relay/Services/daemon-session-query-service.js";
+import { DraftPreWarmTag } from "../../relay/Services/draft-prewarm.js";
+import { InstanceManagementServiceLive } from "../../relay/Services/instance-management-service.js";
+import { ProjectManagementServiceLive } from "../../relay/Services/project-management-service.js";
+import { ScanServiceLive } from "../../relay/Services/scan-service.js";
+import type { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
 import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";
-
-const RELAY_WAIT_TIMEOUT_MS = 10_000;
-
-export interface WebSocketRelay {
-	readonly rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
-}
 
 export class WebSocketUpgradeError extends Data.TaggedError(
 	"WebSocketUpgradeError",
@@ -72,10 +85,6 @@ export interface WebSocketRelayRouter {
 	readonly ensureRelayStarted: (
 		slug: string,
 	) => Effect.Effect<void, WebSocketUpgradeError>;
-	readonly waitForRelay: (
-		slug: string,
-		timeoutMs: number,
-	) => Effect.Effect<WebSocketRelay, WebSocketUpgradeError>;
 	readonly touchLastUsed: (
 		slug: string,
 	) => Effect.Effect<void, WebSocketUpgradeError>;
@@ -86,37 +95,94 @@ export class WebSocketRelayRouterTag extends Context.Service<
 	WebSocketRelayRouter
 >()("WebSocketRelayRouter") {}
 
-export const resolveProjectRpcContext = (
-	relayRouter: WebSocketRelayRouter,
-	slug: string,
-): ReturnType<ResolveRpcContext> =>
+/**
+ * Each project's RPC context, built by the daemon from the project's own
+ * services (82tn.16). A call names its project as t3code's commands name their
+ * thread (Orchestrator.ts:1910); its streams end with the project's generation,
+ * so replacing a relay leaves a tab's streams running.
+ */
+export class ProjectRpcContextsTag extends Context.Service<
+	ProjectRpcContextsTag,
+	(
+		projectSlug: string,
+	) => Effect.Effect<
+		Context.Context<
+			| Layer.Services<typeof WsRpcServerLayer>
+			| RpcSubscriptionScopeTag
+			| ProjectParts
+		>,
+		WsRpcError
+	>
+>()("ProjectRpcContexts") {}
+
+export const ProjectRpcContextsLive = Layer.effect(
+	ProjectRpcContextsTag,
 	Effect.gen(function* () {
-		yield* relayRouter.ensureRelayStarted(slug);
-		const relay = yield* relayRouter.waitForRelay(slug, RELAY_WAIT_TIMEOUT_MS);
-		yield* relayRouter.touchLastUsed(slug);
-		if (!relay.rpcWsHandler.context)
-			return yield* Effect.fail(
-				new WsRpcError({ message: "RPC context unavailable" }),
+		const relayRouter = yield* WebSocketRelayRouterTag;
+		const projects = yield* ProjectServices;
+		const { registry } = yield* ProviderAdapters;
+		const { drafts } = yield* DaemonOrchestration;
+		const store = Context.merge(
+			yield* Effect.context<
+				ProjectRegistryTag | AccountDirectory | SessionActivityTag
+			>(),
+			yield* persistenceStoreContext,
+		);
+		const queryError = (cause: unknown) =>
+			new DaemonSessionQueryServiceError({ cause });
+		// Project, instance and scan RPCs are the daemon handlers'; these refuse.
+		const refusing = yield* Layer.build(
+			Layer.mergeAll(
+				ProjectManagementServiceLive,
+				InstanceManagementServiceLive,
+				ScanServiceLive,
+			),
+		);
+		const daemon = Context.merge(
+			yield* Effect.context<
+				| UserAvatar
+				| DaemonConfigRefTag
+				| ConfigPersistenceTag
+				| Usage
+				| WorktreeServiceTag
+				| AlertsTag
+				| RateLimiterTag
+				| SessionManagerServiceTag
+			>(),
+			refusing,
+		).pipe(
+			Context.add(ProviderRegistryTag, registry),
+			Context.add(DraftPreWarmTag, drafts),
+			// Deleting a worktree asks which sessions in other projects still use it.
+			Context.add(DaemonSessionQueryServiceTag, {
+				list: (options) =>
+					listDaemonSessions(options).pipe(
+						Effect.provide(store),
+						Effect.mapError(queryError),
+					),
+				listArchived: (options) =>
+					listArchivedSessions(options).pipe(
+						Effect.provide(store),
+						Effect.mapError(queryError),
+					),
+			}),
+		);
+		const unavailable = (slug: string, cause: unknown) =>
+			new WsRpcError({
+				message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
+			});
+		return (slug) =>
+			Effect.gen(function* () {
+				// The relay still wires the project's live provider events until S6.
+				yield* relayRouter.ensureRelayStarted(slug);
+				yield* relayRouter.touchLastUsed(slug);
+				return Context.merge(daemon, yield* projects.forProject(slug));
+			}).pipe(
+				Effect.catch((cause) => Effect.fail(unavailable(slug, cause))),
+				Effect.catchDefect((cause) => Effect.fail(unavailable(slug, cause))),
 			);
-		return yield* relay.rpcWsHandler.context;
-	}).pipe(
-		Effect.catch((cause) =>
-			Effect.fail(
-				cause instanceof WsRpcError
-					? cause
-					: new WsRpcError({
-							message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
-						}),
-			),
-		),
-		Effect.catchDefect((cause) =>
-			Effect.fail(
-				new WsRpcError({
-					message: `Project "${slug}" unavailable: ${formatCause(cause)}`,
-				}),
-			),
-		),
-	);
+	}),
+);
 
 const toRelayUnavailable = (slug: string, cause: unknown) =>
 	new WebSocketUpgradeError({
@@ -166,29 +232,6 @@ export const WebSocketRelayRouterLive: Layer.Layer<
 
 		return {
 			ensureRelayStarted: (slug) => loadRelay(slug).pipe(Effect.asVoid),
-			waitForRelay: (slug, timeoutMs) =>
-				loadRelay(slug).pipe(
-					Effect.timeoutOrElse({
-						duration: Duration.millis(timeoutMs),
-						orElse: () =>
-							Effect.fail(
-								toRelayUnavailable(
-									slug,
-									new Error("Timed out waiting for relay"),
-								),
-							),
-					}),
-					Effect.catch((cause) =>
-						Effect.fail(
-							cause instanceof WebSocketUpgradeError
-								? cause
-								: toRelayUnavailable(slug, cause),
-						),
-					),
-					Effect.catchDefect((cause) =>
-						Effect.fail(toRelayUnavailable(slug, cause)),
-					),
-				),
 			touchLastUsed: (slug) =>
 				withProjectRegistry(touchProjectLastUsed(slug)).pipe(
 					Effect.catch((cause) => Effect.fail(toRelayUnavailable(slug, cause))),
@@ -264,7 +307,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 	| DaemonConfigRefTag
 	| HttpServerRefTag
 	| AuthManagerTag
-	| WebSocketRelayRouterTag
+	| ProjectRpcContextsTag
 	| DaemonWsRpcHandlersTag
 	| ProjectRegistryTag
 	| DaemonStateTag
@@ -275,7 +318,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 		const configRef = yield* DaemonConfigRefTag;
 		const httpServerRef = yield* HttpServerRefTag;
 		const auth = yield* AuthManagerTag;
-		const relayRouter = yield* WebSocketRelayRouterTag;
+		const resolveRpcContext = yield* ProjectRpcContextsTag;
 		const daemonHandlers = yield* DaemonWsRpcHandlersTag;
 		const shutdownSignal = yield* ShutdownSignalTag;
 		const context = yield* Effect.context<never>();
@@ -288,7 +331,7 @@ export const WebSocketRoutingLive: Layer.Layer<
 		}
 
 		const rpcHandler = yield* makeRoutedWsRpcWebSocketHandler(
-			(slug) => resolveProjectRpcContext(relayRouter, slug),
+			resolveRpcContext,
 			daemonHandlers,
 			undefined,
 			(tag) =>

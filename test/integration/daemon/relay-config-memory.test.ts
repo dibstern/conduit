@@ -16,7 +16,10 @@ it("adds a project from shared memory after daemon.json is corrupted", async () 
 	const fixture = await createDaemonProject("chat-simple", { configDir });
 	try {
 		writeFileSync(join(configDir, "daemon.json"), "{corrupted after startup");
-		const result = await fixture.run(
+		// The relay's project adapter, which only daemon tests reach until S6
+		// (82tn.16). A browser's SaveProject goes through the daemon handle,
+		// which refuses to write over the corrupted file and fails the save.
+		const result = await fixture.runOnRelay(
 			Effect.flatMap(ProjectManagementServiceTag, (projects) =>
 				projects.save({ folders: [projectDir] }),
 			),

@@ -24,7 +24,6 @@ import {
 	Array as Arr,
 	Context,
 	Data,
-	Duration,
 	Effect,
 	HashMap,
 	Layer,
@@ -33,7 +32,6 @@ import {
 	Ref,
 	Result,
 	Semaphore,
-	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import {
@@ -889,45 +887,6 @@ export const removeAll = Effect.gen(function* () {
 	yield* requestConfigSave;
 	yield* Effect.logInfo(`Removed ${allSlugs.length} project(s)`);
 }).pipe(Effect.withSpan("projectRegistry.removeAll"));
-
-/**
- * Wait until a project transitions to Ready state, or timeout.
- * Subscribes to DaemonEventBus and filters for InstanceStatusChanged
- * events matching the given slug.
- */
-export const waitForRelay = (slug: string, timeoutMs: number) =>
-	Effect.gen(function* () {
-		// Subscribe before checking: markReady publishes only on a real
-		// transition, so one landing between check and subscribe would be lost.
-		const bus = yield* DaemonEventBusTag;
-		const sub = yield* PubSub.subscribe(bus);
-
-		const entry = yield* getEntry(slug);
-		if (Option.isNone(entry)) {
-			return yield* new ProjectNotFound({ slug });
-		}
-		if (entry.value._tag === "Ready") {
-			return;
-		}
-
-		yield* Stream.fromSubscription(sub).pipe(
-			Stream.filter(
-				(e) => e._tag === "InstanceStatusChanged" && e.instanceId === slug,
-			),
-			Stream.take(1),
-			Stream.runDrain,
-		);
-
-		// Verify it's actually ready (could be error transition)
-		const final = yield* getEntry(slug);
-		if (Option.isNone(final) || final.value._tag !== "Ready") {
-			return yield* new ProjectNotFound({ slug });
-		}
-	}).pipe(
-		Effect.timeout(Duration.millis(timeoutMs)),
-		Effect.annotateLogs("slug", slug),
-		Effect.withSpan("projectRegistry.waitForRelay"),
-	);
 
 /**
  * Evict oldest sessions across relays. Stub implementation until

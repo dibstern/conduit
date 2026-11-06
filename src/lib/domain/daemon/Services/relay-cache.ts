@@ -59,6 +59,7 @@ export interface Relay {
 		now: number,
 	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
 	slug: string;
+	/** Relay-only services for tests until S6 (82tn.16); no RPC reads it. */
 	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 	getStatusSnapshot?: () => RelayStatusSnapshot;
 	setDefaultAgent?: (agent: string) => Effect.Effect<void, WsRpcError>;

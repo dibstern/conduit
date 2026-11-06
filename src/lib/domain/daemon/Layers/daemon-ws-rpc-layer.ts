@@ -127,6 +127,7 @@ import {
 	removeProjectFromEffectRegistry,
 	resolveSessionMode,
 } from "../Services/project-registry-service.js";
+import { ProjectServices } from "../Services/project-services.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionDirectory } from "../Services/session-directory.js";
@@ -201,6 +202,8 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 		const watcher = yield* PortWatcher;
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
+		// Handler-only fixtures run without project contexts.
+		const projects = yield* Effect.serviceOption(ProjectServices);
 		const usage = yield* Usage;
 		const messageSurfacing = yield* MessageSurfacingSettings;
 		const categorySet = yield* CategorySet;
@@ -1217,12 +1220,14 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							message:
 								"No Conduit session is bound to this OpenCode session and instance",
 						});
-					const relay = yield* cache.get(target.projectSlug);
-					if (!relay.rpcWsHandler.context)
+					// The daemon's project context, never a relay's (82tn.16).
+					if (Option.isNone(projects))
 						return yield* new WsRpcError({
-							message: "The project relay has no RPC context",
+							message: "This daemon serves no project contexts",
 						});
-					const relayContext = yield* relay.rpcWsHandler.context;
+					const projectContext = yield* projects.value.forProject(
+						target.projectSlug,
+					);
 					return yield* Effect.gen(function* () {
 						const sessionId = yield* findOpenCodeSession(
 							{ projectIds: [target.projectSlug] },
@@ -1242,7 +1247,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 								"agent",
 							),
 						};
-					}).pipe(Effect.provide(relayContext));
+					}).pipe(Effect.provide(projectContext));
 				}).pipe(
 					Effect.provide(context),
 					Effect.mapError((error) =>

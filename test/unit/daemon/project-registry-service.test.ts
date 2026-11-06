@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Option, Stream } from "effect";
+import { Effect, Layer, Option, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterAll, afterEach, expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
@@ -25,7 +25,6 @@ import {
 	projectInfos,
 	removeProjectFromEffectRegistry,
 	saveProject,
-	waitForRelay,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	type RelayCache,
@@ -236,43 +235,6 @@ describe("explicit project registration", () => {
 			expect(yield* allProjects).toEqual([added.project]);
 		}).pipe(Effect.provide(Layer.fresh(testLayer)));
 	});
-});
-
-describe("waitForRelay", () => {
-	it.effect("resolves immediately if project is already Ready", () =>
-		Effect.gen(function* () {
-			yield* addWithoutRelay(testProject);
-			yield* markReady(testProject.slug);
-			// Should not timeout — project is already ready
-			const result = yield* waitForRelay(testProject.slug, 1000);
-			// waitForRelay returns void on success
-			expect(result).toBeUndefined();
-		}).pipe(Effect.provide(Layer.fresh(testLayer))),
-	);
-
-	it.effect("fails with ProjectNotFound for unknown slug", () =>
-		Effect.gen(function* () {
-			const result = yield* waitForRelay("nonexistent", 1000).pipe(Effect.flip);
-			expect(result._tag).toBe("ProjectNotFound");
-		}).pipe(Effect.provide(Layer.fresh(testLayer))),
-	);
-
-	it.effect("waits for InstanceStatusChanged then verifies Ready", () =>
-		Effect.gen(function* () {
-			yield* addWithoutRelay(testProject);
-
-			// Fork the wait in background
-			const fiber = yield* Effect.forkChild(
-				waitForRelay(testProject.slug, 5000),
-			);
-
-			// Simulate the project becoming ready (publishes InstanceStatusChanged)
-			yield* markReady(testProject.slug);
-
-			// The fiber should complete successfully
-			yield* Fiber.await(fiber);
-		}).pipe(Effect.provide(Layer.fresh(testLayer))),
-	);
 });
 
 describe("evictOldestSessions", () => {

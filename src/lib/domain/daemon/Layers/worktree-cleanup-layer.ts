@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
 	Clock,
+	Context,
 	Deferred,
 	Effect,
 	Layer,
@@ -22,6 +23,7 @@ import {
 	cleanUpProjectWorktrees,
 	type WorktreeCleanupRetry,
 } from "../../../session/worktree-cleanup-sweep.js";
+import type { AlertsTag } from "../../relay/Services/alerts.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
@@ -30,9 +32,11 @@ import {
 	getEffectiveWorktreeCleanup,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
+import { ProjectServices } from "../Services/project-services.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { readColdWorktreeCleanupCandidates } from "../Services/worktree-cleanup-reader.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
+import type { WorktreeServiceTag } from "../Services/worktree-service.js";
 
 export const WorktreeCleanupLive = () =>
 	Layer.effectDiscard(
@@ -43,6 +47,13 @@ export const WorktreeCleanupLive = () =>
 			const bus = yield* DaemonEventBusTag;
 			const storeContext = yield* persistenceStoreContext;
 			const requests = yield* WorktreeCleanupQueueTag;
+			const projectServices = yield* ProjectServices;
+			const daemon = yield* Effect.context<WorktreeServiceTag | AlertsTag>();
+			// The daemon's project context, never a relay's (82tn.16).
+			const projectContext = (slug: string) =>
+				Effect.map(projectServices.forProject(slug), (parts) =>
+					Context.merge(daemon, parts),
+				);
 			const retriesByProject = new Map<
 				string,
 				Map<string, WorktreeCleanupRetry>
@@ -102,17 +113,11 @@ export const WorktreeCleanupLive = () =>
 									Effect.succeed("off" as const),
 								),
 							);
-							let relay = Option.getOrUndefined(
-								yield* cache.peek(project.slug),
-							);
-							if (relay !== undefined) {
-								const context = relay.rpcWsHandler.context;
-								if (context === undefined)
-									return yield* Effect.fail(
-										new Error("Project relay context is unavailable"),
-									);
+							// An open relay still marks the project as in use until S6.
+							const open = Option.isSome(yield* cache.peek(project.slug));
+							if (open)
 								yield* stopQuiescentSettledAgents(now).pipe(
-									Effect.provide(yield* context),
+									Effect.provide(yield* projectContext(project.slug)),
 									Effect.catchCause((cause) =>
 										Failure.isInterruptedOnly(cause)
 											? Effect.failCause(cause)
@@ -125,12 +130,11 @@ export const WorktreeCleanupLive = () =>
 												),
 									),
 								);
-							}
 							const setting = yield* getSetting;
 							if (setting === "off") return;
 							if (worktreeCleanupCandidateFilter(setting, now) === undefined)
 								return;
-							if (relay === undefined) {
+							if (!open) {
 								const paths = yield* readColdWorktreeCleanupCandidates(
 									project,
 									setting,
@@ -147,19 +151,13 @@ export const WorktreeCleanupLive = () =>
 										});
 									return;
 								}
-								relay = yield* cache.get(project.slug);
 							}
-							const context = relay.rpcWsHandler.context;
-							if (context === undefined)
-								return yield* Effect.fail(
-									new Error("Project relay context is unavailable"),
-								);
 							const projectReport = yield* cleanUpProjectWorktrees(
 								getSetting,
 								getProjectFolders,
 								now,
 								retries,
-							).pipe(Effect.provide(yield* context));
+							).pipe(Effect.provide(yield* projectContext(project.slug)));
 							report.removed.push(...projectReport.removed);
 							report.kept.push(...projectReport.kept);
 							report.failed.push(...projectReport.failed);

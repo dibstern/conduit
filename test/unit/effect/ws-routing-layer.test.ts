@@ -18,7 +18,7 @@ import {
 import { makeRelayCacheLive } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
-	type WebSocketRelay,
+	ProjectRpcContextsTag,
 	WebSocketRelayRouterLive,
 	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
@@ -58,30 +58,16 @@ const makeRequest = (
 		socket: { remoteAddress: "127.0.0.1" },
 	}) as IncomingMessage;
 
-const makeWebSocketRelay = (): WebSocketRelay => ({
-	rpcWsHandler: {},
-});
-
 const makeLayer = (
 	server: Server,
 	options?: {
 		auth?: AuthManager;
-		relay?: WebSocketRelay;
-		ensureRelayStarted?: Mock<(slug: string) => void>;
-		touchLastUsed?: Mock<(slug: string) => void>;
-		waitForRelay?: (
-			slug: string,
-			timeoutMs: number,
-		) => Effect.Effect<WebSocketRelay, WebSocketUpgradeError>;
+		resolveProject?: Mock<(slug: string) => void>;
 		shuttingDown?: boolean;
 		projects?: ReadonlyArray<StoredProject>;
 	},
 ) => {
-	const relay = options?.relay ?? makeWebSocketRelay();
-	const ensureRelayStarted = options?.ensureRelayStarted ?? vi.fn();
-	const touchLastUsed = options?.touchLastUsed ?? vi.fn();
-	const waitForRelay =
-		options?.waitForRelay ?? ((_: string, __: number) => Effect.succeed(relay));
+	const resolveProject = options?.resolveProject ?? vi.fn();
 
 	return WebSocketRoutingLive.pipe(
 		Layer.provide(
@@ -99,12 +85,12 @@ const makeLayer = (
 			),
 		),
 		Layer.provide(
-			Layer.succeed(WebSocketRelayRouterTag)({
-				ensureRelayStarted: (slug) =>
-					Effect.sync(() => ensureRelayStarted(slug)),
-				waitForRelay,
-				touchLastUsed: (slug) => Effect.sync(() => touchLastUsed(slug)),
-			}),
+			// Upgrade tests never reach a project; resolving one records the slug and dies.
+			Layer.succeed(ProjectRpcContextsTag)((slug) =>
+				Effect.sync(() => resolveProject(slug)).pipe(
+					Effect.andThen(Effect.die("No project contexts in this test")),
+				),
+			),
 		),
 		Layer.provideMerge(makeDaemonRpcTestLayer(options?.projects)),
 	);
@@ -139,12 +125,11 @@ const makeRouterLayer = (
 	);
 
 describe("WebSocketRelayRouterLive", () => {
-	it.effect("returns a cached relay and does not create duplicates", () => {
-		const relay = makeWebSocketRelay();
+	it.effect("starts one relay per project however often it is asked", () => {
 		const factory = vi.fn((slug: string) =>
 			Effect.succeed({
 				slug,
-				rpcWsHandler: relay.rpcWsHandler,
+				rpcWsHandler: {},
 				syncGlobalSetting: () => Effect.void,
 				refreshGlobalDefaults: () => Effect.void,
 				stop: vi.fn(),
@@ -155,12 +140,8 @@ describe("WebSocketRelayRouterLive", () => {
 		return Effect.gen(function* () {
 			const router = yield* WebSocketRelayRouterTag;
 			yield* router.ensureRelayStarted("test-project");
-			const first = yield* router.waitForRelay("test-project", 10);
 			yield* router.ensureRelayStarted("test-project");
-			const second = yield* router.waitForRelay("test-project", 10);
 
-			expect(first).toBe(second);
-			expect(first.rpcWsHandler).toBe(relay.rpcWsHandler);
 			expect(factory).toHaveBeenCalledTimes(1);
 			expect(factory.mock.calls[0]?.[0]).toBe("test-project");
 		}).pipe(Effect.provide(Layer.fresh(layer)));
@@ -238,9 +219,8 @@ describe("WebSocketRoutingLive", () => {
 	])("destroys sockets for invalid websocket path %s", (path) =>
 		Effect.gen(function* () {
 			const server = createServer();
-			const relay = makeWebSocketRelay();
-			const ensureRelayStarted = vi.fn();
-			const layer = makeLayer(server, { relay, ensureRelayStarted });
+			const resolveProject = vi.fn();
+			const layer = makeLayer(server, { resolveProject });
 
 			yield* Effect.gen(function* () {
 				const socket = makeSocket();
@@ -248,23 +228,22 @@ describe("WebSocketRoutingLive", () => {
 
 				yield* waitForAssertion(() => {
 					expect(socket.destroy).toHaveBeenCalled();
-					expect(ensureRelayStarted).not.toHaveBeenCalled();
+					expect(resolveProject).not.toHaveBeenCalled();
 				});
 			}).pipe(Effect.provide(Layer.fresh(layer)));
 		}),
 	);
 
 	it.effect.each(["/rpc", "/rpc?client=browser"])(
-		"rejects unauthenticated %s upgrades before relay startup",
+		"rejects unauthenticated %s upgrades before resolving a project",
 		(path) =>
 			Effect.gen(function* () {
 				const server = createServer();
-				const ensureRelayStarted = vi.fn();
+				const resolveProject = vi.fn();
 				const auth = new AuthManager({
 					getPinHash: () => hashPin("1234"),
 				});
-				const relay = makeWebSocketRelay();
-				const layer = makeLayer(server, { auth, relay, ensureRelayStarted });
+				const layer = makeLayer(server, { auth, resolveProject });
 
 				yield* Effect.gen(function* () {
 					const socket = makeSocket();
@@ -272,7 +251,7 @@ describe("WebSocketRoutingLive", () => {
 
 					yield* waitForAssertion(() => {
 						expect(socket.destroy).toHaveBeenCalled();
-						expect(ensureRelayStarted).not.toHaveBeenCalled();
+						expect(resolveProject).not.toHaveBeenCalled();
 					});
 				}).pipe(Effect.provide(Layer.fresh(layer)));
 			}),
@@ -296,13 +275,9 @@ describe("WebSocketRoutingLive", () => {
 		(path) =>
 			Effect.gen(function* () {
 				const server = createServer();
-				const ensureRelayStarted = vi.fn();
-				const touchLastUsed = vi.fn();
-				const relay = makeWebSocketRelay();
+				const resolveProject = vi.fn();
 				const layer = makeLayer(server, {
-					relay,
-					ensureRelayStarted,
-					touchLastUsed,
+					resolveProject,
 					shuttingDown: true,
 				});
 
@@ -312,8 +287,7 @@ describe("WebSocketRoutingLive", () => {
 
 					yield* waitForAssertion(() => {
 						expect(socket.destroy).toHaveBeenCalled();
-						expect(ensureRelayStarted).not.toHaveBeenCalled();
-						expect(touchLastUsed).not.toHaveBeenCalled();
+						expect(resolveProject).not.toHaveBeenCalled();
 					});
 				}).pipe(Effect.provide(Layer.fresh(layer)));
 			}),
@@ -330,16 +304,15 @@ describe("WebSocketRoutingLive", () => {
 					Effect.sync(() => upgrade.mockRestore()),
 				);
 				const server = createServer();
-				const ensureRelayStarted = vi.fn();
-				const relay = makeWebSocketRelay();
-				yield* Layer.build(makeLayer(server, { relay, ensureRelayStarted }));
+				const resolveProject = vi.fn();
+				yield* Layer.build(makeLayer(server, { resolveProject }));
 				const req = makeRequest(path);
 				const socket = makeSocket();
 				server.emit("upgrade", req, socket, Buffer.alloc(0));
 				yield* waitForAssertion(() =>
 					expect(upgrade).toHaveBeenCalledWith(req, socket, expect.any(Buffer)),
 				);
-				expect(ensureRelayStarted).not.toHaveBeenCalled();
+				expect(resolveProject).not.toHaveBeenCalled();
 				expect(socket.destroy).not.toHaveBeenCalled();
 			}),
 	);

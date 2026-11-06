@@ -53,7 +53,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodePath } from "@effect/platform-node";
 import {
-	type Context,
+	Context,
 	Deferred,
 	Effect,
 	Exit,
@@ -91,6 +91,7 @@ import {
 import { RecapServiceTag } from "../../../src/lib/domain/relay/Services/recap-service.js";
 import {
 	AgentLivenessTag,
+	ConfigTag,
 	OpenCodeFileServiceTag,
 	OpenCodeSettingsServiceTag,
 	PollerManagerTag,
@@ -99,12 +100,10 @@ import {
 import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { SessionWorkspaceHintStateTag } from "../../../src/lib/domain/relay/Services/session-workspace-hint-state.js";
+import { SSEStreamTag } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
 import { OpenCodeTerminalServiceTag } from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import { ToolContentServiceTag } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
-import {
-	resolveProjectRpcContext,
-	WebSocketRelayRouterTag,
-} from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
+import { ProjectRpcContextsTag } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { MessagePollerManager } from "../../../src/lib/relay/message-poller-impl.js";
 import {
@@ -762,13 +761,9 @@ describe("82tn.16: each project's recaps and goal summaries live with the projec
 /** A browser tab: its own routed RPC client, as its socket is routed, open until `close`. */
 const openTab = Effect.gen(function* () {
 	const scope = yield* Scope.make();
-	const router = yield* WebSocketRelayRouterTag;
+	const resolve = yield* ProjectRpcContextsTag;
 	const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-		Effect.provide(
-			makeRoutedWsRpcServerLayer((slug) =>
-				resolveProjectRpcContext(router, slug),
-			),
-		),
+		Effect.provide(makeRoutedWsRpcServerLayer(resolve)),
 		Scope.provide(scope),
 	);
 	return {
@@ -1002,6 +997,82 @@ describe("82tn.16: one message poller per project", () => {
 			shown: true,
 			other: false,
 			after: false,
+		});
+	});
+});
+
+/**
+ * Lane 16p (audit.md rows 136-140): a project's RPCs run on the daemon's
+ * project context, never a relay's, as t3code serves every RPC from one server
+ * runtime and each command names its thread
+ * (apps/server/src/orchestration-v2/Orchestrator.ts:1910).
+ */
+describe("82tn.16: a project's RPCs run on the daemon's project context", () => {
+	it("keeps a tab's detail stream across a relay replaced while registered", async () => {
+		const daemon = start("rpc-stream-relay-replaced").boot();
+		await daemon.register("alpha");
+		await daemon.inProject("alpha", turn("viewed"));
+		const observed = await daemon.daemon.runPromise(
+			Effect.gen(function* () {
+				const tab = yield* openTab;
+				yield* tab.show("viewed");
+				const activity = yield* SessionActivityTag;
+				const relays = yield* RelayCacheTag;
+				yield* relays.invalidate("alpha");
+				yield* relays.get("alpha");
+				const result = { viewed: activity.hasViewers("viewed") };
+				yield* tab.close;
+				return { ...result, afterClose: activity.hasViewers("viewed") };
+			}),
+		);
+		evidence.observed = observed;
+		expect(observed).toEqual({ viewed: true, afterClose: false });
+	});
+
+	it("ends a removed project's streams", async () => {
+		const daemon = start("rpc-stream-removed").boot();
+		await daemon.register("alpha");
+		await daemon.inProject("alpha", turn("viewed"));
+		const observed = await daemon.daemon.runPromise(
+			Effect.gen(function* () {
+				const tab = yield* openTab;
+				yield* tab.show("viewed");
+				const activity = yield* SessionActivityTag;
+				const shown = activity.hasViewers("viewed");
+				yield* remove("alpha");
+				const result = { shown, afterRemove: activity.hasViewers("viewed") };
+				yield* tab.close;
+				return result;
+			}),
+		);
+		evidence.observed = observed;
+		expect(observed).toEqual({ shown: true, afterRemove: false });
+	});
+
+	it("serves each project from its own context, with no relay's services in it", async () => {
+		const daemon = start("rpc-context-no-relay").boot();
+		await daemon.register("alpha");
+		await daemon.register("beta");
+		const alphaPoller = await daemon.inProject("alpha", PollerManagerTag);
+		const observed = await daemon.daemon.runPromise(
+			Effect.gen(function* () {
+				const resolve = yield* ProjectRpcContextsTag;
+				const alpha = yield* resolve("alpha");
+				const beta = yield* resolve("beta");
+				return {
+					alpha: Context.get(alpha, ConfigTag).slug,
+					beta: Context.get(beta, ConfigTag).slug,
+					projectPoller: Context.get(alpha, PollerManagerTag) === alphaPoller,
+					relayStream: Option.isSome(Context.getOption(alpha, SSEStreamTag)),
+				};
+			}),
+		);
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			alpha: "alpha",
+			beta: "beta",
+			projectPoller: true,
+			relayStream: false,
 		});
 	});
 });

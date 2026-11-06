@@ -301,7 +301,7 @@ async function createHarness(
 
 /** Observe real status-poll publications, including unchanged statuses. */
 const pollCycles = (harness: Harness, cycles: number) =>
-	harness.project.run(
+	harness.project.runOnRelay(
 		Effect.gen(function* () {
 			const subscription = yield* PubSub.subscribe(yield* PollerPubSubTag);
 			for (let cycle = 0; cycle < cycles; cycle++)
@@ -310,7 +310,7 @@ const pollCycles = (harness: Harness, cycles: number) =>
 	);
 
 const statusOf = async (harness: Harness, sessionId: string) =>
-	(await harness.project.run(getCurrentStatuses))[sessionId]?.type;
+	(await harness.project.runOnRelay(getCurrentStatuses))[sessionId]?.type;
 
 async function connectAndView(harness: Harness, sessionId: string) {
 	const client = await harness.project.connectWsClient();

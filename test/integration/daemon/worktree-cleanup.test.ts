@@ -1730,7 +1730,9 @@ syncBuiltinESMExports();
 			expect(
 				result.removed.some(({ sessionId }) => sessionId === session.id),
 			).toBe(true);
-			expect(fixture.generations.at(-1)?.fakeSdkActive).toBe(true);
+			// The sweep runs on the daemon's project context; it starts no
+			// provider for a project nobody opened (82tn.16).
+			expect(fixture.generations.at(-1)?.fakeSdkActive).toBe(false);
 			expect(existsSync(session.path)).toBe(false);
 		}
 	}, 300_000);
