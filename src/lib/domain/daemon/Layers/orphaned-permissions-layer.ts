@@ -1,4 +1,4 @@
-import { Context, Effect, Option, PubSub, Stream } from "effect";
+import { Context, Effect, Option, PubSub, Semaphore } from "effect";
 import { formatErrorDetail } from "../../../errors.js";
 import { bindEventStoreEffect } from "../../../persistence/effect/bind-event-store-effect.js";
 import {
@@ -10,6 +10,7 @@ import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
 import { resolveOrphanedClaudePermissions } from "../../relay/Services/resolve-orphaned-claude-permissions.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
+import { type OwnerScope, OwnerScopes } from "../Services/owner-scopes.js";
 import {
 	allProjects,
 	ProjectRegistryTag,
@@ -25,6 +26,7 @@ export const makeOrphanedClaudePermissions = Effect.gen(function* () {
 	const store = yield* PersistenceStore;
 	const adapters = yield* ProviderAdapters;
 	const registry = yield* ProjectRegistryTag;
+	const owners = yield* OwnerScopes;
 	const unbound = yield* makeUnboundEventStoreEffect.pipe(
 		Effect.provide(store),
 	);
@@ -62,29 +64,44 @@ export const makeOrphanedClaudePermissions = Effect.gen(function* () {
 			),
 			Effect.annotateLogs("slug", projectId),
 		);
-	// Subscribed now, so a project added during recovery is cleared once it is done.
-	const added = yield* PubSub.subscribe(yield* DaemonEventBusTag);
-	yield* Effect.gen(function* () {
-		yield* adapters.recover;
-		yield* Stream.fromSubscription(added).pipe(
-			Stream.runForEach((event) =>
-				event._tag === "InstanceAdded"
-					? Effect.flatMap(registered, (slugs) =>
-							slugs.includes(event.instanceId)
-								? clear(event.instanceId)
-								: Effect.void,
-						)
-					: Effect.void,
+	// Once per project generation: a removed and re-added project opens a new owner scope. The
+	// lock makes start return only once every registered project is cleared.
+	const cleared = new WeakSet<OwnerScope>();
+	const lock = yield* Semaphore.make(1);
+	const clearRegistered = lock.withPermits(1)(
+		Effect.flatMap(registered, (slugs) =>
+			Effect.forEach(
+				slugs,
+				(slug) =>
+					owners.projectScope(slug).pipe(
+						Effect.flatMap((scope) => {
+							if (cleared.has(scope)) return Effect.void;
+							cleared.add(scope);
+							return clear(slug);
+						}),
+						Effect.ignore,
+					),
+				{ discard: true },
 			),
-		);
-	}).pipe(
+		),
+	);
+	// Subscribed now, so a project added during recovery is cleared once it is done. The bus
+	// slides: a listener that is behind loses its oldest messages, a project's add among them,
+	// but only to make room for newer ones. Re-reading the registry on every batch therefore
+	// finds every added project (82tn.77).
+	const added = yield* PubSub.subscribe(yield* DaemonEventBusTag);
+	yield* adapters.recover.pipe(
+		Effect.andThen(
+			PubSub.takeAll(added).pipe(
+				Effect.andThen(clearRegistered),
+				Effect.forever,
+			),
+		),
 		Effect.catchCause((cause) =>
 			Effect.logWarning("Clearing added projects' orphaned asks ended", cause),
 		),
 		Effect.forkScoped,
 	);
 	/** Clear every registered project; call once runner recovery is done. */
-	return Effect.flatMap(registered, (slugs) =>
-		Effect.forEach(slugs, clear, { discard: true }),
-	);
+	return clearRegistered;
 });
