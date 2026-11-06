@@ -28,6 +28,7 @@ import {
 	makeProjectIngestionLive,
 	makeProjectOpenCodeIngressLive,
 } from "../../relay/Layers/project-ingestion-layer.js";
+import { makePtyRuntimeLive } from "../../relay/Layers/pty-manager-layer.js";
 import { AgentServiceLive } from "../../relay/Services/agent-service.js";
 import type { AlertsTag } from "../../relay/Services/alerts.js";
 import { DirectoryListingServiceLive } from "../../relay/Services/directory-listing-service.js";
@@ -64,6 +65,10 @@ import type { OverridesStateTag } from "../../relay/Services/session-overrides-s
 import type { SessionSetupTag } from "../../relay/Services/session-setup.js";
 import { makeSessionTitleServiceLive } from "../../relay/Services/session-title-service.js";
 import type { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+import {
+	LocalPtyServiceTag,
+	OpenCodeTerminalServiceLive,
+} from "../../relay/Services/terminal-service.js";
 import { ToolContentServiceLive } from "../../relay/Services/tool-content-service.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
@@ -170,6 +175,7 @@ export const makeProjectServicesLive = (options: {
 				| WorktreeServiceTag
 			>();
 			const push = yield* PushManagerTag;
+			const localPty = yield* LocalPtyServiceTag;
 			const log = createLogger("relay");
 			const generations = new Map<
 				string,
@@ -326,6 +332,24 @@ export const makeProjectServicesLive = (options: {
 											),
 										),
 									);
+									// Terminals, once per project, so a replaced relay keeps them and a
+									// main-folder change leaves them running: each call reads the folder
+									// then, as t3code restarts a terminal only on a reopen with a changed
+									// cwd (apps/server/src/terminal/Manager.ts:2938-2955).
+									const terminals = yield* Layer.build(
+										OpenCodeTerminalServiceLive.pipe(
+											Layer.provideMerge(makePtyRuntimeLive()),
+											Layer.provide(
+												Layer.succeedContext(
+													Context.add(
+														projectBase,
+														LocalPtyServiceTag,
+														localPty,
+													),
+												),
+											),
+										),
+									);
 									const parts = Context.mergeAll(
 										persistence,
 										models,
@@ -334,6 +358,7 @@ export const makeProjectServicesLive = (options: {
 										titles,
 										readers,
 										inbox,
+										terminals,
 									).pipe(
 										Context.add(ProviderTurnServiceTag, turns),
 										Context.add(

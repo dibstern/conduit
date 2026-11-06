@@ -32,7 +32,9 @@ import type { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-s
 import type {
 	AgentLivenessTag,
 	ConfigTag,
+	ConnectPtyUpstreamTag,
 	OpenCodeModelServiceTag,
+	PtyManagerTag,
 	TranslatorTag,
 } from "../../relay/Services/services.js";
 import type { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
@@ -42,6 +44,7 @@ import type {
 	SessionManagerServiceTag,
 } from "../../relay/Services/session-manager-service.js";
 import type { SessionTitleServiceTag } from "../../relay/Services/session-title-service.js";
+import type { OpenCodeTerminalServiceTag } from "../../relay/Services/terminal-service.js";
 import type { ToolContentServiceTag } from "../../relay/Services/tool-content-service.js";
 import type { ProjectShellEnvTag } from "../Layers/project-shell-env-layer.js";
 import type { PollerTimings } from "../Layers/relay-factory-layer.js";
@@ -79,7 +82,11 @@ export type ProjectGenerationParts =
 	// Turns and the inbox drain, and the agent service a continuation reads (lane 16o).
 	| AgentServiceTag
 	| ProviderTurnServiceTag
-	| SessionInboxTag;
+	| SessionInboxTag
+	// Terminals (lane 16o).
+	| OpenCodeTerminalServiceTag
+	| PtyManagerTag
+	| ConnectPtyUpstreamTag;
 
 /** Everything a call naming the project runs with, built by the daemon. */
 export type ProjectParts =

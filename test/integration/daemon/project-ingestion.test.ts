@@ -86,6 +86,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
+import { OpenCodeTerminalServiceTag } from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import { ToolContentServiceTag } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
@@ -568,5 +569,54 @@ describe("82tn.16: each project's turns and inbox live with the project", () => 
 		const observed = { before, after: await served() };
 		evidence.observed = observed;
 		expect(observed).toEqual({ before: true, after: false });
+	});
+});
+
+describe("82tn.16: each project's terminals live with the project", () => {
+	it("serves a project's terminals with no relay open", async () => {
+		const daemon = start("terminals-cold").boot();
+		await daemon.register("alpha");
+		const snapshot = await daemon.inProject(
+			"alpha",
+			Effect.map(OpenCodeTerminalServiceTag, (terminal) => terminal.snapshot()),
+		);
+		evidence.observed = { snapshot };
+		expect(evidence.observed).toEqual({ snapshot: [] });
+	});
+
+	it("keeps one terminal service across a relay replaced while registered", async () => {
+		const daemon = start("terminals-relay-replaced").boot();
+		await daemon.register("alpha");
+		const project = await daemon.inProject("alpha", OpenCodeTerminalServiceTag);
+		const inRelay = async () => {
+			const relay = await daemon.relay("alpha");
+			const terminal = await relayParts(relay, OpenCodeTerminalServiceTag);
+			await relay.stop();
+			return terminal === project;
+		};
+		const observed = { first: await inRelay(), second: await inRelay() };
+		evidence.observed = observed;
+		expect(observed).toEqual({ first: true, second: true });
+	});
+
+	it("gives two projects sharing a folder their own terminal service", async () => {
+		const daemon = start("terminals-shared-folder").boot();
+		await daemon.register("alpha");
+		await daemon.register("beta");
+		const alpha = await daemon.inProject("alpha", OpenCodeTerminalServiceTag);
+		const beta = await daemon.inProject("beta", OpenCodeTerminalServiceTag);
+		evidence.observed = { same: alpha === beta };
+		expect(evidence.observed).toEqual({ same: false });
+	});
+
+	it("drops a removed project's terminal service", async () => {
+		const daemon = start("terminals-removed").boot();
+		await daemon.register("alpha");
+		const before = await daemon.inProject("alpha", OpenCodeTerminalServiceTag);
+		await daemon.daemon.runPromise(remove("alpha"));
+		await daemon.register("alpha");
+		const after = await daemon.inProject("alpha", OpenCodeTerminalServiceTag);
+		evidence.observed = { same: before === after };
+		expect(evidence.observed).toEqual({ same: false });
 	});
 });

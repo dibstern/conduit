@@ -38,7 +38,6 @@ import {
 	ConnectPtyUpstreamTag,
 	LoggerTag,
 	PtyManagerTag,
-	WebSocketHandlerTag,
 } from "./services.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
 
@@ -254,7 +253,6 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 	OpenCodeTerminalServiceTag,
 	never,
 	| OpenCodeInstancesTag
-	| WebSocketHandlerTag
 	| LoggerTag
 	| ConfigTag
 	| PtyManagerTag
@@ -282,7 +280,6 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 				),
 				Effect.scoped,
 			);
-		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
 		const ptyManager = yield* PtyManagerTag;
@@ -463,7 +460,6 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 		const terminal: OpenCodeTerminalService = {
 			create: (clientId: string, cwd = config.projectDir, account) =>
 				Effect.gen(function* () {
-					const session = wsHandler.getClientSession(clientId) ?? "?";
 					const codex =
 						account?.driver === "codex"
 							? yield* prepareCodexAccount(account, config.configDir).pipe(
@@ -489,15 +485,13 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 					);
 					if (createResult._tag === "Failure") {
 						log.warn(
-							`client=${clientId} session=${session} Failed to create PTY: ${formatErrorDetail(createResult.failure.cause)}`,
+							`client=${clientId} Failed to create PTY: ${formatErrorDetail(createResult.failure.cause)}`,
 						);
 						return yield* createResult.failure;
 					}
 
 					const { pty } = createResult.success;
-					log.info(
-						`client=${clientId} session=${session} Created: ${pty.id} (pid=${pty.pid})`,
-					);
+					log.info(`client=${clientId} Created: ${pty.id} (pid=${pty.pid})`);
 					registerLocalSession(createResult.success, false);
 				}).pipe(Effect.uninterruptible, terminalLock.withPermits(1), (create) =>
 					Effect.gen(function* () {
@@ -602,7 +596,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 					);
 					if (resizeResult._tag === "Failure") {
 						log.warn(
-							`client=${clientId} session=${wsHandler.getClientSession(clientId) ?? "?"} Resize failed ${ptyId}: ${formatErrorDetail(resizeResult.failure.cause)}`,
+							`client=${clientId} Resize failed ${ptyId}: ${formatErrorDetail(resizeResult.failure.cause)}`,
 						);
 					}
 				}),

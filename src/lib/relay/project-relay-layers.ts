@@ -155,6 +155,7 @@ import {
 	AgentLivenessTag,
 	BackgroundLivenessTag,
 	type ConfigTag,
+	ConnectPtyUpstreamTag,
 	LiveTaskListTag,
 	type LoggerTag,
 	OpenCodeFileServiceLive,
@@ -163,6 +164,7 @@ import {
 	OpenCodeSettingsServiceLive,
 	type OpenCodeSettingsServiceTag,
 	type OrchestrationEngineTag,
+	PtyManagerTag,
 	SessionCompactionsTag,
 	SessionRetriesTag,
 	TranslatorTag,
@@ -204,6 +206,7 @@ import { SSEStreamLive } from "../domain/relay/Services/sse-stream-service.js";
 import {
 	LocalPtyServiceOrOwn,
 	OpenCodeTerminalServiceLive,
+	OpenCodeTerminalServiceTag,
 } from "../domain/relay/Services/terminal-service.js";
 import {
 	ToolContentServiceLive,
@@ -890,17 +893,22 @@ export function createProjectRelayLayers({
 	const localPtyServiceLayer = LocalPtyServiceOrOwn(
 		config.configDir ?? DEFAULT_CONFIG_DIR,
 	).pipe(Layer.provide(Layer.merge(daemonContextLayer, loggerLayer)));
-	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				// 82tn.14: the daemon's owner scopes, so a removal closes the project's terminals.
-				daemonContextLayer,
-				openCodeInstancesLayer,
-				webSocketHandlerLayer,
-				loggerLayer,
-				configLayer,
-				ptyRuntimeLayer,
-				localPtyServiceLayer,
+	// The project's terminals, so a replaced relay keeps them (lane 16o).
+	const openCodeTerminalServiceLayer = fromProject(
+		Context.pick(
+			OpenCodeTerminalServiceTag,
+			PtyManagerTag,
+			ConnectPtyUpstreamTag,
+		),
+		OpenCodeTerminalServiceLive.pipe(
+			Layer.provideMerge(ptyRuntimeLayer),
+			Layer.provide(
+				Layer.mergeAll(
+					openCodeInstancesLayer,
+					loggerLayer,
+					configLayer,
+					localPtyServiceLayer,
+				),
 			),
 		),
 	);
@@ -958,14 +966,12 @@ export function createProjectRelayLayers({
 		),
 		scanServiceLayer,
 		openCodeTerminalServiceLayer,
-		localPtyServiceLayer,
 		ingestionLayer,
 		toolContentServiceLayer,
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
 		activityReaders,
 		agentLivenessLayer,
-		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,
 		providerOrchestrationLayer,
