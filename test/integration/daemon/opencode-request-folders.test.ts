@@ -7,6 +7,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	AccountIdSchema,
@@ -99,15 +100,31 @@ describe("82tn.16: OpenCode requests name the session's folder", () => {
 		const recorded = sessions.find(({ id }) => id === worktree.sessionId)
 			?.workspace?.worktrees[fixture.projectDir];
 		if (!recorded) throw new Error("Launch did not record its worktree");
-		const folders = {
-			[worktree.sessionId]: realpathSync(recorded),
-			[other.sessionId]: realpathSync(projectB),
+		// A worktree launch names the session; OpenCode names its own (82tn.80).
+		const nativeOf = (sessionId: string) => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return (
+					db
+						.prepare(
+							"SELECT COALESCE(provider_sid, id) AS native FROM sessions WHERE id = ?",
+						)
+						.get(sessionId) as { native: string }
+				).native;
+			} finally {
+				db.close();
+			}
 		};
-		expect(folders[worktree.sessionId]).not.toBe(
+		const sessionIds = [worktree.sessionId, other.sessionId];
+		const folders = {
+			[nativeOf(worktree.sessionId)]: realpathSync(recorded),
+			[nativeOf(other.sessionId)]: realpathSync(projectB),
+		};
+		expect(folders[nativeOf(worktree.sessionId)]).not.toBe(
 			realpathSync(fixture.projectDir),
 		);
 
-		for (const sessionId of Object.keys(folders)) {
+		for (const sessionId of sessionIds) {
 			await fixture.requestRpc({
 				_tag: "RenameSession",
 				sessionId,

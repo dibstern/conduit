@@ -313,6 +313,23 @@ describe("OpenCode sessions keep their effective working directories", () => {
 			).sessionId;
 		const s1 = await create("Directory S1");
 		const s2 = await create("Directory S2");
+		// A worktree launch names the session; OpenCode names its own (82tn.80).
+		const nativeOf = (sessionId: string) => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return (
+					db
+						.prepare(
+							"SELECT COALESCE(provider_sid, id) AS native FROM sessions WHERE id = ?",
+						)
+						.get(sessionId) as { native: string }
+				).native;
+			} finally {
+				db.close();
+			}
+		};
+		const n1 = nativeOf(s1);
+		const n2 = nativeOf(s2);
 		const { sessions } = await sendRpcRequest(socket, {
 			_tag: "ListDaemonSessions",
 			projectSlug: "process-test",
@@ -330,6 +347,8 @@ describe("OpenCode sessions keep their effective working directories", () => {
 			[w2, "<W2>"],
 			[s1, "<session-1>"],
 			[s2, "<session-2>"],
+			[n1, "<native-1>"],
+			[n2, "<native-2>"],
 		);
 		expect(realpathSync(w1)).not.toBe(realpathSync(w2));
 		const worktrees = git("worktree", "list", "--porcelain");
@@ -342,7 +361,7 @@ describe("OpenCode sessions keep their effective working directories", () => {
 		if (!instance?.port) throw new Error("Managed OpenCode is missing");
 		const native = async (sessionId: string, directory: string) => {
 			const response = await fetch(
-				`http://127.0.0.1:${instance.port}/session/${sessionId}?directory=${encodeURIComponent(directory)}`,
+				`http://127.0.0.1:${instance.port}/session/${nativeOf(sessionId)}?directory=${encodeURIComponent(directory)}`,
 				{
 					headers: {
 						Authorization: `Basic ${Buffer.from(`${instance.env?.["OPENCODE_SERVER_USERNAME"] ?? "opencode"}:${instance.env?.["OPENCODE_SERVER_PASSWORD"]}`).toString("base64")}`,
@@ -519,21 +538,21 @@ describe("OpenCode sessions keep their effective working directories", () => {
 			: [];
 		check(
 			"S1 was created in W1",
-			creations.find(({ id }) => id === s1)?.directory,
+			creations.find(({ id }) => id === n1)?.directory,
 			w1,
 		);
 		check(
 			"S2 was created in W2",
-			creations.find(({ id }) => id === s2)?.directory,
+			creations.find(({ id }) => id === n2)?.directory,
 			w2,
 		);
 		for (const [label, path, directory] of [
-			["S1 prompt", `/session/${s1}/prompt_async`, w1],
-			["S2 prompt", `/session/${s2}/prompt_async`, w2],
-			["S2 fork", `/session/${s2}/fork`, w2],
+			["S1 prompt", `/session/${n1}/prompt_async`, w1],
+			["S2 prompt", `/session/${n2}/prompt_async`, w2],
+			["S2 fork", `/session/${n2}/fork`, w2],
 			[
 				"permission reply",
-				`/session/${s2}/permissions/${providerPermissionId}`,
+				`/session/${n2}/permissions/${providerPermissionId}`,
 				w2,
 			],
 		] as const) {
@@ -555,12 +574,12 @@ describe("OpenCode sessions keep their effective working directories", () => {
 			[s1, w1],
 			[s2, w2],
 			[fork.sessionId, w2],
-		]) {
+		] as const) {
 			for (const suffix of ["", "/message"]) {
 				const reads = requests.filter(
 					({ method, url }) =>
 						method === "GET" &&
-						url.split("?")[0] === `/session/${sessionId}${suffix}`,
+						url.split("?")[0] === `/session/${nativeOf(sessionId)}${suffix}`,
 				);
 				const scopes = reads.map(
 					({ url, directory: header }) =>
