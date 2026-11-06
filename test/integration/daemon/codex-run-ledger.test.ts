@@ -583,6 +583,15 @@ describe("Codex on the Run Ledger", () => {
 		rmSync(gate, { force: true });
 		await turns(fixture, sessionId, ["interrupted"]);
 		expect(captured("turn/start", "out")).toEqual([]);
+		// 82tn.83: the stopped send's end names its input, so the browser settles it with no later turn.
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		const end = db
+			.prepare(
+				"SELECT sessions.last_turn_end_input_id AS ended, pending.input_id AS stopped FROM sessions JOIN pending_inputs pending ON pending.session_id = sessions.id WHERE sessions.id = ? AND pending.text = ?",
+			)
+			.get(sessionId, "Say hello") as { ended: string | null; stopped: string };
+		db.close();
+		expect(end.ended).toBe(end.stopped);
 		const ledger = read(fixture, sessionId);
 		endsOnce(ledger);
 		expect(ledger.ends).toEqual([

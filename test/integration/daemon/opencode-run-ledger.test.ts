@@ -658,6 +658,58 @@ describe("OpenCode on the Run Ledger", () => {
 			.opencodeRequestBodies()
 			.filter(({ path }) => path === `/session/${sessionId}/prompt_async`);
 
+	// 82tn.83: a send a Stop ends before delivery settles at its Run's end, with no later turn, and
+	// its user message sits before that end, live and for a browser that connects afterwards.
+	const settlesAtItsEnd = async (
+		fixture: ProcessHarness,
+		sessionId: string,
+		sent: Promise<unknown>,
+		text: string,
+	) => {
+		let settled = false;
+		void sent.then(() => {
+			settled = true;
+		});
+		await until(() => expect(settled).toBe(true), 10_000);
+		expect(await sent).not.toBeInstanceOf(Error);
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		const stored = (() => {
+			try {
+				return {
+					input: db
+						.prepare(
+							"SELECT input_id AS inputId, (SELECT stream_version FROM events WHERE session_id = pending.session_id AND type = 'message.created' AND json_extract(data, '$.inputId') = pending.input_id) AS placed FROM pending_inputs pending WHERE session_id = ? AND text = ?",
+						)
+						.get(sessionId, text) as { inputId: string; placed: number | null },
+					end: db
+						.prepare(
+							"SELECT last_turn_end_input_id AS inputId, last_turn_end_version AS version FROM sessions WHERE id = ?",
+						)
+						.get(sessionId) as {
+						inputId: string | null;
+						version: number | null;
+					},
+				};
+			} finally {
+				db.close();
+			}
+		})();
+		expect(stored.end.inputId).toBe(stored.input.inputId);
+		expect(stored.input.placed).not.toBeNull();
+		expect(stored.end.version).toBeGreaterThanOrEqual(
+			stored.input.placed ?? Infinity,
+		);
+		const late = await fixture.connect();
+		const shown = (await late.history(sessionId))
+			.filter(({ role }) => role === "user")
+			.map(({ parts }) =>
+				(parts ?? []).map((part) => ("text" in part ? part.text : "")).join(""),
+			);
+		expect(shown.at(-1)).toBe(text);
+		await late.waitForTurnEnd(sessionId, 0, 5_000, stored.input.inputId);
+		return stored;
+	};
+
 	it("a Stop while the instance is starting ends the send interrupted at once and never sends its prompt; a second Stop changes nothing, and the next message runs (82tn.32.51)", async () => {
 		const { fixture, browser, sessionId, gate, sent } = await startingSend(
 			"stop-while-starting",
@@ -674,6 +726,12 @@ describe("OpenCode on the Run Ledger", () => {
 			5_000,
 		);
 		const stopped = read(fixture, sessionId);
+		const settled = await settlesAtItsEnd(
+			fixture,
+			sessionId,
+			sent,
+			"stop-while-starting",
+		);
 		// The next message, sent while the instance still starts, runs once it answers.
 		const next = browser.send(sessionId, "next", 60_000);
 		rmSync(gate, { force: true });
@@ -681,7 +739,7 @@ describe("OpenCode on the Run Ledger", () => {
 		await next;
 		await streaming(fixture, 1);
 		const after = read(fixture, sessionId);
-		proofs.push({ scenario: "stop-while-starting", stopped, after });
+		proofs.push({ scenario: "stop-while-starting", stopped, settled, after });
 		expect(
 			prompted(fixture, sessionId).map(({ body }) => body.includes("next")),
 		).toEqual([false, true]);
@@ -777,14 +835,13 @@ describe("OpenCode on the Run Ledger", () => {
 			5_000,
 		);
 		const stopped = read(fixture, sessionId);
-		// As in 82tn.32.51: the Stopped input is placed after its end, so the browser's
-		// send settles on the next end.
+		// The session read is still held, so the settlement comes from the Stop alone.
+		const settled = await settlesAtItsEnd(fixture, sessionId, sent, "unsent");
 		const next = browser.send(sessionId, "next", 60_000);
 		rmSync(gate, { force: true });
-		await sent;
 		await next;
 		const after = read(fixture, sessionId);
-		proofs.push({ scenario: "stop-before-send", stopped, after });
+		proofs.push({ scenario: "stop-before-send", stopped, settled, after });
 		expect(
 			prompted(fixture, sessionId).map(({ body }) =>
 				["first", "unsent", "next"].filter((text) => body.includes(text)),
@@ -927,14 +984,22 @@ describe("OpenCode on the Run Ledger", () => {
 			5_000,
 		);
 		const stopped = read(fixture, sessionId);
-		// As in 82tn.32.51: the Stopped input is placed after its end, so the browser's
-		// send settles on the next end.
+		const settled = await settlesAtItsEnd(
+			fixture,
+			sessionId,
+			sent,
+			"after-restart",
+		);
 		const next = browser.send(sessionId, "next", 60_000);
 		rmSync(gate, { force: true });
-		await sent;
 		await next;
 		const after = read(fixture, sessionId);
-		proofs.push({ scenario: "stop-first-send-after-restart", stopped, after });
+		proofs.push({
+			scenario: "stop-first-send-after-restart",
+			stopped,
+			settled,
+			after,
+		});
 		expect(
 			prompted(fixture, sessionId).map(({ body }) =>
 				["after-restart", "next"].filter((text) => body.includes(text)),
