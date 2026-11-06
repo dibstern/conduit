@@ -352,7 +352,13 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 			});
 		};
 		const restoreLocalSessions = Effect.gen(function* () {
-			const hosted = yield* localPty.list(config.projectDir);
+			// Projects can share a folder: only this project's terminals, and those with no project
+			// recorded (82tn.82).
+			const hosted = yield* localPty.list(
+				config.projectDir,
+				false,
+				config.slug,
+			);
 			const hostedIds = new Set(hosted.map(({ id }) => id));
 			for (const { id } of ptyManager.listSessions()) {
 				if (ptyManager.getSession(id)?.source !== "local" || hostedIds.has(id))
@@ -556,7 +562,11 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 						const session = ptyManager.getSession(ptyId);
 						let local = session?.source === "local";
 						if (!session || (local && session.upstream?.readyState === 0)) {
-							const hosted = yield* localPty.list(config.projectDir);
+							const hosted = yield* localPty.list(
+								config.projectDir,
+								false,
+								config.slug,
+							);
 							if (hosted.some(({ id }) => id === ptyId)) {
 								local = true;
 								const restored = yield* localPty.attach(

@@ -652,7 +652,11 @@ describe("OpenCodeTerminalServiceLive", () => {
 			const service = yield* OpenCodeTerminalServiceTag;
 			expect(ptyManager.sessionCount).toBe(0);
 			yield* service.close(hosted.pty.id);
-			expect(localPty.list).toHaveBeenCalledWith("/project");
+			expect(localPty.list).toHaveBeenCalledWith(
+				"/project",
+				false,
+				"test-project",
+			);
 			expect(localPty.attach).toHaveBeenCalledWith(hosted.pty.id, "/project");
 			expect(upstream.close).toHaveBeenCalledWith(1000, "Terminal closed");
 			expect(api.pty.delete).not.toHaveBeenCalled();
