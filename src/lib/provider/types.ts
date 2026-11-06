@@ -338,6 +338,8 @@ export interface SendTurnInput
 	readonly sideThread?: boolean;
 	readonly variant?: string;
 	readonly contextWindow?: string;
+	/** No OpenCode catalog was cached at admission, so the adapter checks the pick (82tn.32.52). */
+	readonly pickUnchecked?: true;
 	/** Stored references for images, plain text and PDFs. */
 	readonly images?: readonly AttachmentRef[];
 	readonly agent?: string;

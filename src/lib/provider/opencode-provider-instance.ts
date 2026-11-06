@@ -30,6 +30,7 @@ import {
 import { discoverOpenCodeCatalog } from "./opencode-discovery.js";
 import { openCodeTextServerEffect } from "./opencode-text-server.js";
 import { skillCommand } from "./skill-discovery.js";
+import { resolveTurnSettings } from "./turn-settings.js";
 import type {
 	CommandInfo,
 	ModelInfo,
@@ -499,6 +500,31 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				return yield* Effect.fail(sendFailure(message));
 			}
 			const client = clientResult.success;
+			// Admission had no catalog, and only the answering instance has one; an unread catalog
+			// never accepts an unchecked pick. The prompt is unsent, so a Stop recalls.
+			if (model && input.pickUnchecked) {
+				const listed = yield* Effect.result(
+					Effect.tryPromise(() => client.provider.list()),
+				);
+				const resolved = resolveTurnSettings(
+					{
+						harness: "opencode",
+						model,
+						effort: variant ?? "",
+						contextWindow: input.contextWindow ?? "",
+					},
+					listed._tag === "Success"
+						? listed.success.providers.flatMap((provider) =>
+								(provider.models ?? []).map((entry) => ({
+									...entry,
+									providerId: provider.id || provider.name,
+								})),
+							)
+						: [],
+				);
+				if (resolved._tag === "Failure")
+					return yield* Effect.fail(sendFailure(resolved.failure.message));
+			}
 			if (
 				!isCompaction &&
 				this.hasWorktreeToolForSession &&

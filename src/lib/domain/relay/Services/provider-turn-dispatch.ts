@@ -583,6 +583,7 @@ const prepareEngineTurnInput = (
 			return undefined;
 		}
 		let catalog: readonly ModelInfo[] | undefined;
+		let pickUnchecked = false;
 		if (traits.catalogSource === "discovery") {
 			const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
 			const catalogues =
@@ -600,23 +601,19 @@ const prepareEngineTurnInput = (
 			const models = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 			if (models._tag === "Some") {
 				const cached = yield* models.value.cachedProviders(providerId);
-				const available =
+				// Reading it here would wait for the instance with the send unadmitted, where a
+				// Stop finds no Run (CONTRACT.md 664-666, 82tn.32.52). The executor checks it
+				// once the instance answers.
+				pickUnchecked = cached._tag === "None";
+				catalog =
 					cached._tag === "Some"
-						? Result.succeed(cached.value)
-						: yield* Effect.result(
-								models.value.listProviders({
-									instanceId: providerId,
-									startIfStopped: true,
-									requireFresh: true,
-								}),
-							);
-				if (Result.isSuccess(available))
-					catalog = available.success.providers.flatMap((provider) =>
-						(provider.models ?? []).map((model) => ({
-							...model,
-							providerId: provider.id || provider.name,
-						})),
-					);
+						? cached.value.providers.flatMap((provider) =>
+								(provider.models ?? []).map((model) => ({
+									...model,
+									providerId: provider.id || provider.name,
+								})),
+							)
+						: undefined;
 			}
 		}
 		const resolved =
@@ -743,6 +740,7 @@ const prepareEngineTurnInput = (
 			abortSignal: new AbortController().signal,
 			...(sessionRow?.side_thread === 1 ? { sideThread: true } : {}),
 			...(imageList ? { images: imageList } : {}),
+			...(pickUnchecked ? { pickUnchecked: true as const } : {}),
 		};
 
 		return { sendTurnInput, workspaceMoveSequence };

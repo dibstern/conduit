@@ -843,6 +843,110 @@ describe("OpenCode on the Run Ledger", () => {
 		);
 	}, 60_000);
 
+	// After a restart the model catalog is not cached, so the first send's model check needs the
+	// instance. A Stop meanwhile still finds a send not delivered (CONTRACT.md 664-666).
+	// test-waits-allow timeout-override: a daemon restart takes seconds.
+	it("a Stop on the first send after a daemon restart, while its instance starts, ends it interrupted at once and never sends its prompt (82tn.32.52)", async () => {
+		const fixture = await start();
+		const first = await fixture.connect();
+		const sessionId = await first.createSession(
+			"Stop after restart",
+			instanceId,
+			"opencode",
+		);
+		await first.send(sessionId, "first", 60_000);
+		// Stopped, so the restart cannot adopt a live instance whose catalog answers at once.
+		await fixture.requestRpc({ _tag: "StopInstance", instanceId });
+		const [old] = spawned(fixture);
+		if (!old) throw new Error("No fake OpenCode");
+		await until(() => expect(alive(old.pid)).toBe(false), 15_000);
+		await fixture.terminate();
+		const gate = join(fixture.configDir, "fake-opencode-hold-listen");
+		writeFileSync(gate, "hold");
+		await fixture.restart();
+		const browser = await fixture.connect();
+		const sent = browser
+			.send(sessionId, "after-restart", 60_000)
+			.catch((error: unknown) => error);
+		await until(() => expect(spawned(fixture)).toHaveLength(2), 30_000);
+		await fixture.requestRpc({
+			_tag: "CancelSession",
+			sessionId,
+			commandId: randomUUID(),
+		});
+		// At once: the gate still holds the instance.
+		await until(
+			() => expect(turnEnds(fixture, sessionId)).toEqual(["turn.interrupted"]),
+			5_000,
+		);
+		const stopped = read(fixture, sessionId);
+		// As in 82tn.32.51: the Stopped input is placed after its end, so the browser's
+		// send settles on the next end.
+		const next = browser.send(sessionId, "next", 60_000);
+		rmSync(gate, { force: true });
+		await sent;
+		await next;
+		const after = read(fixture, sessionId);
+		proofs.push({ scenario: "stop-first-send-after-restart", stopped, after });
+		expect(
+			prompted(fixture, sessionId).map(({ body }) =>
+				["after-restart", "next"].filter((text) => body.includes(text)),
+			),
+		).toEqual([[], ["next"]]);
+		expect(after.ends.map(({ reason }) => reason)).toEqual([
+			"completed",
+			"interrupted",
+			"completed",
+		]);
+		expect(after.runs.map(({ status }) => status)).toEqual([
+			"completed",
+			"interrupted",
+			"completed",
+		]);
+	}, 60_000);
+
+	// The first send after a restart has no cached catalog, so its instance checks the pick.
+	// test-waits-allow timeout-override: a daemon restart takes seconds.
+	it("the first send after a daemon restart, when its instance cannot list models, ends in error and never sends its prompt (82tn.32.52)", async () => {
+		const fixture = await start();
+		const first = await fixture.connect();
+		const sessionId = await first.createSession(
+			"Unchecked pick after restart",
+			instanceId,
+			"opencode",
+		);
+		await first.send(sessionId, "first", 60_000);
+		await fixture.terminate();
+		const unlisted = join(fixture.configDir, "fake-opencode-reject-models");
+		writeFileSync(unlisted, "test-only");
+		await fixture.restart();
+		const browser = await fixture.connect();
+		const sent = browser
+			.send(sessionId, "unchecked", 60_000)
+			.catch((error: unknown) => error);
+		await until(
+			() => expect(turnEnds(fixture, sessionId)).toEqual(["turn.error"]),
+			30_000,
+		);
+		const refused = read(fixture, sessionId);
+		rmSync(unlisted, { force: true });
+		const next = browser.send(sessionId, "next", 60_000);
+		await sent;
+		await next;
+		const after = read(fixture, sessionId);
+		proofs.push({ scenario: "unchecked-pick-after-restart", refused, after });
+		expect(
+			prompted(fixture, sessionId).map(({ body }) =>
+				["unchecked", "next"].filter((text) => body.includes(text)),
+			),
+		).toEqual([[], ["next"]]);
+		expect(after.runs.map(({ status }) => status)).toEqual([
+			"completed",
+			"error",
+			"completed",
+		]);
+	}, 60_000);
+
 	it("a prompt whose send comes back unknown and then runs late keeps its Run live while the work runs, probes until an idle read after the work, and ends it once", async () => {
 		const fixture = await start(instanceId, 500);
 		const browser = await fixture.connect();
