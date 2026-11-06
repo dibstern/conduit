@@ -362,6 +362,8 @@ export class ProviderSideEffectReactor {
 	>();
 	private readonly executingControls = new Set<string>();
 	private readonly executingSends = new Map<string, ProviderCommandOutboxRow>();
+	/** A direct send's recall by its Run, while its executor runs (82tn.32.51). */
+	private readonly sendRecalls = new Map<string, AbortController>();
 	private recoveryPrepared = false;
 	private ledgerWakeRegistered = false;
 
@@ -917,6 +919,7 @@ export class ProviderSideEffectReactor {
 		},
 	): Effect.Effect<TurnResult | undefined, ProviderCommandExecutionError> {
 		let ownedSend: string | undefined;
+		let ownedRecall: string | undefined;
 		return Effect.gen({ self: this }, function* () {
 			// H4: a row this executor runs reads the gate before its claim and,
 			// unless removed, writes nothing; the next drain tries it again.
@@ -954,6 +957,10 @@ export class ProviderSideEffectReactor {
 			if (row.effect_type === "send_turn")
 				ownedSend = `${row.request_sequence}:${row.attempt_count}`;
 			const cancellation = new AbortController();
+			if (row.effect_type === "send_turn" && row.run_id) {
+				ownedRecall = row.run_id;
+				this.sendRecalls.set(ownedRecall, cancellation);
+			}
 			// 2.1 row 212: a claim past the cap sends nothing and fails its input through main's path.
 			const delivery = claimed.exhausted
 				? Effect.fail(
@@ -1177,6 +1184,7 @@ export class ProviderSideEffectReactor {
 			Effect.ensuring(
 				Effect.sync(() => {
 					if (ownedSend) this.executingSends.delete(ownedSend);
+					if (ownedRecall) this.sendRecalls.delete(ownedRecall);
 				}),
 			),
 		);
@@ -2208,20 +2216,34 @@ export class ProviderSideEffectReactor {
 							const driver = getProviderDriver(
 								account?.driver ?? instance.providerId,
 							);
-							yield* instance.interruptTurnEffect(
-								row.session_id,
-								// A Stop names its committed cohort's runs, never reusable input ids (4.6).
-								// A legacy payload keeps its turnIds; the predecessor omitted them for an
-								// empty Stop, so fence delivery without changing its committed payload.
-								payload.stop?.owners.map(({ runId }) => runId) ??
-									payload.turnIds ??
-									(driver?.keepsPendingSteersOnInterrupt ||
-									driver?.runsOpenCodeServer
-										? []
-										: undefined),
-								call,
-								context,
-							);
+							yield* instance
+								.interruptTurnEffect(
+									row.session_id,
+									// A Stop names its committed cohort's runs, never reusable input ids (4.6).
+									// A legacy payload keeps its turnIds; the predecessor omitted them for an
+									// empty Stop, so fence delivery without changing its committed payload.
+									payload.stop?.owners.map(({ runId }) => runId) ??
+										payload.turnIds ??
+										(driver?.keepsPendingSteersOnInterrupt ||
+										driver?.runsOpenCodeServer
+											? []
+											: undefined),
+									call,
+									context,
+								)
+								.pipe(
+									// A Stop that cannot reach OpenCode (it may still be starting) recalls its
+									// owners' sends still in hand. The adapter answers cancelled only when the
+									// prompt never left, so the ledger decides whether it was delivered
+									// (CONTRACT.md 664-666).
+									Effect.tapError(() =>
+										Effect.sync(() => {
+											if (driver?.runsOpenCodeServer)
+												for (const { runId } of stopOwners ?? [])
+													this.sendRecalls.get(runId)?.abort();
+										}),
+									),
+								);
 							break;
 						}
 						case "resolve_permission":

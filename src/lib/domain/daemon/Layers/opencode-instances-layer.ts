@@ -11,6 +11,7 @@ import {
 	Option,
 	Queue,
 	Result,
+	Schedule,
 	Schema,
 	Semaphore,
 	Stream,
@@ -195,6 +196,8 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				string,
 				Deferred.Deferred<void, OpenCodeUnavailable>
 			>();
+			// The process identity each in-flight start began from: a different one is its spawn.
+			const startedFrom = new Map<string, string | undefined>();
 			const subscribers = new Set<{
 				directories: () => ReadonlySet<string>;
 				send: (event: OpenCodeInstanceEvent) => void;
@@ -732,7 +735,11 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					const started = Deferred.makeUnsafe<void, OpenCodeUnavailable>();
 					starts.set(instanceId, started);
 					setState(instanceId, pending);
-					return run.pipe(
+					return resolveIn(instanceId).pipe(
+						Effect.map((endpoint) =>
+							startedFrom.set(instanceId, endpoint?.processIdentity),
+						),
+						Effect.andThen(run),
 						Effect.provide(context),
 						Effect.mapError((cause) => spawnFailed(instanceId, cause)),
 						Effect.andThen(resolveIn(instanceId)),
@@ -759,6 +766,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 									.withPermits(1)(
 										Effect.gen(function* () {
 											starts.delete(instanceId);
+											startedFrom.delete(instanceId);
 											if (Exit.isSuccess(exit)) {
 												const endpoint = yield* resolveIn(instanceId);
 												// A lazy Default resolving to an external server was
@@ -1201,6 +1209,40 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					Effect.flatMap(resolveId(instanceId), (id) =>
 						use(id, directory ?? undefined, true),
 					),
+				holdProcess: (instanceId, directory) =>
+					Effect.gen(function* () {
+						const id = yield* resolveId(instanceId);
+						const held = yield* Effect.forkScoped(
+							use(id, directory ?? undefined).pipe(
+								Effect.option,
+								Effect.map(
+									Option.flatMap(({ promptProcessId }) =>
+										Option.fromNullishOr(promptProcessId),
+									),
+								),
+							),
+						);
+						// While a start runs, the record names the process it replaces until it spawns.
+						const spawned = resolveIn(id).pipe(
+							Effect.map((endpoint) =>
+								startedFrom.has(id) &&
+								endpoint?.processIdentity !== undefined &&
+								endpoint.processIdentity !== startedFrom.get(id)
+									? Option.some(
+											openCodePromptProcessId(
+												endpoint.instanceId ?? id,
+												endpoint.processIdentity,
+											),
+										)
+									: Option.none<string>(),
+							),
+							Effect.repeat({
+								until: Option.isSome,
+								schedule: Schedule.spaced("20 millis"),
+							}),
+						);
+						return yield* Effect.raceFirst(Fiber.join(held), spawned);
+					}),
 				useIfRunning: (instanceId, directory) =>
 					Effect.flatMap(resolveId(instanceId), (instanceId) =>
 						gate.withPermits(1)(

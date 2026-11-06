@@ -272,6 +272,7 @@ describe("SessionLifecycleWiringLive", () => {
 				ifRunning: vi.fn(() =>
 					Effect.sync(() => (running ? Option.some(api) : Option.none())),
 				),
+				holdProcess: () => Effect.succeedNone,
 				useIfRunning: vi.fn(() =>
 					Effect.die(
 						new Error("Lifecycle history must not acquire an instance hold"),

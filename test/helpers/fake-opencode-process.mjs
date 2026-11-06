@@ -429,6 +429,10 @@ const server = createServer(async (request, response) => {
 			request.socket.destroy();
 			return;
 		}
+		// A test holds the prompt received and not yet answered (82tn.32.51).
+		while (existsSync(join(configDir, "fake-opencode-hold-prompt")))
+			// test-waits-allow real-wait: the hold is a file the test removes; it has no event.
+			await new Promise((resolve) => setTimeout(resolve, 50));
 		response.writeHead(204).end();
 		// Crash tests control the remaining stream and idle through /test routes.
 		if (holdTurn) {
@@ -790,8 +794,12 @@ const listen = () =>
 const listenDelay = Number(
 	process.env.CONDUIT_TEST_OPENCODE_LISTEN_DELAY_MS ?? 0,
 );
-if (listenDelay > 0) setTimeout(listen, listenDelay);
-else listen();
+// While this file exists the process is up but not yet listening: its instance is starting.
+const listenGate = join(configDir, "fake-opencode-hold-listen");
+const listenWhenOpen = () =>
+	existsSync(listenGate) ? setTimeout(listenWhenOpen, 20) : listen();
+if (listenDelay > 0) setTimeout(listenWhenOpen, listenDelay);
+else listenWhenOpen();
 if (process.env.CONDUIT_TEST_OPENCODE_IGNORE_SIGTERM === "true") {
 	process.on("SIGTERM", () => {});
 }
