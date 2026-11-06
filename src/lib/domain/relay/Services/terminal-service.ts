@@ -102,6 +102,7 @@ export interface LocalPtyService {
 	list(
 		cwd: string,
 		allProjects?: boolean,
+		projectId?: string,
 	): Effect.Effect<ReadonlyArray<PtyInfo>, TerminalServiceError>;
 	attach(
 		ptyId: string,
@@ -110,6 +111,7 @@ export interface LocalPtyService {
 	create(options: {
 		readonly cwd: string;
 		readonly projectDir?: string;
+		readonly projectId?: string;
 		readonly cols?: number | undefined;
 		readonly rows?: number | undefined;
 		readonly env?: Readonly<Record<string, string | undefined>>;
@@ -176,7 +178,7 @@ export const makeLocalPtyServiceLive = (
 						catch: (cause) =>
 							new TerminalServiceError({ operation: "create", cause }),
 					}),
-				list: (cwd, allProjects = false) =>
+				list: (cwd, allProjects = false, projectId) =>
 					Effect.tryPromise({
 						try: async () => {
 							let host: PtyHostClient;
@@ -191,7 +193,9 @@ export const makeLocalPtyServiceLive = (
 								throw error;
 							}
 							// A failed exchange is not an authoritative empty terminal list.
-							return (await host.list(cwd, allProjects)).map(({ pty }) => pty);
+							return (await host.list(cwd, allProjects, projectId)).map(
+								({ pty }) => pty,
+							);
 						},
 						catch: (cause) =>
 							new TerminalServiceError({ operation: "list", cause }),
@@ -466,6 +470,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 					const createResult = yield* Effect.result(
 						localPty.create({
 							cwd,
+							projectId: config.slug,
 							...(account?.driver === "claude"
 								? { env: makeClaudeTerminalEnv({ configDir: account.folder }) }
 								: codex

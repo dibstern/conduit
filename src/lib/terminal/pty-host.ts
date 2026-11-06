@@ -118,6 +118,7 @@ export async function runPtyHost(options: {
 	interface Terminal {
 		pty: PtyInfo;
 		projectDir: string;
+		projectId: string | undefined;
 		process: nodePty.IPty;
 		scrollback: PtyScrollback;
 		exitCode: number | null;
@@ -279,6 +280,7 @@ export async function runPtyHost(options: {
 							const terminal: Terminal = {
 								pty,
 								projectDir: resolve(message.projectDir ?? message.cwd),
+								projectId: message.projectId,
 								process: ptyProcess,
 								scrollback: new PtyScrollback(),
 								exitCode: null,
@@ -314,7 +316,12 @@ export async function runPtyHost(options: {
 									.filter(
 										(terminal) =>
 											message.allProjects ||
-											terminal.projectDir === resolve(message.cwd),
+											(terminal.projectDir === resolve(message.cwd) &&
+												// One made with no project recorded (an older daemon) belongs to every
+												// project on its folder.
+												(message.projectId === undefined ||
+													terminal.projectId === undefined ||
+													terminal.projectId === message.projectId)),
 									)
 									.map(({ pty, exitCode }) => ({ pty, exitCode })),
 								...(message.allProjects ? { allProjects: true } : {}),

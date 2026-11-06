@@ -23,8 +23,9 @@ const RemovedProjectTerminalsLive = Layer.effectDiscard(
 		const localPty = yield* LocalPtyServiceTag;
 		const owners = yield* OwnerScopes;
 		const registry = yield* ProjectRegistryTag;
-		const closeHosted = (projectDir: string) =>
-			localPty.list(projectDir).pipe(
+		// Projects can share a folder: close only this project's terminals (82tn.78).
+		const closeHosted = (slug: string, projectDir: string) =>
+			localPty.list(projectDir, false, slug).pipe(
 				Effect.flatMap((hosted) =>
 					Effect.forEach(
 						hosted,
@@ -58,7 +59,7 @@ const RemovedProjectTerminalsLive = Layer.effectDiscard(
 							return scope.acquire(
 								Effect.addFinalizer((exit) =>
 									Exit.isSuccess(exit) && exit.value === "remove"
-										? closeHosted(projectDir)
+										? closeHosted(slug, projectDir)
 										: Effect.void,
 								),
 							);
