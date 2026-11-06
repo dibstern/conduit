@@ -18,10 +18,47 @@ import {
 	type OpenCodeInstanceEvent,
 	OpenCodeInstancesTag,
 } from "./opencode-instances-service.js";
+import { OpenCodeSessionIds } from "./opencode-session-ids.js";
 import { OwnerScopes } from "./owner-scopes.js";
 
 /** Events a project heard while no pipeline was attached; the oldest go first. */
 const BUFFER_LIMIT = 1_000;
+
+type Fields = Record<string, unknown>;
+const fields = (value: unknown): Fields | undefined =>
+	typeof value === "object" && value !== null ? (value as Fields) : undefined;
+
+/**
+ * The event's properties with every session id it names renamed: top-level and
+ * part `sessionID`, a message's `info.sessionID`, a session's `info.id` and
+ * `info.parentID`. Ids `rename` leaves alone keep their place.
+ */
+const renameSessionIds = (
+	properties: Fields,
+	rename: (id: string) => string,
+): Fields => {
+	const renamed = (value: Fields, keys: readonly string[]) => {
+		const ids = keys.flatMap((key) => {
+			const id = value[key];
+			return typeof id === "string" ? [[key, rename(id)] as const] : [];
+		});
+		return { ...value, ...Object.fromEntries(ids) };
+	};
+	const part = fields(properties["part"]);
+	const info = fields(properties["info"]);
+	return {
+		...renamed(properties, ["sessionID"]),
+		...(part ? { part: renamed(part, ["sessionID"]) } : {}),
+		...(info
+			? {
+					info: renamed(
+						info,
+						"sessionID" in info ? ["sessionID"] : ["id", "parentID"],
+					),
+				}
+			: {}),
+	};
+};
 
 /**
  * One OpenCode event subscription per registered project, held for the
@@ -60,6 +97,7 @@ export const makeOpenCodeProjectStreamsLive = (
 			const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 			const scope = yield* Effect.scope;
 			const owners = yield* Effect.serviceOption(OwnerScopes);
+			const sessionIds = yield* Effect.serviceOption(OpenCodeSessionIds);
 			const gate = yield* Semaphore.make(1);
 			const wakes = yield* Queue.sliding<string>(64);
 			type Entry = {
@@ -104,6 +142,41 @@ export const makeOpenCodeProjectStreamsLive = (
 							Effect.orElseSucceed(() => undefined),
 						);
 
+			// OpenCode names its own sessions; Conduit's pipeline sees only Conduit's (82tn.80).
+			const toConduitIds = (
+				message: Extract<OpenCodeInstanceEvent, { _tag: "event" }>,
+			) =>
+				Effect.gen(function* () {
+					const payload = fields(message.payload);
+					const properties = fields(payload?.["properties"]);
+					if (sessionIds._tag === "None" || !payload || !properties)
+						return message;
+					const natives = new Set<string>();
+					renameSessionIds(properties, (id) => {
+						natives.add(id);
+						return id;
+					});
+					const conduit = new Map<string, string>();
+					for (const id of natives) {
+						const mapped = yield* sessionIds.value.conduit(
+							message.instanceId,
+							id,
+						);
+						if (mapped !== id) conduit.set(id, mapped);
+					}
+					if (conduit.size === 0) return message;
+					return {
+						...message,
+						payload: {
+							...payload,
+							properties: renameSessionIds(
+								properties,
+								(id) => conduit.get(id) ?? id,
+							),
+						},
+					};
+				});
+
 			const deliver = (
 				slug: string,
 				entry: Entry,
@@ -122,14 +195,15 @@ export const makeOpenCodeProjectStreamsLive = (
 			const route = (
 				slug: string,
 				entry: Entry,
-				message: OpenCodeInstanceEvent,
+				received: OpenCodeInstanceEvent,
 			) =>
 				Effect.gen(function* () {
 					if (!foldersOf(slug)) {
 						if (entries.get(slug) === entry) entries.delete(slug);
 						return yield* Effect.interrupt;
 					}
-					if (message._tag !== "event") return deliver(slug, entry, message);
+					if (received._tag !== "event") return deliver(slug, entry, received);
+					const message = yield* toConduitIds(received);
 					const payload = message.payload as Partial<SSEEvent> | null;
 					const sessionId = payload?.properties
 						? extractSessionId(payload as SSEEvent)

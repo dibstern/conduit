@@ -131,6 +131,7 @@ import {
 	makeOpenCodeProjectStreamsLive,
 	OpenCodeProjectStreams,
 } from "../Services/opencode-project-streams.js";
+import { OpenCodeSessionIdsLive } from "../Services/opencode-session-ids.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
@@ -928,11 +929,20 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		configDir,
 	).pipe(Layer.provideMerge(withAvatar));
 
+	// The one owner of Conduit's map onto OpenCode's own session ids (82tn.80).
+	const withOpenCodeSessionIds = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			return OpenCodeSessionIdsLive.pipe(
+				Layer.provide(Layer.succeedContext(store)),
+			);
+		}),
+	).pipe(Layer.provideMerge(withManagedOpenCodeServers));
 	const withOpenCodeInstances = (
 		options.openCodeInstances
 			? Layer.succeed(OpenCodeInstancesTag, options.openCodeInstances)
 			: OpenCodeInstancesLive
-	).pipe(Layer.provideMerge(withManagedOpenCodeServers));
+	).pipe(Layer.provideMerge(withOpenCodeSessionIds));
 	const withSessionDirectory = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;
