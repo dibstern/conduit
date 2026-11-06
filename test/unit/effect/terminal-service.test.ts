@@ -299,6 +299,7 @@ describe("OpenCodeTerminalServiceLive", () => {
 			const instances = {
 				...makeOpenCodeInstancesStub({ opencode: api }),
 				ifRunning: () => Effect.succeed(Option.none()),
+				holdProcess: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeed(Option.none()),
 			};
 			return Effect.gen(function* () {

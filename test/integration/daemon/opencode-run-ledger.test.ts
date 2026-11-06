@@ -602,6 +602,202 @@ describe("OpenCode on the Run Ledger", () => {
 		]);
 	});
 
+	// 82tn.32.51 (lane 3251 audit): a send whose instance is still starting has not been delivered
+	// (CONTRACT 664-666): a Stop ends it interrupted at once and its prompt is never sent. The
+	// instance idled out after a first turn, so the send's model check needs no live server.
+	const startingSend = async <T>(
+		prompt: string,
+		prepare: (fixture: ProcessHarness) => Promise<T> = async () =>
+			undefined as T,
+	) => {
+		const fixture = await start();
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"Stop while starting",
+			instanceId,
+			"opencode",
+		);
+		const prepared = await prepare(fixture);
+		await browser.send(sessionId, "first", 60_000);
+		await fixture.requestRpc({ _tag: "StopInstance", instanceId });
+		const [old] = spawned(fixture);
+		if (!old) throw new Error("No fake OpenCode");
+		await until(() => expect(alive(old.pid)).toBe(false), 15_000);
+		const gate = join(fixture.configDir, "fake-opencode-hold-listen");
+		writeFileSync(gate, "hold");
+		const sent = browser
+			.send(sessionId, prompt, 60_000)
+			.catch((error: unknown) => error);
+		await until(() => expect(spawned(fixture)).toHaveLength(2), 30_000);
+		return { fixture, browser, sessionId, gate, sent, prepared };
+	};
+	const alive = (pid: number) => {
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+	const turnEnds = (fixture: ProcessHarness, sessionId: string) => {
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			return (
+				db
+					.prepare(
+						"SELECT type FROM events WHERE session_id = ? AND type IN ('turn.completed', 'turn.interrupted', 'turn.error') ORDER BY sequence",
+					)
+					.all(sessionId) as { type: string }[]
+			).map(({ type }) => type);
+		} finally {
+			db.close();
+		}
+	};
+	const prompted = (fixture: ProcessHarness, sessionId: string) =>
+		fixture
+			.opencodeRequestBodies()
+			.filter(({ path }) => path === `/session/${sessionId}/prompt_async`);
+
+	it("a Stop while the instance is starting ends the send interrupted at once and never sends its prompt; a second Stop changes nothing, and the next message runs (82tn.32.51)", async () => {
+		const { fixture, browser, sessionId, gate, sent } = await startingSend(
+			"stop-while-starting",
+		);
+		for (const _ of [1, 2])
+			await fixture.requestRpc({
+				_tag: "CancelSession",
+				sessionId,
+				commandId: randomUUID(),
+			});
+		// At once: the instance is still starting, so the gate still holds it.
+		await until(
+			() => expect(turnEnds(fixture, sessionId)).toEqual(["turn.interrupted"]),
+			5_000,
+		);
+		const stopped = read(fixture, sessionId);
+		// The next message, sent while the instance still starts, runs once it answers.
+		const next = browser.send(sessionId, "next", 60_000);
+		rmSync(gate, { force: true });
+		await sent;
+		await next;
+		await streaming(fixture, 1);
+		const after = read(fixture, sessionId);
+		proofs.push({ scenario: "stop-while-starting", stopped, after });
+		expect(
+			prompted(fixture, sessionId).map(({ body }) => body.includes("next")),
+		).toEqual([false, true]);
+		expect(turnEnds(fixture, sessionId)).toEqual(["turn.interrupted"]);
+		expect(after.runs.map(({ status }) => status)).toEqual([
+			"completed",
+			"interrupted",
+			"completed",
+		]);
+		expect(after.ends).toEqual(
+			after.runs.map(({ id }, index) => ({
+				runId: id,
+				reason: index === 1 ? "interrupted" : "completed",
+			})),
+		);
+	});
+
+	it("a Stop racing the prompt's send never calls it unsent: the prompt reached OpenCode, the abort follows it, and the Run ends once by its work (82tn.32.51)", async () => {
+		const fixture = await start();
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"Stop racing the send",
+			instanceId,
+			"opencode",
+		);
+		await browser.send(sessionId, "first", 60_000);
+		const gate = join(fixture.configDir, "fake-opencode-hold-prompt");
+		writeFileSync(gate, "hold");
+		const sent = browser
+			.send(sessionId, "racing", 60_000)
+			.catch((error: unknown) => error);
+		await until(() => expect(prompted(fixture, sessionId)).toHaveLength(2));
+		// The Stop's reply waits for the Run's end, which waits for the prompt's answer.
+		const stop = fixture
+			.requestRpc({ _tag: "CancelSession", sessionId, commandId: randomUUID() })
+			.catch((error: unknown) => error);
+		const aborted = () =>
+			fixture
+				.opencodeRequests()
+				.some(
+					({ method, url }) =>
+						method === "POST" &&
+						url.split("?")[0] === `/session/${sessionId}/abort`,
+				);
+		await until(() => expect(aborted()).toBe(true), 15_000);
+		const stopped = read(fixture, sessionId);
+		rmSync(gate, { force: true });
+		await sent;
+		await stop;
+		await until(
+			() =>
+				expect(
+					read(fixture, sessionId).runs.map(({ status }) => status),
+				).toEqual(["completed", "completed"]),
+			30_000,
+		);
+		const after = read(fixture, sessionId);
+		proofs.push({ scenario: "stop-racing-send", stopped, after });
+		// While the prompt was in flight the Run was still live: no end before the abort.
+		expect(stopped.ends).toHaveLength(1);
+		expect(prompted(fixture, sessionId)).toHaveLength(2);
+		expect(after.ends).toEqual([
+			{ runId: after.runs[0]?.id, reason: "completed" },
+			// The abort reached OpenCode before it ran the prompt, so the prompt's work ran and ended.
+			{ runId: after.runs[1]?.id, reason: "completed" },
+		]);
+	});
+
+	it("a Stop while a shared instance starts recalls only its own project's send (82tn.32.51)", async () => {
+		const {
+			fixture,
+			sessionId,
+			gate,
+			sent,
+			prepared: { b, sessionB },
+		} = await startingSend("stopped-a", async (fixture) => {
+			const directoryB = join(fixture.root, "project-b");
+			mkdirSync(directoryB, { recursive: true });
+			const { savedSlug } = await fixture.requestRpc({
+				_tag: "SaveProject",
+				folders: [directoryB],
+			});
+			const b = await fixture.connect(undefined, undefined, savedSlug);
+			const sessionB = await b.createSession(
+				"Project B",
+				instanceId,
+				"opencode",
+			);
+			return { b, sessionB };
+		});
+		const sentB = b.send(sessionB, "kept-b", 60_000);
+		await until(() => expect(read(fixture, sessionB).runs).toHaveLength(1));
+		await fixture.requestRpc({
+			_tag: "CancelSession",
+			sessionId,
+			commandId: randomUUID(),
+		});
+		await until(
+			() => expect(turnEnds(fixture, sessionId)).toEqual(["turn.interrupted"]),
+			5_000,
+		);
+		rmSync(gate, { force: true });
+		// The stopped send's own reply never comes (no turn of its own ends it); B's does.
+		void sent;
+		await sentB;
+		const after = { a: read(fixture, sessionId), b: read(fixture, sessionB) };
+		proofs.push({ scenario: "shared-instance-stop", after });
+		expect(prompted(fixture, sessionId)).toHaveLength(1);
+		expect(prompted(fixture, sessionB)).toHaveLength(1);
+		expect(after.a.runs.map(({ status }) => status)).toEqual([
+			"completed",
+			"interrupted",
+		]);
+		expect(after.b.runs.map(({ status }) => status)).toEqual(["completed"]);
+	});
+
 	it("a prompt whose send comes back unknown and then runs late keeps its Run live while the work runs, probes until an idle read after the work, and ends it once", async () => {
 		const fixture = await start(instanceId, 500);
 		const browser = await fixture.connect();

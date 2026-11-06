@@ -939,12 +939,17 @@ const dispatchEngineTurn = (
 					PROVIDER_DRIVERS[driver].runsOpenCodeServer &&
 					Option.isSome(link)
 				) {
-					const client = yield* (yield* OpenCodeInstancesTag)
-						.use(account.id, sendTurnInput.workspaceRoot)
-						.pipe(Effect.option);
-					const processId = Option.getOrUndefined(client)?.promptProcessId;
-					if (processId)
-						yield* link.value.linkProcess(resolvedInput.sessionId, processId);
+					// The Run is written once the process exists, not once it answers, so a Stop while
+					// it starts finds the Run (82tn.32.51, CONTRACT.md 664-666).
+					const processId = yield* (yield* OpenCodeInstancesTag).holdProcess(
+						account.id,
+						sendTurnInput.workspaceRoot,
+					);
+					if (Option.isSome(processId))
+						yield* link.value.linkProcess(
+							resolvedInput.sessionId,
+							processId.value,
+						);
 				}
 				// 82tn.14: the session's OpenCode work ends with its owner scope on a removal (a project removal
 				// or a session delete); a detach leaves it for the next daemon. Bound once per scope generation.

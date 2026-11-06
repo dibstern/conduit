@@ -1278,6 +1278,7 @@ describe("SessionManagerService", () => {
 				borrow: use,
 				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
+				holdProcess: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
@@ -1504,6 +1505,7 @@ describe("SessionManagerService", () => {
 				borrow: use,
 				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
+				holdProcess: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
@@ -1827,6 +1829,7 @@ describe("SessionManagerService", () => {
 				borrow: use,
 				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
+				holdProcess: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
@@ -1932,6 +1935,7 @@ describe("SessionManagerService", () => {
 				borrow: () => Effect.succeed(namedApi),
 				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
+				holdProcess: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
@@ -2009,6 +2013,7 @@ describe("SessionManagerService", () => {
 			borrow: () => Effect.succeed(namedApi),
 			isManagedStopped: () => Effect.succeed(false),
 			ifRunning: () => Effect.succeedNone,
+			holdProcess: () => Effect.succeedNone,
 			useIfRunning: () => Effect.succeedNone,
 			stop: () => Effect.void,
 		} satisfies OpenCodeInstances;
@@ -2225,6 +2230,7 @@ describe("SessionManagerService", () => {
 				borrow: use,
 				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
+				holdProcess: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
@@ -2311,6 +2317,7 @@ describe("SessionManagerService", () => {
 					borrow: use,
 					isManagedStopped: () => Effect.succeed(false),
 					ifRunning: () => Effect.succeedNone,
+					holdProcess: () => Effect.succeedNone,
 					useIfRunning: () => Effect.succeedNone,
 					stop: () => Effect.void,
 				} satisfies OpenCodeInstances;
