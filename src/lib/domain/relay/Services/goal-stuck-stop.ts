@@ -1,27 +1,27 @@
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Option, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import type { StoredEvent } from "../../../contracts/stored-event.js";
+import { createLogger } from "../../../logger.js";
 import { sendPushForEventEffect } from "../../../relay/sse-wiring.js";
-import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
-import { AlertLedgerTag } from "./alert-ledger.js";
-import { ProviderTurnServiceTag } from "./provider-turn-service.js";
-import { ConfigTag, LoggerTag } from "./services.js";
+import { DaemonTurns } from "../../daemon/Services/daemon-turns.js";
+import { PushManagerTag } from "../../server/Services/push-service.js";
+import { AlertLedgerTag, makeAlertLedger } from "./alert-ledger.js";
+import { ProviderTurns } from "./provider-turn-service.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
-import { SessionInboxTag } from "./session-inbox.js";
 
 export const GOAL_STUCK_STOP_AFTER = 10;
 
-/** React only to live commits. Replaying history must never stop a provider. */
+/** One daemon reactor for every project, on the daemon's session event bus.
+ *  React only to live commits. Replaying history must never stop a provider. */
 export const GoalStuckStopReactorLive = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const bus = yield* SessionEventBusTag;
-		const { projectId } = yield* PersistenceProjectTag;
-		const turns = yield* ProviderTurnServiceTag;
-		const inbox = yield* SessionInboxTag;
-		const ledger = yield* AlertLedgerTag;
-		const config = yield* ConfigTag;
-		const log = yield* LoggerTag;
+		const turns = yield* ProviderTurns;
+		const { serialised } = yield* DaemonTurns;
+		const ledger = yield* makeAlertLedger;
+		const pushManager = yield* (yield* PushManagerTag).getLegacyManager;
+		const log = createLogger("daemon");
 		const events = yield* bus.subscribe();
 		const trackers = new Map<
 			string,
@@ -30,7 +30,6 @@ export const GoalStuckStopReactorLive = Layer.effectDiscard(
 
 		const observe = (event: StoredEvent) =>
 			Effect.gen(function* () {
-				if (event.projectId !== projectId) return;
 				const sessionId = event.sessionId;
 				const previous = trackers.get(sessionId);
 				// Native goal continuations can look like user messages. Only a real
@@ -64,16 +63,23 @@ export const GoalStuckStopReactorLive = Layer.effectDiscard(
 				tracker.count = row?.goal_stuck != null ? tracker.count + 1 : 0;
 				if (tracker.count < GOAL_STUCK_STOP_AFTER) return;
 				tracker.count = 0;
+				// A provider runs only while a relay serves its project, so a removed or
+				// unserved project has nothing to stop.
+				const served = turns.served(event.projectId);
+				if (Option.isNone(served)) return;
 				const commandId = `goal-stuck:${event.eventId}`;
 				// Fails when main refuses the Stop; the inner effect waits for turn
 				// end, which must not block this event subscription.
-				yield* inbox.withSession(
-					sessionId,
-					turns.beginStop({ clientId: "goal-stuck", commandId, sessionId }),
+				yield* serialised(sessionId)(
+					served.value.beginStop({
+						clientId: "goal-stuck",
+						commandId,
+						sessionId,
+					}),
 				);
-				if (config.pushManager)
+				if (Option.isSome(pushManager))
 					yield* sendPushForEventEffect(
-						config.pushManager,
+						pushManager.value,
 						{
 							_tag: "goal_stuck",
 							sessionId,
@@ -81,7 +87,7 @@ export const GoalStuckStopReactorLive = Layer.effectDiscard(
 							reason: goal.lastReason ?? "",
 						},
 						log,
-						{ slug: config.slug, sessionId },
+						{ slug: event.projectId, sessionId },
 					).pipe(
 						Effect.provideService(AlertLedgerTag, ledger),
 						Effect.catchCause((cause) =>
