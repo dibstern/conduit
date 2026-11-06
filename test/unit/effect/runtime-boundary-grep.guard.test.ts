@@ -46,6 +46,12 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 		reason: "OpenCode SDK requires a Promise-shaped fetch",
 	},
 	{
+		path: "src/lib/instance/opencode-api.ts",
+		linePattern: /Effect\.runPromise\s*\(mapped\)/,
+		reason:
+			"OpenCodeAPI is Promise-shaped; its session id map is an Effect service",
+	},
+	{
 		path: "src/lib/frontend/transport/runtime.ts",
 		linePattern: /return await rt\.runPromise(?:Exit)?(?:With)?\s*\(effect\);/,
 		reason: "frontend transport wrappers expose Promise-shaped store APIs",

@@ -15,6 +15,7 @@ import type {
 	ConfigUpdateData,
 	Event as OpenCodeEvent,
 } from "@opencode-ai/sdk/v2/types";
+import { Effect } from "effect";
 import { parseAttachmentDataUrl } from "../attachment-data-url.js";
 import {
 	decodeOpenCodeAgentListResponse,
@@ -74,6 +75,23 @@ export interface OpenCodeAPIOptions {
 	processIdentity?: string | undefined;
 	promptProcessId?: string | undefined;
 	controlReplaySafe?: boolean | undefined;
+	/** Conduit's session ids against this instance's own (82tn.80); identity without one. */
+	sessionIds?: OpenCodeSessionIdMap | undefined;
+}
+
+// OpenCodeAPI is Promise-shaped; its id map is the OpenCodeSessionIds service.
+function mapAtSessionBoundary(
+	mapped: Effect.Effect<string> | undefined,
+	id: string,
+): Promise<string> {
+	return mapped ? Effect.runPromise(mapped) : Promise.resolve(id);
+}
+
+export interface OpenCodeSessionIdMap {
+	/** The native session a Conduit session runs on. */
+	native(sessionId: string): Effect.Effect<string>;
+	/** The Conduit session a native session belongs to. */
+	conduit(nativeId: string): Effect.Effect<string>;
 }
 
 /**
@@ -100,6 +118,7 @@ export class OpenCodeAPI {
 	private readonly client: OpencodeClient;
 	private readonly _baseUrl: string;
 	private readonly _authHeaders: Record<string, string>;
+	private readonly sessionIds: OpenCodeSessionIdMap | undefined;
 
 	readonly session: SessionNamespace;
 	readonly permission: PermissionNamespace;
@@ -119,6 +138,7 @@ export class OpenCodeAPI {
 		this.client = options.sdk;
 		this._baseUrl = options.baseUrl;
 		this._authHeaders = options.authHeaders;
+		this.sessionIds = options.sessionIds;
 
 		this.session = new SessionNamespace(this);
 		this.permission = new PermissionNamespace(this);
@@ -258,6 +278,24 @@ export class OpenCodeAPI {
 		}
 	}
 
+	/** The native id every session call sends. */
+	native(sessionId: string): Promise<string> {
+		return mapAtSessionBoundary(this.sessionIds?.native(sessionId), sessionId);
+	}
+
+	/** The Conduit id every session id OpenCode returns is read as. */
+	conduit(nativeId: string): Promise<string> {
+		return mapAtSessionBoundary(this.sessionIds?.conduit(nativeId), nativeId);
+	}
+
+	/** A session OpenCode returned, under its Conduit id and its parent's. */
+	async conduitSession(session: SessionDetail): Promise<SessionDetail> {
+		if (!this.sessionIds) return session;
+		const id = await this.conduit(session.id);
+		const parentID = session.parentID && (await this.conduit(session.parentID));
+		return { ...session, id, ...(parentID ? { parentID } : {}) };
+	}
+
 	/** Access internal SDK client (for namespaces) */
 	get _sdk(): OpencodeClient {
 		return this.client;
@@ -265,12 +303,25 @@ export class OpenCodeAPI {
 }
 
 // Response schemas validate the SDK's nested message envelope before flattening.
-function flattenMessage(message: OpenCodeMessageWithParts): Message {
-	return { ...message.info, parts: [...message.parts] } as Message;
+// Messages of one native session read under the Conduit session's id.
+function flattenMessage(
+	message: OpenCodeMessageWithParts,
+	sessionID: string,
+): Message {
+	return {
+		...message.info,
+		sessionID,
+		parts: message.parts.map((part) =>
+			"sessionID" in part ? { ...part, sessionID } : part,
+		),
+	} as Message;
 }
 
-function flattenMessages(data: readonly OpenCodeMessageWithParts[]): Message[] {
-	return data.map(flattenMessage);
+function flattenMessages(
+	data: readonly OpenCodeMessageWithParts[],
+	sessionID: string,
+): Message[] {
+	return data.map((message) => flattenMessage(message, sessionID));
 }
 
 class SessionNamespace {
@@ -280,15 +331,24 @@ class SessionNamespace {
 		roots?: boolean;
 		limit?: number;
 	}): Promise<SessionDetail[]> {
-		return this.api.sdk("session.list", decodeSessionListResponse, () =>
-			this.api._sdk.session.list(options),
+		const sessions = await this.api.sdk(
+			"session.list",
+			decodeSessionListResponse,
+			() => this.api._sdk.session.list(options),
+		);
+		return Promise.all(
+			sessions.map((session) => this.api.conduitSession(session)),
 		);
 	}
 
 	async get(id: string): Promise<SessionDetail> {
-		return this.api.sdk("session.get", decodeSessionDetailResponse, () =>
-			this.api._sdk.session.get({ sessionID: id }),
+		const native = await this.api.native(id);
+		const session = await this.api.sdk(
+			"session.get",
+			decodeSessionDetailResponse,
+			() => this.api._sdk.session.get({ sessionID: native }),
 		);
+		return this.api.conduitSession(session);
 	}
 
 	async create(options?: {
@@ -298,8 +358,9 @@ class SessionNamespace {
 		id?: string;
 		directory?: string;
 	}): Promise<SessionDetail> {
+		// Create names native sessions only; the caller binds a Conduit id to it.
 		if (options?.id !== undefined) {
-			const id = options.id;
+			const native = options.id;
 			const scope =
 				options.directory === undefined ? {} : { directory: options.directory };
 			// v2 accepts the id reserved for a worktree launch. Read the legacy
@@ -309,7 +370,7 @@ class SessionNamespace {
 				decodeSessionDetailResponse,
 				async () => {
 					const created = await this.api._sdk.v2.session.create({
-						id,
+						id: native,
 						...(options.directory === undefined
 							? {}
 							: { location: { directory: options.directory } }),
@@ -317,7 +378,7 @@ class SessionNamespace {
 					if (created.error !== undefined) return created;
 					return options.title || options.permission
 						? this.api._sdk.session.update({
-								sessionID: id,
+								sessionID: native,
 								...(options.title === undefined
 									? {}
 									: { title: options.title }),
@@ -327,7 +388,7 @@ class SessionNamespace {
 								...scope,
 							})
 						: this.api._sdk.session.get({
-								sessionID: id,
+								sessionID: native,
 								...scope,
 							});
 				},
@@ -339,8 +400,9 @@ class SessionNamespace {
 	}
 
 	async delete(id: string): Promise<void> {
+		const native = await this.api.native(id);
 		await this.api.sdk("session.delete", decodeOpenCodeBooleanResponse, () =>
-			this.api._sdk.session.delete({ sessionID: id }),
+			this.api._sdk.session.delete({ sessionID: native }),
 		);
 	}
 
@@ -348,16 +410,18 @@ class SessionNamespace {
 		id: string,
 		options: { title?: string; permission?: PermissionRuleset },
 	): Promise<void> {
+		const native = await this.api.native(id);
 		await this.api.sdk("session.update", decodeOpenCodeSessionResponse, () =>
-			this.api._sdk.session.update({ sessionID: id, ...options }),
+			this.api._sdk.session.update({ sessionID: native, ...options }),
 		);
 	}
 
 	/** Align native execution cwd without copying files or changing session history. */
 	async move(id: string, directory: string): Promise<void> {
+		const native = await this.api.native(id);
 		await this.api.sdk("session.move", decodeOpenCodeUndefinedResponse, () =>
 			this.api._sdk.experimental.controlPlane.moveSession({
-				sessionID: id,
+				sessionID: native,
 				destination: { directory },
 				moveChanges: false,
 			}),
@@ -365,13 +429,20 @@ class SessionNamespace {
 	}
 
 	async statuses(directory?: string): Promise<Record<string, SessionStatus>> {
-		return this.api.sdk(
+		const statuses = await this.api.sdk(
 			"session.statuses",
 			decodeOpenCodeSessionStatusMap,
 			() =>
 				this.api._sdk.session.status(
 					directory === undefined ? undefined : { directory },
 				),
+		);
+		return Object.fromEntries(
+			await Promise.all(
+				Object.entries(statuses).map(
+					async ([id, status]) => [await this.api.conduit(id), status] as const,
+				),
+			),
 		);
 	}
 
@@ -380,19 +451,20 @@ class SessionNamespace {
 		sessionId: string,
 		options?: { limit?: number; signal?: AbortSignal },
 	): Promise<Message[]> {
+		const native = await this.api.native(sessionId);
 		const data = await this.api.sdk(
 			"session.messages",
 			decodeOpenCodeMessageListResponse,
 			() =>
 				this.api._sdk.session.messages(
 					{
-						sessionID: sessionId,
+						sessionID: native,
 						...(options?.limit != null ? { limit: options.limit } : {}),
 					},
 					options?.signal ? { signal: options.signal } : undefined,
 				),
 		);
-		return flattenMessages(data);
+		return flattenMessages(data, sessionId);
 	}
 
 	/** Cursor paging uses the same endpoint and parameters as the former gap. */
@@ -400,13 +472,14 @@ class SessionNamespace {
 		sessionId: string,
 		options?: { limit?: number; before?: string },
 	): Promise<Message[]> {
+		const native = await this.api.native(sessionId);
 		const data = await this.api.sdk(
 			"session.messagesPage",
 			decodeOpenCodeMessageListResponse,
 			() =>
 				this.api._sdk.session.messages(
 					{
-						sessionID: sessionId,
+						sessionID: native,
 						...(options?.limit ? { limit: options.limit } : {}),
 						...(options?.before ? { before: options.before } : {}),
 					},
@@ -416,29 +489,32 @@ class SessionNamespace {
 					},
 				),
 		);
-		return flattenMessages(data);
+		return flattenMessages(data, sessionId);
 	}
 
 	async message(sessionId: string, messageId: string): Promise<Message> {
+		const native = await this.api.native(sessionId);
 		const data = await this.api.sdk(
 			"session.message",
 			decodeOpenCodeMessageWithPartsResponse,
 			() =>
 				this.api._sdk.session.message({
-					sessionID: sessionId,
+					sessionID: native,
 					messageID: messageId,
 				}),
 		);
-		return flattenMessage(data);
+		return flattenMessage(data, sessionId);
 	}
 
+	// Message ids are the native session's own; a native fork (82tn.81) re-ids copies.
 	async deleteMessage(sessionId: string, messageId: string): Promise<void> {
+		const native = await this.api.native(sessionId);
 		await this.api.sdk(
 			"session.deleteMessage",
 			decodeOpenCodeBooleanResponse,
 			() =>
 				this.api._sdk.session.deleteMessage({
-					sessionID: sessionId,
+					sessionID: native,
 					messageID: messageId,
 				}),
 		);
@@ -450,9 +526,10 @@ class SessionNamespace {
 		messageId: string,
 		text: string,
 	): Promise<void> {
+		const native = await this.api.native(sessionId);
 		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
 			this.api._sdk.session.promptAsync({
-				sessionID: sessionId,
+				sessionID: native,
 				messageID: messageId,
 				noReply: true,
 				parts: [{ type: "text", text, synthetic: true }],
@@ -461,9 +538,10 @@ class SessionNamespace {
 	}
 
 	async prompt(sessionId: string, options: PromptOptions): Promise<void> {
+		const native = await this.api.native(sessionId);
 		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
 			this.api._sdk.session.promptAsync({
-				sessionID: sessionId,
+				sessionID: native,
 				...(options.messageId !== undefined
 					? { messageID: options.messageId }
 					: {}),
@@ -490,12 +568,13 @@ class SessionNamespace {
 		command: { readonly name: string; readonly arguments: string },
 		options: Omit<PromptOptions, "text" | "system">,
 	): Promise<void> {
+		const native = await this.api.native(sessionId);
 		await this.api.sdk(
 			"session.command",
 			decodeOpenCodeMessageWithPartsResponse,
 			() =>
 				this.api._sdk.session.command({
-					sessionID: sessionId,
+					sessionID: native,
 					command: command.name,
 					arguments: command.arguments,
 					...(options.messageId !== undefined
@@ -517,8 +596,9 @@ class SessionNamespace {
 	}
 
 	async abort(sessionId: string): Promise<void> {
+		const native = await this.api.native(sessionId);
 		await this.api.sdk("session.abort", decodeOpenCodeBooleanResponse, () =>
-			this.api._sdk.session.abort({ sessionID: sessionId }),
+			this.api._sdk.session.abort({ sessionID: native }),
 		);
 	}
 
@@ -535,13 +615,14 @@ class SessionNamespace {
 			signal: AbortSignal;
 		},
 	): Promise<OpenCodeMessageWithParts> {
+		const native = await this.api.native(sessionId);
 		return this.api.sdk(
 			"session.promptText",
 			decodeOpenCodeMessageWithPartsResponse,
 			() =>
 				this.api._sdk.session.prompt(
 					{
-						sessionID: sessionId,
+						sessionID: native,
 						directory: options.directory,
 						model: options.model,
 						variant: options.variant,
@@ -559,8 +640,10 @@ class SessionNamespace {
 		sessionId: string,
 		options?: { messageID?: string },
 	): Promise<SessionDetail> {
+		const native = await this.api.native(sessionId);
+		// The fork is a new native session; its caller binds it (82tn.81).
 		return this.api.sdk("session.fork", decodeSessionDetailResponse, () =>
-			this.api._sdk.session.fork({ sessionID: sessionId, ...options }),
+			this.api._sdk.session.fork({ sessionID: native, ...options }),
 		);
 	}
 
@@ -568,15 +651,20 @@ class SessionNamespace {
 		sessionId: string,
 		options?: { providerID: string; modelID: string },
 	): Promise<void> {
+		const native = await this.api.native(sessionId);
 		await this.api.sdk("session.summarize", decodeOpenCodeBooleanResponse, () =>
-			this.api._sdk.session.summarize({ sessionID: sessionId, ...options }),
+			this.api._sdk.session.summarize({ sessionID: native, ...options }),
 		);
 	}
 
 	async children(sessionId: string): Promise<SessionDetail[]> {
-		return this.api.sdk("session.children", decodeSessionListResponse, () =>
-			this.api._sdk.session.children({ sessionID: sessionId }),
+		const native = await this.api.native(sessionId);
+		const children = await this.api.sdk(
+			"session.children",
+			decodeSessionListResponse,
+			() => this.api._sdk.session.children({ sessionID: native }),
 		);
+		return Promise.all(children.map((child) => this.api.conduitSession(child)));
 	}
 }
 
@@ -595,7 +683,12 @@ class PermissionNamespace {
 						})
 					: this.api._sdk.permission.list({ directory }),
 		);
-		return [...permissions];
+		return Promise.all(
+			permissions.map(async (permission) => ({
+				...permission,
+				sessionID: await this.api.conduit(permission.sessionID),
+			})),
+		);
 	}
 
 	/** Keep the existing session-scoped endpoint and response body. */
@@ -605,12 +698,13 @@ class PermissionNamespace {
 		response: "once" | "always" | "reject",
 		directory?: string,
 	): Promise<void> {
+		const native = await this.api.native(sessionId);
 		await this.api.sdk(
 			"permission.reply",
 			decodeOpenCodeBooleanResponse,
 			() => {
 				const request = {
-					sessionID: sessionId,
+					sessionID: native,
 					permissionID: permissionId,
 					response,
 					...(directory === undefined ? {} : { directory }),
@@ -642,7 +736,16 @@ class QuestionNamespace {
 						})
 					: this.api._sdk.question.list({ directory }),
 		);
-		return [...questions];
+		return Promise.all(
+			questions.map(async (question) =>
+				typeof question["sessionID"] === "string"
+					? {
+							...question,
+							sessionID: await this.api.conduit(question["sessionID"]),
+						}
+					: question,
+			),
+		);
 	}
 
 	async reply(

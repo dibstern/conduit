@@ -68,6 +68,7 @@ import { DaemonStoreAvailability } from "../Services/daemon-store-availability.j
 import type { DaemonTurns } from "../Services/daemon-turns.js";
 import type { MessageSurfacingSettings } from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import type { OpenCodeSessionIds } from "../Services/opencode-session-ids.js";
 import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
 import {
@@ -135,6 +136,7 @@ export const makeProjectServicesLive = (options: {
 				| AccountDirectory
 				| InputDraftsTag
 				| OpenCodeInstancesTag
+				| OpenCodeSessionIds
 				| SessionActivityTag
 				| OverridesStateTag
 				| DaemonEventBusTag
