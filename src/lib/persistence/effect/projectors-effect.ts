@@ -1924,6 +1924,26 @@ export const makeTurnProjector = defineProjector(() => ({
 							AND prior.session_id = turns.session_id AND prior.status IN ('completed', 'error', 'interrupted'))
 						AND EXISTS (SELECT 1 FROM provider_runs next WHERE next.id = excluded.run_id
 							AND next.session_id = excluded.session_id AND next.status IN ('pending', 'running')))) RETURNING session_id`;
+				// A Stop ends an undelivered send's Run at once (CONTRACT 664-666) and main's writer
+				// places it later (970-973); the contract leaves that order open. Its end found no
+				// member, so this placement carries it, unless a member or a newer Run already has one.
+				if (
+					written.length &&
+					run &&
+					["completed", "error", "interrupted"].includes(run.status)
+				)
+					yield* sql`UPDATE sessions SET updated_at = ${event.createdAt},
+						last_turn_error_at = ${run.status === "error" ? run.completed_at : null},
+						last_turn_end_input_id = ${event.data.inputId ?? null},
+						last_turn_end_version = ${event.streamVersion}
+						WHERE id = ${event.sessionId}
+						AND ${event.streamVersion} > COALESCE(last_turn_end_version, -1)
+						AND NOT EXISTS (SELECT 1 FROM turns WHERE run_id = ${run.id}
+							AND session_id = ${event.sessionId} AND id <> ${event.data.messageId})
+						AND NOT EXISTS (SELECT 1 FROM provider_runs other JOIN turns
+							ON turns.run_id = other.id AND turns.session_id = other.session_id
+							WHERE other.session_id = ${event.sessionId} AND other.id <> ${run.id}
+								AND other.completed_at > ${run.completed_at})`;
 				// input.admitted freezes the request in pending_inputs. A native
 				// message id can differ from its input id, which owns these settings.
 				const settings = yield* sql<OwnedRow>`UPDATE turns

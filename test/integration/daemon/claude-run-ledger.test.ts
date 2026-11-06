@@ -1266,7 +1266,14 @@ describe("Claude on the Run Ledger", () => {
 					"SELECT input_id AS inputId FROM pending_inputs WHERE session_id = ? AND state = 'queued'",
 				)
 				.all(sessionId) as { inputId: string }[];
+			// 82tn.83: the stopped send's end names its input, so the browser settles it with no later turn.
+			const end = db
+				.prepare(
+					"SELECT sessions.last_turn_end_input_id AS ended, pending.input_id AS stopped FROM sessions JOIN pending_inputs pending ON pending.session_id = sessions.id WHERE sessions.id = ? AND pending.text = ?",
+				)
+				.get(sessionId, prompt) as { ended: string | null; stopped: string };
 			db.close();
+			expect(end.ended).toBe(end.stopped);
 			expect(queued).toHaveLength(1);
 			await browser.sendNow(sessionId, queued[0]?.inputId ?? "");
 			// test-waits-allow polling: Send now's turn reaches this browser only through history.
