@@ -24,6 +24,13 @@
  * Rows 92-95 are covered by project-services.test.ts (removal, reconnect) and
  * row 91 here (store isolation). The turn service and inbox stay with the
  * relay: they hold the project's folders from when they were built.
+ *
+ * Slice 7 (rows 99-101): tool details, directory listing and agent liveness
+ * are built once per project:
+ * 99 a project no relay has opened, or added while running, has none;
+ * 100 a relay replaced while registered builds its own;
+ * 101 two projects sharing a folder share one tool-details reader.
+ * Store isolation is row 76 (the reader reads the project's bound store).
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -46,11 +53,16 @@ import { addWithoutRelay } from "../../../src/lib/domain/daemon/Services/project
 import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
+import { DirectoryListingServiceTag } from "../../../src/lib/domain/relay/Services/directory-listing-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { ProjectSettingsTag } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { TranslatorTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	AgentLivenessTag,
+	TranslatorTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
+import { ToolContentServiceTag } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
@@ -352,15 +364,13 @@ const titleParts = Effect.all({
 });
 
 /** The same parts as the relay's runtime holds them (its type predates them). */
-const relayParts = (relay: {
-	readonly effectRuntime: { readonly runtime: unknown };
-}) =>
+const relayParts = <A, R>(
+	relay: { readonly effectRuntime: { readonly runtime: unknown } },
+	parts: Effect.Effect<A, never, R>,
+) =>
 	(
-		relay.effectRuntime.runtime as ManagedRuntime.ManagedRuntime<
-			Effect.Services<typeof titleParts>,
-			never
-		>
-	).runPromise(titleParts);
+		relay.effectRuntime.runtime as ManagedRuntime.ManagedRuntime<R, never>
+	).runPromise(parts);
 
 describe("82tn.16: each project's settings and titles live with the project", () => {
 	it("serves a project's settings and titles with no relay open", async () => {
@@ -380,10 +390,10 @@ describe("82tn.16: each project's settings and titles live with the project", ()
 		await daemon.register("alpha");
 		const project = await daemon.inProject("alpha", titleParts);
 		const first = await daemon.relay("alpha");
-		const firstParts = await relayParts(first);
+		const firstParts = await relayParts(first, titleParts);
 		await first.stop();
 		const second = await daemon.relay("alpha");
-		const secondParts = await relayParts(second);
+		const secondParts = await relayParts(second, titleParts);
 		await second.stop();
 		const same = (parts: typeof project) =>
 			parts.settings === project.settings && parts.titles === project.titles;
@@ -407,5 +417,61 @@ describe("82tn.16: each project's settings and titles live with the project", ()
 		};
 		evidence.observed = observed;
 		expect(observed).toEqual({ titles: false, betaBrowsers: 0 });
+	});
+});
+
+/** The project's tool details, directory listing and agent liveness. */
+const readerParts = Effect.all({
+	tools: ToolContentServiceTag,
+	directories: DirectoryListingServiceTag,
+	liveness: AgentLivenessTag,
+});
+
+describe("82tn.16: each project's tool details, directory listing and agent liveness live with the project", () => {
+	it("serves them with no relay open", async () => {
+		const daemon = start("readers-cold").boot();
+		await daemon.register("alpha");
+		const observed = await daemon.inProject(
+			"alpha",
+			Effect.gen(function* () {
+				const { tools, liveness } = yield* readerParts;
+				return {
+					details: yield* tools.details("absent", ["tool-1"]),
+					live: yield* liveness("absent"),
+				};
+			}),
+		);
+		evidence.observed = observed;
+		expect(observed).toEqual({ details: [], live: false });
+	});
+
+	it("keeps one of each across a relay replaced while registered", async () => {
+		const daemon = start("readers-relay-replaced").boot();
+		await daemon.register("alpha");
+		const project = await daemon.inProject("alpha", readerParts);
+		const inRelay = async () => {
+			const relay = await daemon.relay("alpha");
+			const parts = await relayParts(relay, readerParts);
+			await relay.stop();
+			return (
+				parts.tools === project.tools &&
+				parts.directories === project.directories &&
+				parts.liveness === project.liveness
+			);
+		};
+		const observed = { first: await inRelay(), second: await inRelay() };
+		evidence.observed = observed;
+		expect(observed).toEqual({ first: true, second: true });
+	});
+
+	it("gives two projects sharing a folder their own tool-details reader", async () => {
+		const daemon = start("readers-shared-folder").boot();
+		await daemon.register("alpha");
+		await daemon.register("beta");
+		const alpha = await daemon.inProject("alpha", readerParts);
+		const beta = await daemon.inProject("beta", readerParts);
+		const observed = { sameTools: alpha.tools === beta.tools };
+		evidence.observed = observed;
+		expect(observed).toEqual({ sameTools: false });
 	});
 });

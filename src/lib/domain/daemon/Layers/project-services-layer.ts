@@ -24,10 +24,12 @@ import type { ClaudeSdkSeam } from "../../../types.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import type { PersistenceError } from "../../persistence/Services/persistence-service.js";
 import {
+	AgentLivenessLive,
 	makeProjectIngestionLive,
 	makeProjectOpenCodeIngressLive,
 } from "../../relay/Layers/project-ingestion-layer.js";
 import type { AlertsTag } from "../../relay/Services/alerts.js";
+import { DirectoryListingServiceLive } from "../../relay/Services/directory-listing-service.js";
 import type { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { OpenCodeSessionCreationGateTag } from "../../relay/Services/opencode-runtime-ingress-service.js";
 import { ProjectSettingsLive } from "../../relay/Services/project-settings.js";
@@ -55,6 +57,7 @@ import {
 import type { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
 import { makeSessionTitleServiceLive } from "../../relay/Services/session-title-service.js";
 import type { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+import { ToolContentServiceLive } from "../../relay/Services/tool-content-service.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import type { CategorySet } from "../Services/category-set.js";
@@ -266,12 +269,21 @@ export const makeProjectServicesLive = (options: {
 											Layer.provide(Layer.succeedContext(projectBase)),
 										),
 									);
+									// Stateless readers, built here so no relay has to (slice 7).
+									const readers = yield* Layer.build(
+										Layer.mergeAll(
+											ToolContentServiceLive,
+											DirectoryListingServiceLive,
+											AgentLivenessLive,
+										).pipe(Layer.provide(Layer.succeedContext(projectBase))),
+									);
 									const parts = Context.mergeAll(
 										persistence,
 										models,
 										ingestion,
 										ingress,
 										titles,
+										readers,
 									).pipe(
 										Context.add(
 											RelayStatusSnapshotTag,

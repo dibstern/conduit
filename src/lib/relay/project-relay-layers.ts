@@ -80,6 +80,7 @@ import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event
 import { makeRunLedgerSchedulerLive } from "../domain/persistence/Services/run-ledger-scheduler.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import {
+	AgentLivenessLive,
 	makeProjectIngestionLive,
 	makeProjectOpenCodeIngressLive,
 } from "../domain/relay/Layers/project-ingestion-layer.js";
@@ -102,7 +103,10 @@ import {
 	DaemonSessionQueryServiceLive,
 	DaemonSessionQueryServiceTag,
 } from "../domain/relay/Services/daemon-session-query-service.js";
-import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
+import {
+	DirectoryListingServiceLive,
+	DirectoryListingServiceTag,
+} from "../domain/relay/Services/directory-listing-service.js";
 import { DraftPreWarmOrOwn } from "../domain/relay/Services/draft-prewarm.js";
 import { makeGoalSummaryServiceLive } from "../domain/relay/Services/goal-summary-service.js";
 import { HandoffReceiptsLive } from "../domain/relay/Services/handoff-receipts.js";
@@ -194,7 +198,10 @@ import {
 	LocalPtyServiceOrOwn,
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
-import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
+import {
+	ToolContentServiceLive,
+	ToolContentServiceTag,
+} from "../domain/relay/Services/tool-content-service.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import {
@@ -215,13 +222,11 @@ import {
 	ClaudeAccountScopes,
 	ClaudeAccountScopesLive,
 } from "../provider/claude/claude-account-scopes.js";
-import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
 import { codexUsageReader } from "../provider/codex/codex-usage.js";
 import { makeOrchestrationRuntimeLayer } from "../provider/orchestration-wiring.js";
-import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { usageAccounts } from "../provider/usage-reader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
@@ -757,19 +762,10 @@ export function createProjectRelayLayers({
 		Layer.provide(providerOrchestrationDeps),
 		Layer.provideMerge(providerAdaptersLayer),
 	);
-	const agentLivenessLayer = Layer.effect(
-		AgentLivenessTag,
-		Effect.gen(function* () {
-			const registry = yield* ProviderRegistryTag;
-			return (sessionId: string) =>
-				Effect.suspend(() => {
-					const instance = registry.getInstance("claude");
-					return instance instanceof ClaudeProviderInstance
-						? instance.hasLiveProcessEffect(sessionId)
-						: Effect.succeed(false);
-				});
-		}),
-	).pipe(Layer.provide(providerOrchestrationLayer));
+	const agentLivenessLayer = fromProject(
+		Context.pick(AgentLivenessTag),
+		AgentLivenessLive.pipe(Layer.provide(providerOrchestrationLayer)),
+	);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
 	);
@@ -901,9 +897,10 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
-	const toolContentServiceLayer = ToolContentServiceLive.pipe(
-		Layer.provideMerge(persistenceEffectLayer),
-	);
+	const toolContentServiceLayer = fromProject(
+		Context.pick(ToolContentServiceTag),
+		ToolContentServiceLive.pipe(Layer.provide(persistenceEffectLayer)),
+	).pipe(Layer.provideMerge(persistenceEffectLayer));
 	const creationGateLayer = fromProject(
 		Context.pick(OpenCodeSessionCreationGateTag),
 		Layer.effect(OpenCodeSessionCreationGateTag, Semaphore.make(1)),
@@ -947,7 +944,10 @@ export function createProjectRelayLayers({
 		sseStreamLayer,
 		projectManagementServiceLayer,
 		daemonSessionQueryServiceLayer,
-		DirectoryListingServiceLive.pipe(Layer.provide(configLayer)),
+		fromProject(
+			Context.pick(DirectoryListingServiceTag),
+			DirectoryListingServiceLive.pipe(Layer.provide(configLayer)),
+		),
 		scanServiceLayer,
 		openCodeTerminalServiceLayer,
 		localPtyServiceLayer,

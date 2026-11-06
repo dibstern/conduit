@@ -5,7 +5,9 @@ import { realWorkspacePath } from "../../../git/worktrees.js";
 import type { CommitAndSignalProject } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreError } from "../../../persistence/effect/event-store-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { ClaudeProviderInstance } from "../../../provider/claude/claude-provider-instance.js";
 import { OpenCodeProviderInstance } from "../../../provider/opencode-provider-instance.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { publishProviderRelayMessage } from "../../../relay/project-relay-publisher.js";
 import type { PushNotificationSender } from "../../../server/push.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
@@ -27,6 +29,7 @@ import {
 } from "../Services/pending-interaction-service.js";
 import { makeProviderRuntimeIngestionLive } from "../Services/provider-runtime-ingestion-service.js";
 import {
+	AgentLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	type OrchestrationEngineTag,
@@ -240,5 +243,20 @@ export const makeProjectOpenCodeIngressLive = Layer.effectContext(
 			SessionRetriesTag,
 			Effect.map(SessionActivityTag, (activity) => activity.retries.retryingOf),
 		),
+	),
+);
+
+/** Whether a session's Claude process is live. */
+export const AgentLivenessLive = Layer.effect(
+	AgentLivenessTag,
+	Effect.map(
+		ProviderRegistryTag,
+		(registry) => (sessionId: string) =>
+			Effect.suspend(() => {
+				const instance = registry.getInstance("claude");
+				return instance instanceof ClaudeProviderInstance
+					? instance.hasLiveProcessEffect(sessionId)
+					: Effect.succeed(false);
+			}),
 	),
 );

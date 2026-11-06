@@ -7,6 +7,7 @@ import { daemonStorePath } from "../../../persistence/project-storage.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
 import type { AlertLedgerTag } from "../../relay/Services/alert-ledger.js";
 import type { ContinuationTag } from "../../relay/Services/continuation.js";
+import type { DirectoryListingServiceTag } from "../../relay/Services/directory-listing-service.js";
 import type {
 	OpenCodeHistoryReconcileTag,
 	OpenCodeProcessLinkTag,
@@ -18,6 +19,7 @@ import type { ProjectSettingsTag } from "../../relay/Services/project-settings.j
 import type { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
 import type { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
 import type {
+	AgentLivenessTag,
 	ConfigTag,
 	OpenCodeModelServiceTag,
 	TranslatorTag,
@@ -28,6 +30,7 @@ import type {
 	SessionManagerServiceTag,
 } from "../../relay/Services/session-manager-service.js";
 import type { SessionTitleServiceTag } from "../../relay/Services/session-title-service.js";
+import type { ToolContentServiceTag } from "../../relay/Services/tool-content-service.js";
 import type { ProjectShellEnvTag } from "../Layers/project-shell-env-layer.js";
 import type { PollerTimings } from "../Layers/relay-factory-layer.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
@@ -56,7 +59,11 @@ export type ProjectGenerationParts =
 	| OpenCodeProcessLinkTag
 	// Settings and titles (82tn.16 slice 5).
 	| ProjectSettingsTag
-	| SessionTitleServiceTag;
+	| SessionTitleServiceTag
+	// Stateless readers (82tn.16 slice 7).
+	| ToolContentServiceTag
+	| DirectoryListingServiceTag
+	| AgentLivenessTag;
 
 /** Everything a call naming the project runs with, built by the daemon. */
 export type ProjectParts =
