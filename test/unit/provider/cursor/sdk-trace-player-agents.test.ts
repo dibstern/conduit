@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,7 +9,9 @@ import { cursorCredentialFixture } from "../../../helpers/cursor-account-resourc
 // Failure modes 1-6 in the lane 75 audit: a new agent shares the old agent's id
 // and runs, a resumed agent loses its id or runs, two captured agents replay out
 // of order, the first agent stops replaying the captured id, a restart reuses an
-// id the store holds, and a recorded queued run leaks to another agent.
+// id the store holds, and a recorded queued run leaks to another agent. 7-8: an
+// agent an older runner build kept in the store hides its running run from a
+// newer runner, or its id is given to a new agent.
 const trace = (name: string) =>
 	resolve(`test/fixtures/cursor-sdk-traces/${name}.jsonl`);
 const capturedIds = (name: string) =>
@@ -110,6 +112,28 @@ describe("trace player agent ids", () => {
 		expect(ids.slice(0, 2)).toEqual(capturedIds("sandbox-primed").slice(0, 2));
 		expect(new Set(ids).size).toBe(3);
 		expect(await run()).toEqual(ids);
+	});
+
+	it("reads the agent an older runner build kept in the store, its running run and its id", async () => {
+		const storePath = storeDir();
+		const [captured = ""] = capturedIds("basic");
+		const activeRun = { runId: "run-older", status: "running", requestId: "r" };
+		writeFileSync(
+			join(storePath, "trace-state.json"),
+			JSON.stringify({
+				id: captured,
+				cwd: "/workspace",
+				sendIndex: 1,
+				activeRun,
+			}),
+		);
+		const replay = await open("basic", storePath);
+		expect(await replay.activeRun(captured)).toEqual(activeRun);
+		expect((await replay.resume(captured)).id).toBe(captured);
+		expect(await replay.activeRun(captured)).toEqual(activeRun);
+		expect((await replay.create()).id).not.toBe(captured);
+		await replay.port.deleteAgent(captured, "/workspace", replay.store);
+		expect(await replay.activeRun(captured)).toBeUndefined();
 	});
 
 	it("reports a recorded queued run only for the agent it was recorded for", async () => {
