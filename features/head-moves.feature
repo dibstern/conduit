@@ -175,3 +175,36 @@ Examples:
   | viewport | message                 | reason                             |
   | phone    | Add a migration section | Files from this point were pruned. |
   | desktop  | Add a migration section | Files from this point were pruned. |
+
+Scenario Outline: files another session changed since go into a new worktree instead
+  Given the viewport is a <viewport>
+  And the session <other> has run in <folder> since
+  And a branched conversation is open
+  When I open the head log from the first reply's message menu
+  And I choose to rewind to a message from the head log
+  And I pick the message <message> to rewind to
+  Then rewinding the files is unavailable because <reason>
+  When I choose to branch into a worktree
+  Then one fork with files keeps the conversation up to <messageId>
+  And the conversation did not move
+  And the fork <fork> is open
+
+Examples:
+  | viewport | other     | folder      | message                 | reason                                                    | messageId  | fork                 |
+  | phone    | Docs pass | /work/notes | Add a migration section | Docs pass changed files in /work/notes since this point. | hm-reply-1 | sess-head-moves-fork |
+  | desktop  | Docs pass | /work/notes | Add a migration section | Docs pass changed files in /work/notes since this point. | hm-reply-1 | sess-head-moves-fork |
+
+Scenario Outline: files from pruned history cannot go into a new worktree either
+  Given the viewport is a <viewport>
+  And the files at every move's target were pruned
+  And a branched conversation is open
+  When I open the head log from the first reply's message menu
+  And I choose to rewind to a message from the head log
+  And I pick the message <message> to rewind to
+  Then rewinding the files is unavailable because <reason>
+  And branching into a worktree is not offered
+
+Examples:
+  | viewport | message                 | reason                             |
+  | phone    | Add a migration section | Files from this point were pruned. |
+  | desktop  | Add a migration section | Files from this point were pruned. |

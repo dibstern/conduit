@@ -117,6 +117,17 @@ export interface WorktreeService {
 	readonly rollback: (
 		created: CreatedWorktrees,
 	) => Effect.Effect<void, WorktreeCreationError>;
+	/** Keeps a note of a launch until `settle`, so a restart in between can undo it (82tn.54). */
+	readonly hold: (
+		created: CreatedWorktrees,
+	) => Effect.Effect<void, WorktreeCreationError>;
+	readonly settle: (
+		created: CreatedWorktrees,
+	) => Effect.Effect<void, WorktreeCreationError>;
+	/** At startup: rolls back each held launch no session `owns`, then forgets them all. */
+	readonly recoverHeld: <E, R>(
+		owns: (created: CreatedWorktrees) => Effect.Effect<boolean, E, R>,
+	) => Effect.Effect<void, never, R>;
 }
 
 export class WorktreeServiceTag extends Context.Service<

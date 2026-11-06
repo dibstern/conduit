@@ -232,6 +232,37 @@ export const planFiles = (
 	});
 
 /**
+ * Each folder's tree at `node` (82tn.54): the end of the nearest run on its path that captured it.
+ * Only the source's own history counts; another session in the folder does not refuse a fork,
+ * which never writes the source folder.
+ */
+export const filesAt = (sessionId: string, node: string | null) =>
+	Effect.gen(function* () {
+		const found = yield* Effect.serviceOption(FolderTimeline);
+		if (Option.isNone(found))
+			return yield* new FilesRefused({ sessionId, reason: "not_available" });
+		return yield* Effect.forEach(
+			yield* targets(found.value, sessionId, null, node, undefined),
+			({ directory, sequence, to }) =>
+				Effect.gen(function* () {
+					if (yield* isPruned(sessionId, sequence))
+						return yield* new FilesRefused({
+							sessionId,
+							reason: "pruned",
+							directory,
+						});
+					if (to === undefined)
+						return yield* new FilesRefused({
+							sessionId,
+							reason: "not_available",
+							directory,
+						});
+					return { directory, to };
+				}),
+		);
+	});
+
+/**
  * Restores the planned folders and journals the move with `journal`, under each folder's apply
  * lock. The refusals are read again under the lock, so a run started, a restore or an eviction
  * since the plan refuses, and nothing is written.

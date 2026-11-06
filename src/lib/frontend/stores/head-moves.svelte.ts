@@ -1,10 +1,13 @@
 // Head moves from the transcript (82tn.51): the Head Log dialog's open state, and the one
 // preview-then-commit path every move control uses. Components name the move; the wire's
 // intent stays here, out of their vocabulary.
+import { FilesRefused } from "../../contracts/limit-recovery.js";
 import type { MoveIntent } from "../../contracts/ws-rpc.js";
 import { failureLine, toastFailure } from "../transport/rpc-errors.js";
 import { rpc } from "../transport/ws-rpc-client.js";
-import { sessionState } from "./session.svelte.js";
+import { getBrowserClientId } from "./client-identity.js";
+import { selection } from "./selection.svelte.js";
+import { followFork, sessionState } from "./session.svelte.js";
 import { showToast } from "./ui.svelte.js";
 
 /** The session whose Head Log dialog is open, if any. */
@@ -31,11 +34,12 @@ export const rewindTo = (
 	);
 
 /** What a rewind with files to before a message would do (82tn.53): the paths that change,
- *  each folder's prefixed when there are several, or why the files cannot go back. */
+ *  each folder's prefixed when there are several, or why the files cannot go back, and whether
+ *  they can go into a new worktree instead (82tn.54): only files still kept there can. */
 export const planRewindFiles = (
 	sessionId: string,
 	messageId: string,
-): Promise<{ paths: string[] } | { refused: string }> =>
+): Promise<{ paths: string[] } | { refused: string; branchable: boolean }> =>
 	rpc("PreviewHeadMove", {
 		sessionId,
 		intent: { _tag: "rewind", messageId, withFiles: true },
@@ -52,8 +56,25 @@ export const planRewindFiles = (
 		},
 		(error: unknown) => ({
 			refused: failureLine(error, "The files could not be checked."),
+			branchable:
+				error instanceof FilesRefused &&
+				(error.reason === "other_session" || error.reason === "changed"),
 		}),
 	);
+
+/** A fork from before a message into a new worktree holding the files kept there (82tn.54);
+ *  the conversation here stays where it is. */
+export const branchIntoWorktree = (sessionId: string, messageId: string) => {
+	const from = selection.scope;
+	void rpc("ForkSession", {
+		sessionId,
+		originId: getBrowserClientId(),
+		messageId,
+		files: true,
+	})
+		.then((response) => followFork(from, response))
+		.catch(toastFailure("Could not branch into a worktree."));
+};
 
 /** Back to before a message, sending `resend` from there: edit-and-resend, or regenerate. */
 export const resendFrom = (
