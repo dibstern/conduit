@@ -20,6 +20,7 @@
 import { existsSync } from "node:fs";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
+import { SCRATCH_PROJECT_SLUG } from "../../../contracts/scratch-project.js";
 import type { AccountDirectory } from "../Services/account-directory.js";
 import {
 	commitDaemonRuntimeConfig,
@@ -67,6 +68,8 @@ export const prefetchSessionCounts: Effect.Effect<
 	let fetched = 0;
 
 	for (const [slug, entry] of HashMap.entries(registryState)) {
+		// Scratch sessions are counted from the store, not an OpenCode listing.
+		if (slug === SCRATCH_PROJECT_SLUG) continue;
 		if (!existsSync(entry.project.folders[0])) continue;
 		// Skip if we already have persisted counts
 		if (config.persistedSessionCounts.has(slug)) continue;

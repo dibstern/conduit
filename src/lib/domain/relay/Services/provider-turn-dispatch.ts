@@ -19,6 +19,7 @@ import {
 	type ProviderDriverKind,
 	type ProviderDriverTraits,
 } from "../../../contracts/provider-instance.js";
+import { SCRATCH_PROJECT_SLUG } from "../../../contracts/scratch-project.js";
 import { isPlaceholderTitle } from "../../../contracts/session-title.js";
 import {
 	type SessionWorkspace,
@@ -260,6 +261,13 @@ export const resolveSessionFolders = (
 			workspaceRoot = recreated.directory;
 		}
 		if (!(yield* workspaceFolderPresent(workspaceRoot))) {
+			// A No-project session never falls back to the shared scratch root; nothing recreates it.
+			if (config.slug === SCRATCH_PROJECT_SLUG)
+				return yield* Effect.fail(
+					new RelayError(`Session folder does not exist: ${workspaceRoot}`, {
+						code: "FILE_NOT_FOUND",
+					}),
+				);
 			const fallback =
 				fallbackMissingWorktree &&
 				workspace._tag === "Some" &&

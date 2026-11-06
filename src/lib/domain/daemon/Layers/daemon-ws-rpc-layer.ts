@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import {
 	Context,
 	Deferred,
@@ -17,6 +18,10 @@ import {
 	PROVIDER_DRIVERS,
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
+import {
+	SCRATCH_FOLDER,
+	SCRATCH_PROJECT_SLUG,
+} from "../../../contracts/scratch-project.js";
 import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 import { DEFAULT_TERMINAL_KEYS } from "../../../contracts/terminal-keys.js";
 import {
@@ -335,7 +340,12 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 		const rememberNewSessionProject = (slug: string) =>
 			Effect.gen(function* () {
 				const config = yield* DaemonConfigRefTag;
-				if ((yield* Ref.get(config)).newSessionProject === slug) return;
+				// No project is an explicit pick each time; the default stays a real project.
+				if (
+					slug === SCRATCH_PROJECT_SLUG ||
+					(yield* Ref.get(config)).newSessionProject === slug
+				)
+					return;
 				yield* commitDaemonRuntimeConfig((current) => ({
 					...current,
 					newSessionProject: slug,
@@ -573,6 +583,13 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							};
 						}),
 					),
+					// The frame never lists No project; its sessions still show (ADR-0011).
+					[
+						{
+							slug: SCRATCH_PROJECT_SLUG,
+							folders: [join(configDir, SCRATCH_FOLDER)],
+						},
+					],
 				).pipe(
 					Stream.provideContext(shellContext),
 					Stream.mapError((error) =>

@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
+import { SCRATCH_PROJECT_SLUG } from "../contracts/scratch-project.js";
 import type { PreWarmDraft } from "../contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { DraftPreWarmTag } from "../domain/relay/Services/draft-prewarm.js";
@@ -66,6 +67,8 @@ export const preWarmDraft = (request: typeof PreWarmDraft.payloadSchema.Type) =>
 			if (request.worktreeBase !== undefined) return;
 			const drafts = yield* DraftPreWarmTag;
 			const config = yield* ConfigTag;
+			// A No-project session has no folder until it is created.
+			if (config.slug === SCRATCH_PROJECT_SLUG) return;
 			yield* drafts.warm(
 				request.originId,
 				request.draftId,

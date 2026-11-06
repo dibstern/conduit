@@ -37,6 +37,11 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import {
+	SCRATCH_FOLDER,
+	SCRATCH_PROJECT_SLUG,
+	SCRATCH_PROJECT_TITLE,
+} from "../../../contracts/scratch-project.js";
+import {
 	DEFAULT_WORKTREE_CLEANUP,
 	resolveWorktreeCleanup,
 } from "../../../contracts/worktree.js";
@@ -362,6 +367,12 @@ export const getEffectiveWorktreeCleanup = (slug: string) =>
 export const resolveSessionMode = (slug: string) =>
 	Effect.gen(function* () {
 		const project = yield* getProject(slug);
+		// A No-project session runs in its own folder; there is no checkout to branch.
+		if (slug === SCRATCH_PROJECT_SLUG)
+			return {
+				mode: "local",
+				source: "project",
+			} satisfies ResolveSessionModeResponse;
 		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 		const file = yield* readProjectFile(project.folders[0]);
 		const warning = file._tag === "invalid" ? { warning: file.message } : {};
@@ -411,7 +422,10 @@ export const findByDirectory = (directory: string) =>
 		const entries = HashMap.values(state);
 		const normalized = normalizeProjectDirectory(directory);
 		for (const entry of entries) {
-			if (normalizeProjectDirectory(entry.project.folders[0]) === normalized) {
+			if (
+				entry.project.slug !== SCRATCH_PROJECT_SLUG &&
+				normalizeProjectDirectory(entry.project.folders[0]) === normalized
+			) {
 				return Option.some(entry);
 			}
 		}
@@ -431,7 +445,9 @@ export const allProjects = Effect.gen(function* () {
 
 export const projectInfos = Effect.gen(function* () {
 	const unavailable = yield* DaemonStoreAvailability;
-	const projects = yield* allProjects;
+	const projects = (yield* allProjects).filter(
+		({ slug }) => slug !== SCRATCH_PROJECT_SLUG,
+	);
 	return yield* withPublishedProjectGit(
 		projects.map((project) => {
 			const unavailableReason = unavailable.get(project.slug);
@@ -640,6 +656,9 @@ export const remove = (slug: string) =>
 	Effect.flatMap(ProjectSaveLockTag, (lock) =>
 		lock.withPermits(1)(
 			Effect.gen(function* () {
+				// The No-project entry is daemon-owned; only its sessions can go.
+				if (slug === SCRATCH_PROJECT_SLUG)
+					return yield* new ProjectNotFound({ slug });
 				const ref = yield* ProjectRegistryTag;
 				const bus = yield* DaemonEventBusTag;
 				const relayCache = yield* RelayCacheTag;
@@ -753,7 +772,8 @@ export const updateProject = (
 
 		const notFound = yield* Ref.modify(ref, (state) => {
 			const existing = HashMap.get(state, slug);
-			if (Option.isNone(existing)) {
+			// The No-project entry has no settings; it is not the user's project.
+			if (Option.isNone(existing) || slug === SCRATCH_PROJECT_SLUG) {
 				return [true, state] as const;
 			}
 			const entry = existing.value;
@@ -864,10 +884,15 @@ export const removeAll = Effect.gen(function* () {
 	const relayCache = yield* RelayCacheTag;
 
 	const state = yield* Ref.get(ref);
-	const allSlugs = Array.from(HashMap.keys(state));
+	const allSlugs = Array.from(HashMap.keys(state)).filter(
+		(slug) => slug !== SCRATCH_PROJECT_SLUG,
+	);
 
-	// Clear all entries atomically
-	yield* Ref.set(ref, HashMap.empty());
+	// Clear all entries atomically, keeping the daemon-owned No-project entry.
+	yield* Ref.update(
+		ref,
+		HashMap.filter((_, slug) => slug === SCRATCH_PROJECT_SLUG),
+	);
 	yield* refreshProjectRollups(allSlugs);
 
 	// Invalidate all relays and publish removal events
@@ -1028,8 +1053,19 @@ export const makeProjectRegistryFromDaemonStateLive: Layer.Layer<
 				),
 			{ concurrency: 4 },
 		);
+		// The No-project entry is daemon-owned and never persisted: it is added on every start.
+		const scratchRoot = join(state.configDir, SCRATCH_FOLDER);
+		mkdirSync(scratchRoot, { recursive: true });
 		const ref = yield* Ref.make<ProjectRegistryState>(
-			makeInitialProjectState(initialProjects),
+			makeInitialProjectState([
+				...initialProjects.filter(({ slug }) => slug !== SCRATCH_PROJECT_SLUG),
+				{
+					slug: SCRATCH_PROJECT_SLUG,
+					title: SCRATCH_PROJECT_TITLE,
+					folders: [scratchRoot],
+					addedAt: now,
+				},
+			]),
 		);
 		const lock = yield* Semaphore.make(1);
 		return Context.make(ProjectRegistryTag, ref).pipe(
@@ -1069,7 +1105,9 @@ export const saveProject = (input: SaveProjectInput) =>
 					};
 				});
 				const folders = inputs.map((folder) => folder.path);
-				const projects = yield* allProjects;
+				const projects = (yield* allProjects).filter(
+					({ slug }) => slug !== SCRATCH_PROJECT_SLUG,
+				);
 				const existing = projects.find(
 					(project) => project.slug === input.slug,
 				);

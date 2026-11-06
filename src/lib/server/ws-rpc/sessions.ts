@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Clock, Effect, Option, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
@@ -15,6 +15,7 @@ import {
 	PROVIDER_DRIVERS,
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../contracts/provider-instance.js";
+import { SCRATCH_PROJECT_SLUG } from "../../contracts/scratch-project.js";
 import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
 import {
@@ -236,6 +237,10 @@ export const sessionsHandlers = {
 		),
 	MoveSessionWorkspace: (request) =>
 		Effect.gen(function* () {
+			if ((yield* ConfigTag).slug === SCRATCH_PROJECT_SLUG)
+				return yield* new WsRpcError({
+					message: "A No-project session stays in its own folder.",
+				});
 			const workspace = yield* SessionWorkspaceTag;
 			return {
 				directory: yield* workspace.withLaunch(
@@ -717,6 +722,63 @@ export const sessionsHandlers = {
 								},
 							}),
 				};
+				const project = yield* ConfigTag;
+				if (project.slug === SCRATCH_PROJECT_SLUG) {
+					yield* takeReservation;
+					if (request.newWorktree || path !== undefined)
+						return yield* new WsRpcError({
+							message:
+								"A No-project session runs in its own folder, not a worktree.",
+						});
+					// ADR-0011: Conduit makes the folder, so only a runtime that launches into one can run here.
+					if (
+						!PROVIDER_SESSION_CAPABILITIES[account.driver].supportsNewWorktree
+					)
+						return yield* new WorkspaceMoveError({
+							path: project.projectDir,
+							reason: "unsupported-provider",
+						});
+					const sessionId = createLocalSessionId();
+					const folder = join(project.projectDir, sessionId);
+					const session = yield* workspace.withLaunch(
+						sessionId,
+						Effect.uninterruptibleMask((restore) =>
+							Effect.gen(function* () {
+								// Not recursive: an existing folder is never shared.
+								yield* Effect.try(() => mkdirSync(folder));
+								return yield* restore(
+									createSessionForClient({
+										...options,
+										sessionId,
+										directory: folder,
+										// Recorded, not moved: the folder is Conduit's, so there is no Git to check.
+										initializeWorkspace: (id: string) =>
+											workspace
+												.record(
+													id,
+													{
+														path: folder,
+														projectFolder: project.projectDir,
+														reset: false,
+														provider: account.id,
+														origin: "existing",
+													},
+													"launch",
+												)
+												.pipe(Effect.asVoid),
+									}),
+								).pipe(
+									Effect.catchCause((cause) =>
+										Effect.sync(() =>
+											rmSync(folder, { recursive: true, force: true }),
+										).pipe(Effect.andThen(Effect.failCause(cause))),
+									),
+								);
+							}),
+						),
+					);
+					return { projectSlug: request.projectSlug, sessionId: session.id };
+				}
 				if (request.newWorktree) {
 					yield* takeReservation;
 					if (path !== undefined)
@@ -881,7 +943,10 @@ export const sessionsHandlers = {
 								),
 						),
 					);
-					if (request.worktreePath === undefined) {
+					if (
+						request.worktreePath === undefined &&
+						config.slug !== SCRATCH_PROJECT_SLUG
+					) {
 						yield* Effect.try(() =>
 							saveRelaySettings(
 								{ lastSessionMode: request.newWorktree ? "worktree" : "local" },
@@ -965,6 +1030,14 @@ export const sessionsHandlers = {
 		),
 	ForkSession: (request) =>
 		Effect.gen(function* () {
+			// A fork would share the parent's folder or need one of its own (m379.11).
+			if (
+				(yield* ConfigTag).slug === SCRATCH_PROJECT_SLUG ||
+				request.targetProjectSlug === SCRATCH_PROJECT_SLUG
+			)
+				return yield* new WsRpcError({
+					message: "No-project sessions cannot be forked yet.",
+				});
 			const options = {
 				clientId: request.originId,
 				...("sessionId" in request ? { sessionId: request.sessionId } : {}),

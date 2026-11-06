@@ -1,5 +1,6 @@
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import { getAllIPs, getTailscaleIP } from "../../../cli/tls.js";
+import { SCRATCH_PROJECT_SLUG } from "../../../contracts/scratch-project.js";
 import {
 	type ProjectSaveRejected,
 	type SaveProjectInput,
@@ -160,6 +161,9 @@ export const DaemonHandleLive: Layer.Layer<
 
 		const getProjects = () =>
 			allProjects.pipe(
+				Effect.map((projects) =>
+					projects.filter(({ slug }) => slug !== SCRATCH_PROJECT_SLUG),
+				),
 				Effect.provideService(ProjectRegistryTag, projectRef),
 				Effect.withSpan("daemonHandle.getProjects"),
 			);
@@ -182,6 +186,7 @@ export const DaemonHandleLive: Layer.Layer<
 				const projects: DaemonStatus["projects"] = [];
 
 				for (const [slug, entry] of HashMap.entries(state)) {
+					if (slug === SCRATCH_PROJECT_SLUG) continue;
 					const relay = yield* relayCache.peek(slug);
 					const relayStatus = Option.isSome(relay)
 						? relay.value.getStatusSnapshot?.()
@@ -211,7 +216,7 @@ export const DaemonHandleLive: Layer.Layer<
 					host: config.host,
 					...(tsIP !== null && { tailscaleIP: tsIP }),
 					...(lanIP !== null && { lanIP }),
-					projectCount: HashMap.size(state),
+					projectCount: projects.length,
 					sessionCount,
 					clientCount: lifecycleContext.clientCount,
 					pinEnabled: config.pinHash !== null,

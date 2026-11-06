@@ -16,6 +16,7 @@ import {
 	Ref,
 	Semaphore,
 } from "effect";
+import { SCRATCH_PROJECT_SLUG } from "../../../contracts/scratch-project.js";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../contracts/worktree.js";
 import {
 	type DaemonConfig,
@@ -65,7 +66,10 @@ export class ConfigPersistenceWriteError extends Data.TaggedError(
 export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 	const configRef = yield* DaemonConfigRefTag;
 	const runtime = yield* Ref.get(configRef);
-	const projects = yield* allProjects;
+	// The daemon-owned No-project entry is added on every start, never saved.
+	const projects = (yield* allProjects).filter(
+		({ slug }) => slug !== SCRATCH_PROJECT_SLUG,
+	);
 	const directory = yield* AccountDirectory;
 	const accounts = yield* directory.snapshot;
 	const instanceState = yield* Ref.get(yield* InstanceManagerStateTag);

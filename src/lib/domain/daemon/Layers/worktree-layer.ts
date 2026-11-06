@@ -28,6 +28,7 @@ import {
 	Semaphore,
 	Stream,
 } from "effect";
+import { SCRATCH_FOLDER } from "../../../contracts/scratch-project.js";
 import type { SessionWorktreeOwnership } from "../../../contracts/session-workspace.js";
 import {
 	type WorkspaceMissing,
@@ -72,8 +73,12 @@ const realPathWithMissingChildren = (path: string): string => {
 export const worktreesRoot = (configDir: string) =>
 	realPathWithMissingChildren(join(configDir, "worktrees"));
 
+/** Session folders Conduit owns: worktrees and No-project folders. Neither can join a project. */
 export const isConduitWorktreePath = (configDir: string, candidate: string) => {
-	const roots = [resolve(configDir, "worktrees"), worktreesRoot(configDir)];
+	const roots = ["worktrees", SCRATCH_FOLDER].flatMap((name) => [
+		resolve(configDir, name),
+		realPathWithMissingChildren(join(configDir, name)),
+	]);
 	const paths = [resolve(candidate), realPathWithMissingChildren(candidate)];
 	return roots.some((root) =>
 		paths.some((path) => {

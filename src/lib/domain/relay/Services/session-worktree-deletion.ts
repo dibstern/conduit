@@ -1,6 +1,8 @@
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { Effect, Result, Schema } from "effect";
 import { SqlClient } from "effect/sql";
+import { SCRATCH_PROJECT_SLUG } from "../../../contracts/scratch-project.js";
 import {
 	SessionWorkspaceSchema,
 	type SessionWorktreeInspection,
@@ -159,9 +161,44 @@ export const readSessionWorktreeOwnership = (
 		),
 	);
 
+/** A No-project session's folder is Conduit's, like a worktree, so delete asks the same way (ADR-0011). */
+const scratchFolderDeletion = (sessionId: string, root: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const [row] = yield* sql<{ workspace: string | null }>`
+			SELECT workspace FROM sessions WHERE id = ${sessionId}`;
+		const workspace =
+			row?.workspace == null
+				? undefined
+				: yield* Schema.decodeUnknownEffect(
+						Schema.fromJsonString(SessionWorkspaceSchema),
+					)(row.workspace);
+		const path = workspace?.worktrees[root];
+		const files =
+			path === undefined
+				? undefined
+				: yield* Effect.try(() =>
+						existsSync(path) ? readdirSync(path).length : undefined,
+					);
+		if (path === undefined || files === undefined)
+			return {
+				ownership: [],
+				worktrees: [],
+				removeWorktrees: true,
+			} satisfies SessionWorktreeDeletionPlan;
+		return {
+			ownership: [],
+			worktrees: [{ folder: root, path, reasons: [], inUse: false }],
+			// Keep by default once the session has written anything.
+			removeWorktrees: files === 0,
+		} satisfies SessionWorktreeDeletionPlan;
+	});
+
 export const prepareSessionWorktreeDeletion = (sessionId: string) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
+		if (config.slug === SCRATCH_PROJECT_SLUG)
+			return yield* scratchFolderDeletion(sessionId, config.projectDir);
 		const owned = yield* readSessionWorktreeOwnership(sessionId);
 		if (owned.length === 0)
 			return {
@@ -216,6 +253,15 @@ export const cleanupSessionWorktrees = (
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
+		if (config.slug === SCRATCH_PROJECT_SLUG)
+			return yield* Effect.forEach(plan.worktrees, ({ path }) =>
+				Effect.try(() => rmSync(path, { recursive: true, force: true })).pipe(
+					Effect.as([] as string[]),
+					Effect.catch((error) =>
+						Effect.succeed([`${path}: ${error.message}`]),
+					),
+				),
+			).pipe(Effect.map((warnings) => warnings.flat()));
 		const agentIsLive = yield* AgentLivenessTag;
 		const service = yield* Effect.serviceOption(WorktreeServiceTag);
 		if (service._tag === "None")

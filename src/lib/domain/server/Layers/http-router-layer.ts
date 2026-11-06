@@ -5,6 +5,7 @@ import * as NodePath from "@effect/platform-node/NodePath";
 import { Context, Effect, HashMap, Layer, Option, Ref, Scope } from "effect";
 import { HttpRouter } from "effect/http";
 import type { AuthManager } from "../../../auth.js";
+import { SCRATCH_PROJECT_SLUG } from "../../../contracts/scratch-project.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	AttachmentsProvider,
@@ -181,9 +182,12 @@ const makeDaemonProjectsReader = (deps: {
 		Effect.gen(function* () {
 			const config = yield* Ref.get(configRef);
 			const state = yield* Ref.get(projectRegistry);
-			const entries = Array.from(HashMap.entries(state)).sort(
-				([, a], [, b]) => (b.project.lastUsed ?? 0) - (a.project.lastUsed ?? 0),
-			);
+			const entries = Array.from(HashMap.entries(state))
+				.filter(([slug]) => slug !== SCRATCH_PROJECT_SLUG)
+				.sort(
+					([, a], [, b]) =>
+						(b.project.lastUsed ?? 0) - (a.project.lastUsed ?? 0),
+				);
 
 			return yield* Effect.forEach(entries, ([slug, entry]) =>
 				Effect.gen(function* () {

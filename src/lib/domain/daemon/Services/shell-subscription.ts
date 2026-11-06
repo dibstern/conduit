@@ -32,7 +32,7 @@ import { stream } from "../../relay/Services/read-model-subscription.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import type { AccountDirectory } from "./account-directory.js";
 import type { SessionActivityTag } from "./session-activity.js";
-import { makeSessionRows } from "./session-rows.js";
+import { makeSessionRows, type SessionRowsScope } from "./session-rows.js";
 
 export type ShellSubscriptionError = ReadQueryEffectError | SqlError;
 
@@ -83,7 +83,14 @@ const fingerprint = ({ projects }: ShellProjectsFrame) =>
 export const subscribeShellProjects = <E>(
 	options: ShellResume,
 	projects: Stream.Stream<ShellProjectsFrame, E>,
-	{ standalone = false }: { readonly standalone?: boolean } = {},
+	{
+		standalone = false,
+		hidden = [],
+	}: {
+		readonly standalone?: boolean;
+		/** Daemon-owned projects whose rows show though the frame never lists them. */
+		readonly hidden?: readonly SessionRowsScope[];
+	} = {},
 ): Stream.Stream<
 	ShellEnvelope,
 	ShellSubscriptionError | E,
@@ -135,10 +142,13 @@ export const subscribeShellProjects = <E>(
 						const healthy = () =>
 							(current?.projects ?? [])
 								.filter((project) => project.unavailableReason === undefined)
-								.map((project) => ({
-									slug: project.slug,
-									folders: project.folders,
-								}));
+								.map(
+									(project): SessionRowsScope => ({
+										slug: project.slug,
+										folders: project.folders,
+									}),
+								)
+								.concat(hidden);
 						const scopes = healthy();
 						const [head, ...tail] = scopes;
 						const scope = head && {
@@ -244,11 +254,12 @@ export const subscribeShellProjects = <E>(
 export const subscribeDaemonShell = <E>(
 	options: ShellResume,
 	projects: Stream.Stream<ShellProjectsFrame, E>,
+	hidden: readonly SessionRowsScope[] = [],
 ) =>
 	Stream.unwrap(
 		makeReadQueryEffect.pipe(
 			Effect.map((readQuery) =>
-				subscribeShellProjects(options, projects).pipe(
+				subscribeShellProjects(options, projects, { hidden }).pipe(
 					Stream.provideService(ReadQueryEffectTag, readQuery),
 				),
 			),

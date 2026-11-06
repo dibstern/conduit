@@ -469,7 +469,7 @@ export const deleteSessionForClient = ({
 			log.info(`client=${clientId} Deleted: ${id}`);
 			const warnings = inspection.warnings;
 			if (
-				inspection.plan?.ownership.length &&
+				inspection.plan?.worktrees.length &&
 				(removeWorktrees ?? inspection.plan.removeWorktrees)
 			) {
 				warnings.push(
