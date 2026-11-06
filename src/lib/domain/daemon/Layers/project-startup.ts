@@ -16,7 +16,6 @@ import {
 	wireMonitoringEffect,
 } from "../../../relay/monitoring-wiring.js";
 import { wirePollersEffect } from "../../../relay/poller-wiring.js";
-import { readPersistedStartupSessions } from "../../../relay/project-relay-startup.js";
 import { makeSessionLifecycleWiringLive } from "../../../relay/session-lifecycle-wiring.js";
 import { wireSSEConsumerEffect } from "../../../relay/sse-wiring.js";
 import type { PushNotificationSender } from "../../../server/push.js";
@@ -53,6 +52,15 @@ import {
 	ProviderAdapters,
 } from "../Services/provider-adapters.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
+
+/** The project's stored session count, which the status snapshot starts from. */
+export const readPersistedStartupSessions = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const { projectId } = yield* PersistenceProjectTag;
+	const rows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count
+		FROM sessions WHERE project_id = ${projectId}`;
+	return rows[0]?.count ?? 0;
+});
 
 /**
  * Starts one registered project in its generation (82tn.16, lane 16q):
@@ -171,8 +179,8 @@ export const startProject = (options: {
 				`Restored permission modes for ${restored.permissionModes} session(s)`,
 			);
 		const sessions = yield* Effect.result(readPersistedStartupSessions);
-		if (sessions._tag === "Success" && sessions.success.count > 0)
-			yield* statusSnapshot.setSessionCount(sessions.success.count);
+		if (sessions._tag === "Success" && sessions.success > 0)
+			yield* statusSnapshot.setSessionCount(sessions.success);
 		if (sessions._tag === "Failure")
 			log.warn(
 				`Session list unavailable at startup: ${formatErrorDetail(sessions.failure)}`,

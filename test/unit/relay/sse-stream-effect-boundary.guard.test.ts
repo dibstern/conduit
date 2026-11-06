@@ -14,10 +14,10 @@ describe("SSE stream Effect boundary", () => {
 		expect(source).not.toMatch(/Effect\s*\.\s*run(?:Promise|Sync)\s*\(/);
 	});
 
-	it("production relay wiring uses the Effect lifecycle API", () => {
+	it("production project wiring uses the Effect lifecycle API", () => {
 		const source = [
-			"src/lib/relay/project-relay-layers.ts",
-			"src/lib/relay/project-relay-startup.ts",
+			"src/lib/domain/daemon/Layers/project-services-layer.ts",
+			"src/lib/domain/daemon/Layers/project-startup.ts",
 		]
 			.map((path) => readFileSync(join(REPO_ROOT, path), "utf8"))
 			.join("\n");
@@ -28,10 +28,10 @@ describe("SSE stream Effect boundary", () => {
 		expect(source).toContain("SSEStreamLive");
 	});
 
-	it("relay-stack does not construct or drain SSE as an imperative runtime bridge", () => {
+	it("project wiring does not construct or drain SSE as an imperative runtime bridge", () => {
 		const source = [
-			"src/lib/relay/relay-stack.ts",
-			"src/lib/relay/project-relay-startup.ts",
+			"src/lib/domain/daemon/Layers/project-services-layer.ts",
+			"src/lib/domain/daemon/Layers/project-startup.ts",
 		]
 			.map((path) => readFileSync(join(REPO_ROOT, path), "utf8"))
 			.join("\n");

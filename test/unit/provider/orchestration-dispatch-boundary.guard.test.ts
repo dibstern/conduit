@@ -53,10 +53,10 @@ describe("orchestration dispatch boundary", () => {
 		expect(source).not.toContain("IdempotencySetTag");
 	});
 
-	it("relay stop lets the scoped runtime own orchestration shutdown", () => {
+	it("project stop lets the scoped runtime own orchestration shutdown", () => {
 		const source = [
-			"src/lib/relay/relay-stack.ts",
-			"src/lib/relay/project-relay-layers.ts",
+			"src/lib/domain/daemon/Layers/project-services-layer.ts",
+			"src/lib/domain/daemon/Layers/project-startup.ts",
 		]
 			.map((path) => readFileSync(join(REPO_ROOT, path), "utf8"))
 			.join("\n");

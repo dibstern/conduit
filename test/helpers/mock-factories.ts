@@ -170,13 +170,11 @@ import {
 	sdkDefaultClaudeConfigDir,
 } from "../../src/lib/provider/claude/claude-sdk-env.js";
 import { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
-import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../src/lib/provider/provider-registry.js";
 import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
-import type { ProjectRelay } from "../../src/lib/relay/relay-stack.js";
 import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
 import { RpcSubscriptionScopeLive } from "../../src/lib/server/ws-rpc.js";
 import type { ProjectRelayConfig } from "../../src/lib/types.js";
@@ -292,119 +290,6 @@ export function createMockSSEWiringDeps(
 		slug: "test-project",
 		providerInstanceId: "opencode",
 		...overrides,
-	};
-}
-
-export function createMockProjectRelay(
-	overrides?: Partial<ProjectRelay>,
-): ProjectRelay {
-	return {
-		syncGlobalSetting: () => Effect.void,
-		refreshGlobalDefaults: () => Effect.void,
-		settleIdleSessions: () => Effect.succeed(0),
-		archiveIdleSessions: () => Effect.succeed(0),
-		deleteArchivedSessions: () => Effect.succeed(0),
-		rpcWsHandler: {
-			handleUpgrade: vi.fn(),
-			drain: vi.fn().mockResolvedValue(undefined),
-		} satisfies ProjectRelay["rpcWsHandler"],
-		sseStream: partialFake<ProjectRelay["sseStream"]>({
-			connectEffect: vi.fn(),
-			disconnectEffect: vi.fn(),
-			drainEffect: vi.fn(),
-			getHealth: vi.fn(() => ({
-				connected: false,
-				lastEventAt: null,
-				reconnectCount: 0,
-				stale: false,
-			})),
-			isConnected: vi.fn(),
-			on: vi.fn(),
-		}),
-		translator: partialFake<ProjectRelay["translator"]>({}),
-		orchestration: {
-			engine: {
-				dispatch: vi.fn().mockResolvedValue({
-					status: "completed",
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-					providerStateUpdates: [],
-				}),
-				bindSession: vi.fn(),
-				unbindSession: vi.fn(),
-				getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
-				listBoundSessionsEffect: vi.fn(() => Effect.succeed([])),
-				shutdown: vi.fn().mockResolvedValue(undefined),
-			},
-			registry: {} as OrchestrationLayer["registry"],
-			openCodeInstance: {} as OrchestrationLayer["openCodeInstance"],
-		} as unknown as OrchestrationLayer,
-		effectRuntime: {
-			runtime: {} as ProjectRelay["effectRuntime"]["runtime"],
-			dispose: vi.fn().mockResolvedValue(undefined),
-		},
-		getStatusSnapshot: vi.fn(() => ({
-			sessionCount: 0,
-			clients: 0,
-			isProcessing: false,
-			sse: {
-				connected: false,
-				lastEventAt: null,
-				reconnectCount: 0,
-				stale: false,
-			},
-		})),
-		isAnySessionProcessing: vi.fn().mockReturnValue(false),
-		initialSessionId: "s1",
-		stop: vi.fn().mockResolvedValue(undefined),
-		...overrides,
-		setDefaultAgent:
-			overrides?.setDefaultAgent ?? vi.fn().mockResolvedValue(undefined),
-	};
-}
-
-/** Factory that resolves immediately with a mock relay */
-export function immediateRelayFactory(
-	relay?: ProjectRelay,
-): (signal: AbortSignal) => Promise<ProjectRelay> {
-	return async () => relay ?? createMockProjectRelay();
-}
-
-/** Factory that rejects with the given error message */
-export function failingRelayFactory(
-	errorMsg: string,
-): (signal: AbortSignal) => Promise<ProjectRelay> {
-	return async () => {
-		throw new Error(errorMsg);
-	};
-}
-
-/** Factory controlled by a Deferred — resolves/rejects when you tell it to */
-export interface DeferredRelay {
-	factory: (signal: AbortSignal) => Promise<ProjectRelay>;
-	resolve: (relay?: ProjectRelay) => void;
-	reject: (error: Error) => void;
-}
-
-export function deferredRelayFactory(): DeferredRelay {
-	let resolvePromise!: (relay: ProjectRelay) => void;
-	let rejectPromise!: (error: Error) => void;
-
-	const factory: (signal: AbortSignal) => Promise<ProjectRelay> = (signal) =>
-		new Promise<ProjectRelay>((res, rej) => {
-			resolvePromise = res;
-			rejectPromise = rej;
-			signal.addEventListener("abort", () =>
-				rej(new DOMException("Aborted", "AbortError")),
-			);
-		});
-
-	return {
-		factory,
-		resolve: (relay?: ProjectRelay) =>
-			resolvePromise(relay ?? createMockProjectRelay()),
-		reject: (error: Error) => rejectPromise(error),
 	};
 }
 

@@ -198,7 +198,7 @@ describe("daemon-owned provider adapter construction", () => {
 		expect(/makeCodexProviderRuntime\s*\(/.test(wiring)).toBe(false);
 		expect(/serviceOption\(ProviderAdapters\)/.test(wiring)).toBe(false);
 		const startup = readFileSync(
-			"src/lib/relay/project-relay-startup.ts",
+			"src/lib/domain/daemon/Layers/project-startup.ts",
 			"utf8",
 		);
 		expect(/instance\.recoverEffect\s*\(/.test(startup)).toBe(false);

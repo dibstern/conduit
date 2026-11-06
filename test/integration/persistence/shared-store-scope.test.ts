@@ -22,6 +22,7 @@ import {
 	DEFAULT_WORKTREE_CLEANUP,
 	WorktreeRecoveryError,
 } from "../../../src/lib/contracts/worktree.js";
+import { readPersistedStartupSessions } from "../../../src/lib/domain/daemon/Layers/project-startup.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	countRunningProjectSessions,
@@ -116,7 +117,6 @@ import {
 	settleRunnerCommand,
 	settleUnclaimedRunnerCommands,
 } from "../../../src/lib/provider/runner/runner-recovery.js";
-import * as relayStartup from "../../../src/lib/relay/project-relay-startup.js";
 import { settleIdleSessions } from "../../../src/lib/session/auto-settle-sweep.js";
 import {
 	cleanUpProjectWorktrees,
@@ -985,19 +985,14 @@ describe("shared-store relay project scope", () => {
 		);
 	});
 
-	it("startup count and default session belong to A", async () => {
+	it("startup session count belongs to A", async () => {
 		const before = daemonStoreManifest(store.filename);
-		const read = relayStartup.readPersistedStartupSessions;
-		const result = await store.runtime.runPromise(read);
+		const count = await store.runtime.runPromise(readPersistedStartupSessions);
 		record(
-			"relay-startup-count-and-default",
+			"startup-session-count",
 			before,
-			result.count === kinds.length && result.sessionId?.startsWith(`${A}-`)
-				? 1
-				: 0,
-			result.count -
-				kinds.length +
-				(result.sessionId?.startsWith(`${B}-`) ? 1 : 0),
+			count === kinds.length ? 1 : 0,
+			count - kinds.length,
 		);
 	});
 

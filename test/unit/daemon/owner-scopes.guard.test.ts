@@ -184,9 +184,6 @@ const scopeOpenerSites = new Map([
 	[`${root}/Layers/project-services-layer.ts:Scope.fork`, 1],
 	// The daemon's own runtime.
 	[`${root}/Layers/daemon-foreground.ts:ManagedRuntime.make`, 1],
-	// The relay's runtimes; 82tn.16 deletes the relay.
-	["src/lib/relay/project-relay-layers.ts:ManagedRuntime.make", 1],
-	["src/lib/relay/relay-stack.ts:ManagedRuntime.make", 1],
 ]);
 
 function constructions(text: string): string[] {
@@ -299,17 +296,17 @@ describe("daemon-owned sessions and turns (82tn.10.9)", () => {
 describe("one alert feed and pollers held by tabs (82tn.12)", () => {
 	const read = (path: string) => readFileSync(path, "utf8");
 
-	it("the daemon builds the alert feed and lends it; a relay builds one only when none is lent", () => {
+	it("only the daemon builds the alert feed", () => {
 		expect(read(`${root}/Layers/daemon-layers.ts`)).toContain(
 			"Layer.merge(AlertsLive)",
 		);
-		const relay = read("src/lib/relay/project-relay-layers.ts");
-		// The import and the standalone fallback, nothing else.
-		expect(relay.match(/\bAlertsLive\b/g)).toHaveLength(2);
-		expect(relay.indexOf("Option.isSome(sharedAlerts)")).toBeGreaterThan(0);
-		expect(relay.indexOf("Option.isSome(sharedAlerts)")).toBeLessThan(
-			relay.lastIndexOf("AlertsLive"),
-		);
+		// Its definition, and the daemon's import and one build.
+		expect(
+			sources("src/lib").filter((file) => /\bAlertsLive\b/.test(read(file))),
+		).toEqual([
+			`${root}/Layers/daemon-layers.ts`,
+			"src/lib/domain/relay/Services/alerts.ts",
+		]);
 	});
 
 	it("a tab hears every project's alerts and asks (82tn.13)", () => {

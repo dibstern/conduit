@@ -8,7 +8,6 @@ const diskLoaderSites = new Map([
 	["src/lib/domain/daemon/Layers/daemon-foreground.ts", 1],
 	// The writer validates the destination and retains legacy debug before replacing it.
 	["src/lib/domain/daemon/Layers/config-persistence-layer.ts", 1],
-	["src/lib/relay/project-relay-layers.ts", 1],
 	["src/lib/domain/daemon/Services/account-directory.ts", 1],
 	["src/bin/cli-doctor.ts", 1],
 	// Service install/start runs without a daemon and injects the loader into its commands.
@@ -22,7 +21,6 @@ const configPathOwners = new Set([
 	// Legacy Effect config writer owns its injected file path.
 	"src/lib/domain/daemon/Services/daemon-config-persistence.ts",
 	"src/lib/env.ts",
-	"src/lib/relay/project-relay-layers.ts",
 	// Lists the configuration directory, not daemon configuration contents.
 	"src/lib/domain/relay/Services/directory-listing-service.ts",
 ]);

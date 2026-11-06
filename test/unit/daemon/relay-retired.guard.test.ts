@@ -9,7 +9,6 @@ import { describe, expect, it } from "vitest";
 // the per-project relay still waiting for deletion.
 
 const daemon = "src/lib/domain/daemon";
-const relay = "src/lib/relay";
 
 function sources(directory: string): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -94,9 +93,6 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			new Map([
 				// The daemon's one runtime.
 				[`${daemon}/Layers/daemon-foreground.ts`, 1],
-				// relay
-				[`${relay}/project-relay-layers.ts`, 1],
-				[`${relay}/relay-stack.ts`, 1],
 			]),
 		);
 		// Every remaining file that names the relay; all are relay.
@@ -104,12 +100,8 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			new Map([
 				[`${daemon}/Layers/opencode-instances-layer.ts`, 2],
 				[`${daemon}/Layers/provider-adapters-layer.ts`, 3],
-				["src/lib/domain/relay/Layers/relay-core-layers.ts", 2],
 				["src/lib/domain/relay/Services/services.ts", 3],
 				["src/lib/handlers/types.ts", 2],
-				[`${relay}/project-relay-layers.ts`, 3],
-				[`${relay}/project-relay-startup.ts`, 5],
-				[`${relay}/relay-stack.ts`, 24],
 				["src/lib/types.ts", 1],
 			]),
 		);
@@ -123,26 +115,15 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"waitForRelay",
 			"resolveProjectRpcContext",
 		]);
-		expect(tally(server, named(relayRpc))).toEqual(
-			new Map([
-				[`${relay}/project-relay-startup.ts`, 4],
-				[`${relay}/relay-stack.ts`, 8],
-			]),
-		);
+		expect(tally(server, named(relayRpc))).toEqual(new Map([]));
 	});
 
 	it("opens a registered project in its generation, never through a relay (lane 16q)", () => {
 		// Startup, the SSE consumer and the status poller run in the project's
-		// generation; the relay factory is gone (lane 16r), and only the relay
-		// stack still names a relay's maker.
+		// generation; the relay factory and the relay stack are gone (lane 16r).
 		expect(
 			tally(server, named(new Set(["RelayFactoryTag", "startProjectRelay"]))),
-		).toEqual(
-			new Map([
-				[`${relay}/relay-stack.ts`, 2],
-				[`${relay}/project-relay-startup.ts`, 1],
-			]),
-		);
+		).toEqual(new Map([]));
 	});
 
 	it("builds daemon-wide services once, in the daemon's layers", () => {
@@ -174,7 +155,6 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				// The send limiter: one for the daemon, keyed by tab (lane 16o); its definition, and a
 				// standalone relay's own.
 				["src/lib/domain/relay/Layers/rate-limiter-layer.ts", 1],
-				["src/lib/domain/relay/Layers/relay-layer.ts", 2],
 				// Permission timeouts: one loop over every registered project, not one per relay.
 				[`${daemon}/Layers/permission-timeout-layer.ts`, 1],
 				// The PTY host's client: one for the daemon, which also closes a removed project's
@@ -190,8 +170,6 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				[`${daemon}/Layers/daemon-orchestration-layer.ts`, 2],
 				// A store opened without the daemon schedules its own project's retention.
 				["src/lib/persistence/effect/live.ts", 2],
-				// relay: a standalone relay's own alarm scheduler.
-				[`${relay}/project-relay-layers.ts`, 2],
 				// The status poller's definition and daemon layer, and a standalone relay's own poller.
 				["src/lib/domain/relay/Layers/status-poller-layer.ts", 4],
 			]),
@@ -266,10 +244,6 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/domain/relay/Services/relay-status-snapshot.ts", 3],
 				["src/lib/domain/relay/Services/services.ts", 3],
 				["src/lib/persistence/effect/live.ts", 2],
-				// relay: a standalone relay's own copies, which a relay of a registered
-				// project builds only when the daemon cannot build the project.
-				["src/lib/domain/relay/Layers/relay-layer.ts", 7],
-				[`${relay}/project-relay-layers.ts`, 42],
 			]),
 		);
 	});
@@ -316,11 +290,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 
 	it("names no per-project or relay OpenCode home", () => {
 		expect(tally(server, named(openCodeHomeNames))).toEqual(
-			new Map([
-				// relay: the standalone instance set.
-				[`${daemon}/Layers/opencode-instances-layer.ts`, 1],
-				[`${relay}/project-relay-layers.ts`, 2],
-			]),
+			new Map([[`${daemon}/Layers/opencode-instances-layer.ts`, 1]]),
 		);
 	});
 
