@@ -15,7 +15,6 @@ import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
@@ -23,7 +22,6 @@ describe("WsRpcServerLayer SetDefaultModel", () => {
 	it.effect(
 		"sets the relay default model and returns restored variant state",
 		() => {
-			const wsHandler = makeMockWebSocketHandler();
 			const api = makeMockOpenCodeAPI();
 			api.provider.list = vi.fn(async () => ({
 				connected: ["openai"],
@@ -81,7 +79,6 @@ describe("WsRpcServerLayer SetDefaultModel", () => {
 						Layer.provideMerge(
 							makeTestHandlerLayer({
 								api,
-								wsHandler,
 								config: makeMockConfig({ configDir }),
 							}),
 						),

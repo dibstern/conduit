@@ -414,7 +414,12 @@ export const makeProjectServicesLive = (options: {
 									);
 									generations.set(projectId, parts);
 									yield* Effect.addFinalizer(() =>
-										Effect.sync(() => generations.delete(projectId)),
+										Effect.sync(() => {
+											generations.delete(projectId);
+											Context.get(shared, SessionActivityTag).forgetProject(
+												projectId,
+											);
+										}),
 									);
 									return parts;
 								}),

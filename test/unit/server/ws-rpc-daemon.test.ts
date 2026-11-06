@@ -215,7 +215,6 @@ describe("daemon RPC handlers", () => {
 				Effect.succeed({
 					slug,
 					attach: () => () => {},
-					wsHandler: { broadcast: vi.fn() },
 					rpcWsHandler: {},
 					syncGlobalSetting: () => Effect.void,
 					refreshGlobalDefaults: () => Effect.void,

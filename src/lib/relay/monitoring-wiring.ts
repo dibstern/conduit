@@ -77,10 +77,6 @@ interface SSEConnectionHealthLike {
 	isConnected(): boolean;
 }
 
-interface MonitoringWsHandlerLike {
-	getClientsForSession(sessionId: string): string[];
-}
-
 /** Narrowed Effect session service capabilities needed by monitoring wiring. */
 interface SessionServiceLike {
 	refreshSessionLineage(): Promise<void>;
@@ -117,7 +113,8 @@ interface LegacyStatusPollerPort {
 export interface MonitoringWiringDeps {
 	readonly resolveAccount: (ref: AccountRef) => Promise<Account | undefined>;
 	client: OpenCodeSessionReaderLike;
-	wsHandler: MonitoringWsHandlerLike;
+	/** Whether a tab views the session: the daemon's viewer record. */
+	hasViewers: (sessionId: string) => boolean;
 	sessionService: SessionServiceLike;
 	processingTimeouts: ProcessingTimeoutsPort;
 	statusPoller: LegacyStatusPollerPort;
@@ -299,11 +296,10 @@ const processAndApplyDoneEffect = (
 				messageId: originId,
 			}),
 		};
-		const doneViewers = deps.wsHandler.getClientsForSession(sessionId);
 		const doneResult = processEvent(
 			doneMsg,
 			sessionId,
-			doneViewers,
+			deps.hasViewers(sessionId),
 			"status-poller",
 		);
 		yield* applyPipelineResultEffect(doneResult, sessionId, pipelineDeps);
@@ -440,7 +436,7 @@ export function wireMonitoring(
 	const {
 		resolveAccount,
 		client,
-		wsHandler,
+		hasViewers,
 		sessionService,
 		processingTimeouts,
 		statusPoller,
@@ -503,11 +499,10 @@ export function wireMonitoring(
 			}
 
 			const doneMsg = { type: "done" as const, sessionId, code: 0 };
-			const doneViewers = wsHandler.getClientsForSession(sessionId);
 			const doneResult = processEvent(
 				doneMsg,
 				sessionId,
-				doneViewers,
+				hasViewers(sessionId),
 				"status-poller",
 			);
 			applyPipelineResult(doneResult, sessionId, pipelineDeps);
@@ -581,7 +576,7 @@ export function wireMonitoring(
 					{ connected: sseStream.isConnected() },
 					sseTracker,
 					parentMap,
-					(sid) => wsHandler.getClientsForSession(sid).length > 0,
+					hasViewers,
 					now,
 					providerStreamsLifecycle(
 						boundId === undefined ? undefined : accounts.get(boundId),
@@ -652,7 +647,7 @@ export const wireMonitoringEffect = (
 			SessionManagerServiceTag | ConfigTag | OverridesStateTag | AlertsTag
 		>();
 		const {
-			wsHandler,
+			hasViewers,
 			sseStream,
 			config,
 			statusLog,
@@ -738,7 +733,7 @@ export const wireMonitoringEffect = (
 									{ connected: sseStream.isConnected() },
 									sseTracker,
 									parentMap,
-									(sid) => wsHandler.getClientsForSession(sid).length > 0,
+									hasViewers,
 									now,
 									providerStreamsLifecycle(
 										boundId === undefined ? undefined : accounts.get(boundId),

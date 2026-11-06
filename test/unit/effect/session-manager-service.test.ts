@@ -55,7 +55,6 @@ import {
 	LoggerTag,
 	OrchestrationEngineTag,
 	StatusPollerTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { loadPreRenderedHistory } from "../../../src/lib/domain/relay/Services/session-manager-history.js";
 import { listSessions } from "../../../src/lib/domain/relay/Services/session-manager-list.js";
@@ -116,7 +115,6 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
 	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
@@ -426,7 +424,6 @@ const requiredSessionServices = Layer.mergeAll(
 	sessionConfigLayer,
 	sessionLoggerLayer,
 	Layer.succeed(OpenCodeAPITag)(openCodeApi),
-	Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 	Layer.effect(SessionActivityTag, makeSessionActivity),
 	RelayStatusSnapshotLive,
 	makeOverridesStateLive(),
@@ -3122,13 +3119,9 @@ describe("SessionManagerService", () => {
 			makeRow("side", { parent_id: "root", side_thread: 1 }),
 		];
 		const readQuery = makeReadQueryEffect(rows);
-		const ws = makeMockWebSocketHandler({
-			getClientSession: vi.fn(() => "root"),
-		});
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 			Layer.succeed(ReadQueryEffectTag)(readQuery),
-			Layer.succeed(WebSocketHandlerTag)(ws),
 			Layer.succeed(StatusPollerTag)(makeMockStatusPoller()),
 			Layer.succeed(LoggerTag)(makeMockLogger()),
 			makeSessionManagerStateLive(),

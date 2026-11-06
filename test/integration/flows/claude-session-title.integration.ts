@@ -11,7 +11,6 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 import {
 	ConfigTag,
 	LoggerTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
@@ -36,7 +35,6 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
-	makeMockWebSocketHandler,
 	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 
@@ -103,7 +101,6 @@ const makeTitleServiceLayer = (input: {
 					...(input.configDir ? { configDir: input.configDir } : {}),
 				}),
 			),
-			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 			Layer.succeed(SessionManagerServiceTag)(
 				mockSessionManagers(makeMockSessionManagerService()),
 			),

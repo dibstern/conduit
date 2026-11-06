@@ -12,6 +12,7 @@ import {
 	DaemonEvent,
 	DaemonEventBusTag,
 } from "../domain/daemon/Services/daemon-pubsub.js";
+import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { loadModelCatalog } from "../domain/relay/Services/model-catalog.js";
 import {
@@ -23,7 +24,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	PollerManagerTag,
-	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { forkSession } from "../domain/relay/Services/session-command.js";
 import type { CreateSessionOptions } from "../domain/relay/Services/session-manager-service.js";
@@ -159,13 +159,12 @@ const switchClientToSession = (
 	Effect.gen(function* () {
 		if (!sessionId) return;
 
-		const wsHandler = yield* WebSocketHandlerTag;
 		const pollerManager = yield* PollerManagerTag;
 
-		wsHandler.setClientSession(
+		(yield* SessionActivityTag).selectSession(
+			(yield* ConfigTag).slug,
 			clientId,
 			sessionId,
-			(yield* ConfigTag).slug,
 			yield* CurrentEventDelivery,
 		);
 
@@ -794,7 +793,6 @@ export const forkSessionForClient = ({
 	readonly forkId?: string;
 }) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
 		const managers = yield* SessionManagerServiceTag;
 		const ownSlug = (yield* ConfigTag).slug;
 		const target =
@@ -804,7 +802,9 @@ export const forkSessionForClient = ({
 		const sessionManagerService = managers.forProject(target ?? ownSlug);
 
 		const sessionId =
-			requestedSessionId || wsHandler.getClientSession(clientId) || "";
+			requestedSessionId ||
+			(yield* SessionActivityTag).selectedSession(ownSlug, clientId) ||
+			"";
 		if (!sessionId) return undefined;
 		const log = yield* LoggerTag;
 

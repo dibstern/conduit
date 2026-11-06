@@ -2521,67 +2521,6 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
-	it("does not construct websocket handler bridge services in relay-stack", () => {
-		const path = "src/lib/relay/project-relay-layers.ts";
-		const source = readFileSync(join(REPO_ROOT, path), "utf8");
-		const retiredBridgePatterns = [
-			{
-				pattern: /\bnew EffectWsHandler\b/,
-				reason: "WebSocketHandlerTag must be constructed by a scoped Layer",
-			},
-			{
-				pattern: /\bnew SessionRegistry\b/,
-				reason:
-					"viewer tracking must use the Effect websocket handler state, not a relay-stack registry",
-			},
-			{
-				pattern: /Layer\.succeed\s*\(\s*WebSocketHandlerTag\s*(?:,|\)\s*\()/,
-				reason: "WebSocketHandlerTag must not wrap a prebuilt handler",
-			},
-		] as const;
-
-		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
-			source
-				.split("\n")
-				.flatMap((line, index) =>
-					pattern.test(line)
-						? [{ path, line: index + 1, source: line.trim(), reason }]
-						: [],
-				),
-		);
-
-		expect(hits).toEqual([]);
-	});
-
-	it("does not let EffectWsHandler own a private ManagedRuntime bridge", () => {
-		const path = "src/lib/server/effect-ws-handler.ts";
-		const source = readFileSync(join(REPO_ROOT, path), "utf8");
-		const retiredBridgePatterns = [
-			{
-				pattern: /\bManagedRuntime\b/,
-				reason:
-					"EffectWsHandler should be constructed by its scoped Layer, not own a private runtime",
-			},
-			{
-				pattern: /\.run(?:Promise|Sync)(?:Exit)?(?:With)?\s*\(/,
-				reason:
-					"EffectWsHandler callbacks should fork into the relay runtime and keep sync reads on an explicit mirror",
-			},
-		] as const;
-
-		const hits = retiredBridgePatterns.flatMap(({ pattern, reason }) =>
-			source
-				.split("\n")
-				.flatMap((line, index) =>
-					pattern.test(line)
-						? [{ path, line: index + 1, source: line.trim(), reason }]
-						: [],
-				),
-		);
-
-		expect(hits).toEqual([]);
-	});
-
 	it("does not let the RPC websocket handler own a private transport runtime", () => {
 		const path = "src/lib/server/ws-rpc-handler.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");

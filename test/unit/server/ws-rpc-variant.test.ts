@@ -15,7 +15,6 @@ import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
@@ -23,7 +22,6 @@ describe("WsRpcServerLayer SwitchVariant", () => {
 	it.effect(
 		"sets the variant for the requested session and returns pushed state",
 		() => {
-			const wsHandler = makeMockWebSocketHandler();
 			const api = makeMockOpenCodeAPI();
 			api.provider.list = vi.fn(async () => ({
 				connected: ["openai"],
@@ -83,7 +81,6 @@ describe("WsRpcServerLayer SwitchVariant", () => {
 						Layer.provideMerge(
 							makeTestHandlerLayer({
 								api,
-								wsHandler,
 								config: makeMockConfig({
 									configDir: mkdtempSync(
 										join(tmpdir(), "conduit-rpc-variant-"),

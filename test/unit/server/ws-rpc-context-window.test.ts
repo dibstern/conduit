@@ -12,7 +12,6 @@ import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-que
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockLogger,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -23,7 +22,6 @@ describe("WsRpcServerLayer SwitchContextWindow", () => {
 			{ value: "200k", label: "200K", isDefault: true },
 			{ value: "1m", label: "1M (beta)" },
 		];
-		const wsHandler = makeMockWebSocketHandler();
 		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({
 				models: [
@@ -77,7 +75,6 @@ describe("WsRpcServerLayer SwitchContextWindow", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
-							wsHandler,
 							log: makeMockLogger(),
 							orchestrationEngine: engine,
 						}),

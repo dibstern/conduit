@@ -33,7 +33,14 @@ const relayNames = new Set([
 	"RelayFactoryTag",
 ]);
 const scopeOpeners = new Set(["Scope.make", "Scope.makeUnsafe", "Scope.fork"]);
-const routingNames = new Set(["WebSocketHandlerTag", "getClientsForSession"]);
+// The relay's per-project client registry: which tabs view a session and which
+// session each tab picked. The daemon's SessionActivity owns both (lane 16p).
+const routingNames = new Set([
+	"WebSocketHandlerTag",
+	"getClientsForSession",
+	"getClientSession",
+	"registerSessionViewer",
+]);
 const openCodeHomeNames = new Set([
 	"openCodeInstanceTarget",
 	"openCodeInstanceId",
@@ -268,29 +275,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 	});
 
 	it("routes browser events only through Event Audiences", () => {
-		expect(tally(server, named(routingNames))).toEqual(
-			new Map([
-				// relay: the per-project client registry and its readers.
-				["src/lib/domain/relay/Layers/websocket-handler-layer.ts", 3],
-				["src/lib/domain/relay/Services/services.ts", 2],
-				["src/lib/domain/relay/Services/session-registry-state.ts", 1],
-				["src/lib/handlers/model.ts", 3],
-				["src/lib/handlers/permissions.ts", 4],
-				["src/lib/handlers/prompt.ts", 2],
-				["src/lib/handlers/session.ts", 3],
-				["src/lib/handlers/types.ts", 1],
-				[`${relay}/monitoring-wiring.ts`, 5],
-				[`${relay}/poller-wiring.ts`, 2],
-				[`${relay}/project-relay-layers.ts`, 1],
-				[`${relay}/project-relay-startup.ts`, 2],
-				[`${relay}/relay-stack.ts`, 1],
-				[`${relay}/sse-wiring.ts`, 2],
-				["src/lib/server/effect-ws-handler.ts", 1],
-				["src/lib/server/ws-handler-shape.ts", 1],
-				["src/lib/server/ws-rpc.ts", 2],
-				["src/lib/session/worktree-cleanup-sweep.ts", 3],
-			]),
-		);
+		expect(tally(server, named(routingNames))).toEqual(new Map());
 	});
 
 	it("writes Run state only in the Run Ledger", () => {

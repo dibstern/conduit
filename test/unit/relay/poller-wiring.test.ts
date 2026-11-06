@@ -43,9 +43,7 @@ describe("wirePollers", () => {
 			statusPoller: {
 				markMessageActivity: vi.fn(),
 			} as never,
-			wsHandler: {
-				getClientsForSession: vi.fn(() => []),
-			} as never,
+			hasViewers: () => false,
 			sessionService: {
 				getSessionParentMap: () =>
 					new Map([["child-session", "parent-session"]]),
@@ -117,9 +115,7 @@ describe("wirePollers", () => {
 					on: vi.fn(),
 					off: vi.fn(),
 				},
-				wsHandler: {
-					getClientsForSession: vi.fn(() => []),
-				} as never,
+				hasViewers: () => false,
 				pipelineDeps: {
 					log: createSilentLogger(),
 				},
@@ -172,7 +168,7 @@ describe("wirePollers", () => {
 					on: (_event, callback) => void sseListeners.add(callback),
 					off: (_event, callback) => void sseListeners.delete(callback),
 				},
-				wsHandler: { getClientsForSession: vi.fn(() => []) } as never,
+				hasViewers: () => false,
 				pipelineDeps: { log: createSilentLogger() },
 				sseTracker: { recordEvent: vi.fn() } as never,
 				config: { slug: "project" },

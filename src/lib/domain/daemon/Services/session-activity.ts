@@ -349,7 +349,29 @@ export interface SessionActivity {
 	/** Called for each session whose rows a gate link moved; the daemon's announce adds itself. */
 	readonly onServersMoved: Set<(sessionId: string) => void>;
 	readonly hintDismissals: Map<string, number>;
-	readonly viewers: Map<string, number>;
+	/**
+	 * Counts the caller's tab as viewing the session until its scope closes: the daemon's one
+	 * record of viewers, as t3code keeps one server-wide subscriber map whose entries leave with
+	 * their scope (apps/server/src/orchestration-v2/CommandOutputHub.ts:170-191).
+	 */
+	readonly view: (sessionId: string) => Effect.Effect<void, never, Scope.Scope>;
+	readonly hasViewers: (sessionId: string) => boolean;
+	/**
+	 * Records the session a tab picked last in a project, the fallback for a request naming
+	 * none, and selects it on the tab's socket (or the socket it picked on before).
+	 */
+	readonly selectSession: (
+		projectId: string,
+		tabId: string,
+		sessionId: string,
+		delivery: EventDelivery | undefined,
+	) => void;
+	readonly selectedSession: (
+		projectId: string,
+		tabId: string,
+	) => string | undefined;
+	/** Drops a project's picks; its generation calls this as it closes. */
+	readonly forgetProject: (projectId: string) => void;
 	readonly connectionInterests: Map<EventDelivery, Interests>;
 	readonly watchInterests: (delivery: EventDelivery) => () => void;
 	readonly changed: (sessionId: string) => void;
@@ -379,6 +401,24 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 				return moved;
 			};
 		const connectionInterests = new Map<EventDelivery, Interests>();
+		const viewers = new Map<string, number>();
+		const picks = new Map<
+			string,
+			Map<
+				string,
+				{
+					readonly sessionId: string;
+					readonly delivery: EventDelivery | undefined;
+					readonly release: () => void;
+				}
+			>
+		>();
+		const countViewer = (sessionId: string, by: 1 | -1) => {
+			const count = (viewers.get(sessionId) ?? 0) + by;
+			if (count > 0) viewers.set(sessionId, count);
+			else viewers.delete(sessionId);
+			changed(sessionId);
+		};
 		// Existing hint consumers mutate a Map. Keep that interface while ensuring
 		// dismissals and resets notify readers just like the other activity state.
 		const hintDismissals = new (class extends Map<string, number> {
@@ -456,7 +496,29 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 			gateUrls,
 			onServersMoved,
 			hintDismissals,
-			viewers: new Map(),
+			view: (sessionId) =>
+				Effect.acquireRelease(
+					Effect.sync(() => countViewer(sessionId, 1)),
+					() => Effect.sync(() => countViewer(sessionId, -1)),
+				),
+			hasViewers: (sessionId) => viewers.has(sessionId),
+			selectSession: (projectId, tabId, sessionId, delivery) => {
+				const tabs = picks.get(projectId) ?? new Map();
+				picks.set(projectId, tabs);
+				const previous = tabs.get(tabId);
+				const socket = delivery ?? previous?.delivery;
+				const release =
+					socket?.setClientSession(tabId, sessionId, projectId) ?? (() => {});
+				previous?.release();
+				tabs.set(tabId, { sessionId, delivery: socket, release });
+			},
+			selectedSession: (projectId, tabId) =>
+				picks.get(projectId)?.get(tabId)?.sessionId,
+			forgetProject: (projectId) => {
+				for (const { release } of picks.get(projectId)?.values() ?? [])
+					release();
+				picks.delete(projectId);
+			},
 			connectionInterests,
 			watchInterests: (delivery) => {
 				const update = () => {

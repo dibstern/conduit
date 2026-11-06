@@ -2,7 +2,7 @@
 // Effect-native replacement for the imperative SessionOverrides class.
 // Uses Ref<OverridesState> for atomic state and FiberMap for timeout management.
 //
-// Pattern (mirrors SessionRegistryState / SessionManagerState):
+// Pattern (mirrors SessionManagerState):
 //   OverridesStateTag → Ref.Ref<OverridesState>
 //   makeOverridesStateLive() → Layer providing the Tag
 //   Pure functions: setModel, getModel, setAgent, getAgent, etc.

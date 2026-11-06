@@ -131,8 +131,7 @@ export const makeProjectIngestionLive = (
 							const pushManager = Option.getOrUndefined(yield* push);
 							// A browser on the daemon socket counts as a viewer (82tn.16).
 							yield* publishProviderRelayMessage(msg, {
-								isViewed: (sessionId) =>
-									(activity.viewers.get(sessionId) ?? 0) > 0,
+								isViewed: activity.hasViewers,
 								log,
 								slug,
 								...(pushManager ? { pushManager } : {}),

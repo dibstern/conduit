@@ -14,7 +14,6 @@ import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
@@ -87,7 +86,6 @@ describe("WsRpcServerLayer Claude settings", () => {
 	for (const key of CLAUDE_TRUST_TIERED_SETTINGS_KEYS) {
 		it.effect(`rejects trust-tiered override ${key}`, () => {
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-rpc-claude-"));
-			const wsHandler = makeMockWebSocketHandler();
 
 			return Effect.gen(function* () {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
@@ -115,7 +113,6 @@ describe("WsRpcServerLayer Claude settings", () => {
 						Layer.provideMerge(
 							makeTestHandlerLayer({
 								config: makeMockConfig({ configDir }),
-								wsHandler,
 							}),
 						),
 					),

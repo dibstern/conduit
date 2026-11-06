@@ -13,7 +13,6 @@ import {
 	ConnectPtyUpstreamTag,
 	LoggerTag,
 	PtyManagerTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type LocalPtyService,
@@ -31,7 +30,6 @@ import {
 import {
 	makeMockConfig,
 	makeMockLogger,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
@@ -83,7 +81,6 @@ const makeLayer = (options?: {
 	readonly ptyManager?: PtyManager;
 	readonly connectPtyUpstream?: ConnectPtyUpstreamShape;
 	readonly localPty?: LocalPtyService;
-	readonly wsHandler?: ReturnType<typeof makeMockWebSocketHandler>;
 	readonly log?: ReturnType<typeof makeMockLogger>;
 }) => {
 	const api = options?.api ?? makeApi();
@@ -120,7 +117,6 @@ const makeLayer = (options?: {
 				return Effect.succeed(session);
 			}),
 		} satisfies LocalPtyService);
-	const wsHandler = options?.wsHandler ?? makeMockWebSocketHandler();
 	const log = options?.log ?? makeMockLogger();
 
 	return OpenCodeTerminalServiceLive.pipe(
@@ -132,7 +128,6 @@ const makeLayer = (options?: {
 				Layer.succeed(PtyManagerTag)(ptyManager),
 				Layer.succeed(ConnectPtyUpstreamTag)(connectPtyUpstream),
 				Layer.succeed(LocalPtyServiceTag)(localPty),
-				Layer.succeed(WebSocketHandlerTag)(wsHandler),
 				Layer.succeed(ConfigTag)(makeMockConfig({ projectDir: "/project" })),
 				Layer.succeed(LoggerTag)(log),
 			),
@@ -464,7 +459,6 @@ describe("OpenCodeTerminalServiceLive", () => {
 		"does not connect an OpenCode upstream when creating a terminal",
 		() => {
 			const events: string[] = [];
-			const wsHandler = makeMockWebSocketHandler();
 			const ptyManager = new PtyManager({ log: makeMockLogger() });
 			ptyManager.subscribe((event) => events.push(`publish:${event._tag}`));
 			const connectPtyUpstream = vi.fn(() =>
@@ -475,7 +469,6 @@ describe("OpenCodeTerminalServiceLive", () => {
 			const api = makeApi();
 			const layer = makeLayer({
 				api,
-				wsHandler,
 				ptyManager,
 				connectPtyUpstream,
 			});
@@ -494,7 +487,6 @@ describe("OpenCodeTerminalServiceLive", () => {
 	it.effect(
 		"fails typed without publishing when local terminal creation fails",
 		() => {
-			const wsHandler = makeMockWebSocketHandler();
 			const ptyManager = new PtyManager({ log: makeMockLogger() });
 			const events = published(ptyManager);
 			const localPty: LocalPtyService = {
@@ -516,7 +508,7 @@ describe("OpenCodeTerminalServiceLive", () => {
 					),
 				),
 			};
-			const layer = makeLayer({ wsHandler, localPty, ptyManager });
+			const layer = makeLayer({ localPty, ptyManager });
 
 			return Effect.gen(function* () {
 				const service = yield* OpenCodeTerminalServiceTag;

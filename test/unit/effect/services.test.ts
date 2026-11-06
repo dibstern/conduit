@@ -17,13 +17,11 @@ import {
 	PollerManagerTag,
 	PtyManagerTag,
 	StatusPollerTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 
 const ALL_TAGS = [
 	OpenCodeAPITag,
 	OpenCodeSettingsServiceTag,
-	WebSocketHandlerTag,
 	PtyManagerTag,
 	ConfigTag,
 	LoggerTag,
@@ -49,10 +47,6 @@ describe("Service Tags", () => {
 
 	it("OpenCodeSettingsService tag has correct key", () => {
 		expect(OpenCodeSettingsServiceTag.key).toBe("OpenCodeSettingsService");
-	});
-
-	it("WebSocketHandler tag has correct key", () => {
-		expect(WebSocketHandlerTag.key).toBe("WebSocketHandler");
 	});
 
 	it("PtyManager tag has correct key", () => {

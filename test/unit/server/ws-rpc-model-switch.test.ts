@@ -16,7 +16,6 @@ import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -25,7 +24,6 @@ describe("WsRpcServerLayer SwitchModel", () => {
 	it.effect(
 		"sets the model for the requested session and returns restored variant state",
 		() => {
-			const wsHandler = makeMockWebSocketHandler();
 			const api = makeMockOpenCodeAPI();
 			api.provider.list = vi.fn(async () => ({
 				connected: ["openai"],
@@ -95,7 +93,6 @@ describe("WsRpcServerLayer SwitchModel", () => {
 						Layer.provideMerge(
 							makeTestHandlerLayer({
 								api,
-								wsHandler,
 								orchestrationEngine,
 								config: makeMockConfig({ configDir }),
 							}),

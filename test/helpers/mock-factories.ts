@@ -113,8 +113,6 @@ import {
 	type SessionManagerShape,
 	type StatusPollerShape,
 	StatusPollerTag,
-	type WebSocketHandlerShape,
-	WebSocketHandlerTag,
 } from "../../src/lib/domain/relay/Services/services.js";
 import { SessionInboxTag } from "../../src/lib/domain/relay/Services/session-inbox.js";
 import { SessionManagerError } from "../../src/lib/domain/relay/Services/session-manager-error.js";
@@ -134,7 +132,6 @@ import {
 	makeOverridesStateLive,
 	OverridesStateTag,
 } from "../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { makeSessionRegistryStateLive } from "../../src/lib/domain/relay/Services/session-registry-state.js";
 import { makePollerStateLive } from "../../src/lib/domain/relay/Services/session-status-poller.js";
 import {
 	type SessionTitleService,
@@ -185,14 +182,6 @@ import { RpcSubscriptionScopeLive } from "../../src/lib/server/ws-rpc.js";
 import type { ProjectRelayConfig } from "../../src/lib/types.js";
 import { withDispatchEffect } from "./orchestration-engine-test-double.js";
 import { partialFake } from "./partial-fake.js";
-
-function createMockWsHandlerFull(): HandlerDeps["wsHandler"] {
-	return {
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(),
-		getClientsForSession: vi.fn().mockReturnValue([]),
-	};
-}
 
 function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 	return {
@@ -272,7 +261,6 @@ export function createMockHandlerDeps(
 	overrides?: Partial<HandlerDeps>,
 ): HandlerDeps {
 	return {
-		wsHandler: createMockWsHandlerFull(),
 		sessionMgr: createMockSessionMgr(),
 		ptyManager: createMockPtyManager(),
 		config: createMockConfig(),
@@ -298,9 +286,7 @@ export function createMockSSEWiringDeps(
 ): SSEWiringDeps {
 	return {
 		translator: createMockTranslator(),
-		wsHandler: {
-			getClientsForSession: vi.fn().mockReturnValue(["c1"]),
-		},
+		hasViewers: vi.fn().mockReturnValue(true),
 		log: createSilentLogger(),
 		pipelineLog: createSilentLogger(),
 		slug: "test-project",
@@ -318,7 +304,6 @@ export function createMockProjectRelay(
 		settleIdleSessions: () => Effect.succeed(0),
 		archiveIdleSessions: () => Effect.succeed(0),
 		deleteArchivedSessions: () => Effect.succeed(0),
-		wsHandler: makeMockWebSocketHandler(),
 		rpcWsHandler: {
 			handleUpgrade: vi.fn(),
 			drain: vi.fn().mockResolvedValue(undefined),
@@ -561,21 +546,6 @@ export function makeMockOpenCodeAPI(
 		getAuthHeaders: vi.fn(() => ({})),
 		...overrides,
 	} as unknown as OpenCodeAPI;
-}
-
-/** Create a mock WebSocketHandlerShape for Effect tests. */
-export function makeMockWebSocketHandler(
-	overrides?: Partial<WebSocketHandlerShape>,
-): WebSocketHandlerShape {
-	return {
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => undefined),
-		getClientsForSession: vi.fn(() => []),
-		registerSessionViewer: vi.fn(() => () => {}),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-		...overrides,
-	};
 }
 
 /** Create a mock SessionManagerShape for Effect tests. */
@@ -937,11 +907,23 @@ const makeTestInstanceManagementService = (
  * Options for building the handler-level test Layer.
  * Every field is optional — defaults are used for omitted fields.
  */
+/** The daemon's real SessionActivity; `selected` stands in for every tab's pick. */
+export const makeTestSessionActivityLayer = (selected?: string) =>
+	Layer.effect(
+		SessionActivityTag,
+		Effect.map(makeSessionActivity, (activity) =>
+			selected === undefined
+				? activity
+				: { ...activity, selectedSession: () => selected },
+		),
+	);
+
 export interface TestHandlerLayerOptions {
 	accountDirectory?: AccountDirectory["Service"];
 	api?: OpenCodeAPI;
 	openCodeModelService?: OpenCodeModelService;
-	wsHandler?: WebSocketHandlerShape;
+	/** The session every tab has picked, as the daemon's SessionActivity reports it. */
+	selectedSession?: string;
 	sessionMgr?: SessionManagerShape;
 	sessionManagerService?: SessionManagerService;
 	ptyManager?: PtyManager;
@@ -978,7 +960,6 @@ export function makeTestHandlerLayer(
 	// biome-ignore lint/suspicious/noExplicitAny: existing broad test Layer output; the persistence layer now has a typed failure channel
 ): Layer.Layer<any, PersistenceEffectError> {
 	const api = opts?.api ?? makeMockOpenCodeAPI();
-	const wsHandler = opts?.wsHandler ?? makeMockWebSocketHandler();
 	const ptyManager = opts?.ptyManager ?? makeMockPtyManager();
 	const config = opts?.config ?? makeMockConfig();
 	const log = opts?.log ?? makeMockLogger();
@@ -1029,7 +1010,7 @@ export function makeTestHandlerLayer(
 		opts?.accountDirectory ?? makeMockAccountDirectory(),
 	);
 	const loggerLayer = Layer.succeed(LoggerTag)(log);
-	const activityLayer = Layer.effect(SessionActivityTag, makeSessionActivity);
+	const activityLayer = makeTestSessionActivityLayer(opts?.selectedSession);
 	const backgroundLayer = Layer.effect(
 		BackgroundLivenessTag,
 		Effect.map(
@@ -1083,7 +1064,6 @@ export function makeTestHandlerLayer(
 		opts?.orchestrationEngine ??
 			new OrchestrationEngine({ registry: new ProviderRegistry() }),
 	);
-	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag)(wsHandler);
 	const configured =
 		config.configDir === undefined
 			? Either.succeed(defaultDaemonConfig())
@@ -1156,7 +1136,7 @@ export function makeTestHandlerLayer(
 		Layer.provide(
 			Layer.mergeAll(
 				openCodeInstancesLayer,
-				wsHandlerLayer,
+				activityLayer,
 				loggerLayer,
 				configLayer,
 				ptyManagerLayer,
@@ -1192,7 +1172,6 @@ export function makeTestHandlerLayer(
 						DaemonEventBusLive,
 						configLayer,
 						accountDirectoryLayer,
-						wsHandlerLayer,
 						RelayStatusSnapshotLive,
 						openCodeInstancesLayer,
 						overridesStateLayer,
@@ -1214,7 +1193,7 @@ export function makeTestHandlerLayer(
 				openCodeInstancesLayer,
 				sessionWorkspaceLayer,
 				openCodeModelServiceLayer,
-				wsHandlerLayer,
+				activityLayer,
 				loggerLayer,
 				configLayer,
 				accountDirectoryLayer,
@@ -1255,7 +1234,6 @@ export function makeTestHandlerLayer(
 		),
 		sessionManagerServiceLayer,
 		...(opts?.persistenceLayer ? [persistenceLayer] : []),
-		wsHandlerLayer,
 		overridesStateLayer,
 		ProjectSettingsLive,
 		RpcSubscriptionScopeLive,
@@ -1315,7 +1293,6 @@ export function makeTestDaemonStateLayer(
 		makeInstanceManagerStateLive(opts?.instanceManagerConfig, [], {
 			launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 		}),
-		makeSessionRegistryStateLive(),
 		RateLimiterLive(
 			opts?.rateLimiter ?? { maxRequests: 100, windowMs: 60_000 },
 		),

@@ -29,10 +29,7 @@ import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { RecapServiceTag } from "../domain/relay/Services/recap-service.js";
-import {
-	ConfigTag,
-	WebSocketHandlerTag,
-} from "../domain/relay/Services/services.js";
+import { ConfigTag } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
 import { subscribeSessionPromptIndex } from "../domain/relay/Services/session-prompt-index.js";
@@ -78,41 +75,13 @@ const unaryHandlers = {
 	...conversationHandlers,
 };
 
+/** The tab views the session while its detail stream is open. */
 const subscribeSessionDetailWithPresence = (
 	options: Parameters<typeof subscribeSessionDetail>[0],
 ) =>
 	Stream.unwrap(
 		Effect.gen(function* () {
-			const wsHandler = yield* WebSocketHandlerTag;
-			const activity = yield* Effect.serviceOption(SessionActivityTag);
-			yield* Effect.acquireRelease(
-				Effect.sync(() => {
-					const removeViewer = wsHandler.registerSessionViewer(
-						options.sessionId,
-					);
-					if (Option.isSome(activity)) {
-						const state = activity.value;
-						state.viewers.set(
-							options.sessionId,
-							(state.viewers.get(options.sessionId) ?? 0) + 1,
-						);
-						state.changed(options.sessionId);
-					}
-					return removeViewer;
-				}),
-				(removeViewer) =>
-					Effect.sync(() => {
-						removeViewer();
-						if (Option.isSome(activity)) {
-							const state = activity.value;
-							const remaining = (state.viewers.get(options.sessionId) ?? 1) - 1;
-							if (remaining > 0)
-								state.viewers.set(options.sessionId, remaining);
-							else state.viewers.delete(options.sessionId);
-							state.changed(options.sessionId);
-						}
-					}),
-			);
+			yield* (yield* SessionActivityTag).view(options.sessionId);
 			return subscribeSessionDetail(options);
 		}),
 	);

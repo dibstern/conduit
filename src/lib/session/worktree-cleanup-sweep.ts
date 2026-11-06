@@ -20,7 +20,6 @@ import {
 	AgentLivenessTag,
 	ConfigTag,
 	SessionRetriesTag,
-	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
@@ -138,7 +137,7 @@ export const cleanUpProjectWorktrees = (
 		const localPty = yield* Effect.serviceOption(LocalPtyServiceTag);
 		const instances = yield* OpenCodeInstancesTag;
 		const sessionGit = yield* Effect.serviceOption(SessionGit);
-		const viewers = yield* WebSocketHandlerTag;
+		const activity = yield* SessionActivityTag;
 		const agentIsLive = yield* AgentLivenessTag;
 		const report: {
 			removed: WorktreeCleanupEntry[];
@@ -158,7 +157,7 @@ export const cleanUpProjectWorktrees = (
 			Effect.gen(function* () {
 				return {
 					...(yield* readSessionQuiescence(now, sessionId)),
-					hasViewer: viewers.getClientsForSession(sessionId).length > 0,
+					hasViewer: activity.hasViewers(sessionId),
 					hasLiveAgent: yield* agentIsLive(sessionId),
 				};
 			});

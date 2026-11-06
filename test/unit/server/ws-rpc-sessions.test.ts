@@ -11,6 +11,7 @@ import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeUnavailable } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { GoalSummaryServiceTag } from "../../../src/lib/domain/relay/Services/goal-summary-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
@@ -39,7 +40,6 @@ import {
 	makeMockConfig,
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -205,7 +205,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				title: "New Session",
 			} as unknown as SessionDetail),
 		);
-		const wsHandler = makeMockWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			createSession,
 		});
@@ -244,18 +243,18 @@ describe("WsRpcServerLayer ListSessions", () => {
 					contextWindow: "",
 				},
 			});
-			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
-				"browser-tab-a",
-				"session-new",
-				"test-project",
-				undefined,
-			);
+			expect(
+				(yield* SessionActivityTag).selectedSession(
+					"test-project",
+					"browser-tab-a",
+				),
+			).toBe("session-new");
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
-						makeTestHandlerLayer({ api, wsHandler, sessionManagerService }),
+						makeTestHandlerLayer({ api, sessionManagerService }),
 					),
 				),
 				{ local: true },
@@ -396,8 +395,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 	);
 
 	it.effect("views a session for the originating browser tab", () => {
-		const wsHandler = makeMockWebSocketHandler();
-
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
 			const sql = yield* SqlClient.SqlClient;
@@ -415,18 +412,16 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
-				"browser-tab-a",
-				"session-1",
-				"test-project",
-				undefined,
-			);
+			expect(
+				(yield* SessionActivityTag).selectedSession(
+					"test-project",
+					"browser-tab-a",
+				),
+			).toBe("session-1");
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
-				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ wsHandler })),
-				),
+				WsRpcServerLayer.pipe(Layer.provideMerge(makeTestHandlerLayer())),
 				{ local: true },
 			),
 		);
@@ -502,7 +497,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			{ id: "message-2", time: { created: 11 } },
 		] as unknown as Awaited<ReturnType<typeof api.session.messages>>);
 		const setForkEntry = vi.fn(() => Effect.void);
-		const wsHandler = makeMockWebSocketHandler();
 		const sessionManagerService = makeMockSessionManagerService({
 			listSessions: vi.fn(() =>
 				Effect.succeed([
@@ -567,7 +561,12 @@ describe("WsRpcServerLayer ListSessions", () => {
 				{ type: "session.context_window_changed" },
 				{ type: "session.workspace_changed" },
 			]);
-			expect(wsHandler.setClientSession).not.toHaveBeenCalled();
+			expect(
+				(yield* SessionActivityTag).selectedSession(
+					"test-project",
+					"browser-tab-a",
+				),
+			).toBeUndefined();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -575,7 +574,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 					Layer.provideMerge(
 						makeTestHandlerLayer({
 							api,
-							wsHandler,
 							sessionManagerService,
 							persistenceLayer,
 						}),
@@ -637,7 +635,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				}),
 			);
 			const api = makeMockOpenCodeAPI();
-			const wsHandler = makeMockWebSocketHandler();
 			const setForkEntry = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
 				setForkEntry,
@@ -697,7 +694,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 					Layer.mergeAll(
 						makeTestHandlerLayer({
 							api,
-							wsHandler,
 							sessionManagerService,
 							persistenceLayer,
 							accountDirectory: makeMockAccountDirectory([
@@ -1111,9 +1107,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			providerId: "opencode",
 			resolvePermissionEffect,
 		} as unknown as ProviderInstance);
-		const wsHandler = makeMockWebSocketHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
 
 		return Effect.gen(function* () {
 			const pendingInteractions = yield* PendingInteractionServiceTag;
@@ -1150,7 +1143,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					Layer.provideMerge(
 						makeTestHandlerLayer({
 							api,
-							wsHandler,
+							selectedSession: "session-1",
 							providerRegistry,
 							orchestrationEngine,
 						}),
@@ -1166,9 +1159,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 		const dispatchEffect = vi.fn(() => Effect.void);
 		const orchestrationEngine = withDispatchEffect({ dispatchEffect });
 		const config = makeMockConfig({ projectDir: "/project" });
-		const wsHandler = makeMockWebSocketHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
 		return Effect.gen(function* () {
 			yield* applySessionCommand({
 				type: "session.created",
@@ -1213,7 +1203,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 						makeTestHandlerLayer({
 							api,
 							config,
-							wsHandler,
+							selectedSession: "session-1",
 							orchestrationEngine,
 						}),
 					),
@@ -1228,9 +1218,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 		const dispatchEffect = vi.fn(() => Effect.void);
 		const orchestrationEngine = withDispatchEffect({ dispatchEffect });
 		const config = makeMockConfig({ projectDir: "/project" });
-		const wsHandler = makeMockWebSocketHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
 		return Effect.gen(function* () {
 			yield* applySessionCommand({
 				type: "session.created",
@@ -1275,7 +1262,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 						makeTestHandlerLayer({
 							api,
 							config,
-							wsHandler,
+							selectedSession: "session-1",
 							orchestrationEngine,
 						}),
 					),

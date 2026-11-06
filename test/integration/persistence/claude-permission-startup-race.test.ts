@@ -29,7 +29,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { handlePermissionResponse } from "../../../src/lib/handlers/permissions.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -59,8 +58,8 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	makeTestSessionActivityLayer,
 } from "../../helpers/mock-factories.js";
 
 const sessionId = "recovered-session";
@@ -328,10 +327,7 @@ describe("Claude permission ownership during startup cleanup", () => {
 				requestId: PermissionId.make(approval.id),
 				decision: "allow",
 			}).pipe(
-				Effect.provideService(
-					WebSocketHandlerTag,
-					makeMockWebSocketHandler({ getClientSession: () => sessionId }),
-				),
+				Effect.provide(makeTestSessionActivityLayer(sessionId)),
 				Effect.provideService(LoggerTag, makeMockLogger()),
 				Effect.provideService(OrchestrationEngineTag, engine),
 				Effect.provideService(

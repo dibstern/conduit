@@ -37,7 +37,7 @@ type RawData = import("ws").RawData;
  * Open an upstream WebSocket to OpenCode's `/pty/:id/connect` endpoint and wire
  * it to the relay's PTY manager, whose feed every PTY subscriber reads.
  *
- * @param deps   - Explicit dependencies (ptyManager, wsHandler, client, etc.)
+ * @param deps   - Explicit dependencies (ptyManager, client, etc.)
  * @param ptyId  - The PTY session identifier
  * @param cursor - 0 to replay the entire PTY buffer (new PTYs), -1 to skip
  *                 buffered data (reconnecting to an existing PTY)

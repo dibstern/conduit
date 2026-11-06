@@ -19,6 +19,7 @@ import {
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { makeRelayCacheLive } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
@@ -32,7 +33,6 @@ import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handle
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import {
 	makeMockConfig,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
@@ -81,14 +81,10 @@ describe("daemon shared RPC routing", () => {
 					lastUsed: 1,
 				},
 			];
-			const handlers = new Map<
-				string,
-				ReturnType<typeof makeMockWebSocketHandler>
-			>();
+			const activities = new Map<string, SessionActivityTag["Service"]>();
 			const startPolling = vi.fn();
 			const factory = (slug: string) =>
 				Effect.gen(function* () {
-					const wsHandler = makeMockWebSocketHandler();
 					const pollerManager = {
 						on: vi.fn(),
 						off: vi.fn(),
@@ -105,7 +101,6 @@ describe("daemon shared RPC routing", () => {
 									daemonStorePath(root),
 									slug,
 								),
-								wsHandler,
 								pollerManager,
 							}),
 							makeWsTransportLive({ noServer: true }),
@@ -114,10 +109,12 @@ describe("daemon shared RPC routing", () => {
 					const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
 						runtime,
 					}).pipe(Effect.provide(yield* runtime.contextEffect));
-					handlers.set(slug, wsHandler);
+					activities.set(
+						slug,
+						yield* Effect.promise(() => runtime.runPromise(SessionActivityTag)),
+					);
 					return {
 						slug,
-						wsHandler,
 						rpcWsHandler,
 						syncGlobalSetting: () => Effect.void,
 						refreshGlobalDefaults: () => Effect.void,
@@ -216,15 +213,15 @@ describe("daemon shared RPC routing", () => {
 			}
 			expect(upgrades).toHaveBeenCalledTimes(1);
 
-			const handlerA = handlers.get("project-a");
-			const handlerB = handlers.get("project-b");
-			if (!handlerA || !handlerB) {
+			const activityA = activities.get("project-a");
+			const activityB = activities.get("project-b");
+			if (!activityA || !activityB) {
 				return yield* Effect.fail(new Error("Expected both relays to start"));
 			}
-			expect(handlerB.setClientSession).toHaveBeenCalledWith(
-				"daemon-client",
+			expect(activityB.selectedSession("project-b", "daemon-client")).toBe(
 				"session-b",
-				"project-b",
+			);
+			expect(activityA.selectedSession("project-a", "daemon-client")).toBe(
 				undefined,
 			);
 			expect(startPolling).toHaveBeenCalledWith("session-b");

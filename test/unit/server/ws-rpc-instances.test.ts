@@ -22,10 +22,7 @@ import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js"
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
-import {
-	makeMockWebSocketHandler,
-	makeTestHandlerLayer,
-} from "../../helpers/mock-factories.js";
+import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 const rpcClient = Effect.gen(function* () {
 	return yield* RpcTest.makeClient(WsRpcGroup);
@@ -125,7 +122,6 @@ afterEach(() => {
 
 describe("WsRpcServerLayer instance management", () => {
 	it.effect("starts an instance and returns the updated list", () => {
-		const wsHandler = makeMockWebSocketHandler();
 		const startInstance = vi.fn(async () => undefined);
 		const instanceMgmt = makeInstanceMgmt({ startInstance });
 
@@ -145,7 +141,7 @@ describe("WsRpcServerLayer instance management", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
+					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt })),
 				),
 				{ local: true },
 			),
@@ -153,7 +149,6 @@ describe("WsRpcServerLayer instance management", () => {
 	});
 
 	it.effect("stops and removes instances through the instance service", () => {
-		const wsHandler = makeMockWebSocketHandler();
 		const stopInstance = vi.fn();
 		const removeInstance = vi.fn();
 		const instanceMgmt = makeInstanceMgmt({ stopInstance, removeInstance });
@@ -180,7 +175,7 @@ describe("WsRpcServerLayer instance management", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt, wsHandler })),
+					Layer.provideMerge(makeTestHandlerLayer({ instanceMgmt })),
 				),
 				{ local: true },
 			),

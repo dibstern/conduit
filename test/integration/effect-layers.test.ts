@@ -59,7 +59,6 @@ const composedLayer = Layer.mergeAll(
 		Effect.succeed({
 			slug,
 			attach: () => () => {},
-			wsHandler: {},
 			rpcWsHandler: {},
 			syncGlobalSetting: () => Effect.void,
 			refreshGlobalDefaults: () => Effect.void,

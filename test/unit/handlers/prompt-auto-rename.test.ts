@@ -13,7 +13,6 @@ import {
 	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -125,13 +124,9 @@ const providePromptLayer = (input: {
 	readonly provider: "claude" | "opencode";
 	readonly title: string;
 }) => {
-	const wsHandler = makeMockWebSocketHandler({
-		getClientSession: vi.fn(() => "session-1"),
-		getClientsForSession: vi.fn(() => []),
-	});
 	const sessionManagerService = makeMockSessionManagerService();
 	const baseLayer = makeTestHandlerLayer({
-		wsHandler,
+		selectedSession: "session-1",
 		openCodeModelService: makeMockOpenCodeModelService(
 			MOCK_OPENCODE_GPT4_CATALOG,
 		),
@@ -150,12 +145,8 @@ describe("prompt title generation", () => {
 			const engine = makeEngine("claude");
 			const events: string[] = [];
 			const persistService = makePersistService(vi.fn(() => Effect.void));
-			const wsHandler = makeMockWebSocketHandler({
-				getClientSession: vi.fn(() => "session-1"),
-				getClientsForSession: vi.fn(() => []),
-			});
 			const layer = makeTestHandlerLayer({
-				wsHandler,
+				selectedSession: "session-1",
 				orchestrationEngine: engine,
 				readQueryEffect: makeReadQuery("claude", "Untitled"),
 				claudeEventPersistEffect: persistService,

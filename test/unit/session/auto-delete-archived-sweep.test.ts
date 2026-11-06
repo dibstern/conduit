@@ -39,7 +39,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
@@ -61,7 +60,6 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
 	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
@@ -108,7 +106,6 @@ describe("archived tree retention", () => {
 									requestWorktreeCleanup: cleanup,
 								}),
 							),
-							Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 							Layer.effect(SessionActivityTag, makeSessionActivity),
 							Layer.succeed(PortWatcher)({
 								mark: () => Effect.succeed({ kind: "unclaimed" } as const),

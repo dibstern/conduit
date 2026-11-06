@@ -18,7 +18,6 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerStateTag } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { OverridesStateTag } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { SessionRegistryStateTag } from "../../../src/lib/domain/relay/Services/session-registry-state.js";
 import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
@@ -62,10 +61,6 @@ describe("Relay stack Layer composition", () => {
 	it.effect("RelayStateLive constructs all Effect-native state services", () =>
 		Effect.gen(function* () {
 			// Verify all state Tags are accessible through the composed Layer
-			const registryRef = yield* SessionRegistryStateTag;
-			const registry = yield* Ref.get(registryRef);
-			expect(HashMap.size(registry)).toBe(0);
-
 			const sessionRef = yield* SessionManagerStateTag;
 			const sessionState = yield* Ref.get(sessionRef);
 			expect(HashMap.size(sessionState.cachedParentMap)).toBe(0);

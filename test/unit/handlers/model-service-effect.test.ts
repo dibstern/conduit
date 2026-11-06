@@ -39,7 +39,6 @@ import {
 	OpenCodeModelServiceLive,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
@@ -78,8 +77,8 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockSessionManagerService,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	makeTestSessionActivityLayer,
 	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -139,7 +138,7 @@ describe("model handlers with Effect-native model service", () => {
 				}),
 				Layer.succeed(ConfigTag)(makeMockConfig({ configDir })),
 				Layer.succeed(LoggerTag)(logger),
-				Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+				makeTestSessionActivityLayer(),
 				makeOverridesStateLive(), ProjectSettingsLive,
 			);
 			return Effect.gen(function* () {
@@ -175,9 +174,6 @@ describe("model handlers with Effect-native model service", () => {
 	it.effect(
 		"loads providers and relay-owned active-session model info without requiring the Promise OpenCode API tag",
 		() => {
-			const wsHandler = makeMockWebSocketHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
 			const logger = makeMockLogger();
 			const modelService = {
 				listProviders: vi.fn(() =>
@@ -205,7 +201,7 @@ describe("model handlers with Effect-native model service", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag)(modelService),
-				Layer.succeed(WebSocketHandlerTag)(wsHandler),
+				makeTestSessionActivityLayer("session-1"),
 				Layer.succeed(LoggerTag)(logger),
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [] })) })),
 				makeOverridesStateLive(),
@@ -246,9 +242,6 @@ describe("model handlers with Effect-native model service", () => {
 	it.effect(
 		"keeps configured OpenCode providers in model refreshes for Claude-bound sessions",
 		() => {
-			const wsHandler = makeMockWebSocketHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
 			const logger = makeMockLogger();
 			const modelService = {
 				listProviders: vi.fn(() =>
@@ -284,7 +277,7 @@ describe("model handlers with Effect-native model service", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag)(modelService),
-				Layer.succeed(WebSocketHandlerTag)(wsHandler),
+				makeTestSessionActivityLayer("session-1"),
 				Layer.succeed(LoggerTag)(logger),
 				Layer.succeed(OrchestrationEngineTag)(engine),
 				makeOverridesStateLive(),
@@ -367,7 +360,7 @@ describe("model handlers with Effect-native model service", () => {
 				Layer.succeed(OrchestrationEngineTag)(engine),
 				Layer.succeed(ConfigTag)(makeMockConfig({ configDir })),
 				Layer.succeed(LoggerTag)(makeMockLogger()),
-				Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+				makeTestSessionActivityLayer(),
 				makeOverridesStateLive(), ProjectSettingsLive, RpcSubscriptionScopeLive,
 			);
 			return yield* Effect.gen(function* () {
@@ -440,7 +433,7 @@ describe("model handlers with Effect-native model service", () => {
 			const deps = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag)(modelService),
 				Layer.succeed(OrchestrationEngineTag)(engine),
-				Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+				makeTestSessionActivityLayer(),
 				Layer.succeed(LoggerTag)(makeMockLogger()),
 				makeOverridesStateLive(), ProjectSettingsLive, RpcSubscriptionScopeLive,
 			);
@@ -515,7 +508,7 @@ describe("model handlers with Effect-native model service", () => {
 				persistDefaultModel: () => Effect.void,
 			}),
 			Layer.succeed(OrchestrationEngineTag)(engine),
-			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+			makeTestSessionActivityLayer(),
 			Layer.succeed(LoggerTag)(makeMockLogger()),
 			makeOverridesStateLive(), ProjectSettingsLive, RpcSubscriptionScopeLive,
 		);
@@ -534,9 +527,6 @@ describe("model handlers with Effect-native model service", () => {
 	it.effect(
 		"switches OpenCode variants using the model service without requiring the Promise OpenCode API tag",
 		() => {
-			const wsHandler = makeMockWebSocketHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
 			const logger = makeMockLogger();
 			const modelService = {
 				listProviders: vi.fn(() =>
@@ -564,7 +554,7 @@ describe("model handlers with Effect-native model service", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag)(modelService),
-				Layer.succeed(WebSocketHandlerTag)(wsHandler),
+				makeTestSessionActivityLayer("session-1"),
 				Layer.succeed(LoggerTag)(logger),
 				Layer.succeed(ConfigTag)(makeMockConfig({
 						configDir: mkdtempSync(join(tmpdir(), "conduit-switch-variant-")),
@@ -596,9 +586,6 @@ describe("model handlers with Effect-native model service", () => {
 	it.effect(
 		"switches a stored OpenCode session model with Default when its saved choice is stale",
 		() => {
-			const wsHandler = makeMockWebSocketHandler({
-				getClientSession: vi.fn(() => "session-model-switch"),
-			});
 			const logger = makeMockLogger();
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-switch-model-"));
 			saveRelaySettings({ defaultVariants: { "openai/gpt-4": "removed" } }, configDir);
@@ -628,7 +615,7 @@ describe("model handlers with Effect-native model service", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag)(modelService),
-				Layer.succeed(WebSocketHandlerTag)(wsHandler),
+				makeTestSessionActivityLayer("session-model-switch"),
 				Layer.succeed(LoggerTag)(logger),
 				Layer.succeed(ConfigTag)(makeMockConfig({ configDir })),
 				makeOverridesStateLive(),
@@ -668,7 +655,6 @@ describe("model handlers with Effect-native model service", () => {
 	it.effect(
 		"sets the OpenCode default model using the model service without requiring the Promise OpenCode API tag",
 		() => {
-			const wsHandler = makeMockWebSocketHandler();
 			const logger = makeMockLogger();
 			const modelService = {
 				listProviders: vi.fn(() =>
@@ -696,7 +682,7 @@ describe("model handlers with Effect-native model service", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag)(modelService),
-				Layer.succeed(WebSocketHandlerTag)(wsHandler),
+				makeTestSessionActivityLayer(),
 				Layer.succeed(LoggerTag)(logger),
 				Layer.succeed(ConfigTag)(makeMockConfig({
 						configDir: mkdtempSync(join(tmpdir(), "conduit-default-model-")),
@@ -751,7 +737,7 @@ describe("model handlers with Effect-native model service", () => {
 			}),
 			Layer.succeed(ConfigTag)(makeMockConfig({ configDir, publishGlobalSetting })),
 			Layer.succeed(LoggerTag)(logger),
-			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+			makeTestSessionActivityLayer(),
 			makeOverridesStateLive(), ProjectSettingsLive,
 		);
 		return Effect.gen(function* () {
@@ -864,7 +850,7 @@ describe("model handlers with Effect-native model service", () => {
 			Layer.succeed(OpenCodeInstancesTag)(instances),
 			Layer.succeed(ConfigTag)(config),
 			Layer.succeed(LoggerTag)(makeMockLogger()),
-			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+			makeTestSessionActivityLayer(),
 			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({
 				getProviderForSessionEffect: (sessionId: string) => Effect.succeed(
 					sessionId === "opencode-session" ? "opencode" : sessionId === "claude-session" ? "claude" : "work-claude",

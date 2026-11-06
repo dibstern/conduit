@@ -144,7 +144,6 @@ describe("WebSocketRelayRouterLive", () => {
 		const factory = vi.fn((slug: string) =>
 			Effect.succeed({
 				slug,
-				wsHandler: {},
 				rpcWsHandler: relay.rpcWsHandler,
 				syncGlobalSetting: () => Effect.void,
 				refreshGlobalDefaults: () => Effect.void,
@@ -171,7 +170,6 @@ describe("WebSocketRelayRouterLive", () => {
 		const factory = vi.fn((slug: string) =>
 			Effect.succeed({
 				slug,
-				wsHandler: {},
 				rpcWsHandler: {},
 				syncGlobalSetting: () => Effect.void,
 				refreshGlobalDefaults: () => Effect.void,

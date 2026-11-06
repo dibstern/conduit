@@ -21,7 +21,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
@@ -51,8 +50,8 @@ import {
 	makeMockAgentService,
 	makeMockConfig,
 	makeMockSessionManagerService,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	makeTestSessionActivityLayer,
 	mockSessionManagers,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
@@ -110,7 +109,7 @@ describe("interaction timeout run ownership", () => {
 									opencode: makeHandlerOpenCodeAPI(),
 								}),
 							),
-							Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+							makeTestSessionActivityLayer(),
 							Layer.succeed(LoggerTag)(createSilentLogger()),
 							Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 							Layer.succeed(ConfigTag)(makeMockConfig()),

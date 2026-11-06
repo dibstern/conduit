@@ -10,8 +10,6 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-	type WebSocketHandlerShape,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
@@ -35,24 +33,11 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeTestHandlerLayer,
+	makeTestSessionActivityLayer,
 	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
-
-function mockWsHandler(
-	overrides?: Partial<WebSocketHandlerShape>,
-): WebSocketHandlerShape {
-	return {
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => "session-1"),
-		getClientsForSession: vi.fn(() => []),
-		registerSessionViewer: vi.fn(() => () => {}),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-		...overrides,
-	};
-}
 
 function mockLogger(): Logger {
 	return makeMockLogger() as Logger;
@@ -72,9 +57,6 @@ describe("model handlers with Effect override state", () => {
 				{ defaultVariants: { "openai/gpt-4": "fast" } },
 				configDir,
 			);
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
 			const modelService = {
 				listProviders: vi.fn(() =>
 					Effect.succeed({
@@ -100,7 +82,7 @@ describe("model handlers with Effect override state", () => {
 			};
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag)(modelService),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("session-1"),
 				Layer.succeed(LoggerTag)(mockLogger()),
 				Layer.succeed(ConfigTag)(makeMockConfig({ configDir })),
 				makeOverridesStateLive(),
@@ -156,10 +138,6 @@ describe("model handlers with Effect override state", () => {
 					},
 				],
 			});
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
 			const sessionManagerService = makeMockSessionManagerService({
 				recordMessageActivity: vi.fn(() => Effect.void),
 			});
@@ -202,7 +180,7 @@ describe("model handlers with Effect override state", () => {
 					Layer.fresh(
 						makeTestHandlerLayer({
 							api,
-							wsHandler: ws,
+							selectedSession: "session-1",
 							sessionManagerService,
 							orchestrationEngine: withDispatchEffect(engine),
 							config: makeMockConfig({ configDir }),

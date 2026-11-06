@@ -11,6 +11,7 @@ import {
 } from "../contracts/provider-instance.js";
 import { WsRpcError } from "../contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import {
 	PendingInteractionServiceTag,
 	type PendingQuestion,
@@ -22,7 +23,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import {
 	OverridesStateTag,
@@ -585,7 +585,8 @@ export const handlePermissionResponse = (
 	payload: PermissionResponsePayload,
 ) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
+		const activity = yield* SessionActivityTag;
+		const slug = (yield* ConfigTag).slug;
 		const log = yield* LoggerTag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
 
@@ -596,7 +597,7 @@ export const handlePermissionResponse = (
 			persistPattern,
 			permissionDestination,
 		} = payload;
-		const visibleSessionId = wsHandler.getClientSession(clientId) ?? "";
+		const visibleSessionId = activity.selectedSession(slug, clientId) ?? "";
 		const stored = yield* readPromptReference(
 			requestId,
 			"permission",
@@ -828,14 +829,15 @@ export const handleAskUserResponse = (
 	payload: AskUserResponsePayload,
 ) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
+		const activity = yield* SessionActivityTag;
+		const slug = (yield* ConfigTag).slug;
 		const log = yield* LoggerTag;
 
 		const { toolId, answers } = payload;
 		const stored = yield* readPromptReference(
 			toolId,
 			"question",
-			wsHandler.getClientSession(clientId),
+			activity.selectedSession(slug, clientId),
 			payload.commandId,
 		);
 		if (stored?.status === "resolved") return;
@@ -852,7 +854,7 @@ export const handleAskUserResponse = (
 		const sessionId =
 			stored?.session_id ||
 			pendingQuestion?.sessionId ||
-			wsHandler.getClientSession(clientId) ||
+			activity.selectedSession(slug, clientId) ||
 			"";
 		const formatted = formatAnswers(answers);
 		const hasSecret =
@@ -1117,7 +1119,8 @@ export const handleQuestionReject = (
 	payload: QuestionRejectPayload,
 ) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
+		const activity = yield* SessionActivityTag;
+		const slug = (yield* ConfigTag).slug;
 		const log = yield* LoggerTag;
 
 		const { toolId } = payload;
@@ -1126,7 +1129,7 @@ export const handleQuestionReject = (
 		const stored = yield* readPromptReference(
 			toolId,
 			"question",
-			wsHandler.getClientSession(clientId),
+			activity.selectedSession(slug, clientId),
 			payload.commandId,
 		);
 		if (stored?.status === "resolved") return;
@@ -1143,7 +1146,7 @@ export const handleQuestionReject = (
 		const sessionId =
 			stored?.session_id ||
 			pendingQuestion?.sessionId ||
-			wsHandler.getClientSession(clientId) ||
+			activity.selectedSession(slug, clientId) ||
 			"";
 		const providerProcessId =
 			stored?.provider_process_id ?? pendingQuestion?.providerProcessId;
