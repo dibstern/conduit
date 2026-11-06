@@ -1219,6 +1219,63 @@ describe("Codex on the Run Ledger", () => {
 			sessionId,
 		);
 	}, 300_000);
+	// main records a turn's start only at Codex's turn/started, so a daemon that dies after
+	// turn/start went out leaves an open Run with no start and no hold.
+	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
+	it("settles a Codex turn main's runner sent before its start was recorded once, never re-sent", async (context) => {
+		const historical = await historicalRunnerBundle(
+			"020678548921ff6419796274482a1a9ecc5dfc69",
+		);
+		if (!historical.available) return context.skip(historical.reason);
+		const { fixture, browser, sessionId, restart } = await start(
+			"two-build-unstarted",
+			fixtureRows("basic"),
+			{},
+			{ dist: historical.dist },
+			false,
+		);
+		const accepted = fixtureRows("basic").find(
+			({ message }) => message?.result?.["turn"],
+		)?.["at"];
+		writeFileSync(gatePath, String(Number(accepted) - 1));
+		await submit(browser, sessionId, "Say hello", "queue", randomUUID(), false);
+		// test-waits-allow polling: the app-server's input reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("turn/start", "out")).toHaveLength(1),
+			{ timeout: TIMEOUT },
+		);
+		await fixture.kill();
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			expect(
+				db
+					.prepare(
+						"SELECT type FROM events WHERE session_id = ? AND type IN ('run.started', 'run.dispatched')",
+					)
+					.all(sessionId),
+			).toEqual([]);
+		} finally {
+			db.close();
+		}
+		const from = fixture.marks.length;
+		await restart(process.env["CONDUIT_TEST_DIST"] ?? "dist");
+		// Nothing holds Codex back now: a turn sent again would complete.
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		await (await fixture.connect()).followSession(sessionId);
+		await turns(fixture, sessionId, ["error"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.runs).toHaveLength(1);
+		// No runner of this build was asked to send it (the capture restarts with each app-server).
+		expect(
+			fixture.marks
+				.slice(from)
+				.filter(
+					(mark) =>
+						mark.kind === "runner-started" && mark.sessionId === sessionId,
+				),
+		).toEqual([]);
+	}, 300_000);
 	it("keeps a wake running through a daemon restart; it ends once at its own result", async () => {
 		const { fixture, sessionId, trace, restart } = await wake(
 			"restart-wake",

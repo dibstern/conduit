@@ -248,8 +248,9 @@ describe("per-project relay stays retired (82tn.16)", () => {
 		// No allowlist: only the ledger's store, its projection and schema history.
 		expect(tally(server, runStateWrites)).toEqual(
 			new Map([
-				// Schema history: the session-delete cascade trigger and one backfill.
-				["src/lib/persistence/effect/migrations.ts", 2],
+				// Schema history: the session-delete cascade trigger, one backfill and the
+				// upgrade's mark on an older build's unstarted claims (0097).
+				["src/lib/persistence/effect/migrations.ts", 3],
 				["src/lib/persistence/effect/projectors-effect.ts", 8],
 				["src/lib/persistence/effect/run-ledger-arm.ts", 4],
 			]),

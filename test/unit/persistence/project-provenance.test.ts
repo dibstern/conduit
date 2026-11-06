@@ -147,6 +147,7 @@ describe("Bound project provenance", () => {
 			"0094_history_graph",
 			"0095_sessions_diff_base",
 			"0096_pending_rewind_to_head_move",
+			"0097_provider_run_legacy_claim",
 		]);
 	});
 

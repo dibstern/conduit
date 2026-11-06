@@ -1970,6 +1970,26 @@ export const effectMigrationEntries = {
 		}
 		yield* sql`ALTER TABLE sessions DROP COLUMN pending_rewind_message_id`;
 	}),
+	// 82tn.32.53: a send the build before claimed records no hold, and no start until the
+	// provider's first update, so after the upgrade it reads as this build's claim never held
+	// and would be sent again. Mark each open Run with no hold as that build's: legacy recovery
+	// settles it, never re-sent (CONTRACT 1426-1428, 2695). A store that already holds sends
+	// has run this build's ledger, so its unheld Runs are its own.
+	"0097_provider_run_legacy_claim": Effect.gen(function* () {
+		yield* runAddColumnMigrationIfMissing(
+			"provider_runs",
+			"legacy_claim",
+			"ALTER TABLE provider_runs ADD COLUMN legacy_claim INTEGER NOT NULL DEFAULT 0",
+		);
+		yield* executeSqlStatements(`
+			UPDATE provider_runs SET legacy_claim = 1
+			WHERE status IN ('pending', 'running') AND runner_id IS NULL
+			AND NOT EXISTS (SELECT 1 FROM events WHERE type = 'run.dispatched'
+				AND json_extract(data, '$.commandId') IS NOT NULL)
+			AND NOT EXISTS (SELECT 1 FROM events WHERE session_id = provider_runs.session_id
+				AND type = 'run.dispatched' AND json_extract(data, '$.runId') = provider_runs.id)
+		`);
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

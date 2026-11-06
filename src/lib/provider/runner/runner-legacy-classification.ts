@@ -39,7 +39,9 @@ export const legacyRunnerBindings = (
 	hello: RunnerHello,
 ): NonNullable<RunnerHello["bindings"]> => hello.bindings ?? [];
 
-/** One predicate for legacy provenance, also usable in correlated ledger reads. */
+/** One predicate for legacy provenance, also usable in correlated ledger reads. `legacy_claim`
+ * marks an older build's claim never started (migration 0097; gap: CONTRACT 1426-1428 names
+ * only a hold without a command id). */
 export const legacyRunnerRunPredicate = (
 	sql: SqlClient.SqlClient,
 	sessionId: string,
@@ -55,7 +57,8 @@ export const legacyRunnerRunPredicate = (
 	AND (EXISTS (SELECT 1 FROM events WHERE session_id = legacy_run.session_id AND type = 'run.dispatched'
 		AND json_extract(data, '$.runId') = legacy_run.id AND json_extract(data, '$.commandId') IS NULL)
 		OR (legacy_run.started_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM events
-			WHERE session_id = legacy_run.session_id AND type = 'run.dispatched' AND json_extract(data, '$.runId') = legacy_run.id)))
+			WHERE session_id = legacy_run.session_id AND type = 'run.dispatched' AND json_extract(data, '$.runId') = legacy_run.id))
+		OR legacy_run.legacy_claim = 1)
 )`;
 
 export const legacyRunnerRunQuery = (
