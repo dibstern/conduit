@@ -12,7 +12,10 @@ import { InputDraftsLive } from "../Services/input-drafts.js";
 import { ProjectSettingsLive } from "../Services/project-settings.js";
 import { PtyManagerStateLive } from "../Services/pty-manager-service.js";
 import { RelayEventBusLive } from "../Services/relay-event-bus.js";
-import { RelayStatusSnapshotLive } from "../Services/relay-status-snapshot.js";
+import {
+	RelayStatusSnapshotLive,
+	type RelayStatusSnapshotTag,
+} from "../Services/relay-status-snapshot.js";
 import {
 	SessionEventBusLive,
 	type SessionEventBusTag,
@@ -59,11 +62,13 @@ export const makeRelayStateLive = (
 		>;
 		/** Daemon relays publish to the daemon's one alert feed. */
 		readonly alertsLayer?: Layer.Layer<AlertsTag>;
+		/** Daemon relays share the project's status snapshot with the daemon. */
+		readonly statusSnapshotLayer?: Layer.Layer<RelayStatusSnapshotTag>;
 	} = {},
 ) => {
 	const sessionEventBusLayer =
 		options.sessionEventBusLayer ?? SessionEventBusLive;
-	// The session manager itself is the daemon's; the relay lends it these parts.
+	// The session manager itself is the daemon's; a standalone relay's own reads these parts.
 	const sessionManagerParts = Layer.mergeAll(
 		options.sessionManagerStateLayer ??
 			Layer.merge(
@@ -75,7 +80,7 @@ export const makeRelayStateLive = (
 			),
 		DaemonEventBusLive,
 		sessionEventBusLayer,
-		RelayStatusSnapshotLive,
+		options.statusSnapshotLayer ?? RelayStatusSnapshotLive,
 	);
 	return Layer.mergeAll(
 		// Session state

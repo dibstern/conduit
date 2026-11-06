@@ -158,8 +158,6 @@ export interface ProjectRelayConfig {
 	) => import("./contracts/project-shell-env.js").ProjectShellEnvSnapshot;
 	/** Await the existing shell capture before speculative Claude boot only. */
 	prepareShellEnv?: (directory: string) => Promise<boolean>;
-	/** Shared HTTP server owned by the caller. */
-	httpServer: import("node:http").Server;
 	/**
 	 * Standalone relays' OpenCode server URL (e.g., "http://localhost:4096").
 	 * Daemon relays resolve theirs per request through `openCodeInstances`.
@@ -177,6 +175,8 @@ export interface ProjectRelayConfig {
 	>;
 	/** Shared daemon services; must include the daemon-owned ProviderAdapters. */
 	daemonConfigContext?: import("effect").Context.Context<never>;
+	/** No relay reads this (relay-stack owns its server); S6 removes it. */
+	httpServer?: import("node:http").Server;
 	/** Project working directory */
 	projectDir: string;
 	/** Additional Claude workspace folders, fixed for this relay's lifetime. */

@@ -60,6 +60,10 @@ import {
 	OpenCodeProjectStreams,
 } from "../domain/daemon/Services/opencode-project-streams.js";
 import { ProjectContext } from "../domain/daemon/Services/project-context.js";
+import {
+	type ProjectGenerationParts,
+	ProjectServices,
+} from "../domain/daemon/Services/project-services.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import {
 	makeSessionActivity,
@@ -130,6 +134,10 @@ import {
 } from "../domain/relay/Services/provider-turn-service.js";
 import { makeRecapServiceLive } from "../domain/relay/Services/recap-service.js";
 import {
+	RelayStatusSnapshotLive,
+	RelayStatusSnapshotTag,
+} from "../domain/relay/Services/relay-status-snapshot.js";
+import {
 	ScanServiceLive,
 	ScanServiceTag,
 } from "../domain/relay/Services/scan-service.js";
@@ -141,6 +149,7 @@ import {
 	LoggerTag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
+	OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceLive,
 	type OpenCodeSettingsServiceTag,
 	type OrchestrationEngineTag,
@@ -153,9 +162,8 @@ import {
 } from "../domain/relay/Services/session-event-bus.js";
 import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
 import {
-	attachSessionManagerLive,
-	type SessionManagerServiceTag,
-	SessionManagersOrOwn,
+	ownSessionManagersLive,
+	SessionManagerServiceTag,
 } from "../domain/relay/Services/session-manager-service.js";
 import {
 	emptySessionManagerState,
@@ -193,7 +201,9 @@ import {
 	makePersistenceEffectLayer,
 	makePersistenceProjectLayer,
 	type PersistenceEffectError,
+	type PersistenceProjectContext,
 	PersistenceStore,
+	type PersistenceStoreContext,
 } from "../persistence/effect/live.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -526,16 +536,47 @@ export function createProjectRelayLayers({
 		config.daemonConfigContext ?? Context.empty(),
 		EventRetentionSchedulerTag,
 	);
+	// A registered project's generation is the daemon's (82tn.16): one status
+	// snapshot, OpenCode creation gate, model catalog and store binding, whichever
+	// relay serves it. A relay for a project outside the registry builds its own.
+	const sharedProject = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		ProjectServices,
+	);
+	const fromProject = <I, E, R>(
+		pick: (
+			parts: Context.Context<ProjectGenerationParts>,
+		) => Context.Context<I>,
+		own: Layer.Layer<I, E, R>,
+	): Layer.Layer<I, E, R> =>
+		Option.isSome(sharedProject)
+			? Layer.unwrap(
+					Effect.match(sharedProject.value.generation(config.slug), {
+						onFailure: () => own,
+						onSuccess: (parts) => Layer.succeedContext(pick(parts)),
+					}),
+				)
+			: own;
 	const persistenceEffectLayer = (
 		Option.isSome(sharedStore)
-			? makePersistenceProjectLayer(config.slug, {
-					sessionEventBusLayer,
-					retentionSchedulerLayer: Option.isSome(sharedRetention)
-						? Layer.succeedContext(
-								Context.make(EventRetentionSchedulerTag, sharedRetention.value),
-							)
-						: undefined,
-				}).pipe(Layer.provideMerge(Layer.succeedContext(sharedStore.value)))
+			? fromProject(
+					(
+						parts,
+					): Context.Context<
+						PersistenceProjectContext | PersistenceStoreContext
+					> => parts,
+					makePersistenceProjectLayer(config.slug, {
+						sessionEventBusLayer,
+						retentionSchedulerLayer: Option.isSome(sharedRetention)
+							? Layer.succeedContext(
+									Context.make(
+										EventRetentionSchedulerTag,
+										sharedRetention.value,
+									),
+								)
+							: undefined,
+					}).pipe(Layer.provideMerge(Layer.succeedContext(sharedStore.value))),
+				)
 			: makePersistenceEffectLayer(
 					config.persistenceDbPath,
 					config.slug,
@@ -833,13 +874,16 @@ export function createProjectRelayLayers({
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
 	);
-	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				daemonSettingsLayer,
-				openCodeInstancesLayer,
-				configLayer,
-				loggerLayer,
+	const openCodeModelServiceLayer = fromProject(
+		Context.pick(OpenCodeModelServiceTag),
+		OpenCodeModelServiceLive.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					daemonSettingsLayer,
+					openCodeInstancesLayer,
+					configLayer,
+					loggerLayer,
+				),
 			),
 		),
 	);
@@ -980,7 +1024,10 @@ export function createProjectRelayLayers({
 		usageLayer,
 		historyReconcileLayer,
 		processLinkLayer,
-		Layer.effect(OpenCodeSessionCreationGateTag, Semaphore.make(1)),
+		fromProject(
+			Context.pick(OpenCodeSessionCreationGateTag),
+			Layer.effect(OpenCodeSessionCreationGateTag, Semaphore.make(1)),
+		),
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
@@ -1025,6 +1072,10 @@ export function createProjectRelayLayers({
 		makeRelayStateLive({
 			sessionEventBusLayer,
 			alertsLayer,
+			statusSnapshotLayer: fromProject(
+				Context.pick(RelayStatusSnapshotTag),
+				RelayStatusSnapshotLive,
+			),
 			...(Option.isSome(sharedSessionManager) && {
 				sessionManagerStateLayer: Layer.effectContext(
 					sharedSessionManager.value.project(config.slug).pipe(
@@ -1052,12 +1103,15 @@ export function createProjectRelayLayers({
 		}),
 		bridgeLayers,
 	);
+	// The daemon's session managers build each project's parts themselves.
+	const sharedManagers = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		SessionManagerServiceTag,
+	);
 	const relayStateBridgesAndSessions = Layer.provideMerge(
-		attachSessionManagerLive.pipe(
-			Layer.provide(
-				SessionManagersOrOwn.pipe(Layer.provide(daemonContextLayer)),
-			),
-		),
+		Option.isSome(sharedManagers)
+			? Layer.sync(SessionManagerServiceTag, () => sharedManagers.value)
+			: ownSessionManagersLive,
 		relayStateAndBridges,
 	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(

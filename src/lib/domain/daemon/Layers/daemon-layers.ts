@@ -77,7 +77,6 @@ import {
 } from "../../relay/Services/input-drafts.js";
 import { ProviderTurnsLive } from "../../relay/Services/provider-turn-service.js";
 import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
-import { SessionManagerServiceLive } from "../../relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../relay/Services/session-overrides-state.js";
 import { DaemonSessionSetupLive } from "../../relay/Services/session-setup.js";
 import { SessionWorkspaceHintReactorLive } from "../../relay/Services/session-workspace-hint.js";
@@ -187,6 +186,10 @@ import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
 import { makePreviewGateLive } from "./preview-gate-layer.js";
 import { ProjectContextLive } from "./project-context-layer.js";
+import {
+	DaemonSessionManagersLive,
+	makeProjectServicesLive,
+} from "./project-services-layer.js";
 import {
 	makeProjectShellEnvLive,
 	ProjectShellEnvTag,
@@ -1099,7 +1102,6 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	).pipe(Layer.provideMerge(withSessionSetup));
 	const withSessionManager = Layer.mergeAll(
 		SessionManagerOwnerLive,
-		SessionManagerServiceLive,
 		DaemonTurnsLive,
 		ProviderTurnsLive,
 	).pipe(Layer.provideMerge(withEviction));
@@ -1108,11 +1110,22 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		PermissionTimeoutLive,
 		makeHostedTerminalsLive(configDir),
 	).pipe(Layer.provideMerge(withSessionManager));
+	// Each project's context comes from the registry, not from its relay (82tn.16).
+	const withProjectServices = DaemonSessionManagersLive.pipe(
+		Layer.provideMerge(
+			makeProjectServicesLive({
+				configDir,
+				claudeSdk: options.claudeSdk,
+				pollerTimings: options.pollerTimings,
+			}),
+		),
+		Layer.provideMerge(withOrchestration),
+	);
 	const registries = RelayFactoryLive(
 		configDir,
 		options.claudeSdk,
 		options.pollerTimings,
-	).pipe(Layer.provideMerge(withOrchestration));
+	).pipe(Layer.provideMerge(withProjectServices));
 
 	const withRelayCache = makeRelayCacheLayer().pipe(
 		Layer.provideMerge(registries),
