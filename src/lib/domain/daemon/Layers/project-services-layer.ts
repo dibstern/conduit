@@ -1,3 +1,4 @@
+import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import {
 	Context,
 	Effect,
@@ -13,6 +14,8 @@ import {
 	makePersistenceProjectLayer,
 	PersistenceStore,
 } from "../../../persistence/effect/live.js";
+import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-module.js";
+import { defaultClaudeSessionForkSdk } from "../../../provider/claude/claude-session-fork.js";
 import type { ClaudeSdkSeam } from "../../../types.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import type { PersistenceError } from "../../persistence/Services/persistence-service.js";
@@ -81,8 +84,24 @@ export const makeProjectServicesLive = (options: {
 			const environments = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
 			);
+			// A relay's calls ran with the SDK its process uses; a cold project's must too.
+			const testSdk = (yield* loadClaudeSdkTestModule.pipe(Effect.orDie))
+				?.claudeSdk;
 			const daemon = {
 				...options,
+				claudeSdk:
+					options.claudeSdk ??
+					(testSdk?.titleQuery && testSdk.fork
+						? {
+								query: testSdk.query,
+								titleQuery: testSdk.titleQuery,
+								fork: testSdk.fork,
+							}
+						: {
+								query: sdkQuery,
+								titleQuery: sdkQuery,
+								fork: defaultClaudeSessionForkSdk,
+							}),
 				environments,
 				cleanupQueue: yield* Effect.serviceOption(WorktreeCleanupQueueTag),
 				registry,
