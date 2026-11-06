@@ -74,7 +74,6 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusTag } from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
 import {
@@ -149,7 +148,6 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
 	mockSessionManagers,
 	PassThroughSessionInbox,
@@ -418,9 +416,6 @@ const serviceLayer = (input: {
 	readonly configDir?: string;
 	readonly accountDirectory?: AccountDirectory["Service"];
 }) => {
-	const wsHandler = makeMockWebSocketHandler({
-		getClientsForSession: vi.fn(() => ["client-1"]),
-	});
 	const log = makeMockLogger();
 	const sessionManagerService = makeMockSessionManagerService();
 	const ingestion = input.ingestion ?? makeIngestion();
@@ -445,7 +440,6 @@ const serviceLayer = (input: {
 		Layer.succeed(OpenCodeModelServiceTag)(
 			makeMockOpenCodeModelService(openCodeCatalog),
 		),
-		Layer.succeed(WebSocketHandlerTag)(wsHandler),
 		Layer.succeed(LoggerTag)(log),
 		Layer.succeed(ConfigTag)(
 			makeMockConfig({
@@ -509,7 +503,6 @@ const serviceLayer = (input: {
 				),
 			),
 		),
-		wsHandler,
 		log,
 		sessionManagerService,
 		ingestion,

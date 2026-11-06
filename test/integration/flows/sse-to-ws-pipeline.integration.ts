@@ -18,7 +18,7 @@ describe("Integration: SSE to RPC Pipeline", () => {
 		harness = await createDaemonProject();
 		harness.mock.resetQueues();
 		await (await harness.opencode()).app.path();
-		const sse = await harness.run(SSEStreamTag);
+		const sse = await harness.runOnRelay(SSEStreamTag);
 		await vi.waitFor(() => {
 			expect(sse.getHealth().connected).toBe(true);
 		});

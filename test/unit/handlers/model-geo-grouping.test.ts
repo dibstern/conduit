@@ -15,7 +15,6 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
@@ -27,7 +26,7 @@ import { RpcSubscriptionScopeLive } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
-	makeMockWebSocketHandler,
+	makeTestSessionActivityLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
@@ -113,7 +112,7 @@ layer(
 			};
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag)(modelService),
-				Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+				makeTestSessionActivityLayer(),
 				Layer.succeed(LoggerTag)(makeMockLogger()),
 				Layer.succeed(OrchestrationEngineTag)(
 					withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [] })) }),
@@ -173,7 +172,7 @@ layer(
 		};
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeModelServiceTag)(modelService),
-			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+			makeTestSessionActivityLayer(),
 			Layer.succeed(LoggerTag)(makeMockLogger()),
 			Layer.succeed(OrchestrationEngineTag)(
 				withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [] })) }),

@@ -100,7 +100,7 @@ function createHarness(
 			}),
 	);
 	const startPolling = vi.fn();
-	const getClientsForSession = vi.fn((_sessionId: string): string[] => []);
+	const hasViewers = vi.fn((_sessionId: string) => false);
 	const accounts = accountDirectory();
 
 	const result = wireMonitoring({
@@ -113,9 +113,7 @@ function createHarness(
 		client: {
 			session: { messages },
 		},
-		wsHandler: {
-			getClientsForSession,
-		},
+		hasViewers,
 		sessionService: {
 			refreshSessionLineage: vi.fn(async () => {}),
 			getSessionParentMap: () => parentMap,
@@ -162,7 +160,7 @@ function createHarness(
 		result,
 		messages,
 		startPolling,
-		getClientsForSession,
+		hasViewers,
 		resolveMessages: () => resolveMessages?.([]),
 		emitStatus: async (message: Record<string, { type: "busy" | "idle" }>) => {
 			await changed?.(message, false);
@@ -261,7 +259,7 @@ describe("wireMonitoring shutdown", () => {
 			]),
 		);
 		await harness.emitStatus({ ...idle, active: { type: "busy" } });
-		expect(harness.getClientsForSession.mock.calls).toEqual([["active"]]);
+		expect(harness.hasViewers.mock.calls).toEqual([["active"]]);
 		expect([...harness.result.getMonitoringState().sessions.keys()]).toEqual([
 			"active",
 		]);
@@ -325,7 +323,7 @@ describe("wireMonitoring shutdown", () => {
 		);
 		harness.emitStatus({ ...idle, active: { type: "busy" } });
 		await flushPromises();
-		expect(harness.getClientsForSession.mock.calls).toEqual([["active"]]);
+		expect(harness.hasViewers.mock.calls).toEqual([["active"]]);
 		expect([...harness.result.getMonitoringState().sessions.keys()]).toEqual([
 			"active",
 		]);
@@ -876,7 +874,7 @@ async function createEffectHarness(
 	const startPolling = vi.fn((id: string) => {
 		pollerEvents.push(`start:${id}`);
 	});
-	const getClientsForSession = vi.fn((_id: string): string[] => []);
+	const hasViewers = vi.fn((_id: string) => false);
 	const alerts = Effect.runSync(PubSub.unbounded<Alert>());
 	const alertsSeen = Effect.runSync(
 		PubSub.subscribe(alerts).pipe(Scope.provide(Effect.runSync(Scope.make()))),
@@ -949,9 +947,7 @@ async function createEffectHarness(
 				try: () => messages(sessionId),
 				catch: (cause) => cause,
 			}),
-		wsHandler: {
-			getClientsForSession,
-		},
+		hasViewers,
 		pollerManager: {
 			startPolling,
 			stopPolling: (id) => {
@@ -1010,7 +1006,7 @@ async function createEffectHarness(
 		messages,
 		statusWarn,
 		startPolling,
-		getClientsForSession,
+		hasViewers,
 		pollerEvents,
 		resolveMessages: () => resolveMessages?.([]),
 		emitStatus: (

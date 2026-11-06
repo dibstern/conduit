@@ -3,7 +3,16 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, ManagedRuntime, Option, Ref, Stream } from "effect";
+import {
+	Cause,
+	type Context,
+	Effect,
+	Layer,
+	ManagedRuntime,
+	Option,
+	Ref,
+	Stream,
+} from "effect";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
 import { SqlClient } from "effect/sql";
@@ -18,10 +27,15 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { makeRelayCacheLive } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	makeRelayCacheLive,
+	RelayCacheTag,
+} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
+	ProjectRpcContextsTag,
 	WebSocketRelayRouterLive,
 	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
@@ -32,7 +46,6 @@ import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handle
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import {
 	makeMockConfig,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
@@ -52,6 +65,34 @@ const makeProjectStore = (
 		),
 	);
 };
+
+type ProjectRpcContext = Effect.Success<
+	ReturnType<ProjectRpcContextsTag["Service"]>
+>;
+
+/** Test projects run their RPCs on a stand-in relay's handler runtime. */
+const standInProjectContexts = Effect.gen(function* () {
+	const router = yield* WebSocketRelayRouterTag;
+	const cache = yield* RelayCacheTag;
+	return (slug: string) =>
+		Effect.gen(function* () {
+			yield* router.ensureRelayStarted(slug);
+			const relay = yield* cache.get(slug);
+			const context = relay.rpcWsHandler.context;
+			if (!context) return yield* Effect.die("Stand-in relay has no context");
+			// The stand-in runtime carries the handler services, not every project part.
+			return (yield* context) as Context.Context<unknown> as ProjectRpcContext;
+		}).pipe(
+			// A disposed stand-in runtime dies; the RPC fails, as a closed project does.
+			Effect.catchCause((cause) =>
+				Effect.fail(
+					new WsRpcError({
+						message: `Project "${slug}" unavailable: ${Cause.pretty(cause)}`,
+					}),
+				),
+			),
+		);
+});
 
 describe("daemon shared RPC routing", () => {
 	it.effect("routes ViewSession across projects on one daemon RPC socket", () =>
@@ -81,14 +122,10 @@ describe("daemon shared RPC routing", () => {
 					lastUsed: 1,
 				},
 			];
-			const handlers = new Map<
-				string,
-				ReturnType<typeof makeMockWebSocketHandler>
-			>();
+			const activities = new Map<string, SessionActivityTag["Service"]>();
 			const startPolling = vi.fn();
 			const factory = (slug: string) =>
 				Effect.gen(function* () {
-					const wsHandler = makeMockWebSocketHandler();
 					const pollerManager = {
 						on: vi.fn(),
 						off: vi.fn(),
@@ -105,7 +142,6 @@ describe("daemon shared RPC routing", () => {
 									daemonStorePath(root),
 									slug,
 								),
-								wsHandler,
 								pollerManager,
 							}),
 							makeWsTransportLive({ noServer: true }),
@@ -114,10 +150,12 @@ describe("daemon shared RPC routing", () => {
 					const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
 						runtime,
 					}).pipe(Effect.provide(yield* runtime.contextEffect));
-					handlers.set(slug, wsHandler);
+					activities.set(
+						slug,
+						yield* Effect.promise(() => runtime.runPromise(SessionActivityTag)),
+					);
 					return {
 						slug,
-						wsHandler,
 						rpcWsHandler,
 						syncGlobalSetting: () => Effect.void,
 						refreshGlobalDefaults: () => Effect.void,
@@ -143,7 +181,7 @@ describe("daemon shared RPC routing", () => {
 			server.on("upgrade", upgrades);
 			const routerContext = yield* Layer.build(
 				WebSocketRelayRouterLive.pipe(
-					Layer.provide(
+					Layer.provideMerge(
 						Layer.mergeAll(
 							makeProjectRegistryLive(projects),
 							makeRelayCacheLive(factory),
@@ -153,7 +191,7 @@ describe("daemon shared RPC routing", () => {
 					),
 				),
 			);
-			const relayRouter = yield* WebSocketRelayRouterTag.pipe(
+			const resolve = yield* standInProjectContexts.pipe(
 				Effect.provide(routerContext),
 			);
 			yield* Layer.build(
@@ -166,7 +204,7 @@ describe("daemon shared RPC routing", () => {
 							Layer.effect(HttpServerRefTag, Ref.make<Server | null>(server)),
 							DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
 							makeAuthManagerLive(new AuthManager({ getPinHash: () => null })),
-							Layer.succeed(WebSocketRelayRouterTag)(relayRouter),
+							Layer.succeed(ProjectRpcContextsTag)(resolve),
 						),
 					),
 				),
@@ -216,15 +254,15 @@ describe("daemon shared RPC routing", () => {
 			}
 			expect(upgrades).toHaveBeenCalledTimes(1);
 
-			const handlerA = handlers.get("project-a");
-			const handlerB = handlers.get("project-b");
-			if (!handlerA || !handlerB) {
+			const activityA = activities.get("project-a");
+			const activityB = activities.get("project-b");
+			if (!activityA || !activityB) {
 				return yield* Effect.fail(new Error("Expected both relays to start"));
 			}
-			expect(handlerB.setClientSession).toHaveBeenCalledWith(
-				"daemon-client",
+			expect(activityB.selectedSession("project-b", "daemon-client")).toBe(
 				"session-b",
-				"project-b",
+			);
+			expect(activityA.selectedSession("project-a", "daemon-client")).toBe(
 				undefined,
 			);
 			expect(startPolling).toHaveBeenCalledWith("session-b");
@@ -255,9 +293,7 @@ describe("daemon shared RPC routing", () => {
 				);
 				const upgrades = vi.fn();
 				server.on("upgrade", upgrades);
-				const ensure = vi.fn(() => Effect.die("Must not start a relay"));
-				const wait = vi.fn(() => Effect.die("Must not resolve a relay"));
-				const touch = vi.fn(() => Effect.die("Must not touch a relay"));
+				const resolve = vi.fn(() => Effect.die("Must not resolve a project"));
 				yield* Layer.build(
 					WebSocketRoutingLive.pipe(
 						Layer.provide(
@@ -267,11 +303,7 @@ describe("daemon shared RPC routing", () => {
 								makeAuthManagerLive(
 									new AuthManager({ getPinHash: () => null }),
 								),
-								Layer.succeed(WebSocketRelayRouterTag)({
-									ensureRelayStarted: ensure,
-									waitForRelay: wait,
-									touchLastUsed: touch,
-								}),
+								Layer.succeed(ProjectRpcContextsTag)(resolve),
 							),
 						),
 					),
@@ -301,9 +333,7 @@ describe("daemon shared RPC routing", () => {
 					(yield* client.GetProjects({ projectSlug: "not-registered" }))
 						.projects,
 				).toHaveLength(1);
-				expect(ensure).not.toHaveBeenCalled();
-				expect(wait).not.toHaveBeenCalled();
-				expect(touch).not.toHaveBeenCalled();
+				expect(resolve).not.toHaveBeenCalled();
 				expect(upgrades).toHaveBeenCalledTimes(1);
 			}),
 	);
@@ -377,7 +407,7 @@ describe("daemon shared RPC routing", () => {
 				const upgrades = vi.fn();
 				server.on("upgrade", upgrades);
 				const routerLayer = WebSocketRelayRouterLive.pipe(
-					Layer.provide(
+					Layer.provideMerge(
 						Layer.mergeAll(
 							makeProjectRegistryLive(projects),
 							makeRelayCacheLive(factory),
@@ -387,12 +417,9 @@ describe("daemon shared RPC routing", () => {
 					),
 				);
 				const routerContext = yield* Layer.build(routerLayer);
-				const router = yield* WebSocketRelayRouterTag.pipe(
-					Effect.provide(routerContext),
+				const resolve = vi.fn(
+					yield* standInProjectContexts.pipe(Effect.provide(routerContext)),
 				);
-				const ensure = vi.fn(router.ensureRelayStarted);
-				const wait = vi.fn(router.waitForRelay);
-				const touch = vi.fn(router.touchLastUsed);
 				yield* Layer.build(
 					WebSocketRoutingLive.pipe(
 						Layer.provide(makeDaemonRpcTestLayer()),
@@ -403,11 +430,7 @@ describe("daemon shared RPC routing", () => {
 								makeAuthManagerLive(
 									new AuthManager({ getPinHash: () => null }),
 								),
-								Layer.succeed(WebSocketRelayRouterTag)({
-									ensureRelayStarted: ensure,
-									waitForRelay: wait,
-									touchLastUsed: touch,
-								}),
+								Layer.succeed(ProjectRpcContextsTag)(resolve),
 							),
 						),
 					),
@@ -439,9 +462,7 @@ describe("daemon shared RPC routing", () => {
 						projectSlug: slug,
 						commands: [],
 					});
-					expect(ensure).toHaveBeenCalledWith(slug);
-					expect(wait).toHaveBeenCalledWith(slug, 10_000);
-					expect(touch).toHaveBeenCalledWith(slug);
+					expect(resolve).toHaveBeenCalledWith(slug);
 				}
 				for (const slug of ["missing-project", "unavailable"]) {
 					const result = yield* Effect.result(

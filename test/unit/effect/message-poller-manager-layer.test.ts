@@ -2,7 +2,8 @@ import { setImmediate } from "node:timers/promises";
 import { Effect, Exit, Layer, Option, Scope } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { makeMessagePollerManagerLive } from "../../../src/lib/domain/relay/Layers/message-poller-manager-layer.js";
+import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { MessagePollerManagerLive } from "../../../src/lib/domain/relay/Layers/message-poller-manager-layer.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -18,6 +19,7 @@ import { MessagePollerManager } from "../../../src/lib/relay/message-poller-impl
 import {
 	makeMockConfig,
 	makeMockLogger,
+	makeTestSessionActivityLayer,
 } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
@@ -93,10 +95,15 @@ async function buildLayerHarness(options?: {
 			}),
 		),
 		Layer.succeed(LoggerTag)(log),
+		options?.hasViewers == null
+			? makeTestSessionActivityLayer()
+			: Layer.succeed(SessionActivityTag)(
+					partialFake<SessionActivityTag["Service"]>({
+						hasViewers: options.hasViewers,
+					}),
+				),
 	);
-	const layer = makeMessagePollerManagerLive({
-		...(options?.hasViewers != null && { hasViewers: options.hasViewers }),
-	}).pipe(Layer.provide(dependencyLayer));
+	const layer = MessagePollerManagerLive.pipe(Layer.provide(dependencyLayer));
 	const scope = await Effect.runPromise(Scope.make());
 	const context = await Effect.runPromise(
 		Layer.buildWithScope(Layer.fresh(layer), scope),

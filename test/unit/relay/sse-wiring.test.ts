@@ -691,7 +691,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 				}),
 		});
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [
@@ -725,7 +725,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
 			Effect.succeed(new Map()),
 		);
-		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [
@@ -764,7 +764,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
 			Effect.succeed(new Map([["child-session", "parent-session"]])),
 		);
-		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [
@@ -792,7 +792,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
 			Effect.succeed(new Map([["child-session", "parent-session"]])),
 		);
-		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [
@@ -829,7 +829,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
 			Effect.succeed(new Map([["child-session", "parent-session"]])),
 		);
-		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [
@@ -856,7 +856,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 describe("alert published for dropped notification-worthy events", () => {
 	it("publishes an alert when done is dropped (no viewers)", async () => {
 		const deps = createMockSSEWiringDeps();
-		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
 		const translated: RelayMessage = {
 			type: "done",
 			sessionId: "s1",
@@ -886,7 +886,7 @@ describe("alert published for dropped notification-worthy events", () => {
 
 	it("publishes an alert with message when error is dropped", async () => {
 		const deps = createMockSSEWiringDeps();
-		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
 		const translated: RelayMessage = {
 			type: "done",
 			alertId: "error-1",
@@ -919,7 +919,7 @@ describe("alert published for dropped notification-worthy events", () => {
 	it("does NOT publish an alert when the session has viewers", async () => {
 		const deps = createMockSSEWiringDeps();
 		// An RPC viewer suppresses the completion alert.
-		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue(["c1"]);
+		vi.mocked(deps.hasViewers).mockReturnValue(true);
 		const translated: RelayMessage = {
 			type: "done",
 			sessionId: "s1",
@@ -940,7 +940,7 @@ describe("alert published for dropped notification-worthy events", () => {
 
 	it("does NOT publish an alert for non-notification types (delta)", async () => {
 		const deps = createMockSSEWiringDeps();
-		vi.mocked(deps.wsHandler.getClientsForSession).mockReturnValue([]);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
 		const translated: RelayMessage = {
 			type: "delta",
 			sessionId: "s1",

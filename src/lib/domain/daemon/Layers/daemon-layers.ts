@@ -87,9 +87,9 @@ import {
 	makeDaemonHttpRouterLive,
 } from "../../server/Layers/http-router-layer.js";
 import {
-	resolveProjectRpcContext,
+	ProjectRpcContextsLive,
+	ProjectRpcContextsTag,
 	WebSocketRelayRouterLive,
-	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
 } from "../../server/Layers/ws-routing-layer.js";
 import { PushNotificationManagerLive } from "../../server/Services/push-service.js";
@@ -598,14 +598,13 @@ export const DaemonRpcServerLive = Layer.effectDiscard(
 		const ctx = yield* DaemonLifecycleContextTag;
 		const handlers = yield* DaemonWsRpcHandlersTag;
 		const directory = yield* SessionDirectory;
-		const relayRouter = yield* WebSocketRelayRouterTag;
+		const resolveRpcContext = yield* ProjectRpcContextsTag;
 		const shutdownSignal = yield* ShutdownSignalTag;
 		const server = makeDaemonRpcSocketLayer(
 			ctx.socketPath,
-			makeRoutedWsRpcServerLayer(
-				(slug) => resolveProjectRpcContext(relayRouter, slug),
-				handlers,
-			).pipe(Layer.provide(Layer.succeed(SessionDirectory, directory))),
+			makeRoutedWsRpcServerLayer(resolveRpcContext, handlers).pipe(
+				Layer.provide(Layer.succeed(SessionDirectory, directory)),
+			),
 			{
 				onSuccessfulShutdownResponse: (tag) =>
 					Deferred.succeed(
@@ -1184,10 +1183,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withDaemonWiring),
 	);
 
-	const withWsRelayRouter = Layer.merge(
-		WebSocketRelayRouterLive,
-		DaemonWsRpcHandlersLive,
-	).pipe(Layer.provideMerge(withBackground));
+	const withWsRelayRouter = ProjectRpcContextsLive.pipe(
+		Layer.provideMerge(
+			Layer.merge(WebSocketRelayRouterLive, DaemonWsRpcHandlersLive),
+		),
+		Layer.provideMerge(withBackground),
+	);
 
 	// Tier 5: Scoped fiber Layers (need registries + config)
 	// Side-effect-only Layers (scopedDiscard) that fork background fibers.

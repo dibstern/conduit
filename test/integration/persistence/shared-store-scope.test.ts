@@ -60,7 +60,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../../../src/lib/domain/relay/Services/session-attention.js";
 import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
@@ -131,7 +130,6 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import {
@@ -948,7 +946,6 @@ describe("shared-store relay project scope", () => {
 					OpenCodeInstancesTag,
 					makeOpenCodeInstancesStub(),
 				),
-				Effect.provideService(WebSocketHandlerTag, makeMockWebSocketHandler()),
 				Effect.provideServiceEffect(SessionActivityTag, makeSessionActivity),
 				Effect.provideService(AgentLivenessTag, () => Effect.succeed(false)),
 			),

@@ -163,7 +163,6 @@ describe("DaemonHandleTag", () => {
 					Effect.succeed({
 						slug,
 						attach: () => () => {},
-						wsHandler: {},
 						rpcWsHandler: {},
 						syncGlobalSetting: () => Effect.void,
 						refreshGlobalDefaults: () => Effect.void,
@@ -188,7 +187,6 @@ describe("DaemonHandleTag", () => {
 								Option.some({
 									slug,
 									attach: () => () => {},
-									wsHandler: {},
 									rpcWsHandler: {},
 									syncGlobalSetting: () => Effect.void,
 									refreshGlobalDefaults: () => Effect.void,

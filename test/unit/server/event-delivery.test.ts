@@ -5,13 +5,13 @@ import type {
 	PtyEnvelope,
 	ShellProjectsFrame,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { makeSessionActivity } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import {
 	SessionDirectory,
 	SessionDirectoryReadError,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { EffectWsHandler } from "../../../src/lib/server/effect-ws-handler.js";
 import { EventDelivery } from "../../../src/lib/server/event-audiences.js";
 import {
 	CurrentEventDelivery,
@@ -206,8 +206,8 @@ describe("RPC event audiences", () => {
 		() =>
 			Effect.gen(function* () {
 				const delivery = new EventDelivery();
-				const handler = new EffectWsHandler();
-				handler.setClientSession("tab", "session-a", "project-a", delivery);
+				const activity = yield* makeSessionActivity;
+				activity.selectSession("project-a", "tab", "session-a", delivery);
 				const ready = yield* Deferred.make<void>();
 				const next = yield* Deferred.make<string>();
 				const events: string[] = [];
@@ -233,7 +233,7 @@ describe("RPC event audiences", () => {
 				);
 				yield* Deferred.await(ready);
 				yield* Effect.yieldNow;
-				handler.setClientSession("tab", "session-a", "project-a", delivery);
+				activity.selectSession("project-a", "tab", "session-a", delivery);
 				yield* Effect.yieldNow;
 				yield* Deferred.succeed(next, "second");
 				yield* Fiber.join(fiber);

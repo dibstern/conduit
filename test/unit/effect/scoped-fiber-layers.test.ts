@@ -10,6 +10,7 @@ import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, HashMap, Layer, Ref, Scope } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import {
 	prefetchSessionCounts,
@@ -31,9 +32,8 @@ import {
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
-	WebSocketRelayRouterTag,
+	ProjectRpcContextsTag,
 	WebSocketRoutingLive,
-	WebSocketUpgradeError,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 
@@ -50,18 +50,10 @@ const configRefLayer = DaemonConfigRefLive(
 const authLayer = makeAuthManagerLive(
 	new AuthManager({ getPinHash: () => null }),
 );
-const wsRelayRouterLayer = Layer.succeed(WebSocketRelayRouterTag)({
-	ensureRelayStarted: () => Effect.void,
-	waitForRelay: (slug: string) =>
-		Effect.fail(
-			new WebSocketUpgradeError({
-				reason: "relay_unavailable",
-				slug,
-				cause: new Error("No relay configured in this test"),
-			}),
-		),
-	touchLastUsed: () => Effect.void,
-});
+// No project resolves here: these tests never open an RPC socket.
+const projectRpcContextsLayer = Layer.succeed(ProjectRpcContextsTag)((slug) =>
+	Effect.fail(new WsRpcError({ message: `No project "${slug}" in this test` })),
+);
 const httpServerRefWithServerLayer = Layer.effect(
 	HttpServerRefTag,
 	Effect.flatMap(
@@ -119,7 +111,7 @@ describe("WebSocketRoutingLive", () => {
 		Layer.provide(configRefLayer),
 		Layer.provide(httpServerRefWithServerLayer),
 		Layer.provide(authLayer),
-		Layer.provide(wsRelayRouterLayer),
+		Layer.provide(projectRpcContextsLayer),
 	);
 
 	it.effect("builds without error", () =>
@@ -410,7 +402,7 @@ describe("Scoped fiber lifecycle", () => {
 					Layer.provide(configRefLayer),
 					Layer.provide(httpServerRefWithServerLayer),
 					Layer.provide(authLayer),
-					Layer.provide(wsRelayRouterLayer),
+					Layer.provide(projectRpcContextsLayer),
 				),
 			);
 			const scope = yield* Scope.make();

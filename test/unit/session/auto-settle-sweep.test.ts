@@ -19,7 +19,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
@@ -38,7 +37,6 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
 	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
@@ -100,7 +98,6 @@ describe("relay automatic settlement sweep", () => {
 					Layer.succeed(OpenCodeAPITag)(openCodeApi),
 					loggerLayer,
 					configLayer,
-					Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 					Layer.effect(SessionActivityTag, makeSessionActivity),
 					RelayStatusSnapshotLive,
 					makeOverridesStateLive(),

@@ -11,7 +11,6 @@ import {
 	LoggerTag,
 	PollerManagerTag,
 	StatusPollerTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type SessionManagerService,
@@ -39,7 +38,7 @@ import {
 	makeMockLogger,
 	makeMockSessionManagerService,
 	makeMockStatusPoller,
-	makeMockWebSocketHandler,
+	makeTestSessionActivityLayer,
 	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 
@@ -60,11 +59,6 @@ function makeSessionMetadataLayer(options: {
 			permission: { list: vi.fn(async () => []) },
 			question: { list: vi.fn(async () => []) },
 		});
-	const wsHandler = makeMockWebSocketHandler(
-		options.clientSession === undefined
-			? {}
-			: { getClientSession: vi.fn(() => options.clientSession) },
-	);
 	const sessionManagerService =
 		options.sessionManagerService ?? makeMockSessionManagerService();
 	const statusPoller = makeMockStatusPoller({
@@ -85,7 +79,7 @@ function makeSessionMetadataLayer(options: {
 	const baseLayer = Layer.mergeAll(
 		makePersistenceEffectLayer(":memory:", "test-project"),
 		Layer.succeed(OpenCodeAPITag)(api),
-		Layer.succeed(WebSocketHandlerTag)(wsHandler),
+		makeTestSessionActivityLayer(options.clientSession),
 		Layer.succeed(SessionManagerServiceTag)(
 			mockSessionManagers(sessionManagerService),
 		),

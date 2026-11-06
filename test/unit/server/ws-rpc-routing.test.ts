@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest";
 import {
-	type Context,
+	Context,
 	Effect,
 	Exit,
 	Layer,
@@ -38,7 +38,6 @@ import {
 } from "../../../src/lib/server/ws-rpc-handler.js";
 import {
 	makeMockConfig,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
@@ -53,7 +52,6 @@ describe("routed RPC server", () => {
 		"EA27 routed ownership failure is refused before producer acquisition",
 		() =>
 			Effect.gen(function* () {
-				const wsHandler = makeMockWebSocketHandler();
 				let lookups = 0;
 				const directory = Layer.succeed(SessionDirectory)({
 					projectOf: (sessionId) =>
@@ -74,11 +72,12 @@ describe("routed RPC server", () => {
 					Layer.mergeAll(
 						RpcSubscriptionScopeLive,
 						makeTestHandlerLayer({
-							wsHandler,
 							config: makeMockConfig({ slug: "project-a" }),
 						}),
 					),
 				);
+				const activity = Context.get(context, SessionActivityTag);
+				const view = vi.spyOn(activity, "view");
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 					Effect.provide(
 						makeRoutedWsRpcServerLayer(() => Effect.succeed(context)).pipe(
@@ -94,7 +93,8 @@ describe("routed RPC server", () => {
 					_tag: "Failure",
 					failure: { _tag: "WsRpcError", code: "ownership-lookup-failed" },
 				});
-				expect(wsHandler.registerSessionViewer).not.toHaveBeenCalled();
+				expect(view).not.toHaveBeenCalled();
+				expect(activity.hasViewers("session-a")).toBe(false);
 			}),
 	);
 	it.effect(

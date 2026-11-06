@@ -14,15 +14,9 @@ describe("mock-factories", () => {
 		});
 
 		it("accepts sub-object overrides", () => {
-			const getClientsForSession = vi.fn(() => ["rpc-viewer"]);
-			const deps = createMockHandlerDeps({
-				wsHandler: {
-					setClientSession: vi.fn(),
-					getClientSession: vi.fn(),
-					getClientsForSession,
-				},
-			});
-			expect(deps.wsHandler.getClientsForSession).toBe(getClientsForSession);
+			const isProcessing = vi.fn(() => true);
+			const deps = createMockHandlerDeps({ statusPoller: { isProcessing } });
+			expect(deps.statusPoller.isProcessing).toBe(isProcessing);
 		});
 	});
 

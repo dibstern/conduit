@@ -78,7 +78,6 @@ import {
 	parseCookies,
 } from "../server/http-utils.js";
 import type { PushNotificationSender } from "../server/push.js";
-import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import {
 	makeRoutedWsRpcWebSocketHandler,
 	RoutedWsRpcWebSocketHandlerTag,
@@ -327,7 +326,6 @@ export interface ProjectRelay {
 		windowMs: number,
 		now: number,
 	): Effect.Effect<number, SqlError | SessionManagerError>;
-	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
 	translator: ReturnType<typeof createTranslator>;
@@ -397,7 +395,6 @@ export interface RelayStack {
 	deleteArchivedSessions: ProjectRelay["deleteArchivedSessions"];
 	archiveIdleSessions: ProjectRelay["archiveIdleSessions"];
 	server: EffectRelayServer;
-	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
 	translator: ReturnType<typeof createTranslator>;
@@ -478,13 +475,9 @@ export async function createProjectRelay(
 		}
 	}
 
-	// Startup supplies the handler, but runner adoption can publish before it does.
-	let wsHandler: WebSocketHandlerShape | undefined;
-
 	const layers = createProjectRelayLayers({
 		config,
 		...(testSendLimit !== undefined && { testSendLimit }),
-		getWsHandler: () => wsHandler,
 	});
 	const { effectRuntime } = layers;
 	const startup = await startProjectRelay({
@@ -499,7 +492,6 @@ export async function createProjectRelay(
 		initialDefaultVariant,
 		layers,
 	});
-	wsHandler = startup.wsHandler;
 	// The relay lends its continuation to the daemon's one sweep until stop().
 	const continuationSweep = layers.relayManagedRuntime.runFork(
 		Effect.gen(function* () {
@@ -566,8 +558,7 @@ export async function createProjectRelay(
 			settleIdleSessions(
 				{
 					projectDir: config.projectDir,
-					hasViewer: (id) =>
-						startup.wsHandler.getClientsForSession(id).length > 0,
+					hasViewer: startup.activity.hasViewers,
 					hasLiveBackgroundWork: (id) =>
 						startup.activity.background.hasLiveWork(id),
 					setSettled: (id) =>
@@ -608,7 +599,6 @@ export async function createProjectRelay(
 					startup.persistenceProject,
 				),
 			),
-		wsHandler,
 		rpcWsHandler,
 		sseStream,
 		translator,
@@ -1000,7 +990,6 @@ export async function createRelayStack(
 		archiveIdleSessions: relay.archiveIdleSessions,
 		deleteArchivedSessions: relay.deleteArchivedSessions,
 		settleIdleSessions: relay.settleIdleSessions,
-		wsHandler: relay.wsHandler,
 		rpcWsHandler: relay.rpcWsHandler,
 		sseStream: relay.sseStream,
 		translator: relay.translator,

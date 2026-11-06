@@ -9,8 +9,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	type WebSocketHandlerShape,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	getAgent,
@@ -32,36 +30,20 @@ import {
 	makeMockAccountDirectory,
 	makeMockConfig,
 	makeOpenCodeInstancesStub,
+	makeTestSessionActivityLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
-function mockWsHandler(
-	overrides?: Partial<WebSocketHandlerShape>,
-): WebSocketHandlerShape {
-	return {
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => undefined),
-		getClientsForSession: vi.fn(() => []),
-		registerSessionViewer: vi.fn(() => () => {}),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-		...overrides,
-	};
-}
-
 function agentHandlerLayer({
 	client,
-	ws,
 	engine,
 	log = makeHandlerLogger(),
 }: {
 	client: OpenCodeAPI;
-	ws: WebSocketHandlerShape;
 	engine?: OrchestrationEngine;
 	log?: Logger;
 }) {
 	const apiLayer = Layer.succeed(OpenCodeAPITag)(client);
-	const wsLayer = Layer.succeed(WebSocketHandlerTag)(ws);
 	const overridesLayer = makeOverridesStateLive();
 	const logLayer = Layer.succeed(LoggerTag)(log);
 	const deps = Layer.mergeAll(
@@ -70,7 +52,7 @@ function agentHandlerLayer({
 		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
-		wsLayer,
+		makeTestSessionActivityLayer(),
 		overridesLayer,
 		logLayer,
 		Layer.succeed(ConfigTag)(makeMockConfig()),
@@ -97,7 +79,6 @@ const listAgents = (sessionId: string | undefined, instanceId?: string) =>
 
 describe("GetAgents active provider", () => {
 	it.effect("returns Claude agents for a Claude-bound active session", () => {
-		const ws = mockWsHandler();
 		const client = makeHandlerOpenCodeAPI({
 			app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 		});
@@ -152,7 +133,7 @@ describe("GetAgents active provider", () => {
 				activeAgentId: "Explore",
 			});
 		}).pipe(
-			Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+			Effect.provide(agentHandlerLayer({ client, engine }), {
 				local: true,
 			}),
 		);
@@ -161,7 +142,6 @@ describe("GetAgents active provider", () => {
 	it.effect(
 		"returns all Claude agents regardless of active Claude model",
 		() => {
-			const ws = mockWsHandler();
 			const client = makeHandlerOpenCodeAPI({
 				app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 			});
@@ -189,7 +169,7 @@ describe("GetAgents active provider", () => {
 			});
 
 			return listAgents("session-1").pipe(
-				Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+				Effect.provide(agentHandlerLayer({ client, engine }), {
 					local: true,
 				}),
 				Effect.tap((reply) =>
@@ -213,7 +193,6 @@ describe("GetAgents active provider", () => {
 	it.effect(
 		"returns OpenCode agents for an OpenCode-bound active session",
 		() => {
-			const ws = mockWsHandler();
 			const rawAgents = [
 				{ id: "build", name: "build", mode: "primary" as const },
 				{ id: "title", name: "title", mode: "subagent" as const, hidden: true },
@@ -243,7 +222,7 @@ describe("GetAgents active provider", () => {
 				});
 				expect(yield* getAgent("session-1")).toBe("plan");
 			}).pipe(
-				Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+				Effect.provide(agentHandlerLayer({ client, engine }), {
 					local: true,
 				}),
 			);
@@ -253,7 +232,6 @@ describe("GetAgents active provider", () => {
 	it.effect(
 		"uses the requested instance instead of the active session provider",
 		() => {
-			const ws = mockWsHandler();
 			const client = makeHandlerOpenCodeAPI({
 				app: {
 					agents: vi.fn(async () => [
@@ -267,7 +245,7 @@ describe("GetAgents active provider", () => {
 			});
 
 			return listAgents("session-1", "opencode").pipe(
-				Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+				Effect.provide(agentHandlerLayer({ client, engine }), {
 					local: true,
 				}),
 				Effect.tap((reply) =>
@@ -285,7 +263,6 @@ describe("GetAgents active provider", () => {
 	);
 
 	it.effect("preserves OpenCode behavior when no active session exists", () => {
-		const ws = mockWsHandler();
 		const client = makeHandlerOpenCodeAPI({
 			app: {
 				agents: vi.fn(async () => [
@@ -295,7 +272,7 @@ describe("GetAgents active provider", () => {
 		});
 
 		return listAgents(undefined).pipe(
-			Effect.provide(agentHandlerLayer({ client, ws }), { local: true }),
+			Effect.provide(agentHandlerLayer({ client }), { local: true }),
 			Effect.tap((reply) =>
 				Effect.sync(() => {
 					expect(client.app.agents).toHaveBeenCalledOnce();
@@ -311,7 +288,6 @@ describe("GetAgents active provider", () => {
 	it.effect(
 		"falls back to Claude agents when startup has no active session and OpenCode is unavailable",
 		() => {
-			const ws = mockWsHandler();
 			const client = makeHandlerOpenCodeAPI({
 				app: {
 					agents: vi.fn(async () => {
@@ -337,7 +313,7 @@ describe("GetAgents active provider", () => {
 			});
 
 			return listAgents(undefined).pipe(
-				Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+				Effect.provide(agentHandlerLayer({ client, engine }), {
 					local: true,
 				}),
 				Effect.tap((reply) =>
@@ -364,7 +340,6 @@ describe("GetAgents active provider", () => {
 	it.effect(
 		"uses Claude agents immediately when the default provider is Claude",
 		() => {
-			const ws = mockWsHandler();
 			const client = makeHandlerOpenCodeAPI({
 				app: {
 					agents: vi.fn(async () => {
@@ -406,7 +381,7 @@ describe("GetAgents active provider", () => {
 					agents: [{ id: "Explore", name: "Explore", model: "haiku" }],
 				});
 			}).pipe(
-				Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+				Effect.provide(agentHandlerLayer({ client, engine }), {
 					local: true,
 				}),
 			);
@@ -414,7 +389,6 @@ describe("GetAgents active provider", () => {
 	);
 
 	it.effect("clears stale stored agent not present in active list", () => {
-		const ws = mockWsHandler();
 		const client = makeHandlerOpenCodeAPI({
 			app: { agents: vi.fn(async () => [{ id: "build", name: "build" }]) },
 		});
@@ -446,7 +420,7 @@ describe("GetAgents active provider", () => {
 				agents: [{ id: "Explore", name: "Explore" }],
 			});
 		}).pipe(
-			Effect.provide(agentHandlerLayer({ client, ws, engine }), {
+			Effect.provide(agentHandlerLayer({ client, engine }), {
 				local: true,
 			}),
 		);

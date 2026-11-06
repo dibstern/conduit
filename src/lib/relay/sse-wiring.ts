@@ -102,9 +102,8 @@ export function extractSessionId(event: SSEEvent): string | undefined {
 export interface SSEWiringDeps {
 	translator: Translator;
 	readonly providerInstanceId: string;
-	wsHandler: {
-		getClientsForSession: (sessionId: string) => string[];
-	};
+	/** Whether a tab views the session: the daemon's viewer record. */
+	hasViewers: (sessionId: string) => boolean;
 	pushManager?: PushNotificationSender;
 	log: Logger;
 	pipelineLog: Logger;
@@ -499,7 +498,7 @@ const handleSSEEventAfterPendingEffect = (
 	eventSessionId: string | undefined,
 ) =>
 	Effect.gen(function* () {
-		const { translator, wsHandler, pushManager, pipelineLog, log } = deps;
+		const { translator, hasViewers, pushManager, pipelineLog, log } = deps;
 
 		if (event.type === "session.updated") {
 			if (hasInfoWithSessionID(event.properties)) {
@@ -583,10 +582,11 @@ const handleSSEEventAfterPendingEffect = (
 				: (m as RelayMessage),
 		);
 		for (let msg of toSend) {
-			const viewers = targetSessionId
-				? wsHandler.getClientsForSession(targetSessionId)
-				: [];
-			const pipeResult = processEvent(msg, targetSessionId, viewers);
+			const pipeResult = processEvent(
+				msg,
+				targetSessionId,
+				targetSessionId !== undefined && hasViewers(targetSessionId),
+			);
 			msg = pipeResult.msg;
 
 			yield* applyPipelineResultEffect(pipeResult, targetSessionId, {

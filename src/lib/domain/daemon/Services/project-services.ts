@@ -13,6 +13,7 @@ import type {
 	PersistenceStoreContext,
 } from "../../../persistence/effect/live.js";
 import { daemonStorePath } from "../../../persistence/project-storage.js";
+import type { RpcSubscriptionScopeTag } from "../../../server/ws-rpc.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
 import type { AgentServiceTag } from "../../relay/Services/agent-service.js";
 import type { AlertLedgerTag } from "../../relay/Services/alert-ledger.js";
@@ -38,6 +39,7 @@ import type {
 	OpenCodeFileServiceTag,
 	OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceTag,
+	PollerManagerTag,
 	PtyManagerTag,
 	TranslatorTag,
 } from "../../relay/Services/services.js";
@@ -97,7 +99,11 @@ export type ProjectGenerationParts =
 	| OpenCodeSettingsServiceTag
 	// Recaps and goal summaries (lane 16o).
 	| RecapServiceTag
-	| GoalSummaryServiceTag;
+	| GoalSummaryServiceTag
+	// The message poller (lane 16p).
+	| PollerManagerTag
+	// Streams a tab opens on the project end with the generation, not a relay (lane 16p).
+	| RpcSubscriptionScopeTag;
 
 /** Everything a call naming the project runs with, built by the daemon. */
 export type ProjectParts =

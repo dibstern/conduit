@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -254,22 +255,22 @@ describe("Event Audiences failure catalogue", () => {
 		).toBe(false);
 	});
 
-	it("EA12 setClientSession replaces selected interests", async () => {
+	it("EA12 selecting a session replaces the tab's selected interests", async () => {
 		const { EventDelivery } = await import(
 			"../../../src/lib/server/event-audiences.js"
 		);
-		const { EffectWsHandler } = await import(
-			"../../../src/lib/server/effect-ws-handler.js"
+		const { makeSessionActivity } = await import(
+			"../../../src/lib/domain/daemon/Services/session-activity.js"
 		);
 		const connection = new EventDelivery();
-		const handler = new EffectWsHandler();
-		handler.setClientSession("client", "session-a", "project-a", connection);
-		expect(handler.getClientInterests("client")).toEqual(
+		const activity = Effect.runSync(makeSessionActivity);
+		activity.selectSession("project-a", "client", "session-a", connection);
+		expect(connection.interests).toEqual(
 			interests(["session-a"], ["project-a"]),
 		);
-		handler.setClientSession("client", "session-b", "project-b", connection);
-		expect(handler.getClientSession("client")).toBe("session-b");
-		expect(handler.getClientInterests("client")).toEqual(
+		activity.selectSession("project-b", "client", "session-b", connection);
+		expect(activity.selectedSession("project-b", "client")).toBe("session-b");
+		expect(connection.interests).toEqual(
 			interests(["session-b"], ["project-b"]),
 		);
 		const send = vi.fn();
@@ -281,8 +282,9 @@ describe("Event Audiences failure catalogue", () => {
 				send,
 			),
 		).toBe(true);
-		handler.close();
-		expect(handler.getClientInterests("client")).toBeUndefined();
+		activity.forgetProject("project-b");
+		expect(activity.selectedSession("project-b", "client")).toBeUndefined();
+		expect(connection.interests).toEqual(interests());
 	});
 
 	it("EA13 late cleanup cannot erase a newer selection", async () => {
@@ -304,16 +306,16 @@ describe("Event Audiences failure catalogue", () => {
 			),
 		).toBe(true);
 		expect(send).toHaveBeenCalledTimes(1);
-		const { EffectWsHandler } = await import(
-			"../../../src/lib/server/effect-ws-handler.js"
+		const { makeSessionActivity } = await import(
+			"../../../src/lib/domain/daemon/Services/session-activity.js"
 		);
-		const oldRelay = new EffectWsHandler();
-		const newRelay = new EffectWsHandler();
+		const activity = Effect.runSync(makeSessionActivity);
 		const selected = new EventDelivery();
-		oldRelay.setClientSession("client", "session-a", "project-a", selected);
-		newRelay.setClientSession("client", "session-b", "project-b", selected);
-		oldRelay.close();
+		activity.selectSession("project-a", "client", "session-a", selected);
+		activity.selectSession("project-b", "client", "session-b", selected);
+		activity.forgetProject("project-a");
 		expect(selected.interests).toEqual(interests(["session-b"], ["project-b"]));
+		expect(activity.selectedSession("project-b", "client")).toBe("session-b");
 	});
 
 	it("EA14 daemon and relay streams share the delivery seam", async () => {

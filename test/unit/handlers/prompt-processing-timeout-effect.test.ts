@@ -25,7 +25,6 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
@@ -61,6 +60,7 @@ import {
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	makeOpenCodeInstancesStub,
+	makeTestSessionActivityLayer,
 	mockSessionManagers,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
@@ -76,20 +76,6 @@ const config = {
 	noServer: true,
 } satisfies Partial<ProjectRelayConfig>;
 
-function makeWsHandler() {
-	return {
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => "session-1"),
-		getClientsForSession: vi.fn(() => ["client-1"]),
-		registerSessionViewer: vi.fn(() => () => {}),
-		attach: vi.fn(() => () => {}),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-		on: vi.fn(),
-		once: vi.fn(),
-	};
-}
-
 describe("prompt processing timeouts through Effect state", () => {
 	for (const continuation of [false, true]) {
 		for (const timing of [
@@ -103,7 +89,6 @@ describe("prompt processing timeouts through Effect state", () => {
 			it.effect(
 				`${continuation ? "continuation" : "input"} timeout with ${timing}`,
 				() => {
-					const ws = makeWsHandler();
 					const userId = continuation ? "original-input" : "cmd-timeout-send";
 					let failAccepted: (() => Effect.Effect<boolean>) | undefined;
 					let lateFailureHandled = false;
@@ -133,7 +118,7 @@ describe("prompt processing timeouts through Effect state", () => {
 							Layer.succeed(OpenCodeModelServiceTag)(
 								makeMockOpenCodeModelService(MOCK_OPENCODE_GPT4_CATALOG),
 							),
-							Layer.succeed(WebSocketHandlerTag)(ws),
+							makeTestSessionActivityLayer("session-1"),
 							Layer.succeed(LoggerTag)(createSilentLogger()),
 							Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 							Layer.succeed(ConfigTag)(config as ProjectRelayConfig),
@@ -455,7 +440,6 @@ describe("prompt processing timeouts through Effect state", () => {
 	it.effect(
 		"clears the processing timeout when the active prompt is cancelled",
 		() => {
-			const ws = makeWsHandler();
 			const engine = withDispatchEffect({
 				dispatchEffect: vi.fn(() => Effect.void),
 			});
@@ -472,7 +456,7 @@ describe("prompt processing timeouts through Effect state", () => {
 				Layer.succeed(OpenCodeInstancesTag)(
 					makeOpenCodeInstancesStub({ opencode: client }),
 				),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("session-1"),
 				Layer.succeed(LoggerTag)(createSilentLogger()),
 				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 				Layer.succeed(ConfigTag)(config as ProjectRelayConfig),

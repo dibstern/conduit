@@ -1,6 +1,6 @@
 // Verifies that each WebSocket client (browser tab) can independently view
 // different sessions. Tests the per-tab session routing introduced by the
-// ViewSession / setClientSession / sendToSession system.
+// ViewSession / SessionActivity.selectSession / sendToSession system.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {

@@ -78,7 +78,7 @@ import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import type { EventRetentionTag } from "../domain/persistence/Services/event-retention.js";
 import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { makeRunLedgerSchedulerLive } from "../domain/persistence/Services/run-ledger-scheduler.js";
-import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
+import { MessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import {
 	AgentLivenessLive,
 	makeProjectIngestionLive,
@@ -94,7 +94,6 @@ import { makeRelayStateLive } from "../domain/relay/Layers/relay-layer.js";
 import { SessionStateProjectionNotifierLive } from "../domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { SessionWorkspaceOrOwn } from "../domain/relay/Layers/session-workspace-layer.js";
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
-import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
 import { makeWsTransportLive } from "../domain/relay/Layers/ws-transport-layer.js";
 import {
 	AgentServiceLive,
@@ -172,6 +171,7 @@ import {
 	OpenCodeSettingsServiceLive,
 	OpenCodeSettingsServiceTag,
 	type OrchestrationEngineTag,
+	PollerManagerTag,
 	PtyManagerTag,
 	SessionCompactionsTag,
 	SessionRetriesTag,
@@ -246,7 +246,6 @@ import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js"
 import { codexUsageReader } from "../provider/codex/codex-usage.js";
 import { makeOrchestrationRuntimeLayer } from "../provider/orchestration-wiring.js";
 import { usageAccounts } from "../provider/usage-reader.js";
-import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { createTranslator } from "./event-translator.js";
@@ -296,15 +295,12 @@ export interface RelayRuntime {
 export interface ProjectRelayLayerInputs {
 	config: ProjectRelayConfig;
 	testSendLimit?: number;
-	/** Undefined until startup finishes; runner adoption publishes before then. */
-	getWsHandler: () => WebSocketHandlerShape | undefined;
 }
 
 /** Build the shared per-project Layer graph and its managed runtime. */
 export function createProjectRelayLayers({
 	config,
 	testSendLimit,
-	getWsHandler,
 }: ProjectRelayLayerInputs) {
 	const claudeSdk = config.claudeSdk ?? {
 		query: sdkQuery,
@@ -874,28 +870,19 @@ export function createProjectRelayLayers({
 			onSome: (service) => Layer.sync(ScanServiceTag, () => service),
 		},
 	);
-	const webSocketHandlerLayer = WebSocketHandlerLive.pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				configLayer,
-				loggerLayer,
-				sessionEventBusLayer,
-				persistenceEffectLayer,
-			),
-		),
-	);
 	// Polling must not restart an idle-stopped OpenCode.
-	const messagePollerManagerLayer = makeMessagePollerManagerLive({
-		hasViewers: (sid) =>
-			(getWsHandler()?.getClientsForSession(sid).length ?? 0) > 0,
-	}).pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				sessionWorkspaceLayer,
-				openCodeInstancesLayer,
-				persistenceEffectLayer,
-				configLayer,
-				loggerLayer,
+	const messagePollerManagerLayer = fromProject(
+		Context.pick(PollerManagerTag),
+		MessagePollerManagerLive.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					activityLayer,
+					sessionWorkspaceLayer,
+					openCodeInstancesLayer,
+					persistenceEffectLayer,
+					configLayer,
+					loggerLayer,
+				),
 			),
 		),
 	);
@@ -982,7 +969,6 @@ export function createProjectRelayLayers({
 		openCodeTerminalServiceLayer,
 		ingestionLayer,
 		toolContentServiceLayer,
-		webSocketHandlerLayer,
 		messagePollerManagerLayer,
 		activityReaders,
 		agentLivenessLayer,

@@ -19,6 +19,7 @@ import {
 import type { TitleGenerationSelection } from "../contracts/title-generation.js";
 import type { GetModelsResponse } from "../contracts/ws-rpc.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import {
 	cloneContextWindowOptions,
 	loadModelCatalog,
@@ -36,7 +37,6 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import {
 	selectSessionContextWindow,
@@ -99,11 +99,11 @@ const saveRelaySettingsEffect = (
 		catch: (cause) => new RelaySettingsSaveError({ cause }),
 	});
 
-/** Helper: resolve session from WebSocketHandler context. */
+/** The session the tab picked last in this project. */
 const resolveSessionFromContext = (clientId: string) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
-		return wsHandler.getClientSession(clientId);
+		const activity = yield* SessionActivityTag;
+		return activity.selectedSession((yield* ConfigTag).slug, clientId);
 	});
 
 const loadVariantsForModel = (
@@ -253,7 +253,7 @@ export const getModelsResponse = (
 	| OrchestrationEngineTag
 	| ReadQueryEffectTag
 	| OverridesStateTag
-	| WebSocketHandlerTag
+	| SessionActivityTag
 	| ProjectSettingsTag
 	| AccountDirectory
 > =>

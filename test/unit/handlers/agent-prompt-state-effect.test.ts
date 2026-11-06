@@ -10,7 +10,6 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -20,10 +19,6 @@ describe("agent selection state", () => {
 	it.effect("uses the switched agent when sending the next prompt", () => {
 		const api = makeMockOpenCodeAPI();
 		vi.mocked(api.session.prompt).mockResolvedValue(undefined);
-		const ws = makeMockWebSocketHandler({
-			getClientSession: vi.fn(() => "session-1"),
-			getClientsForSession: vi.fn(() => []),
-		});
 		const sessionManagerService = makeMockSessionManagerService({
 			recordMessageActivity: vi.fn(() => Effect.void),
 		});
@@ -65,7 +60,7 @@ describe("agent selection state", () => {
 						openCodeModelService: makeMockOpenCodeModelService(
 							MOCK_OPENCODE_GPT4_CATALOG,
 						),
-						wsHandler: ws,
+						selectedSession: "session-1",
 						sessionManagerService,
 						orchestrationEngine: engine,
 						seedEvents: [
@@ -86,10 +81,6 @@ describe("agent selection state", () => {
 	it.effect("uses the default agent when no session override exists", () => {
 		const api = makeMockOpenCodeAPI();
 		vi.mocked(api.session.prompt).mockResolvedValue(undefined);
-		const ws = makeMockWebSocketHandler({
-			getClientSession: vi.fn(() => "session-1"),
-			getClientsForSession: vi.fn(() => []),
-		});
 		const sessionManagerService = makeMockSessionManagerService({
 			recordMessageActivity: vi.fn(() => Effect.void),
 		});
@@ -126,7 +117,7 @@ describe("agent selection state", () => {
 						openCodeModelService: makeMockOpenCodeModelService(
 							MOCK_OPENCODE_GPT4_CATALOG,
 						),
-						wsHandler: ws,
+						selectedSession: "session-1",
 						sessionManagerService,
 						orchestrationEngine: engine,
 						seedEvents: [

@@ -25,7 +25,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -43,7 +42,6 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
 	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
@@ -72,7 +70,6 @@ describe("SessionManagerService settle signal", () => {
 					Layer.succeed(OpenCodeAPITag)(openCodeApi),
 					loggerLayer,
 					configLayer,
-					Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 					Layer.effect(SessionActivityTag, makeSessionActivity),
 					RelayStatusSnapshotLive,
 					makeOverridesStateLive(),

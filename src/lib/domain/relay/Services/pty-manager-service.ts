@@ -2,7 +2,7 @@
 // Map<string, PtySessionState> on the imperative PtyManager class with
 // a single atomic Ref<HashMap<string, PtySessionState>>.
 //
-// Pattern (mirrors SessionRegistryState):
+// Pattern:
 //   PtyManagerStateTag → Ref.Ref<PtyManagerState>
 //   PtyManagerStateLive → Layer providing the Tag
 //   Pure functions: registerPtySession, removePtySession, getPtySession,

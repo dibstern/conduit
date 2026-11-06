@@ -15,7 +15,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
@@ -43,25 +42,12 @@ import {
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	makeOpenCodeInstancesStub,
+	makeTestSessionActivityLayer,
 	mockSessionManagers,
 	NoopProviderRuntimeIngestionLive,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
-
-function makeWsHandler() {
-	return {
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => "session-1"),
-		getClientsForSession: vi.fn(() => ["client-1"]),
-		registerSessionViewer: vi.fn(() => () => {}),
-		attach: vi.fn(() => () => {}),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-		on: vi.fn(),
-		once: vi.fn(),
-	};
-}
 
 describe("permission/question processing timeouts through Effect state", () => {
 	it.effect(
@@ -88,7 +74,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: client }),
 					),
-					Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
+					makeTestSessionActivityLayer("session-1"),
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag)(makeMockConfig()),
 					PendingInteractionServiceLive,
@@ -167,7 +153,8 @@ describe("permission/question processing timeouts through Effect state", () => {
 				Layer.succeed(OpenCodeInstancesTag)(
 					makeOpenCodeInstancesStub({ opencode: client }),
 				),
-				Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
+				makeTestSessionActivityLayer("session-1"),
+				Layer.succeed(ConfigTag)(makeMockConfig()),
 				Layer.succeed(LoggerTag)(createSilentLogger()),
 				Layer.succeed(SessionManagerServiceTag)(
 					mockSessionManagers(makeMockSessionManagerService()),

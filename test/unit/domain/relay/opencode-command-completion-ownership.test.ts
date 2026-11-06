@@ -949,7 +949,7 @@ for (const confirmedStop of [false, true]) {
 					processEvent(
 						{ type: "done", code: 0, sessionId: "s" },
 						"s",
-						[],
+						false,
 						"sse",
 					),
 					"s",

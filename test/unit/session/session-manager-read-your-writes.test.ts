@@ -20,7 +20,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	projectSessionManager,
@@ -45,7 +44,6 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
 	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
@@ -357,7 +355,6 @@ describe("SessionManager read-your-writes parity", () => {
 						Layer.succeed(OpenCodeAPITag)(api),
 						loggerLayer,
 						configLayer,
-						Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 						Layer.effect(SessionActivityTag, makeSessionActivity),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),

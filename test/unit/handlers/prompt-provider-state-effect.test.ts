@@ -23,8 +23,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	type WebSocketHandlerShape,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
@@ -55,24 +53,12 @@ import {
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	makeOpenCodeInstancesStub,
+	makeTestSessionActivityLayer,
 	mockSessionManagers,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
-
-function mockWsHandler(
-	sessionId = "session-provider-state",
-): WebSocketHandlerShape {
-	return {
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => sessionId),
-		getClientsForSession: vi.fn(() => ["client-1"]),
-		registerSessionViewer: vi.fn(() => () => {}),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-	};
-}
 
 const setClaudeModel = (sessionId: string) =>
 	setModel(sessionId, {
@@ -126,7 +112,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-provider-state-effect-"));
 			const filename = join(dir, "events.db");
-			const ws = mockWsHandler();
 			const log = createSilentLogger();
 			const client = makeHandlerOpenCodeAPI({
 				session: {
@@ -191,7 +176,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: client }),
 					),
-					Layer.succeed(WebSocketHandlerTag)(ws),
+					makeTestSessionActivityLayer("session-provider-state"),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(
 						mockSessionManagers(makeMockSessionManagerService()),
@@ -295,7 +280,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 	it.effect("loads Claude history metadata from Effect persistence", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-history-effect-"));
 		const filename = join(dir, "events.db");
-		const ws = mockWsHandler("session-history-effect");
 		const log = createSilentLogger();
 		const client = makeHandlerOpenCodeAPI({
 			session: {
@@ -326,7 +310,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				Layer.succeed(OpenCodeInstancesTag)(
 					makeOpenCodeInstancesStub({ opencode: client }),
 				),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("session-history-effect"),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(
 					mockSessionManagers(makeMockSessionManagerService()),
@@ -411,7 +395,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-user-effect-"));
 			const filename = join(dir, "events.db");
-			const ws = mockWsHandler("session-claude-user-effect");
 			const log = createSilentLogger();
 			const client = makeHandlerOpenCodeAPI({
 				session: {
@@ -462,7 +445,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: client }),
 					),
-					Layer.succeed(WebSocketHandlerTag)(ws),
+					makeTestSessionActivityLayer("session-claude-user-effect"),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(
 						mockSessionManagers(makeMockSessionManagerService()),
@@ -564,7 +547,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-sink-effect-"));
 			const filename = join(dir, "events.db");
 			const persistence = makePersistenceEffectLayer(filename, "test-project");
-			const ws = mockWsHandler("session-claude-sink-effect");
 			const log = createSilentLogger();
 			const client = makeHandlerOpenCodeAPI({
 				session: {
@@ -624,7 +606,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: client }),
 					),
-					Layer.succeed(WebSocketHandlerTag)(ws),
+					makeTestSessionActivityLayer("session-claude-sink-effect"),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(
 						mockSessionManagers(makeMockSessionManagerService()),

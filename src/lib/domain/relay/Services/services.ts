@@ -22,7 +22,6 @@ import { discoverOpenCodeCatalog } from "../../../provider/opencode-discovery.js
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import type { Translator } from "../../../relay/event-translator.js";
 import type { PtyManager } from "../../../relay/pty-manager.js";
-import type { WebSocketHandlerShape } from "../../../server/ws-handler-shape.js";
 import type { HistoryMessage } from "../../../shared-types.js";
 import type {
 	ProjectRelayConfig,
@@ -36,8 +35,6 @@ import {
 } from "../../daemon/Services/opencode-instances-service.js";
 import type { SessionBackground } from "../../daemon/Services/session-activity.js";
 import type { SessionStatusPollerService } from "./session-status-poller.js";
-
-export type { WebSocketHandlerShape };
 
 /** Shape for the statusPoller field — methods needed by relay effects and lifecycle wiring. */
 export type StatusPollerShape = Pick<
@@ -377,11 +374,6 @@ export const OpenCodeSettingsServiceLive: Layer.Layer<
 	}),
 );
 
-export class WebSocketHandlerTag extends Context.Service<
-	WebSocketHandlerTag,
-	WebSocketHandlerShape
->()("WebSocketHandler") {}
-
 export class PtyManagerTag extends Context.Service<PtyManagerTag, PtyManager>()(
 	"PtyManager",
 ) {}
@@ -458,29 +450,27 @@ export class ClientIdTag extends Context.Service<ClientIdTag, string>()(
 // added to HandlerDeps without a matching Tag.
 
 type _AssertCoverage = {
-	[K in keyof Required<HandlerDeps>]: K extends "wsHandler"
-		? WebSocketHandlerShape
-		: K extends "sessionMgr"
-			? SessionManagerShape
-			: K extends "ptyManager"
-				? PtyManager
-				: K extends "config"
-					? ProjectRelayConfig
-					: K extends "log"
-						? Logger
-						: K extends "statusPoller"
-							? StatusPollerShape
-							: K extends "pollerManager"
-								? PollerManagerShape
-								: K extends "connectPtyUpstream"
-									? ConnectPtyUpstreamShape
-									: K extends "instanceMgmt"
-										? InstanceManagementDeps
-										: K extends "projectMgmt"
-											? ProjectManagementDeps
-											: K extends "orchestrationEngine"
-												? OrchestrationEngine
-												: never;
+	[K in keyof Required<HandlerDeps>]: K extends "sessionMgr"
+		? SessionManagerShape
+		: K extends "ptyManager"
+			? PtyManager
+			: K extends "config"
+				? ProjectRelayConfig
+				: K extends "log"
+					? Logger
+					: K extends "statusPoller"
+						? StatusPollerShape
+						: K extends "pollerManager"
+							? PollerManagerShape
+							: K extends "connectPtyUpstream"
+								? ConnectPtyUpstreamShape
+								: K extends "instanceMgmt"
+									? InstanceManagementDeps
+									: K extends "projectMgmt"
+										? ProjectManagementDeps
+										: K extends "orchestrationEngine"
+											? OrchestrationEngine
+											: never;
 };
 
 // If any field maps to `never`, this assignment will fail at compile time.
@@ -497,5 +487,4 @@ declare const _check: _ExhaustiveCheck;
 export { RateLimiterTag } from "../Layers/rate-limiter-layer.js";
 export { SessionManagerStateTag } from "./session-manager-state.js";
 export { OverridesStateTag } from "./session-overrides-state.js";
-export { SessionRegistryStateTag } from "./session-registry-state.js";
 export { PollerPubSubTag, PollerStateTag } from "./session-status-poller.js";

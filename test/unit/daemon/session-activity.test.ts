@@ -53,7 +53,7 @@ describe("Session Activity", () => {
 				releaseSecond();
 				second.view(interests);
 				expect(activity.connectionInterests.size).toBe(0);
-				expect(activity.viewers.size).toBe(0);
+				expect(activity.hasViewers("session-a")).toBe(false);
 			}),
 	);
 

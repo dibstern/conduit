@@ -5,13 +5,11 @@ import { handleViewSession } from "../../../src/lib/handlers/session.js";
 import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerShape,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
 describe("ViewSession handler", () => {
 	it("does not query OpenCode session models", async () => {
-		const wsHandler = makeMockWebSocketHandler();
 		const api = makeMockOpenCodeAPI();
 		vi.spyOn(api.session, "get").mockRejectedValue(
 			new Error("ViewSession metadata must not query OpenCode session models"),
@@ -28,7 +26,7 @@ describe("ViewSession handler", () => {
 
 		await Effect.runPromise(
 			handleViewSession("client-1", { sessionId: "session-1" }).pipe(
-				Effect.provide(makeTestHandlerLayer({ api, wsHandler, sessionMgr }), {
+				Effect.provide(makeTestHandlerLayer({ api, sessionMgr }), {
 					local: true,
 				}),
 			),

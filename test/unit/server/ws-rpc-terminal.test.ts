@@ -14,7 +14,6 @@ import {
 	MOCK_PROJECT_DIR,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
@@ -40,7 +39,6 @@ describe("WsRpcServerLayer terminal controls", () => {
 			api.pty.create = vi.fn(async () => ({ id: "pty-2" }));
 			api.pty.delete = vi.fn(async () => undefined);
 			api.pty.resize = vi.fn(async () => undefined);
-			const wsHandler = makeMockWebSocketHandler();
 			const ptyManager = new PtyManager({ log: makeMockLogger() });
 			const connectPtyUpstream = vi.fn(() => Effect.void);
 
@@ -72,7 +70,6 @@ describe("WsRpcServerLayer terminal controls", () => {
 						Layer.provideMerge(
 							makeTestHandlerLayer({
 								api,
-								wsHandler,
 								ptyManager,
 								connectPtyUpstream,
 							}),
@@ -99,7 +96,6 @@ describe("WsRpcServerLayer terminal controls", () => {
 			}));
 			api.pty.delete = vi.fn(async () => undefined);
 			api.pty.resize = vi.fn(async () => undefined);
-			const wsHandler = makeMockWebSocketHandler();
 			const ptyManager = new PtyManager({ log: makeMockLogger() });
 			const upstream = {
 				readyState: 1,
@@ -206,7 +202,6 @@ describe("WsRpcServerLayer terminal controls", () => {
 						Layer.provideMerge(
 							makeTestHandlerLayer({
 								api,
-								wsHandler,
 								ptyManager,
 								localPty,
 								connectPtyUpstream,
@@ -222,7 +217,6 @@ describe("WsRpcServerLayer terminal controls", () => {
 	it.effect(
 		"CreatePty fails typed when the terminal cannot spawn, with no raw system_error",
 		() => {
-			const wsHandler = makeMockWebSocketHandler();
 			const localPty: LocalPtyService = {
 				list: () => Effect.succeed([]),
 				attach: () => Effect.die("Unexpected attach in RPC test"),
@@ -246,7 +240,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 				Effect.scoped,
 				Effect.provide(
 					WsRpcServerLayer.pipe(
-						Layer.provideMerge(makeTestHandlerLayer({ wsHandler, localPty })),
+						Layer.provideMerge(makeTestHandlerLayer({ localPty })),
 					),
 					{ local: true },
 				),

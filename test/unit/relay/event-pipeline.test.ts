@@ -13,12 +13,12 @@ import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 describe("resolveRoute", () => {
 	it("returns send when viewers exist", () => {
-		const result = resolveRoute("delta", "ses_abc", ["client1"]);
+		const result = resolveRoute("delta", "ses_abc", true);
 		expect(result).toEqual({ action: "send", sessionId: "ses_abc" });
 	});
 
 	it("returns drop with reason when no viewers", () => {
-		const result = resolveRoute("tool_result", "ses_abc", []);
+		const result = resolveRoute("tool_result", "ses_abc", false);
 		expect(result).toEqual({
 			action: "drop",
 			reason: "no viewers for session ses_abc",
@@ -26,12 +26,12 @@ describe("resolveRoute", () => {
 	});
 
 	it("returns drop when no sessionId", () => {
-		const result = resolveRoute("delta", undefined, []);
+		const result = resolveRoute("delta", undefined, false);
 		expect(result).toEqual({ action: "drop", reason: "no session ID" });
 	});
 
-	it("returns drop when sessionId is undefined even with viewers listed", () => {
-		const result = resolveRoute("delta", undefined, ["c1"]);
+	it("returns drop when sessionId is undefined even when viewed", () => {
+		const result = resolveRoute("delta", undefined, true);
 		expect(result).toEqual({ action: "drop", reason: "no session ID" });
 	});
 });
@@ -83,7 +83,7 @@ describe("resolveTimeout", () => {
 describe("processEvent (composed pipeline)", () => {
 	it("composes all decisions for a normal message with viewers", () => {
 		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
-		const result = processEvent(msg, "ses_abc", ["c1"]);
+		const result = processEvent(msg, "ses_abc", true);
 		expect(result.msg).toBe(msg);
 		expect(result.route).toEqual({ action: "send", sessionId: "ses_abc" });
 		expect(result.cache).toBe(true);
@@ -93,7 +93,7 @@ describe("processEvent (composed pipeline)", () => {
 
 	it("marks done events with clear timeout", () => {
 		const msg: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
-		const result = processEvent(msg, "ses_abc", ["c1"]);
+		const result = processEvent(msg, "ses_abc", true);
 		expect(result.timeout).toBe("clear");
 		expect(result.cache).toBe(true);
 		expect(result.route).toEqual({ action: "send", sessionId: "ses_abc" });
@@ -102,7 +102,7 @@ describe("processEvent (composed pipeline)", () => {
 
 	it("drops events with no sessionId", () => {
 		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
-		const result = processEvent(msg, undefined, []);
+		const result = processEvent(msg, undefined, false);
 		expect(result.route).toEqual({ action: "drop", reason: "no session ID" });
 		expect(result.cache).toBe(false);
 		expect(result.timeout).toBe("none");
@@ -111,7 +111,7 @@ describe("processEvent (composed pipeline)", () => {
 
 	it("caches but drops routing when no viewers", () => {
 		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
-		const result = processEvent(msg, "ses_abc", []);
+		const result = processEvent(msg, "ses_abc", false);
 		expect(result.cache).toBe(true);
 		expect(result.route).toEqual({
 			action: "drop",
@@ -126,7 +126,7 @@ describe("processEvent (composed pipeline)", () => {
 			sessionId: "ses_abc",
 			messageId: "m1",
 		};
-		const result = processEvent(msg, "ses_abc", ["c1"]);
+		const result = processEvent(msg, "ses_abc", true);
 		expect(result.cache).toBe(false);
 		expect(result.route).toEqual({ action: "send", sessionId: "ses_abc" });
 		expect(result.source).toBe("sse");
@@ -134,7 +134,7 @@ describe("processEvent (composed pipeline)", () => {
 
 	it("includes explicit source when provided", () => {
 		const msg: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
-		const result = processEvent(msg, "ses_abc", ["c1"], "status-poller");
+		const result = processEvent(msg, "ses_abc", true, "status-poller");
 		expect(result.source).toBe("status-poller");
 	});
 });

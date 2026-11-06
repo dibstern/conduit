@@ -9,7 +9,6 @@ import {
 	ConnectPtyUpstreamTag,
 	LoggerTag,
 	PtyManagerTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type LocalPtyService,
@@ -23,7 +22,6 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
@@ -90,9 +88,6 @@ describe("PtyManagerLive", () => {
 						return Effect.succeed(session);
 					}),
 				};
-				const wsHandler = makeMockWebSocketHandler({
-					getClientSession: vi.fn(() => "session-1"),
-				});
 				const connectPtyUpstream: ConnectPtyUpstreamShape = vi.fn(
 					() => Effect.void,
 				);
@@ -100,7 +95,6 @@ describe("PtyManagerLive", () => {
 					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: makeApi() }),
 					),
-					Layer.succeed(WebSocketHandlerTag)(wsHandler),
 					Layer.succeed(ConfigTag)(makeMockConfig({ projectDir: "/project" })),
 					Layer.succeed(LoggerTag)(makeMockLogger()),
 					Layer.succeed(LocalPtyServiceTag)(localPty),

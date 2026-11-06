@@ -63,12 +63,12 @@ const _assertPersistedTypes: _AssertPersistedSubset = true;
 export function resolveRoute(
 	_msgType: string,
 	sessionId: string | undefined,
-	viewers: string[],
+	viewed: boolean,
 ): RouteDecision {
 	if (!sessionId) {
 		return { action: "drop", reason: "no session ID" };
 	}
-	if (viewers.length > 0) {
+	if (viewed) {
 		return { action: "send", sessionId };
 	}
 	return { action: "drop", reason: `no viewers for session ${sessionId}` };
@@ -143,12 +143,12 @@ export function applyPipelineResultEffect(
 export function processEvent(
 	msg: RelayMessage,
 	sessionId: string | undefined,
-	viewers: string[],
+	viewed: boolean,
 	source: EventSource = "sse",
 ): PipelineResult {
 	return {
 		msg,
-		route: resolveRoute(msg.type, sessionId, viewers),
+		route: resolveRoute(msg.type, sessionId, viewed),
 		cache: sessionId != null && shouldCache(msg.type),
 		timeout: resolveTimeout(msg.type, sessionId),
 		source,

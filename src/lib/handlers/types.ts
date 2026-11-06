@@ -46,12 +46,6 @@ export interface ProjectManagementDeps {
 }
 
 export interface HandlerDeps {
-	wsHandler: {
-		// Per-tab session tracking
-		setClientSession: (clientId: string, sessionId: string) => void;
-		getClientSession: (clientId: string) => string | undefined;
-		getClientsForSession: (sessionId: string) => string[];
-	};
 	sessionMgr: SessionManagerShape;
 	ptyManager: PtyManager;
 	config: ProjectRelayConfig;

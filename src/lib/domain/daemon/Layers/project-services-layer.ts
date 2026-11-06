@@ -20,9 +20,11 @@ import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-mod
 import { defaultClaudeSessionForkSdk } from "../../../provider/claude/claude-session-fork.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { createTranslator } from "../../../relay/event-translator.js";
+import { RpcSubscriptionScopeTag } from "../../../server/ws-rpc.js";
 import type { ClaudeSdkSeam } from "../../../types.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import type { PersistenceError } from "../../persistence/Services/persistence-service.js";
+import { MessagePollerManagerLive } from "../../relay/Layers/message-poller-manager-layer.js";
 import {
 	AgentLivenessLive,
 	makeProjectIngestionLive,
@@ -367,6 +369,14 @@ export const makeProjectServicesLive = (options: {
 											OpenCodeSettingsServiceLive,
 										).pipe(Layer.provide(Layer.succeedContext(projectBase))),
 									);
+									// One message poller per project, so a replaced relay keeps its
+									// polls; a session counts as viewed while any tab on the daemon
+									// shows it (t3code CommandOutputHub.ts:170-191).
+									const poller = yield* Layer.build(
+										MessagePollerManagerLive.pipe(
+											Layer.provide(Layer.succeedContext(projectBase)),
+										),
+									);
 									// Recaps and goal summaries hold in-flight work and a cache, so one
 									// per project outlives a replaced relay; their one-shot query is the
 									// daemon's, which honours the process test module.
@@ -403,6 +413,7 @@ export const makeProjectServicesLive = (options: {
 										terminals,
 										openCodeReaders,
 										summaries,
+										poller,
 									).pipe(
 										Context.add(ProviderTurnServiceTag, turns),
 										Context.add(
@@ -411,10 +422,18 @@ export const makeProjectServicesLive = (options: {
 										),
 										Context.add(OpenCodeSessionCreationGateTag, gate),
 										Context.add(TranslatorTag, createTranslator()),
+										// t3code ties output listeners to the scope that owns them
+										// (CommandOutputHub.ts:170-191).
+										Context.add(RpcSubscriptionScopeTag, yield* Effect.scope),
 									);
 									generations.set(projectId, parts);
 									yield* Effect.addFinalizer(() =>
-										Effect.sync(() => generations.delete(projectId)),
+										Effect.sync(() => {
+											generations.delete(projectId);
+											Context.get(shared, SessionActivityTag).forgetProject(
+												projectId,
+											);
+										}),
 									);
 									return parts;
 								}),

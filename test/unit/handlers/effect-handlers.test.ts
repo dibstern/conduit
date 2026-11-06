@@ -3,10 +3,7 @@ import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import {
-	makeSessionActivity,
-	SessionActivityTag,
-} from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
@@ -59,10 +56,7 @@ import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
 } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
-import type {
-	SessionManagerShape,
-	WebSocketHandlerShape,
-} from "../../../src/lib/domain/relay/Services/services.js";
+import type { SessionManagerShape } from "../../../src/lib/domain/relay/Services/services.js";
 // Batch 2 imports
 import {
 	AgentLivenessTag,
@@ -73,7 +67,6 @@ import {
 	OrchestrationEngineTag,
 	PollerManagerTag,
 	StatusPollerTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import {
@@ -171,25 +164,12 @@ import {
 	makeMockStatusPoller,
 	makeOpenCodeInstancesStub,
 	makeTestHandlerLayer,
+	makeTestSessionActivityLayer,
 	mockSessionManagers,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { makeBaseSendTurnInput } from "../../helpers/mock-sdk.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
-
-function mockWsHandler(
-	overrides?: Partial<WebSocketHandlerShape>,
-): WebSocketHandlerShape {
-	return {
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => undefined),
-		getClientsForSession: vi.fn(() => []),
-		registerSessionViewer: vi.fn(() => () => {}),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-		...overrides,
-	};
-}
 
 const seedSessionPick = (
 	sessionId: string,
@@ -347,7 +327,6 @@ describe("GetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and returns the filtered list",
 		() => {
-			const ws = mockWsHandler();
 			const mockAgents = [
 				{ name: "build", id: "build", mode: "primary" as const },
 				{ name: "title", id: "title", mode: "subagent" as const, hidden: true },
@@ -360,7 +339,7 @@ describe("GetAgents", () => {
 			return modelsHandlers
 				.GetAgents({ _tag: "GetAgents", projectSlug: "test-project" })
 				.pipe(
-					Effect.provide(makeTestHandlerLayer({ api: client, wsHandler: ws }), { local: true }),
+					Effect.provide(makeTestHandlerLayer({ api: client }), { local: true }),
 					Effect.tap((reply) => Effect.sync(() => {
 						expect(client.app.agents).toHaveBeenCalledOnce();
 						expect(reply).toMatchObject({
@@ -375,7 +354,6 @@ describe("GetAgents", () => {
 
 describe("GetProjects", () => {
 	it.effect("uses the provided project service", () => {
-		const ws = mockWsHandler();
 		const projects = [
 			{ slug: "proj-1", title: "Project 1", folders: ["/path"] as const },
 		];
@@ -389,7 +367,7 @@ describe("GetProjects", () => {
 				save: () => Effect.die("Unexpected save"),
 				remove: () => Effect.die("Unexpected remove"),
 			}),
-			Layer.succeed(WebSocketHandlerTag)(ws),
+			makeTestSessionActivityLayer(),
 		);
 
 		return projectsHandlers.GetProjects({ _tag: "GetProjects", projectSlug: "test-project" }).pipe(
@@ -406,7 +384,6 @@ describe("GetProjects", () => {
 	it.effect(
 		"returns an empty list without querying OpenCode when no registry getter is available",
 		() => {
-			const ws = mockWsHandler();
 			const config = mockConfig();
 			const client = makeHandlerOpenCodeAPI({
 				app: {
@@ -418,7 +395,7 @@ describe("GetProjects", () => {
 
 			const layer = Layer.mergeAll(
 				projectManagementLayer(client, config),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer(),
 			);
 
 			return projectsHandlers.GetProjects({ _tag: "GetProjects", projectSlug: "test-project" }).pipe(
@@ -581,7 +558,6 @@ describe("sendModelsStateToClient", () => {
 		Effect.map(Option.getOrThrow),
 	);
 	it.effect("fetches providers into the model catalog", () => {
-		const ws = mockWsHandler();
 		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({ models: [] })),
 		});
@@ -604,7 +580,7 @@ describe("sendModelsStateToClient", () => {
 
 		const layer = Layer.mergeAll(
 			openCodeModelLayer(client),
-			Layer.succeed(WebSocketHandlerTag)(ws),
+			makeTestSessionActivityLayer(),
 			Layer.succeed(LoggerTag)(log),
 			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 			makeOverridesStateLive(),
@@ -624,7 +600,6 @@ describe("sendModelsStateToClient", () => {
 	it.effect(
 		"publishes variants and contextWindowOptions in live claude provider entries",
 		() => {
-			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
@@ -654,7 +629,7 @@ describe("sendModelsStateToClient", () => {
 
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer(),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
@@ -688,7 +663,6 @@ describe("sendModelsStateToClient", () => {
 	it.effect(
 		"publishes Claude models when OpenCode provider discovery fails",
 		() => {
-			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
@@ -712,7 +686,7 @@ describe("sendModelsStateToClient", () => {
 
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer(),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
@@ -741,7 +715,6 @@ describe("sendModelsStateToClient", () => {
 	it.effect(
 		"keeps OpenCode discovery while skipping session lookup for a Claude-bound model refresh",
 		() => {
-			const ws = mockWsHandler();
 			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 				dispatch: vi.fn(async () => ({
@@ -778,7 +751,7 @@ describe("sendModelsStateToClient", () => {
 
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer(),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
@@ -836,9 +809,6 @@ describe("sendModelsStateToClient", () => {
 
 describe("switchModelForSession", () => {
 	it.effect("sets model override when client has a session", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-42"),
-		});
 		const log = mockLogger();
 		const config = mockConfig();
 		const engine = withDispatchEffect({
@@ -856,7 +826,7 @@ describe("switchModelForSession", () => {
 		const layer = Layer.mergeAll(
 			makeSessionSettingsLayer(),
 			openCodeModelLayer(client),
-			Layer.succeed(WebSocketHandlerTag)(ws),
+			makeTestSessionActivityLayer("session-42"),
 			Layer.succeed(LoggerTag)(log),
 			Layer.succeed(ConfigTag)(config),
 			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
@@ -881,7 +851,6 @@ describe("switchModelForSession", () => {
 	it.effect(
 		"warms OpenCode on model switch without binding a local placeholder",
 		() => {
-			const ws = mockWsHandler();
 			const log = mockLogger();
 			const config = mockConfig();
 			const engine = withDispatchEffect({
@@ -975,7 +944,7 @@ describe("switchModelForSession", () => {
 			const layer = Layer.mergeAll(
 				makeSessionSettingsLayer(),
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer(),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(ConfigTag)(config),
 				Layer.succeed(ReadQueryEffectTag)(readQuery),
@@ -1013,9 +982,6 @@ describe("switchModelForSession", () => {
 	);
 
 	it.effect("returns Claude variants when switching to a Claude model", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-42"),
-		});
 		const log = mockLogger();
 		const config = mockConfig({
 			configDir: `/tmp/conduit-switch-model-claude-${Date.now()}`,
@@ -1045,7 +1011,7 @@ describe("switchModelForSession", () => {
 		const layer = Layer.mergeAll(
 			makeSessionSettingsLayer(),
 			openCodeModelLayer(client),
-			Layer.succeed(WebSocketHandlerTag)(ws),
+			makeTestSessionActivityLayer("session-42"),
 			Layer.succeed(LoggerTag)(log),
 			Layer.succeed(ConfigTag)(config),
 			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
@@ -1074,9 +1040,6 @@ describe("switchModelForSession", () => {
 
 describe("switchVariantForSession", () => {
 	it.effect("returns Claude variants when active model is Claude", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-42"),
-		});
 		const engine = withDispatchEffect({
 			dispatch: vi.fn(async () => ({
 				models: [
@@ -1105,7 +1068,7 @@ describe("switchVariantForSession", () => {
 		const layer = Layer.mergeAll(
 			makeSessionSettingsLayer(),
 			openCodeModelLayer(client),
-			Layer.succeed(WebSocketHandlerTag)(ws),
+			makeTestSessionActivityLayer("session-42"),
 			Layer.succeed(LoggerTag)(log),
 			Layer.succeed(ConfigTag)(config),
 			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
@@ -1136,9 +1099,6 @@ describe("switchVariantForSession", () => {
 	it.effect(
 		"falls back to OpenCode lookup when active model is not Claude",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-42"),
-			});
 			const client = makeHandlerOpenCodeAPI({
 				provider: {
 					list: vi.fn(async () => makeProviderListResult({
@@ -1163,7 +1123,7 @@ describe("switchVariantForSession", () => {
 			const layer = Layer.mergeAll(
 				makeSessionSettingsLayer(),
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("session-42"),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(ConfigTag)(config),
 				makeOverridesStateLive(),
@@ -1199,9 +1159,6 @@ describe("switchContextWindowForSession", () => {
 				{ value: "200k", label: "200k", isDefault: true },
 				{ value: "1m", label: "1M" },
 			];
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-42"),
-			});
 			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
@@ -1218,7 +1175,7 @@ describe("switchContextWindowForSession", () => {
 
 			const layer = Layer.mergeAll(
 				makeSessionSettingsLayer(),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("session-42"),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
@@ -1247,9 +1204,6 @@ describe("switchContextWindowForSession", () => {
 	it.effect(
 		"rejects unsupported context window and keeps current state",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-42"),
-			});
 			const engine = withDispatchEffect({
 				dispatch: vi.fn(async () => ({
 					models: [
@@ -1265,7 +1219,7 @@ describe("switchContextWindowForSession", () => {
 
 			const layer = Layer.mergeAll(
 				makeSessionSettingsLayer(),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("session-42"),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
@@ -1329,7 +1283,7 @@ function mockSessionManager(
 
 function makeForkSessionLayer(options?: {
 	client?: OpenCodeAPI;
-	ws?: WebSocketHandlerShape;
+	selectedSession?: string;
 	sessionMgr?: SessionManagerShape;
 	sessionManagerService?: SessionManagerService;
 	log?: Logger;
@@ -1352,7 +1306,6 @@ function makeForkSessionLayer(options?: {
 			},
 			permission: { list: vi.fn(async () => []) },
 		}));
-	const ws = options?.ws ?? mockWsHandler();
 	const _sessionMgr = options?.sessionMgr ?? mockSessionManager();
 	const sessionManagerService =
 		options?.sessionManagerService ?? makeMockSessionManagerService();
@@ -1385,7 +1338,7 @@ function makeForkSessionLayer(options?: {
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		openCodeModelLayer(client),
 		Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-		Layer.succeed(WebSocketHandlerTag)(ws),
+		makeTestSessionActivityLayer(options?.selectedSession),
 		Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 		PendingInteractionServiceLive,
 		Layer.succeed(LoggerTag)(log),
@@ -1409,12 +1362,11 @@ function makeForkSessionLayer(options?: {
 
 function makeSessionLifecycleLayer(options?: {
 	client?: OpenCodeAPI;
-	ws?: WebSocketHandlerShape;
+	selectedSession?: string;
 	sessionMgr?: SessionManagerShape;
 	sessionManagerService?: SessionManagerService;
 	log?: Logger;
 }) {
-	const ws = options?.ws ?? mockWsHandler();
 	const _sessionMgr = options?.sessionMgr ?? mockSessionManager();
 	const sessionManagerService =
 		options?.sessionManagerService ?? makeMockSessionManagerService();
@@ -1437,7 +1389,7 @@ function makeSessionLifecycleLayer(options?: {
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		openCodeModelLayer(client),
 		Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }] })) })),
-		Layer.succeed(WebSocketHandlerTag)(ws),
+		makeTestSessionActivityLayer(options?.selectedSession),
 		Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 		PendingInteractionServiceLive,
 		Layer.succeed(LoggerTag)(log),
@@ -1464,7 +1416,6 @@ describe("handleForkSession", () => {
 		() => {
 			const establishOpenCodeSession = vi.fn(() => Effect.void);
 			const setForkEntry = vi.fn(() => Effect.void);
-			const ws = mockWsHandler();
 			const client = makeHandlerOpenCodeAPI({
 				session: {
 					fork: vi.fn(async () => makeSessionDetail({
@@ -1483,7 +1434,6 @@ describe("handleForkSession", () => {
 			});
 			const layer = makeForkSessionLayer({
 				client,
-				ws,
 				sessionManagerService: makeMockSessionManagerService({
 					establishOpenCodeSession,
 					setForkEntry,
@@ -1494,7 +1444,7 @@ describe("handleForkSession", () => {
 				yield* handleForkSession("client-1", {
 					sessionId: "ses-parent",
 					messageId: "msg-1",
-				}).pipe(Effect.provide(layer, { local: true }));
+				});
 
 				// OpenCode cuts before messageID, so the fork keeps msg-1.
 				expect(client.session.fork).toHaveBeenCalledWith("ses-parent", {
@@ -1502,8 +1452,10 @@ describe("handleForkSession", () => {
 				});
 				expect(establishOpenCodeSession).not.toHaveBeenCalled();
 				expect(setForkEntry).not.toHaveBeenCalled();
-				expect(ws.setClientSession).not.toHaveBeenCalled();
-			});
+				expect(
+					(yield* SessionActivityTag).selectedSession("test-project", "client-1"),
+				).toBeUndefined();
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
@@ -1511,7 +1463,6 @@ describe("handleForkSession", () => {
 		"does not expose a fork when the canonical upstream fork fails",
 		() => {
 			const setForkEntry = vi.fn(() => Effect.void);
-			const ws = mockWsHandler();
 			const client = makeHandlerOpenCodeAPI({
 				session: {
 					fork: vi.fn(async () => {
@@ -1528,7 +1479,6 @@ describe("handleForkSession", () => {
 			});
 			const layer = makeForkSessionLayer({
 				client,
-				ws,
 				sessionManagerService: makeMockSessionManagerService({
 					setForkEntry,
 				}),
@@ -1607,7 +1557,6 @@ describe("handleForkSession", () => {
 				]),
 			);
 			const serviceSetForkEntry = vi.fn(() => Effect.void);
-			const ws = mockWsHandler();
 			const sessionMgr = mockSessionManager({
 				listSessions: legacyListSessions,
 				loadPreRenderedHistory: vi.fn(async () => ({
@@ -1622,7 +1571,6 @@ describe("handleForkSession", () => {
 			const layer = makeForkSessionLayer({
 				sessionMgr,
 				sessionManagerService,
-				ws,
 			});
 
 			return forkSessionForClient({
@@ -1630,8 +1578,7 @@ describe("handleForkSession", () => {
 				sessionId: "ses-parent",
 				messageId: "msg-1",
 			}).pipe(
-				Effect.provide(layer, { local: true }),
-				Effect.tap((fork) => Effect.sync(() => {
+				Effect.tap((fork) => Effect.gen(function* () {
 					expect(serviceSetForkEntry).not.toHaveBeenCalled();
 					expect(legacySetForkEntry).not.toHaveBeenCalled();
 					expect(serviceListSessions).toHaveBeenCalledWith();
@@ -1643,8 +1590,11 @@ describe("handleForkSession", () => {
 						forkMessageId: "msg-1",
 						forkPointTimestamp: 456,
 					});
-					expect(ws.setClientSession).not.toHaveBeenCalled();
+					expect(
+						(yield* SessionActivityTag).selectedSession("test-project", "client-1"),
+					).toBeUndefined();
 				})),
+				Effect.provide(layer, { local: true }),
 			);
 		},
 	);
@@ -1704,11 +1654,8 @@ describe("handleForkSession", () => {
 				},
 				permission: { list: vi.fn(async () => []) },
 			});
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => undefined),
-			});
 			const sessionMgr = mockSessionManager();
-			const layer = makeForkSessionLayer({ client, ws, sessionMgr });
+			const layer = makeForkSessionLayer({ client, sessionMgr });
 
 			return handleForkSession("client-1", {}).pipe(
 				Effect.provide(layer, { local: true }),
@@ -1728,10 +1675,9 @@ describe("setDefaultPermissionModeForRelay", () => {
 			const configDir = mkdtempSync(
 				join(tmpdir(), "conduit-default-permission-mode-"),
 			);
-			const ws = mockWsHandler();
 			const log = mockLogger();
 			const layer = Layer.mergeAll(
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer(),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(ConfigTag)(mockConfig({ configDir })),
 				makeOverridesStateLive(),
@@ -1783,9 +1729,6 @@ describe("handlePermissionResponse", () => {
 	it.effect(
 		"dispatches permission responses through the orchestration engine",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-			});
 			const log = mockLogger();
 			const client = makeHandlerOpenCodeAPI({
 				permission: { reply: vi.fn(async () => {}) },
@@ -1796,7 +1739,7 @@ describe("handlePermissionResponse", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("session-1"),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(ConfigTag)(config),
 				Layer.succeed(ProviderRegistryTag)(registry),
@@ -1838,9 +1781,6 @@ describe("handlePermissionResponse", () => {
 	it.effect(
 		"uses the pending permission session when the responding client is viewing another session",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "visible-session"),
-			});
 			const log = mockLogger();
 			const client = makeHandlerOpenCodeAPI({
 				permission: { reply: vi.fn(async () => {}) },
@@ -1851,7 +1791,7 @@ describe("handlePermissionResponse", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("visible-session"),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(ConfigTag)(config),
 				Layer.succeed(ProviderRegistryTag)(registry),
@@ -1893,9 +1833,6 @@ describe("handlePermissionResponse", () => {
 	it.effect(
 		"does not persist OpenCode permission rules for Claude sessions",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-claude"),
-			});
 			const log = mockLogger();
 			const client = makeHandlerOpenCodeAPI({
 				permission: { reply: vi.fn(async () => {}) },
@@ -1912,7 +1849,7 @@ describe("handlePermissionResponse", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("session-claude"),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(ConfigTag)(config),
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
@@ -1949,9 +1886,6 @@ describe("handlePermissionResponse", () => {
 		"does not fall back to OpenCode permission reply while the first Claude turn is still in flight",
 		() =>
 			Effect.gen(function* () {
-				const ws = mockWsHandler({
-					getClientSession: vi.fn(() => "session-claude-in-flight"),
-				});
 				const log = mockLogger();
 				const client = makeHandlerOpenCodeAPI({
 					permission: { reply: vi.fn(async () => {}) },
@@ -2004,7 +1938,7 @@ describe("handlePermissionResponse", () => {
 
 				const layer = Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
-					Layer.succeed(WebSocketHandlerTag)(ws),
+					makeTestSessionActivityLayer("session-claude-in-flight"),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(ConfigTag)(config),
 					Layer.succeed(OrchestrationEngineTag)(engine),
@@ -2049,9 +1983,6 @@ describe("handlePermissionResponse", () => {
 	);
 
 	it.effect("processes permission response", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
 		const log = mockLogger();
 		const client = makeHandlerOpenCodeAPI({
 			permission: { reply: vi.fn(async () => {}) },
@@ -2061,7 +1992,7 @@ describe("handlePermissionResponse", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag)(client),
-			Layer.succeed(WebSocketHandlerTag)(ws),
+			makeTestSessionActivityLayer("session-1"),
 			Layer.succeed(LoggerTag)(log),
 			Layer.succeed(ConfigTag)(config),
 			PendingInteractionServiceLive,
@@ -2092,9 +2023,6 @@ describe("handlePermissionResponse", () => {
 describe("handleQuestionReject", () => {
 	it.effect("dispatches question rejection through the orchestration engine", () => {
 		const engine = withDispatchEffect({ dispatchEffect: vi.fn(() => Effect.void) });
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();
 		const client = makeHandlerOpenCodeAPI({
@@ -2103,7 +2031,7 @@ describe("handleQuestionReject", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag)(client),
-			Layer.succeed(WebSocketHandlerTag)(ws),
+			makeTestSessionActivityLayer("session-1"),
 			Layer.succeed(OrchestrationEngineTag)(engine),
 			Layer.succeed(LoggerTag)(log),
 			Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
@@ -2129,9 +2057,6 @@ describe("handleQuestionReject", () => {
 	it.effect(
 		"keeps Claude questions pending when the browser tries to skip them",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "visible-session"),
-			});
 			const log = mockLogger();
 			const sessionManagerService = makeMockSessionManagerService();
 			const client = makeHandlerOpenCodeAPI({
@@ -2151,7 +2076,7 @@ describe("handleQuestionReject", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("visible-session"),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				PendingInteractionServiceLive,
@@ -2195,10 +2120,6 @@ describe("handleAskUserResponse", () => {
 	it.effect(
 		"dispatches an answer to a recovered Claude question without starting a continuation",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "question-session"),
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
 			const engine = withDispatchEffect({ dispatchEffect: vi.fn(() => Effect.void) });
 			const completeRecoveredQuestion = vi.fn(() => Effect.succeed(true));
 			const sendTurn = vi.fn(() => Effect.void);
@@ -2213,7 +2134,7 @@ describe("handleAskUserResponse", () => {
 			};
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("question-session"),
 				Layer.succeed(ConfigTag)(mockConfig()),
 				Layer.succeed(LoggerTag)(mockLogger()),
 				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(makeMockSessionManagerService())),
@@ -2264,9 +2185,6 @@ describe("handleAskUserResponse", () => {
 	);
 	it.effect("dispatches question answers through the orchestration engine", () => {
 		const engine = withDispatchEffect({ dispatchEffect: vi.fn(() => Effect.void) });
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-		});
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();
 		const client = makeHandlerOpenCodeAPI({
@@ -2278,7 +2196,7 @@ describe("handleAskUserResponse", () => {
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-					Layer.succeed(WebSocketHandlerTag)(ws),
+					makeTestSessionActivityLayer("session-1"),
 					Layer.succeed(OrchestrationEngineTag)(engine),
 					Layer.succeed(ConfigTag)(mockConfig()),
 					PendingInteractionServiceLive,
@@ -2309,9 +2227,6 @@ describe("handleAskUserResponse", () => {
 	it.effect(
 		"uses the pending question session when answering a Claude question from another visible session",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "visible-session"),
-			});
 			const log = mockLogger();
 			const sessionManagerService = makeMockSessionManagerService();
 			const client = makeHandlerOpenCodeAPI({
@@ -2334,7 +2249,7 @@ describe("handleAskUserResponse", () => {
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-					Layer.succeed(WebSocketHandlerTag)(ws),
+					makeTestSessionActivityLayer("visible-session"),
 					Layer.succeed(ConfigTag)(mockConfig()),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
@@ -2376,7 +2291,6 @@ describe("handleNewSession", () => {
 	it.effect(
 		"creates and switches through SessionManagerService",
 		() => {
-			const ws = mockWsHandler();
 			const log = mockLogger();
 			const legacyCreateSession = vi.fn(async () => {
 				throw new Error("legacy createSession should not be used");
@@ -2398,7 +2312,6 @@ describe("handleNewSession", () => {
 				createSession: serviceCreateSession,
 			});
 			const layer = makeSessionLifecycleLayer({
-				ws,
 				sessionMgr,
 				sessionManagerService,
 				log,
@@ -2409,8 +2322,7 @@ describe("handleNewSession", () => {
 				permissionMode: "ask",
 				model: { modelId: "sonnet", providerId: "claude" },
 			}).pipe(
-				Effect.provide(layer, { local: true }),
-				Effect.tap(() => Effect.sync(() => {
+				Effect.tap(() => Effect.gen(function* () {
 					expect(serviceCreateSession).toHaveBeenCalledWith("New Session", {
 						account: expect.objectContaining({ id: "claude", driver: "claude" }),
 						permissionMode: "ask",
@@ -2422,22 +2334,19 @@ describe("handleNewSession", () => {
 						},
 					});
 					expect(legacyCreateSession).not.toHaveBeenCalled();
-					expect(ws.setClientSession).toHaveBeenCalledWith(
-						"client-1",
-						"new-session-1",
-						"test-project",
-						undefined,
-					);
+					expect(
+						(yield* SessionActivityTag).selectedSession("test-project", "client-1"),
+					).toBe("new-session-1");
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Created: new-session-1",
 					);
 				})),
+				Effect.provide(layer, { local: true }),
 			);
 		},
 	);
 
 	it.effect("passes the requested provider to SessionManagerService", () => {
-		const ws = mockWsHandler();
 		const log = mockLogger();
 		const serviceCreateSession = vi.fn(() =>
 			Effect.succeed({
@@ -2453,7 +2362,6 @@ describe("handleNewSession", () => {
 			createSession: serviceCreateSession,
 		});
 		const layer = makeSessionLifecycleLayer({
-			ws,
 			sessionManagerService,
 			log,
 		});
@@ -2464,27 +2372,23 @@ describe("handleNewSession", () => {
 			providerId: "opencode",
 			model: { modelId: "gpt-4", providerId: "openai" },
 		}).pipe(
-			Effect.provide(layer, { local: true }),
-			Effect.tap(() => Effect.sync(() => {
+			Effect.tap(() => Effect.gen(function* () {
 				expect(serviceCreateSession).toHaveBeenCalledWith("OpenCode Session", {
 					account: expect.objectContaining({ id: "opencode", driver: "opencode" }),
 					permissionMode: "ask",
 				pick: { harness: "opencode", model: { modelId: "gpt-4", providerId: "openai" }, effort: "", contextWindow: "" },
 			});
-				expect(ws.setClientSession).toHaveBeenCalledWith(
-					"client-1",
-					"opencode-session",
-					"test-project",
-					undefined,
-				);
+				expect(
+					(yield* SessionActivityTag).selectedSession("test-project", "client-1"),
+				).toBe("opencode-session");
 			})),
+			Effect.provide(layer, { local: true }),
 		);
 	});
 
 	it.effect(
 		"does not start the OpenCode message poller for local Claude placeholders",
 		() => {
-			const ws = mockWsHandler();
 			const log = mockLogger();
 			const startPolling = vi.fn();
 			const sessionManagerService = makeMockSessionManagerService();
@@ -2553,7 +2457,7 @@ describe("handleNewSession", () => {
 			} satisfies ReadQueryEffect;
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer(),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				Layer.succeed(ReadQueryEffectTag)(readQuery),
@@ -2587,7 +2491,6 @@ describe("handleNewSession", () => {
 	it.effect(
 		"reconnect replays durable command state without redispatching provider command",
 		() => {
-			const ws = mockWsHandler();
 			const log = mockLogger();
 			const dispatchEffect = vi.fn(() => Effect.void);
 			const startPolling = vi.fn();
@@ -2664,7 +2567,7 @@ describe("handleNewSession", () => {
 			});
 			const layer = Layer.mergeAll(
 				openCodeModelLayer(client),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer(),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				Layer.succeed(ReadQueryEffectTag)(readQuery),
@@ -2703,9 +2606,6 @@ describe("handleDeleteSession", () => {
 	it.effect(
 		"does not repeat client-side deletion effects for a coalesced caller",
 		() => {
-			const ws = mockWsHandler({
-				getClientsForSession: vi.fn(() => ["viewer-1"]),
-			});
 			const log = mockLogger();
 			const deleteSession = vi.fn(() => Effect.succeed(false));
 			const listSessions = vi.fn(() =>
@@ -2726,33 +2626,33 @@ describe("handleDeleteSession", () => {
 				listSessions,
 			});
 			const layer = makeSessionLifecycleLayer({
-				ws,
 				sessionManagerService,
 				log,
 			});
 
-			return handleDeleteSession("client-1", {
-				sessionId: "deleted-session",
-			}).pipe(
-				Effect.provide(layer, { local: true }),
-				Effect.tap(() => Effect.sync(() => {
-					expect(deleteSession).toHaveBeenCalledWith("deleted-session", {
-				closeCommandId: expect.any(String),
-			});
-					expect(listSessions).not.toHaveBeenCalled();
-					expect(ws.setClientSession).not.toHaveBeenCalled();
-					expect(log.info).not.toHaveBeenCalled();
-				})),
-			);
+			return Effect.gen(function* () {
+				const activity = yield* SessionActivityTag;
+				yield* activity.view("deleted-session");
+				activity.selectSession("test-project", "viewer-1", "deleted-session", undefined);
+
+				yield* handleDeleteSession("client-1", {
+					sessionId: "deleted-session",
+				});
+
+				expect(deleteSession).toHaveBeenCalledWith("deleted-session", {
+					closeCommandId: expect.any(String),
+				});
+				expect(listSessions).not.toHaveBeenCalled();
+				expect(activity.selectedSession("test-project", "viewer-1")).toBe("deleted-session");
+				expect(activity.selectedSession("test-project", "client-1")).toBeUndefined();
+				expect(log.info).not.toHaveBeenCalled();
+			}).pipe(Effect.scoped, Effect.provide(layer, { local: true }));
 		},
 	);
 
 	it.effect(
 		"deletes through SessionManagerService",
 		() => {
-			const ws = mockWsHandler({
-				getClientsForSession: vi.fn(() => []),
-			});
 			const log = mockLogger();
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy listSessions should not be used");
@@ -2771,48 +2671,54 @@ describe("handleDeleteSession", () => {
 				listSessions: serviceListSessions,
 			});
 			const layer = makeSessionLifecycleLayer({
-				ws,
 				sessionMgr,
 				sessionManagerService,
 				log,
 			});
 
-			return handleDeleteSession("client-1", {
-				sessionId: "deleted-session",
-			}).pipe(
-				Effect.provide(layer, { local: true }),
-				Effect.tap(() => Effect.sync(() => {
-					expect(ws.getClientsForSession).not.toHaveBeenCalled();
-					expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session", {
-				closeCommandId: expect.any(String),
-			});
-					expect(legacyDeleteSession).not.toHaveBeenCalled();
-					expect(serviceListSessions).not.toHaveBeenCalled();
-					expect(legacyListSessions).not.toHaveBeenCalled();
-					expect(log.info).toHaveBeenCalledWith(
-						"client=client-1 Deleted: deleted-session",
-					);
-				})),
-			);
+			return Effect.gen(function* () {
+				const hasViewers = vi.spyOn(yield* SessionActivityTag, "hasViewers");
+
+				yield* handleDeleteSession("client-1", {
+					sessionId: "deleted-session",
+				});
+
+				expect(hasViewers).not.toHaveBeenCalled();
+				expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session", {
+					closeCommandId: expect.any(String),
+				});
+				expect(legacyDeleteSession).not.toHaveBeenCalled();
+				expect(serviceListSessions).not.toHaveBeenCalled();
+				expect(legacyListSessions).not.toHaveBeenCalled();
+				expect(log.info).toHaveBeenCalledWith(
+					"client=client-1 Deleted: deleted-session",
+				);
+			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
 
 	it.effect("does not move viewers after deleting their session", () => {
-		const ws = mockWsHandler({
-			getClientsForSession: vi.fn(() => ["client-1", "client-2"]),
-		});
 		const sessionManagerService = makeMockSessionManagerService({
 			deleteSession: vi.fn(() => Effect.succeed(true)),
 			listSessions: vi.fn(() => Effect.die("unexpected list")),
 		});
-		return handleDeleteSession("client-1", {
-			sessionId: "deleted-session",
+		return Effect.gen(function* () {
+			const activity = yield* SessionActivityTag;
+			for (const viewer of ["client-1", "client-2"]) {
+				yield* activity.view("deleted-session");
+				activity.selectSession("test-project", viewer, "deleted-session", undefined);
+			}
+
+			yield* handleDeleteSession("client-1", {
+				sessionId: "deleted-session",
+			});
+
+			expect(activity.selectedSession("test-project", "client-1")).toBe("deleted-session");
+			expect(activity.selectedSession("test-project", "client-2")).toBe("deleted-session");
+			expect(sessionManagerService.listSessions).not.toHaveBeenCalled();
 		}).pipe(
-			Effect.provide(makeSessionLifecycleLayer({ ws, sessionManagerService }), { local: true }),
-			Effect.tap(() => Effect.sync(() => {
-				expect(ws.setClientSession).not.toHaveBeenCalled();
-				expect(sessionManagerService.listSessions).not.toHaveBeenCalled();
-			})),
+			Effect.scoped,
+			Effect.provide(makeSessionLifecycleLayer({ sessionManagerService }), { local: true }),
 		);
 	});
 });
@@ -2828,7 +2734,6 @@ describe("renameSessionForClient", () => {
 			const _sessionMgr = mockSessionManager({
 				renameSession: legacyRenameSession,
 			});
-			const ws = mockWsHandler();
 			const calls: string[] = [];
 			const renameSession = vi.fn(() =>
 				Effect.sync(() => {
@@ -2842,7 +2747,7 @@ describe("renameSessionForClient", () => {
 			const layer = Layer.mergeAll(
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer(),
 			);
 
 			return renameSessionForClient({
@@ -2864,7 +2769,6 @@ describe("renameSessionForClient", () => {
 	it.effect("does nothing when id or title is empty", () => {
 		const log = mockLogger();
 		const _sessionMgr = mockSessionManager();
-		const ws = mockWsHandler();
 		const renameSession = vi.fn(() => Effect.void);
 		const sessionManagerService = makeMockSessionManagerService({
 			renameSession,
@@ -2873,7 +2777,7 @@ describe("renameSessionForClient", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(LoggerTag)(log),
 			Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
-			Layer.succeed(WebSocketHandlerTag)(ws),
+			makeTestSessionActivityLayer(),
 		);
 
 		return renameSessionForClient({
@@ -3051,7 +2955,6 @@ describe("sendMessageToSession", () => {
 					tmpdir(),
 					`conduit-prompt-triage-${crypto.randomUUID()}.sqlite`,
 				);
-				const ws = mockWsHandler();
 				const configLayer = Layer.succeed(ConfigTag)(mockConfig());
 				const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 				const openCodeApi = makeMockOpenCodeAPI();
@@ -3062,8 +2965,7 @@ describe("sendMessageToSession", () => {
 						Layer.succeed(OpenCodeAPITag)(openCodeApi),
 						loggerLayer,
 						configLayer,
-						Layer.succeed(WebSocketHandlerTag)(ws),
-Layer.effect(SessionActivityTag, makeSessionActivity),
+						makeTestSessionActivityLayer(),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
 						Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: openCodeApi })),
@@ -3133,7 +3035,6 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 					Effect.provide(
 						Layer.mergeAll(
 							serviceLayer,
-							Layer.succeed(WebSocketHandlerTag)(ws),
 							Layer.succeed(ConfigTag)(mockConfig()),
 							PendingInteractionServiceLive,
 							makeOverridesStateLive(),
@@ -3167,7 +3068,7 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 		const layer = Layer.mergeAll(
 			Layer.succeed(ProviderTurnServiceTag)(provider),
 			Layer.succeed(OpenCodeAPITag)({} as OpenCodeAPI),
-			Layer.succeed(WebSocketHandlerTag)(mockWsHandler()),
+			makeTestSessionActivityLayer(),
 			Layer.succeed(LoggerTag)(mockLogger()),
 			Layer.succeed(ConfigTag)(mockConfig()),
 			Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(service)),
@@ -3257,7 +3158,6 @@ describe("rewindSessionToMessage", () => {
 
 describe("handleMessage", () => {
 	it.effect("logs when no active session", () => {
-		const ws = mockWsHandler({ getClientSession: vi.fn(() => undefined) });
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
@@ -3268,7 +3168,7 @@ describe("handleMessage", () => {
 			Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
 				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer(),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				Layer.succeed(ConfigTag)(config),
@@ -3291,10 +3191,6 @@ describe("handleMessage", () => {
 	});
 
 	it.effect("passes contextWindow override into engine send_turn input", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-			getClientsForSession: vi.fn(() => ["client-1"]),
-		});
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();
 		const config = mockConfig();
@@ -3315,7 +3211,7 @@ describe("handleMessage", () => {
 			Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
 				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("session-1"),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				Layer.succeed(ConfigTag)(config),
@@ -3368,10 +3264,6 @@ describe("handleMessage", () => {
 	it.effect(
 		"builds Claude event sinks from PendingInteractionService without bridge tags",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
 			const log = mockLogger();
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
@@ -3416,7 +3308,7 @@ describe("handleMessage", () => {
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-					Layer.succeed(WebSocketHandlerTag)(ws),
+					makeTestSessionActivityLayer("session-1"),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					Layer.succeed(ConfigTag)(config),
@@ -3479,10 +3371,6 @@ describe("handleMessage", () => {
 		it.effect(
 			"passes Claude history metadata without a transcript into send_turn input",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
 			const log = mockLogger();
 			const sessionManagerService = makeMockSessionManagerService();
 			const config = mockConfig();
@@ -3546,7 +3434,7 @@ describe("handleMessage", () => {
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-					Layer.succeed(WebSocketHandlerTag)(ws),
+					makeTestSessionActivityLayer("session-1"),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					Layer.succeed(ConfigTag)(config),
@@ -3598,10 +3486,6 @@ describe("handleMessage", () => {
 	it.effect(
 		"does not run legacy session-manager auto-rename after first Claude turn",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
 			const log = mockLogger();
 			const legacyListSessions = vi.fn(async () => {
 				throw new Error("legacy auto-rename listSessions should not be used");
@@ -3649,7 +3533,7 @@ describe("handleMessage", () => {
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-					Layer.succeed(WebSocketHandlerTag)(ws),
+					makeTestSessionActivityLayer("session-1"),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					Layer.succeed(ConfigTag)(config),
@@ -3675,10 +3559,6 @@ describe("handleMessage", () => {
 	);
 
 	it.effect("does not inspect custom titles during prompt dispatch", () => {
-		const ws = mockWsHandler({
-			getClientSession: vi.fn(() => "session-1"),
-			getClientsForSession: vi.fn(() => ["client-1"]),
-		});
 		const log = mockLogger();
 		const _sessionMgr = mockSessionManager();
 		const listSessions = vi.fn(() =>
@@ -3717,7 +3597,7 @@ describe("handleMessage", () => {
 			Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
 				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-				Layer.succeed(WebSocketHandlerTag)(ws),
+				makeTestSessionActivityLayer("session-1"),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				Layer.succeed(ConfigTag)(config),
@@ -3742,10 +3622,6 @@ describe("handleMessage", () => {
 	it.effect(
 		"rejects a missing stored pick rather than materializing OpenCode from a runtime override",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "ses-local-placeholder"),
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
 			const log = mockLogger();
 			const serviceCreateSession = vi.fn(() =>
 				Effect.succeed({
@@ -3837,7 +3713,7 @@ describe("handleMessage", () => {
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-					Layer.succeed(WebSocketHandlerTag)(ws),
+					makeTestSessionActivityLayer(),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					Layer.succeed(ConfigTag)(config),
@@ -3850,6 +3726,8 @@ describe("handleMessage", () => {
 
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				const activity = yield* SessionActivityTag;
+				activity.selectSession("test-project", "client-1", "ses-local-placeholder", undefined);
 				yield* (yield* ProjectionRunnerEffectTag).projectEvent(yield* (yield* EventStoreEffectTag).append(canonicalEvent(
 					"session.created", "ses-local-placeholder",
 					{ sessionId: "ses-local-placeholder", title: "Untitled", provider: "claude" },
@@ -3869,7 +3747,9 @@ describe("handleMessage", () => {
 				expect(dispatchedSessionId).toBe("ses-local-placeholder");
 				expect(serviceCreateSession).not.toHaveBeenCalled();
 				expect(engine.bindSession).not.toHaveBeenCalled();
-				expect(ws.setClientSession).not.toHaveBeenCalled();
+				expect(activity.selectedSession("test-project", "client-1")).toBe(
+					"ses-local-placeholder",
+				);
 				expect(engine.dispatchEffect).not.toHaveBeenCalled();
 				const events = yield* sql<{ type: string; run_id: string | null; code: string | null }>`
 					SELECT type, json_extract(metadata, '$.runId') AS run_id,
@@ -3891,10 +3771,6 @@ describe("handleMessage", () => {
 	it.effect(
 		"keeps dispatch rejection recovery after launching continuation",
 		() => {
-			const ws = mockWsHandler({
-				getClientSession: vi.fn(() => "session-1"),
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
 			const log = mockLogger();
 			const _sessionMgr = mockSessionManager();
 			const sessionManagerService = makeMockSessionManagerService();
@@ -3918,7 +3794,7 @@ describe("handleMessage", () => {
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-					Layer.succeed(WebSocketHandlerTag)(ws),
+					makeTestSessionActivityLayer("session-1"),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					Layer.succeed(ConfigTag)(config),
@@ -3981,7 +3857,6 @@ describe("markSessionSeenForClient", () => {
 	it.effect(
 		"returns a failed save as a typed error, logged once, not retried",
 		() => {
-			const ws = mockWsHandler();
 			const log = mockLogger();
 			const failure = new SessionManagerError({
 				operation: "markSessionSeen",
@@ -3998,7 +3873,7 @@ describe("markSessionSeenForClient", () => {
 			}).pipe(
 				Effect.provide(
 					Layer.mergeAll(
-						Layer.succeed(WebSocketHandlerTag)(ws),
+						makeTestSessionActivityLayer(),
 						Layer.succeed(LoggerTag)(log),
 						Layer.succeed(SessionManagerServiceTag)(
 							mockSessionManagers(sessionManagerService),

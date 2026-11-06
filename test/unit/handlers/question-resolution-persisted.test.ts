@@ -16,6 +16,7 @@ import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import type { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
 	InputDraftsLive,
@@ -31,7 +32,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type SessionEventBus,
@@ -78,6 +78,7 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeOpenCodeInstancesStub,
+	makeTestSessionActivityLayer,
 	mockSessionManagers,
 	NoopProviderRuntimeIngestionLive,
 	PassThroughSessionInbox,
@@ -86,19 +87,6 @@ import { withDispatchEffect } from "../../helpers/orchestration-engine-test-doub
 
 const SESSION = "session-1";
 const QUESTION = "que-1";
-
-const makeWsHandler = () => ({
-	attach: vi.fn(() => () => {}),
-	setClientSession: vi.fn(),
-	getClientSession: vi.fn(() => SESSION),
-	getClientsForSession: vi.fn(() => ["client-1"]),
-	registerSessionViewer: vi.fn(() => () => {}),
-	handleUpgrade: vi.fn(),
-	close: vi.fn(),
-	drain: vi.fn(async () => undefined),
-	on: vi.fn(),
-	once: vi.fn(),
-});
 
 /**
  * A live store and bus behind the real handler layer, so the assertion is on
@@ -112,7 +100,7 @@ type HandlerStack =
 	| ConfigTag
 	| PendingInteractionServiceTag
 	| OpenCodeInstancesTag
-	| WebSocketHandlerTag
+	| SessionActivityTag
 	| LoggerTag
 	| SessionManagerServiceTag
 	| AgentServiceTag
@@ -156,7 +144,7 @@ const withHandlerStack = async (
 		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
-		Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
+		makeTestSessionActivityLayer(SESSION),
 		Layer.succeed(LoggerTag)(createSilentLogger()),
 		Layer.succeed(SessionManagerServiceTag)(
 			mockSessionManagers(makeMockSessionManagerService()),

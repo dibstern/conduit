@@ -2,19 +2,17 @@ import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Layer, Logger, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
+import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { SessionGit } from "../../../src/lib/domain/daemon/Services/session-git.js";
 import { SessionStateProjectionNotifierLive } from "../../../src/lib/domain/relay/Layers/session-state-projection-notifier-layer.js";
-import {
-	ConfigTag,
-	WebSocketHandlerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import {
 	makeMockConfig,
 	makeMockSessionManagerService,
-	makeMockWebSocketHandler,
+	makeTestSessionActivityLayer,
 	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 
@@ -46,7 +44,6 @@ describe("SessionStateProjectionNotifier", () => {
 				const layer = SessionStateProjectionNotifierLive.pipe(
 					Layer.provide(
 						Layer.mergeAll(
-							Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 							Layer.succeed(SessionManagerServiceTag)(
 								mockSessionManagers(sessionManagerService),
 							),
@@ -133,7 +130,6 @@ describe("SessionStateProjectionNotifier", () => {
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 						Layer.succeed(SessionManagerServiceTag)(
 							mockSessionManagers(sessionManagerService),
 						),
@@ -159,7 +155,6 @@ describe("SessionStateProjectionNotifier", () => {
 		() =>
 			Effect.gen(function* () {
 				const order: string[] = [];
-				const wsHandler = makeMockWebSocketHandler();
 				const sessionManagerService = makeMockSessionManagerService({
 					refreshSessionLineage: () =>
 						Effect.sync(() => {
@@ -179,7 +174,6 @@ describe("SessionStateProjectionNotifier", () => {
 					),
 					Layer.provide(
 						Layer.mergeAll(
-							Layer.succeed(WebSocketHandlerTag)(wsHandler),
 							Layer.succeed(SessionManagerServiceTag)(
 								mockSessionManagers(sessionManagerService),
 							),
@@ -201,7 +195,6 @@ describe("SessionStateProjectionNotifier", () => {
 		"coalesces a burst of projected events into one lineage refresh",
 		() =>
 			Effect.gen(function* () {
-				const wsHandler = makeMockWebSocketHandler();
 				const refreshSessionLineage = vi.fn(() => Effect.void);
 				const sessionManagerService = makeMockSessionManagerService({
 					refreshSessionLineage,
@@ -209,7 +202,6 @@ describe("SessionStateProjectionNotifier", () => {
 				const layer = SessionStateProjectionNotifierLive.pipe(
 					Layer.provide(
 						Layer.mergeAll(
-							Layer.succeed(WebSocketHandlerTag)(wsHandler),
 							Layer.succeed(SessionManagerServiceTag)(
 								mockSessionManagers(sessionManagerService),
 							),
@@ -238,7 +230,6 @@ describe("SessionStateProjectionNotifier", () => {
 		Effect.gen(function* () {
 			const started = yield* Deferred.make<void>();
 			const release = yield* Deferred.make<void>();
-			const wsHandler = makeMockWebSocketHandler();
 			const refreshSessionLineage = vi.fn(() =>
 				Deferred.succeed(started, undefined).pipe(
 					Effect.andThen(Deferred.await(release)),
@@ -250,7 +241,6 @@ describe("SessionStateProjectionNotifier", () => {
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						Layer.succeed(WebSocketHandlerTag)(wsHandler),
 						Layer.succeed(SessionManagerServiceTag)(
 							mockSessionManagers(sessionManagerService),
 						),
@@ -284,9 +274,6 @@ describe("SessionStateProjectionNotifier", () => {
 	// whenever any window was viewing the session.
 	it.effect("never marks a turn read, even when the session has viewers", () =>
 		Effect.gen(function* () {
-			const wsHandler = makeMockWebSocketHandler({
-				getClientsForSession: vi.fn(() => ["client-1"]),
-			});
 			const markSessionRead = vi.fn(() => Effect.void);
 			const sessionManagerService = makeMockSessionManagerService({
 				markSessionRead,
@@ -294,7 +281,6 @@ describe("SessionStateProjectionNotifier", () => {
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						Layer.succeed(WebSocketHandlerTag)(wsHandler),
 						Layer.succeed(SessionManagerServiceTag)(
 							mockSessionManagers(sessionManagerService),
 						),
@@ -304,13 +290,18 @@ describe("SessionStateProjectionNotifier", () => {
 			);
 
 			yield* Effect.gen(function* () {
+				yield* (yield* SessionActivityTag).view("session-1");
 				const notifier = yield* SessionStateProjectionNotifierTag;
 				yield* notifier.sessionStateProjected("session-1", "turn.completed");
 				yield* notifier.sessionStateProjected("session-1", "turn.error");
 
 				yield* TestClock.adjust("150 millis");
 				expect(markSessionRead).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(layer, { local: true }));
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(layer, { local: true }),
+				Effect.provide(makeTestSessionActivityLayer()),
+			);
 		}),
 	);
 });

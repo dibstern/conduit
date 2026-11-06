@@ -93,7 +93,7 @@ async function signalDelivered(
 	type: PtyEvent["type"] = "pty.created",
 ) {
 	let delivered = 0;
-	(await harness.run(SSEStreamTag)).on("event", (event) => {
+	(await harness.runOnRelay(SSEStreamTag)).on("event", (event) => {
 		if (
 			isPtyEvent(event) &&
 			event.type === type &&

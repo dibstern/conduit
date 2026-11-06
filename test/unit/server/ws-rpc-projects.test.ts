@@ -7,7 +7,6 @@ import type { ProjectManagementService } from "../../../src/lib/domain/relay/Ser
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
@@ -134,7 +133,6 @@ describe("WsRpcServerLayer project management", () => {
 	it.effect("removes a project and returns the updated list", () => {
 		const service = makeService([]);
 		const removeProject = vi.mocked(service.remove);
-		const wsHandler = makeMockWebSocketHandler();
 		const config = makeMockConfig({
 			slug: "proj-1",
 		});
@@ -158,7 +156,6 @@ describe("WsRpcServerLayer project management", () => {
 					Layer.provideMerge(
 						makeTestHandlerLayer({
 							config,
-							wsHandler,
 							projectManagementService: service,
 						}),
 					),
@@ -172,7 +169,6 @@ describe("WsRpcServerLayer project management", () => {
 		const renamed = { ...project, title: "Renamed" };
 		const service = makeService([renamed]);
 		const saveProject = vi.mocked(service.save);
-		const wsHandler = makeMockWebSocketHandler();
 		const config = makeMockConfig({
 			slug: "proj-1",
 		});
@@ -199,7 +195,6 @@ describe("WsRpcServerLayer project management", () => {
 					Layer.provideMerge(
 						makeTestHandlerLayer({
 							config,
-							wsHandler,
 							projectManagementService: service,
 						}),
 					),

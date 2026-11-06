@@ -21,8 +21,6 @@ import {
 import {
 	ConfigTag,
 	LoggerTag,
-	type WebSocketHandlerShape,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	formatTitleFallback,
@@ -63,22 +61,9 @@ import {
 } from "../../helpers/mock-factories.js";
 import { replayOpenCodeText } from "../../helpers/opencode-text-generation.js";
 
-function makeWebSocketHandler() {
-	const handler: WebSocketHandlerShape = {
-		setClientSession: vi.fn(),
-		getClientSession: vi.fn(() => undefined),
-		getClientsForSession: vi.fn(() => []),
-		registerSessionViewer: vi.fn(() => () => {}),
-		close: vi.fn(),
-		drain: vi.fn(async () => undefined),
-	};
-	return { handler };
-}
-
 function makeTestLayer(input: {
 	readonly queryFactory: ClaudeOneShotQueryFactory;
 	readonly now?: () => Date;
-	readonly wsHandler?: WebSocketHandlerShape;
 	readonly config?: ReturnType<typeof makeMockConfig>;
 	readonly logger?: ReturnType<typeof makeMockLogger>;
 	readonly accounts?: ReturnType<typeof makeMockAccountDirectory>;
@@ -89,7 +74,6 @@ function makeTestLayer(input: {
 		ReadQueryEffectTag | ProviderStateEffectTag
 	>;
 }) {
-	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
 		Layer.succeed(AccountDirectory)(
 			input.accounts ?? makeMockAccountDirectory(),
@@ -98,7 +82,6 @@ function makeTestLayer(input: {
 			makeClaudeTextGenerationLayer(input.queryFactory, input.adapterConfigDir),
 		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 		Layer.succeed(LoggerTag)(input.logger ?? makeMockLogger()),
-		Layer.succeed(WebSocketHandlerTag)(ws),
 		Layer.succeed(ConfigTag)(
 			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
 		),
@@ -117,18 +100,15 @@ function makeTestLayer(input: {
 function makePersistenceTestLayer(input: {
 	readonly queryFactory: ClaudeOneShotQueryFactory;
 	readonly now?: () => Date;
-	readonly wsHandler?: WebSocketHandlerShape;
 	readonly persistenceDbPath: string;
 	readonly config?: ReturnType<typeof makeMockConfig>;
 	readonly logger?: ReturnType<typeof makeMockLogger>;
 }) {
-	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		makeClaudeTextGenerationLayer(input.queryFactory),
 		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 		Layer.succeed(LoggerTag)(input.logger ?? makeMockLogger()),
-		Layer.succeed(WebSocketHandlerTag)(ws),
 		Layer.succeed(ConfigTag)(
 			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
 		),
@@ -225,7 +205,6 @@ const waitForSessionProjectorToReachLatestRename = (sessionId = "session-1") =>
 const makeManualRenameRaceLayer = (input: {
 	readonly queryFactory: ClaudeOneShotQueryFactory;
 	readonly now?: () => Date;
-	readonly wsHandler?: WebSocketHandlerShape;
 	readonly logger?: ReturnType<typeof makeMockLogger>;
 	readonly manualTitle?: string;
 }) =>
@@ -275,13 +254,11 @@ const makeManualRenameRaceLayer = (input: {
 					return row;
 				}),
 		};
-		const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 		const deps = Layer.mergeAll(
 			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 			makeClaudeTextGenerationLayer(input.queryFactory),
 			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 			Layer.succeed(LoggerTag)(input.logger ?? makeMockLogger()),
-			Layer.succeed(WebSocketHandlerTag)(ws),
 			Layer.succeed(ConfigTag)(makeMockConfig({ projectDir: process.cwd() })),
 			Layer.succeed(ReadQueryEffectTag)(raceReadQuery),
 			Layer.succeed(EventStoreEffectTag)(eventStore),
@@ -864,10 +841,8 @@ describe("SessionTitleService", () => {
 	it.effect("truncates overlong Opus output and applies it", () => {
 		const { dir, filename } = makeTempDbPath("conduit-title-apply-");
 		return Effect.gen(function* () {
-			const ws = makeWebSocketHandler();
 			const layer = makePersistenceTestLayer({
 				queryFactory: () => replayClaudeText("enter-worktree-turn"),
-				wsHandler: ws.handler,
 				persistenceDbPath: filename,
 			});
 			yield* Effect.gen(function* () {
@@ -937,12 +912,10 @@ describe("SessionTitleService", () => {
 	it.effect("falls back when the Opus query fails", () => {
 		const { dir, filename } = makeTempDbPath("conduit-title-fallback-");
 		return Effect.gen(function* () {
-			const ws = makeWebSocketHandler();
 			const log = makeMockLogger();
 			const fallbackNow = new Date(2026, 4, 17, 10, 11, 0);
 			const layer = makePersistenceTestLayer({
 				queryFactory: () => replayClaudeText("subagent-task-error-turn"),
-				wsHandler: ws.handler,
 				logger: log,
 				now: () => fallbackNow,
 				persistenceDbPath: filename,
@@ -1116,14 +1089,12 @@ describe("SessionTitleService", () => {
 		() => {
 			const { dir, filename } = makeTempDbPath("conduit-title-manual-race-");
 			return Effect.gen(function* () {
-				const ws = makeWebSocketHandler();
 				yield* Effect.gen(function* () {
 					yield* seedSessionRow();
 					const projectionRunner = yield* ProjectionRunnerEffectTag;
 					yield* projectionRunner.markRecovered();
 					const race = yield* makeManualRenameRaceLayer({
 						queryFactory: () => replayClaudeText(),
-						wsHandler: ws.handler,
 					});
 					yield* Effect.gen(function* () {
 						const service = yield* SessionTitleServiceTag;
@@ -1169,7 +1140,6 @@ describe("SessionTitleService", () => {
 			);
 			return Effect.gen(function* () {
 				const log = makeMockLogger();
-				const ws = makeWebSocketHandler();
 				yield* Effect.gen(function* () {
 					yield* seedSessionRow();
 					const projectionRunner = yield* ProjectionRunnerEffectTag;
@@ -1178,7 +1148,6 @@ describe("SessionTitleService", () => {
 						queryFactory: () => {
 							throw new Error("SDK unavailable");
 						},
-						wsHandler: ws.handler,
 						logger: log,
 						now: () => new Date(2026, 4, 17, 10, 11, 0),
 					});

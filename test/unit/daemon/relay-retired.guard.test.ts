@@ -33,7 +33,14 @@ const relayNames = new Set([
 	"RelayFactoryTag",
 ]);
 const scopeOpeners = new Set(["Scope.make", "Scope.makeUnsafe", "Scope.fork"]);
-const routingNames = new Set(["WebSocketHandlerTag", "getClientsForSession"]);
+// The relay's per-project client registry: which tabs view a session and which
+// session each tab picked. The daemon's SessionActivity owns both (lane 16p).
+const routingNames = new Set([
+	"WebSocketHandlerTag",
+	"getClientsForSession",
+	"getClientSession",
+	"registerSessionViewer",
+]);
 const openCodeHomeNames = new Set([
 	"openCodeInstanceTarget",
 	"openCodeInstanceId",
@@ -119,6 +126,24 @@ describe("per-project relay stays retired (82tn.16)", () => {
 		);
 	});
 
+	it("runs a project's RPCs on the daemon's project context, never a relay's", () => {
+		// Lane 16p: no RPC waits for a relay or reads its context. The cache entry
+		// still carries the relay's context for relay-only test reads until S6.
+		const relayRpc = new Set([
+			"rpcWsHandler",
+			"waitForRelay",
+			"resolveProjectRpcContext",
+		]);
+		expect(tally(server, named(relayRpc))).toEqual(
+			new Map([
+				[`${daemon}/Layers/daemon-layers.ts`, 2],
+				[`${daemon}/Services/relay-cache.ts`, 1],
+				[`${relay}/project-relay-startup.ts`, 4],
+				[`${relay}/relay-stack.ts`, 8],
+			]),
+		);
+	});
+
 	it("builds daemon-wide services once, in the daemon's layers", () => {
 		const services = new Set([
 			"makePortWatcherLive",
@@ -200,6 +225,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"OpenCodeSettingsServiceLive",
 			"makeRecapServiceLive",
 			"makeGoalSummaryServiceLive",
+			"MessagePollerManagerLive",
 		]);
 		expect(tally(server, named(builders))).toEqual(
 			new Map([
@@ -208,8 +234,8 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				// titles (slice 5), and its tool details, directory listing and agent
 				// liveness (slice 7), and its turns, inbox and agent service, and its
 				// terminals, OpenCode file and catalog readers, and recaps and goal
-				// summaries (lane 16o).
-				[`${daemon}/Layers/project-services-layer.ts`, 38],
+				// summaries (lane 16o), and its message poller (lane 16p).
+				[`${daemon}/Layers/project-services-layer.ts`, 40],
 				// The ingestion side's definitions: pending interactions, alert ledger,
 				// provider ingestion, the OpenCode ingress with its history ports, and
 				// agent liveness.
@@ -233,6 +259,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/domain/relay/Services/goal-summary-service.ts", 1],
 				["src/lib/domain/relay/Services/terminal-service.ts", 1],
 				["src/lib/domain/relay/Layers/pty-manager-layer.ts", 1],
+				["src/lib/domain/relay/Layers/message-poller-manager-layer.ts", 1],
 				// Definitions, and a store opened without the daemon.
 				["src/lib/domain/relay/Services/session-manager-service.ts", 3],
 				["src/lib/domain/relay/Services/relay-status-snapshot.ts", 3],
@@ -241,7 +268,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				// relay: a standalone relay's own copies, which a relay of a registered
 				// project builds only when the daemon cannot build the project.
 				["src/lib/domain/relay/Layers/relay-layer.ts", 7],
-				[`${relay}/project-relay-layers.ts`, 40],
+				[`${relay}/project-relay-layers.ts`, 42],
 			]),
 		);
 	});
@@ -268,29 +295,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 	});
 
 	it("routes browser events only through Event Audiences", () => {
-		expect(tally(server, named(routingNames))).toEqual(
-			new Map([
-				// relay: the per-project client registry and its readers.
-				["src/lib/domain/relay/Layers/websocket-handler-layer.ts", 3],
-				["src/lib/domain/relay/Services/services.ts", 2],
-				["src/lib/domain/relay/Services/session-registry-state.ts", 1],
-				["src/lib/handlers/model.ts", 3],
-				["src/lib/handlers/permissions.ts", 4],
-				["src/lib/handlers/prompt.ts", 2],
-				["src/lib/handlers/session.ts", 3],
-				["src/lib/handlers/types.ts", 1],
-				[`${relay}/monitoring-wiring.ts`, 5],
-				[`${relay}/poller-wiring.ts`, 2],
-				[`${relay}/project-relay-layers.ts`, 1],
-				[`${relay}/project-relay-startup.ts`, 2],
-				[`${relay}/relay-stack.ts`, 1],
-				[`${relay}/sse-wiring.ts`, 2],
-				["src/lib/server/effect-ws-handler.ts", 1],
-				["src/lib/server/ws-handler-shape.ts", 1],
-				["src/lib/server/ws-rpc.ts", 2],
-				["src/lib/session/worktree-cleanup-sweep.ts", 3],
-			]),
-		);
+		expect(tally(server, named(routingNames))).toEqual(new Map());
 	});
 
 	it("writes Run state only in the Run Ledger", () => {

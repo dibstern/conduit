@@ -26,7 +26,6 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionCommandError } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
@@ -81,7 +80,6 @@ import {
 	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
-	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
 	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
@@ -123,7 +121,6 @@ describe("SessionManager Effect", () => {
 			makePersistenceEffectLayer(":memory:", "test-project"),
 			configLayer,
 			loggerLayer,
-			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 			Layer.effect(SessionActivityTag, makeSessionActivity),
 			RelayStatusSnapshotLive,
 			makeOverridesStateLive(),

@@ -23,7 +23,6 @@ import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-in
 import {
 	makeMockConfig,
 	makeMockLogger,
-	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
@@ -32,7 +31,6 @@ describe("WsRpcServerLayer SetDefaultPermissionMode", () => {
 		const configDir = mkdtempSync(
 			join(tmpdir(), "conduit-rpc-default-permission-mode-"),
 		);
-		const wsHandler = makeMockWebSocketHandler();
 
 		return Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
@@ -54,7 +52,6 @@ describe("WsRpcServerLayer SetDefaultPermissionMode", () => {
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
 						makeTestHandlerLayer({
-							wsHandler,
 							log: makeMockLogger(),
 							config: makeMockConfig({ configDir }),
 						}),
@@ -71,7 +68,6 @@ describe("WsRpcServerLayer SetDefaultPermissionMode", () => {
 
 describe("WsRpcServerLayer SwitchPermissionMode", () => {
 	it.effect("sets and hydrates the permission mode", () => {
-		const wsHandler = makeMockWebSocketHandler();
 		const claudeInstance = makeTestClaudeProviderInstance({});
 		const setSdkPermissionMode = vi
 			.spyOn(claudeInstance, "setPermissionModeEffect")
@@ -115,7 +111,6 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 								":memory:",
 								"test-project",
 							),
-							wsHandler,
 							log: makeMockLogger(),
 						}),
 					),
@@ -127,7 +122,6 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 	});
 
 	it.effect("restores the switched mode after a fresh overrides layer", () => {
-		const wsHandler = makeMockWebSocketHandler();
 		const claudeInstance = makeTestClaudeProviderInstance({});
 		vi.spyOn(claudeInstance, "setPermissionModeEffect").mockReturnValue(
 			Effect.void,
@@ -166,7 +160,6 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 					Layer.provideMerge(
 						makeTestHandlerLayer({
 							providerRegistry,
-							wsHandler,
 							log: makeMockLogger(),
 							persistenceLayer,
 						}),
@@ -182,7 +175,6 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 	it.effect(
 		"leaves the stored mode unchanged when the live query rejects the update",
 		() => {
-			const wsHandler = makeMockWebSocketHandler();
 			const claudeInstance = makeTestClaudeProviderInstance({});
 			vi.spyOn(claudeInstance, "setPermissionModeEffect").mockReturnValue(
 				Effect.fail(
@@ -237,7 +229,6 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 						Layer.provideMerge(
 							makeTestHandlerLayer({
 								providerRegistry,
-								wsHandler,
 								log: makeMockLogger(),
 								persistenceLayer,
 							}),

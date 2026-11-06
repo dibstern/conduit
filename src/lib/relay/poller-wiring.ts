@@ -24,7 +24,6 @@ import {
 import * as Failure from "../effect/failure-classification.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
-import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { RelayMessage } from "../shared-types.js";
 import {
 	applyPipelineResult,
@@ -79,7 +78,8 @@ export interface PollerWiringDeps {
 	pollerManager: PollerManagerLike;
 	sseStream: SSEStreamEvents;
 	statusPoller: LegacyStatusPollerPort;
-	wsHandler: WebSocketHandlerShape;
+	/** Whether a tab views the session: the daemon's viewer record. */
+	hasViewers: (sessionId: string) => boolean;
 	sessionService: SessionServiceLike;
 	pipelineDeps: PipelineDeps;
 	sseTracker: ReturnType<typeof createSessionSSETracker>;
@@ -108,7 +108,7 @@ const handlePollerEventsEffect = (
 	Effect.gen(function* () {
 		const statusPoller = yield* StatusPollerTag;
 		const sessionService = yield* projectSessionManager;
-		const { wsHandler, pipelineDeps, config, pollerLog } = deps;
+		const { hasViewers, pipelineDeps, config, pollerLog } = deps;
 
 		if (polledSessionId) {
 			if (hasActivity) {
@@ -126,13 +126,10 @@ const handlePollerEventsEffect = (
 			activityOnly: true,
 		});
 		for (const msg of events) {
-			const pollerViewers = polledSessionId
-				? wsHandler.getClientsForSession(polledSessionId)
-				: [];
 			const pollerResult = processEvent(
 				msg,
 				polledSessionId,
-				pollerViewers,
+				polledSessionId !== undefined && hasViewers(polledSessionId),
 				"message-poller",
 			);
 			yield* applyPipelineResultEffect(
@@ -172,7 +169,7 @@ export function wirePollers(deps: PollerWiringDeps): void {
 		pollerManager,
 		sseStream,
 		statusPoller,
-		wsHandler,
+		hasViewers,
 		sessionService,
 		pipelineDeps,
 		sseTracker,
@@ -204,13 +201,10 @@ export function wirePollers(deps: PollerWiringDeps): void {
 		}
 
 		for (const msg of events) {
-			const pollerViewers = polledSessionId
-				? wsHandler.getClientsForSession(polledSessionId)
-				: [];
 			const pollerResult = processEvent(
 				msg,
 				polledSessionId,
-				pollerViewers,
+				polledSessionId !== undefined && hasViewers(polledSessionId),
 				"message-poller",
 			);
 			applyPipelineResult(pollerResult, polledSessionId, pipelineDeps);

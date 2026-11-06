@@ -33,7 +33,6 @@ import {
 	makeOverridesStateLive,
 	type OverridesStateTag,
 } from "../Services/session-overrides-state.js";
-import { makeSessionRegistryStateLive } from "../Services/session-registry-state.js";
 import {
 	makePollerPubSubLive,
 	makePollerStateLive,
@@ -98,7 +97,6 @@ export const makeRelayStateLive = (
 	);
 	return Layer.mergeAll(
 		// Session state
-		makeSessionRegistryStateLive(),
 		options.titlesLayer ??
 			makeSessionTitleServiceLive().pipe(
 				Layer.provideMerge(ProjectSettingsLive),

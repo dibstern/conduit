@@ -24,7 +24,6 @@ import {
 	PollerManagerTag,
 	StatusPollerTag,
 	TranslatorTag,
-	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../domain/relay/Services/session-attention.js";
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
@@ -117,7 +116,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 			ProjectSettingsTag | OverridesStateTag | ConfigTag
 		>();
 		const translator = yield* TranslatorTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
 			context: Effect.suspend(() => relayManagedRuntime.contextEffect),
 			runFork: relayManagedRuntime.runFork,
@@ -345,7 +343,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 			activity,
 			projectSettingsContext,
 			translator,
-			wsHandler,
 			rpcWsHandler,
 			statusSnapshot,
 			sseStream,
@@ -381,12 +378,13 @@ function startMonitoringAndPollers(
 ) {
 	const { config, statusLog, sseLog, pipelineLog, pollerLog, layers } = inputs;
 	const { monitoringStateAccess } = layers;
-	const { wsHandler, pollerManager, sseStream } = services;
+	const { pollerManager, sseStream } = services;
+	const { hasViewers } = services.activity;
 	return Effect.gen(function* () {
 		const monitoring = yield* wireMonitoringEffect({
 			// Poller seeding is background work: it must not restart OpenCode.
 			readMessages: services.readOpenCodeMessages,
-			wsHandler,
+			hasViewers,
 			pollerManager,
 			sseStream,
 			config: {
@@ -407,7 +405,7 @@ function startMonitoringAndPollers(
 		yield* wirePollersEffect({
 			pollerManager,
 			sseStream,
-			wsHandler,
+			hasViewers,
 			pipelineDeps: monitoring.pipelineDeps,
 			sseTracker: monitoringStateAccess.sseTracker,
 			config: {
@@ -441,7 +439,7 @@ function startSseConsumers(
 	const { config, sseLog, pipelineLog } = inputs;
 	const {
 		translator,
-		wsHandler,
+		activity,
 		statusPoller,
 		opencodeRuntimeIngress,
 		sseStream,
@@ -450,7 +448,7 @@ function startSseConsumers(
 		const terminal = yield* OpenCodeTerminalServiceTag;
 		const sseConsumerDeps = {
 			translator,
-			wsHandler,
+			hasViewers: activity.hasViewers,
 			...(config.pushManager != null && {
 				pushManager: config.pushManager,
 			}),
@@ -547,7 +545,6 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				const {
 					sql,
 					sessionManagerService,
-					wsHandler,
 					rpcWsHandler,
 					sseStream,
 					sessionId,
@@ -564,7 +561,6 @@ export async function startProjectRelay(inputs: StartupInputs) {
 					sessionManagerService,
 					// The sidebar and open family feeds follow the stamped row.
 					announceBackgroundWork: services.onBackgroundWorkChanged,
-					wsHandler,
 					rpcWsHandler,
 					sseStream,
 					sessionId,

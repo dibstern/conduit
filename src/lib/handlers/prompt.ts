@@ -10,13 +10,11 @@ import type {
 	SteerBlocker,
 } from "../contracts/stored-event.js";
 import type { InputDraftKey } from "../contracts/ws-rpc.js";
+import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { AttachmentStoreTag } from "../domain/persistence/Services/attachment-store.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
-import {
-	LoggerTag,
-	WebSocketHandlerTag,
-} from "../domain/relay/Services/services.js";
+import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { projectSessionManager } from "../domain/relay/Services/session-manager-service.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -192,7 +190,8 @@ export const handleMessage = (
 	payload: LegacyMessagePayload,
 ) =>
 	Effect.gen(function* () {
-		const wsHandler = yield* WebSocketHandlerTag;
+		const activity = yield* SessionActivityTag;
+		const slug = (yield* ConfigTag).slug;
 		const log = yield* LoggerTag;
 		if (!payload.text && !payload.images?.length) return;
 		if (!payload.commandId) {
@@ -201,7 +200,7 @@ export const handleMessage = (
 		}
 		yield* sendMessageToSession({
 			clientId,
-			sessionId: wsHandler.getClientSession(clientId),
+			sessionId: activity.selectedSession(slug, clientId),
 			text: payload.text,
 			commandId: payload.commandId,
 			...(payload.images ? { images: payload.images } : {}),
