@@ -172,6 +172,7 @@ const DaemonInstanceSchema = Schema.Struct({
 	),
 	version: Schema.optionalKey(Schema.String),
 	processIdentity: Schema.optionalKey(ManagedOpenCodeProcessIdentitySchema),
+	processStopped: Schema.optionalKey(Schema.Literal(true)),
 	env: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
 	url: Schema.optionalKey(Schema.String),
 	driver: Schema.optionalKey(KnownProviderDriverKindSchema),
@@ -338,6 +339,8 @@ export const sanitizeRestartMetadata = (value: unknown): unknown => {
 				(pid === undefined ||
 					(typeof pid === "number" && Number.isSafeInteger(pid) && pid > 0)) &&
 				(version === undefined || typeof version === "string") &&
+				(instance["processStopped"] === undefined ||
+					instance["processStopped"] === true) &&
 				validIdentity &&
 				!invalidAuth
 			)
@@ -346,6 +349,7 @@ export const sanitizeRestartMetadata = (value: unknown): unknown => {
 				pid: _pid,
 				version: _version,
 				processIdentity: _identity,
+				processStopped: _stopped,
 				...settings
 			} = instance;
 			return {

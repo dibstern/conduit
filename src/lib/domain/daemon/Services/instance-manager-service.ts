@@ -245,6 +245,7 @@ const buildInstanceManagerState = (
 								...(instance.version !== undefined
 									? { version: instance.version }
 									: {}),
+								...(instance.processStopped ? { processStopped: true } : {}),
 							},
 						] as const,
 				),
@@ -802,8 +803,9 @@ export const getManagedOpenCodeProcessIdentity = (instanceId: string) =>
 
 /**
  * Cached stopped status can also mean failed adoption of a still-live process, so this reads the
- * record. A record naming no process proves none runs: identity is saved before readiness, and a
- * stop that cannot verify ownership keeps it (82tn.32.52: a restart after a start it stopped).
+ * record. Only a recorded process found dead, or conduit's own verified stop, proves none runs. A
+ * record naming no process cannot tell (a restart drops damaged identity), and a failed health check
+ * alone is not loss (CONTRACT.md 3046-3047), so its orphan waits (659-661).
  */
 export const isManagedOpenCodeStopped = (instanceId: string) =>
 	withManagedOpenCodeLock(
@@ -820,6 +822,9 @@ export const isManagedOpenCodeStopped = (instanceId: string) =>
 				getProviderDriver(instance.value.driver ?? "opencode")
 					?.runsOpenCodeServer === true &&
 				Option.isSome(record) &&
+				(record.value.pid !== undefined ||
+					record.value.processIdentity !== undefined ||
+					record.value.processStopped === true) &&
 				(!record.value.pid || !isProcessAlive(record.value.pid)) &&
 				(!record.value.processIdentity ||
 					!isProcessAlive(record.value.processIdentity.supervisorPid))
@@ -867,6 +872,7 @@ export function persistedInstanceConfigs(
 			...(managed && record?.processIdentity !== undefined
 				? { processIdentity: record.processIdentity }
 				: {}),
+			...(managed && record?.processStopped ? { processStopped: true } : {}),
 			...(env === undefined ? {} : { env: { ...env } }),
 			...(!managed && Option.isSome(HashMap.get(state.externalUrls, account.id))
 				? {
@@ -1283,6 +1289,7 @@ const startManagedOpenCodeServer = (
 									{
 										port,
 										...(env !== undefined ? { env } : {}),
+										processStopped: true,
 									},
 								),
 							}));
@@ -1375,6 +1382,7 @@ const startManagedOpenCodeServer = (
 						managedProcesses: HashMap.set(processes, instance.id, {
 							port: record.port,
 							...(record.env !== undefined ? { env: record.env } : {}),
+							processStopped: true,
 						}),
 					};
 				});
