@@ -16,6 +16,7 @@ import {
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
+import { SCRATCH_PROJECT_SLUG } from "../../../contracts/scratch-project.js";
 import {
 	type SessionWorkspace,
 	SessionWorkspaceSchema,
@@ -472,8 +473,10 @@ export const makeSessionGit = Effect.gen(function* () {
 			registeredProjects = current;
 			projectsInitialized = true;
 			// Failed imports must not leave live cache rows that collide on retry.
+			// The No-project root holds only session folders; it has no Git of its own.
 			const available = [...current].filter(
-				([projectId]) => !unavailable.has(projectId),
+				([projectId]) =>
+					!unavailable.has(projectId) && projectId !== SCRATCH_PROJECT_SLUG,
 			);
 			const roots = new Map(
 				available.map(([projectId, project]) => [
