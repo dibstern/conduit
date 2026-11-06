@@ -2950,13 +2950,16 @@ export const ForkSession = Rpc.make("ForkSession", {
 		/** Project the fork joins; defaults to the parent's project. */
 		targetProjectSlug: Schema.optional(NonEmptyString),
 		messageId: Schema.optional(NonEmptyString),
+		/** Fork into a new worktree holding the files kept at the message (82tn.54). */
+		files: Schema.optionalKey(Schema.Boolean),
 	}),
 	success: ForkSessionResponseSchema,
-	/** SessionBusy: the admission's typed refusal (82tn.49). */
+	/** SessionBusy: the admission's typed refusal (82tn.49). FilesRefused: a fork with files. */
 	error: Schema.Union([
 		WsRpcError,
 		Schema.suspend(() => AccountUnroutable),
 		Schema.suspend(() => SessionBusy),
+		Schema.suspend(() => FilesRefused),
 	]),
 });
 
@@ -2970,6 +2973,8 @@ export const ForkSessionForSession = Rpc.make(ForkSession._tag, {
 		/** Project the fork joins; defaults to the parent's project. */
 		targetProjectSlug: Schema.optional(NonEmptyString),
 		messageId: Schema.optional(NonEmptyString),
+		/** Fork into a new worktree holding the files kept at the message (82tn.54). */
+		files: Schema.optionalKey(Schema.Boolean),
 	}),
 	success: ForkSession.successSchema,
 	error: ForkSession.errorSchema,
@@ -3236,6 +3241,28 @@ export const GetHeadBranches = Rpc.make("GetHeadBranches", {
 		sessionId: NonEmptyString,
 	}),
 	success: Schema.Struct({ forks: Schema.Array(HeadForkSchema) }),
+	error: WsRpcError,
+});
+
+/**
+ * How the next send continues from the Head (82tn.52): `current` when the provider already holds
+ * it; `native` resumes the provider's own session there; `catch_up` resumes it and hands it the
+ * turns it missed; `handoff` starts a fresh session from a recorded context handoff; `refused`
+ * when the provider cannot continue from there.
+ */
+export const ResumePlanSchema = Schema.Literals([
+	"current",
+	"native",
+	"catch_up",
+	"handoff",
+	"refused",
+]);
+export type ResumePlan = typeof ResumePlanSchema.Type;
+
+/** The next send's resume plan, shown in the composer before sending. */
+export const GetResumePlan = Rpc.make("GetResumePlan", {
+	payload: Schema.TaggedStruct("GetResumePlan", { sessionId: NonEmptyString }),
+	success: Schema.Struct({ plan: ResumePlanSchema }),
 	error: WsRpcError,
 });
 
@@ -4009,6 +4036,7 @@ const wsRpcRequests = [
 	CommitHeadMove,
 	GetHeadLog,
 	GetHeadBranches,
+	GetResumePlan,
 	SubmitInput,
 	CancelInput,
 	SendInputNow,

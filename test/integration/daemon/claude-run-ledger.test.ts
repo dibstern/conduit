@@ -1202,6 +1202,131 @@ describe("Claude on the Run Ledger", () => {
 		});
 	});
 
+	// 82tn.32.50 (lane 3250 audit): a send paused at its hold, before (not yet delivered, CONTRACT
+	// 664-666) or just after (possibly reached) the runner has it.
+	const pausedSend = async (
+		point: "before-hold" | "after-hold",
+		prompt: string,
+	) => {
+		const started = await start(
+			{},
+			{ serviceEnvironment: { CONDUIT_TEST_SEND_CONTINUATION_PAUSE: point } },
+		);
+		const { fixture, browser } = started;
+		const sessionId = await browser.createSession(`Claude ledger ${point}`);
+		const gate = join(fixture.root, `conduit-test-send-continuation-${point}`);
+		writeFileSync(gate, "hold");
+		const sent = browser
+			.send(sessionId, prompt)
+			.catch((error: unknown) => error);
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "send-continuation-paused" && mark["point"] === point,
+		);
+		return { ...started, sessionId, gate, sent };
+	};
+	const terminals = (fixture: ProcessHarness, sessionId: string) =>
+		read(fixture, sessionId)
+			.events.map(({ type }) => type)
+			.filter((type) =>
+				["turn.completed", "turn.interrupted", "turn.error"].includes(type),
+			);
+
+	for (const point of ["before-hold", "after-hold"] as const) {
+		// Audit 1-3, 5, 10: two Stops end the Run once, interrupted; the prompt reaches the SDK at
+		// most once (never before its hold); the queued input waits for Send now and is sent once.
+		it(`ends a send stopped twice ${point} interrupted once, and sends the next input once on Send now (82tn.32.50)`, async () => {
+			const prompt = `stop-${point}`;
+			const { fixture, browser, sessionId, gate, sent } = await pausedSend(
+				point,
+				prompt,
+			);
+			browser.send(sessionId, "after-stop").catch(() => undefined);
+			await admitted(fixture, sessionId, 2);
+			for (const _ of [1, 2])
+				await fixture.requestRpc({
+					_tag: "CancelSession",
+					sessionId,
+					commandId: randomUUID(),
+				});
+			rmSync(gate, { force: true });
+			await sent;
+			// test-waits-allow polling: the Stop's end reaches the browser only as a row change.
+			await vi.waitFor(
+				() =>
+					expect(terminals(fixture, sessionId)).toEqual(["turn.interrupted"]),
+				{ timeout: 15_000 },
+			);
+			expect(promptsSent(fixture, prompt)).toBeLessThanOrEqual(
+				point === "before-hold" ? 0 : 1,
+			);
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			const queued = db
+				.prepare(
+					"SELECT input_id AS inputId FROM pending_inputs WHERE session_id = ? AND state = 'queued'",
+				)
+				.all(sessionId) as { inputId: string }[];
+			db.close();
+			expect(queued).toHaveLength(1);
+			await browser.sendNow(sessionId, queued[0]?.inputId ?? "");
+			// test-waits-allow polling: Send now's turn reaches this browser only through history.
+			await vi.waitFor(
+				() =>
+					expect(terminals(fixture, sessionId)).toEqual([
+						"turn.interrupted",
+						"turn.completed",
+					]),
+				{ timeout: 15_000 },
+			);
+			expect(promptsSent(fixture, "after-stop")).toBe(1);
+			const ledger = read(fixture, sessionId);
+			expect(ledger.runs.map((run) => run.status)).toEqual([
+				"interrupted",
+				"completed",
+			]);
+			expect(ledger.ends.map((end) => end.runId)).toEqual(
+				ledger.runs.map((run) => run.id),
+			);
+			proofs.push({ case: `stop-${point}`, sessionId, ends: ledger.ends });
+		});
+	}
+
+	// Audit 6-7: a restart before the hold relaunches the send under its commandId once (CONTRACT
+	// 667-672, 689-691); audit 9: one just after the hold may have reached the agent, so it ends once
+	// and is never sent again.
+	for (const point of ["before-hold", "after-hold"] as const)
+		it(`ends a send a restart caught ${point} once, sending it at most once (82tn.32.50)`, async () => {
+			const prompt = `restart-${point}`;
+			const { fixture, sessionId, gate } = await pausedSend(point, prompt);
+			await fixture.terminate();
+			rmSync(gate, { force: true });
+			await fixture.restart();
+			await fixture.connect(sessionId);
+			// test-waits-allow polling: the send's browser died with the daemon.
+			await vi.waitFor(
+				() =>
+					expect(
+						read(fixture, sessionId).runs.every(
+							(run) => run.status !== "pending" && run.status !== "running",
+						),
+					).toBe(true),
+				{ timeout: 20_000 },
+			);
+			const ledger = read(fixture, sessionId);
+			if (point === "before-hold") {
+				expect(promptsSent(fixture, prompt)).toBe(1);
+				expect(terminals(fixture, sessionId)).toEqual(["turn.completed"]);
+				endsOnce(ledger);
+			} else {
+				expect(promptsSent(fixture, prompt)).toBeLessThanOrEqual(1);
+				expect(terminals(fixture, sessionId)).toHaveLength(1);
+				expect(ledger.ends.map((end) => end.runId)).toEqual(
+					ledger.runs.map((run) => run.id),
+				);
+			}
+			proofs.push({ case: `restart-${point}`, sessionId, ends: ledger.ends });
+		});
+
 	// Lane audit 12: a subagent child's open run is its shown foreground while the ledger holds no
 	// Run (82tn.68); the inbox reads the same, so a send to the child waits for that run.
 	it("holds a send to a running subagent child until its run ends, then sends it once (82tn.32.48)", async () => {

@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { join } from "node:path";
 import { Clock, Effect, Option, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import { validateAttachmentDataUrls } from "../../attachment-data-url.js";
@@ -29,6 +31,7 @@ import {
 import { autoSettleIdleWindowMs } from "../../daemon/config-persistence.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
+import { FolderTimeline } from "../../domain/daemon/Services/folder-timeline.js";
 import { SessionActivityTag } from "../../domain/daemon/Services/session-activity.js";
 import { SessionGit } from "../../domain/daemon/Services/session-git.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
@@ -44,6 +47,7 @@ import {
 	draftLaunchKey,
 } from "../../domain/relay/Services/draft-prewarm.js";
 import { GoalSummaryServiceTag } from "../../domain/relay/Services/goal-summary-service.js";
+import { filesAt } from "../../domain/relay/Services/head-move-files.js";
 import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { setRead } from "../../domain/relay/Services/session-attention.js";
@@ -57,6 +61,7 @@ import {
 	previewHeadMove,
 	readHeadBranches,
 	readHeadLog,
+	readSessionResumePlan,
 } from "../../domain/relay/Services/session-rewind.js";
 import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
 import {
@@ -107,6 +112,7 @@ import {
 	resolveDraftLaunchInput,
 } from "../../handlers/session-draft-prewarm.js";
 import { preWarmSession } from "../../handlers/session-prewarm.js";
+import { readHead } from "../../persistence/effect/history-graph.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { isPickRejection, PickRequired } from "../../provider/turn-settings.js";
 import { saveRelaySettings } from "../../relay/relay-settings.js";
@@ -958,14 +964,155 @@ export const sessionsHandlers = {
 			),
 		),
 	ForkSession: (request) =>
-		forkSessionForClient({
-			clientId: request.originId,
-			...("sessionId" in request ? { sessionId: request.sessionId } : {}),
-			...(request.messageId != null ? { messageId: request.messageId } : {}),
-			...(request.instanceId != null ? { instanceId: request.instanceId } : {}),
-			...(request.targetProjectSlug != null
-				? { targetProjectSlug: request.targetProjectSlug }
-				: {}),
+		Effect.gen(function* () {
+			const options = {
+				clientId: request.originId,
+				...("sessionId" in request ? { sessionId: request.sessionId } : {}),
+				...(request.messageId != null ? { messageId: request.messageId } : {}),
+				...(request.instanceId != null
+					? { instanceId: request.instanceId }
+					: {}),
+				...(request.targetProjectSlug != null
+					? { targetProjectSlug: request.targetProjectSlug }
+					: {}),
+			};
+			if (!request.files) return yield* forkSessionForClient(options);
+			// 82tn.54: a fork with files gets a new worktree per project folder holding the files kept
+			// at the message, made before the fork so the worktree is named for the fork's id.
+			const parent = "sessionId" in request ? request.sessionId : undefined;
+			const config = yield* ConfigTag;
+			if (
+				parent === undefined ||
+				(request.targetProjectSlug ?? config.slug) !== config.slug
+			)
+				return yield* new WsRpcError({
+					message:
+						"A fork with files names its session and stays in its project",
+				});
+			const sql = yield* SqlClient.SqlClient;
+			const [session] = yield* sql<{ provider: string }>`
+				SELECT provider FROM sessions WHERE id = ${parent}`;
+			if (!session)
+				return yield* new WsRpcError({
+					message: `Session ${parent} not found`,
+				});
+			const account = yield* (yield* AccountDirectory).resolve({
+				_tag: "Id",
+				id: request.instanceId ?? session.provider,
+			});
+			// A native OpenCode fork takes its id from the server, so no worktree can be named for it.
+			if (
+				!PROVIDER_SESSION_CAPABILITIES[account.driver].supportsNewWorktree ||
+				PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
+			)
+				return yield* new WorkspaceMoveError({
+					path: config.projectDir,
+					reason: "unsupported-provider",
+				});
+			const [message] =
+				request.messageId === undefined
+					? [{ node: yield* readHead(parent) }]
+					: yield* sql<{ node: string | null }>`
+						SELECT history_node_id AS node FROM messages
+						WHERE session_id = ${parent} AND id = ${request.messageId}`;
+			const timeline = yield* Effect.serviceOption(FolderTimeline);
+			if (!message || Option.isNone(timeline))
+				return yield* new FilesRefused({
+					sessionId: parent,
+					reason: "not_available",
+				});
+			const folders = yield* filesAt(parent, message.node);
+			const worktrees = yield* WorktreeServiceTag;
+			const workspace = yield* SessionWorkspaceTag;
+			const forkId = createLocalSessionId();
+			const created = yield* worktrees.create(
+				[config.projectDir, ...(config.extraFolders ?? [])].map((path) => ({
+					path,
+					projectSlug: config.slug,
+					sessionId: forkId,
+				})),
+			);
+			/** The checkout's shared git folder, and its root or the folder's prefix in it. */
+			const repository = (directory: string, part: string) =>
+				timeline.value
+					.folderGit(directory, [
+						"rev-parse",
+						"--path-format=absolute",
+						"--git-common-dir",
+						part,
+					])
+					.pipe(
+						Effect.map(({ stdout }) => {
+							const [common = "", rest = ""] = stdout.split("\n");
+							return [realpathSync(common), rest] as const;
+						}),
+					);
+			// Held until the fork owns the worktrees, so a restart in between rolls them back.
+			return yield* Effect.gen(function* () {
+				yield* worktrees.hold(created);
+				const checkouts = yield* Effect.forEach(
+					Object.values(created.worktrees),
+					(path) => repository(path, "--show-toplevel"),
+				);
+				// Each folder's files go to the same place in the new checkout of its repository.
+				yield* Effect.forEach(
+					folders,
+					({ directory, to }) =>
+						Effect.gen(function* () {
+							const [common, prefix] = yield* repository(
+								directory,
+								"--show-prefix",
+							);
+							const checkout = checkouts.find(([other]) => other === common);
+							if (!checkout)
+								return yield* new FilesRefused({
+									sessionId: parent,
+									reason: "not_available",
+									directory,
+								});
+							yield* timeline.value.materialize(join(checkout[1], prefix), to);
+						}),
+					{ discard: true },
+				);
+				const forked = yield* forkSessionForClient({ ...options, forkId });
+				if (forked)
+					yield* Effect.forEach(
+						Object.entries(created.worktrees),
+						([folder, path], index) =>
+							workspace.move(
+								forked.id,
+								path,
+								"launch",
+								"conduit",
+								folder,
+								index === 0 ? created.ownership : undefined,
+							),
+						{ discard: true },
+					);
+				return forked;
+			}).pipe(
+				Effect.catchCause((cause) =>
+					worktrees
+						.rollback(created)
+						.pipe(
+							Effect.andThen(worktrees.settle(created)),
+							Effect.andThen(Effect.failCause(cause)),
+						),
+				),
+				// The fork owns its worktrees now, so a note left behind is kept at startup.
+				Effect.tap(() =>
+					worktrees
+						.settle(created)
+						.pipe(
+							Effect.catchCause((cause) =>
+								Effect.logWarning(
+									"A fork's worktree note was not removed",
+									cause,
+								),
+							),
+						),
+				),
+			);
 		}).pipe(
 			Effect.flatMap((session) =>
 				session == null
@@ -993,7 +1140,8 @@ export const sessionsHandlers = {
 					return yield* Effect.fail(
 						error instanceof WsRpcError ||
 							error instanceof AccountUnroutable ||
-							error instanceof SessionBusy
+							error instanceof SessionBusy ||
+							error instanceof FilesRefused
 							? error
 							: new WsRpcError({
 									message: `ForkSession failed: ${String(error)}`,
@@ -1153,6 +1301,11 @@ export const sessionsHandlers = {
 			Effect.map((forks) => ({ forks })),
 			Effect.catch(mapRpcFailure("GetHeadBranches")),
 		),
+	GetResumePlan: (request) =>
+		readSessionResumePlan(request.sessionId).pipe(
+			Effect.map((plan) => ({ plan })),
+			Effect.catch(mapRpcFailure("GetResumePlan")),
+		),
 	GetHeadLog: (request) =>
 		readHeadLog(request.sessionId).pipe(
 			Effect.map((entries) => ({ entries })),
@@ -1230,4 +1383,5 @@ export const sessionsHandlers = {
 	| "CommitHeadMove"
 	| "GetHeadLog"
 	| "GetHeadBranches"
+	| "GetResumePlan"
 >;

@@ -6,6 +6,7 @@ import {
 import type {
 	HeadLogEntry,
 	MoveIntent,
+	ResumePlan,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
@@ -206,6 +207,11 @@ export const headMovesHandlers: StepHandler[] = [
 							: {}),
 					};
 				},
+				ForkSession: (payload) => ({
+					projectSlug: "myapp",
+					sessionId: `${sessionId}-fork`,
+					forkedFrom: "sessionId" in payload ? payload.sessionId : "",
+				}),
 				CommitHeadMove: ({ intent, moveId }) => {
 					if (intent._tag === "undo")
 						state.log = [
@@ -384,6 +390,54 @@ export const headMovesHandlers: StepHandler[] = [
 				messageId: match[1] ?? "",
 				withFiles: true,
 			});
+		},
+	},
+	{
+		name: "branch into a worktree",
+		match: /^I choose to branch into a worktree$/,
+		run: async ({ world }) => {
+			await rewindDialog(world.page)
+				.getByRole("button", { name: "Branch into a worktree" })
+				.click();
+		},
+	},
+	{
+		name: "branching into a worktree is not offered",
+		match: /^branching into a worktree is not offered$/,
+		run: async ({ world }) => {
+			await expect(
+				rewindDialog(world.page).getByRole("button", {
+					name: "Branch into a worktree",
+				}),
+			).toHaveCount(0);
+		},
+	},
+	{
+		// 82tn.54: the files go into a new worktree, and the conversation stays where it is.
+		name: "one fork with files keeps the conversation up to a message",
+		match: /^one fork with files keeps the conversation up to (\S+)$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const fork = await rpc.waitForRequest(
+				(request) => request.tag === "ForkSession",
+			);
+			expect(fork.payload).toMatchObject({
+				sessionId,
+				messageId: match[1] ?? "",
+				files: true,
+			});
+			expect(
+				rpc.getRequests().filter((request) => request.tag === "ForkSession"),
+			).toHaveLength(1);
+		},
+	},
+	{
+		name: "the fork is open",
+		match: /^the fork (\S+) is open$/,
+		run: async ({ world, match }) => {
+			await expect(world.page).toHaveURL(
+				new RegExp(`/s/${match[1] ?? ""}(?:[/?]|$)`),
+			);
 		},
 	},
 	{
@@ -592,6 +646,25 @@ export const headMovesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await openMessageMenu(world.page, Number(match[1]));
 			await world.page.getByRole("menuitem", { name: "Regenerate" }).click();
+		},
+	},
+	{
+		name: "the daemon plans how the next message continues",
+		match: /^the next message continues by (native|catch_up|handoff|refused)$/,
+		run: ({ world, match }) => {
+			const plan = match[1] as ResumePlan;
+			requireRpcControl(world.page).setStubs({
+				GetResumePlan: () => ({ plan }),
+			});
+		},
+	},
+	{
+		name: "the composer says how the next message continues",
+		match: /^the composer says the next message (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("composer-resume-plan")).toHaveText(
+				`Next message: ${match[1] ?? ""}`,
+			);
 		},
 	},
 	{

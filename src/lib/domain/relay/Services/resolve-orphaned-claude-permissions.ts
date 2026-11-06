@@ -17,8 +17,9 @@ import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
  * permissions, so ownership comes from the provider that recorded the ask,
  * regardless of the session's current provider.
  *
- * Runs at relay startup, before the command gate opens. Recovered turns can
- * still emit asks while cleanup runs.
+ * Runs on the daemon once runner recovery is done, for each registered project
+ * (OrphanedClaudePermissionsLive). Recovered turns can still emit asks while
+ * cleanup runs.
  */
 export const resolveOrphanedClaudePermissions = Effect.gen(function* () {
 	const sql = yield* Effect.serviceOption(SqlClient.SqlClient);

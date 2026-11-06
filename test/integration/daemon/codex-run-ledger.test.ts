@@ -29,7 +29,7 @@
 //      or runs twice;
 // 279. output the runner sent before the restart is lost or lands twice.
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect, Fiber, Stream } from "effect";
@@ -554,6 +554,41 @@ describe("Codex on the Run Ledger", () => {
 		]);
 		expect(ledger.ends[0]?.forced).not.toBe(1);
 		prove("stop", ledger);
+	});
+
+	// 82tn.32.50 (lane 3250 audit 11): a Stop while the send waits before its hold, with no Codex
+	// process to signal, ends the Run interrupted at once and Codex never sees the prompt
+	// (CONTRACT 664-666, D50).
+	it("ends a send stopped before its hold interrupted at once, never starting its turn (82tn.32.50)", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"stop-before-hold",
+			fixtureRows("stop-queued"),
+			{ CONDUIT_TEST_SEND_CONTINUATION_PAUSE: "before-hold" },
+			{ restartProof: true },
+		);
+		const gate = join(
+			fixture.root,
+			"conduit-test-send-continuation-before-hold",
+		);
+		writeFileSync(gate, "hold");
+		await submit(browser, sessionId, "Say hello");
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "send-continuation-paused" &&
+				mark["point"] === "before-hold",
+		);
+		await Effect.runPromise(
+			browser.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
+		);
+		rmSync(gate, { force: true });
+		await turns(fixture, sessionId, ["interrupted"]);
+		expect(captured("turn/start", "out")).toEqual([]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.ends).toEqual([
+			expect.objectContaining({ outcome: "interrupted" }),
+		]);
+		prove("stop-before-hold", ledger);
 	});
 
 	// Failure modes (32.8): F300 the Run stays running when turn/interrupt is never answered;

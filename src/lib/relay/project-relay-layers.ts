@@ -176,10 +176,11 @@ import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.
 import { SessionWorkspaceHintStateTag } from "../domain/relay/Services/session-workspace-hint-state.js";
 import { SSEStreamLive } from "../domain/relay/Services/sse-stream-service.js";
 import {
-	LocalPtyServiceLive,
+	LocalPtyServiceOrOwn,
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
 import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
+import { DEFAULT_CONFIG_DIR } from "../env.js";
 import { realWorkspacePath } from "../git/worktrees.js";
 import type { CommitAndSignalProject } from "../persistence/effect/commit-and-signal.js";
 import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
@@ -215,7 +216,6 @@ import { createTranslator } from "./event-translator.js";
 import { createMonitoringWiringState } from "./monitoring-wiring.js";
 import { publishProviderRelayMessage } from "./project-relay-publisher.js";
 import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
-import { PermissionTimeoutLive } from "./timer-wiring.js";
 
 /** Services promised to callers of ProjectRelay.effectRuntime. */
 export type RelayRuntimeServices =
@@ -941,9 +941,9 @@ export function createProjectRelayLayers({
 			Layer.mergeAll(openCodeInstancesLayer, configLayer, loggerLayer),
 		),
 	);
-	const localPtyServiceLayer = LocalPtyServiceLive.pipe(
-		Layer.provide(Layer.merge(configLayer, loggerLayer)),
-	);
+	const localPtyServiceLayer = LocalPtyServiceOrOwn(
+		config.configDir ?? DEFAULT_CONFIG_DIR,
+	).pipe(Layer.provide(Layer.merge(daemonContextLayer, loggerLayer)));
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -1010,8 +1010,8 @@ export function createProjectRelayLayers({
 	// Optional bridge layers (only included when deps are present)
 	const bridgeLayers = Layer.merge(coreBridgeLayers, instanceManagementLayer);
 	// Compose: self-constructing state layers + imperative bridge layers.
-	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
-	// SessionLifecycleWiringLive) are added after monitoring state exists
+	// baseLayers are defined here; wiringLayers (SessionLifecycleWiringLive)
+	// are added after monitoring state exists
 	// (provides sseTracker, getMonitoringState).
 	const sharedOverrides = Context.getOption(
 		config.daemonConfigContext ?? Context.empty(),
@@ -1141,10 +1141,10 @@ export function createProjectRelayLayers({
 			}),
 		),
 	);
-	const wiringLayers = Layer.mergeAll(
-		PermissionTimeoutLive,
-		sessionLifecycleWiringLayer,
-	).pipe(Layer.provide(Layer.merge(baseLayers, sessionWorkspaceLayer)));
+	// Permission timeouts run once on the daemon for every project (82tn.16).
+	const wiringLayers = sessionLifecycleWiringLayer.pipe(
+		Layer.provide(Layer.merge(baseLayers, sessionWorkspaceLayer)),
+	);
 	const inboxLayer = SessionInboxLive.pipe(Layer.provide(sessionEventBusLayer));
 	// Provide the borrowed daemon tracer to every layer, including fibers forked
 	// while building services such as the status poller.

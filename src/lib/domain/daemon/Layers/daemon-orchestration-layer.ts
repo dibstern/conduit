@@ -67,6 +67,8 @@ import {
 	SecretAnswersLive,
 } from "../Services/secret-answers.js";
 import { SessionDirectory } from "../Services/session-directory.js";
+import { WorktreeServiceTag } from "../Services/worktree-service.js";
+import { makeOrphanedClaudePermissions } from "./orphaned-permissions-layer.js";
 
 export const DaemonOrchestrationLive = Layer.effect(
 	DaemonOrchestration,
@@ -303,6 +305,19 @@ export const DaemonOrchestrationLive = Layer.effect(
 				),
 			);
 		}
+		// Worktrees a fork with files made before a restart cut it off (82tn.54): kept when a session's
+		// workspace names one, else rolled back. CONTRACT.md 2849-2854 has every liveness reader ask
+		// anythingMayAct; nearest reading: a worktree no session's workspace names has no Run that
+		// could act in it, so this asks no Run Ledger.
+		const worktrees = yield* Effect.serviceOption(WorktreeServiceTag);
+		if (Option.isSome(worktrees))
+			yield* worktrees.value.recoverHeld((created) =>
+				sql`SELECT 1 FROM sessions s, json_each(
+						CASE WHEN json_valid(s.workspace) THEN s.workspace ELSE '{}' END, '$.worktrees') w
+					WHERE w.value IN ${sql.in(Object.values(created.worktrees))} LIMIT 1`.pipe(
+					Effect.map((rows) => rows.length > 0),
+				),
+			);
 		const bindings = new SqliteProviderSessionBindingReadModel(sql);
 		const resolveCallContext = yield* makeProviderCallContextResolver({
 			sessionBindingReadModel: bindings,
@@ -375,6 +390,7 @@ export const DaemonOrchestrationLive = Layer.effect(
 			yield* DaemonStoreAvailability,
 			drafts.discardProject,
 		);
+		const clearOrphanedAsks = yield* makeOrphanedClaudePermissions;
 		let started = false;
 		return {
 			engine,
@@ -383,6 +399,8 @@ export const DaemonOrchestrationLive = Layer.effect(
 				yield* adapters.recover;
 				if (started) return;
 				started = true;
+				// Before the outbox drains, as relay start cleared them before its command gate opened.
+				yield* clearOrphanedAsks;
 				channel("conduit.orchestration.engine").publish({
 					event: "drain-started",
 					engine,

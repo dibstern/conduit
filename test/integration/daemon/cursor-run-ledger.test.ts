@@ -242,6 +242,10 @@ describe("Cursor on the Run Ledger", () => {
 		const fixture = ProcessHarness.create({
 			dist,
 			...(buildId ? { buildId } : {}),
+			// The send-continuation pause writes its mark to the process proof.
+			...(environment["CONDUIT_TEST_SEND_CONTINUATION_PAUSE"]
+				? { restartProof: true }
+				: {}),
 		});
 		harness = fixture;
 		const tracePath = join(fixture.root, "cursor-replay.jsonl");
@@ -367,6 +371,38 @@ describe("Cursor on the Run Ledger", () => {
 		endsOnce(ledger);
 		oneRunnerStartedFirst(ledger);
 		prove("send", ledger);
+	});
+
+	// 82tn.32.50 (lane 3250 audit 11): a Stop while the send waits before its hold, with no Cursor
+	// process to signal, ends the Run interrupted at once and the agent never gets the prompt
+	// (CONTRACT 664-666, D50).
+	it("ends a send stopped before its hold interrupted at once, never sending it (82tn.32.50)", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"stop-before-hold",
+			"basic",
+			{ CONDUIT_TEST_SEND_CONTINUATION_PAUSE: "before-hold" },
+		);
+		const gate = join(
+			fixture.root,
+			"conduit-test-send-continuation-before-hold",
+		);
+		writeFileSync(gate, "hold");
+		await submit(browser, sessionId, "Replay the captured basic turn.");
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "send-continuation-paused" &&
+				mark["point"] === "before-hold",
+		);
+		await stop(browser, sessionId);
+		rmSync(gate, { force: true });
+		await turns(fixture, sessionId, ["interrupted"]);
+		expect(captured("send.options")).toEqual([]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.ends).toEqual([
+			expect.objectContaining({ outcome: "interrupted" }),
+		]);
+		prove("stop-before-hold", ledger);
 	});
 
 	it("stamps every tool row, a subagent's too, with its Run's id and the project folder (82tn.45)", async () => {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import {
 	FilesRefused,
@@ -7,12 +7,14 @@ import {
 } from "../../../contracts/limit-recovery.js";
 import type { InputRequest } from "../../../contracts/stored-event.js";
 import type { HeadLogEntry, MoveIntent } from "../../../contracts/ws-rpc.js";
+import { readResumePlan } from "../../../persistence/effect/head-realignment.js";
 import {
 	pathToRoot,
 	readHead,
 } from "../../../persistence/effect/history-graph.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { EventPayloadMap } from "../../../persistence/events.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { headMoveFiles } from "../../daemon/Services/folder-timeline.js";
 import { planFiles, restoreFiles } from "./head-move-files.js";
 import { InputDraftsTag } from "./input-drafts.js";
@@ -148,6 +150,13 @@ const planHeadMove = (sessionId: string, intent: MoveIntent) =>
 				: yield* sql<{ id: string }>`SELECT id FROM history_nodes
 					WHERE session_id = ${sessionId} AND id IN ${sql.in(joining)} AND available = 0`;
 		if (missing || lost) return yield* noTarget(sessionId);
+		// 82tn.52: a native revert (Codex, OpenCode) only drops turns from the path it holds.
+		if ((yield* readSessionResumePlan(sessionId, target.to)) === "refused")
+			return yield* new SessionBusy({
+				sessionId,
+				command: "head_move",
+				reason: "branch_unsupported",
+			});
 		const [tip] =
 			target.to === null
 				? []
@@ -190,11 +199,36 @@ const planHeadMove = (sessionId: string, intent: MoveIntent) =>
 		return { moveId, head, target, files, folders };
 	});
 
+/** The next send's resume plan on the session's provider (82tn.52), at the Head or at `head`. */
+export const readSessionResumePlan = (
+	sessionId: string,
+	head?: string | null,
+) =>
+	Effect.gen(function* () {
+		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
+		if (!session) return "current" as const;
+		const account = yield* (yield* AccountDirectory)
+			.resolve({ _tag: "Id", id: session.provider })
+			.pipe(Effect.option);
+		return yield* readResumePlan(
+			yield* SqlClient.SqlClient,
+			sessionId,
+			session.provider,
+			Option.match(account, {
+				onNone: () => session.provider,
+				onSome: ({ driver }) => driver,
+			}),
+			head,
+		);
+	});
+
 /** A proposal for an intent: its id and whether the files there are kept (82tn.51). */
 export const previewHeadMove = (sessionId: string, intent: MoveIntent) =>
 	Effect.gen(function* () {
-		const plan = yield* planHeadMove(sessionId, intent);
+		// A busy session says so first: a running Run has no History Node yet, so planning a
+		// target inside it would read as history no longer kept.
 		yield* admitOrRefuse(sessionId, { kind: "head_move" });
+		const plan = yield* planHeadMove(sessionId, intent);
 		return {
 			moveId: plan.moveId,
 			files: plan.files,

@@ -203,6 +203,38 @@ it("drops a session's checkpoints when it is evicted or forgotten, and only its 
 	expect(checkpointRefs()).toHaveLength(1);
 });
 
+// 82tn.54 audit row 1: a checkpoint borrows the objects its repository already has, so a gc
+// there takes a staged blob the user since replaced, and the checkpoint's files are lost.
+it("keeps a checkpoint's files through a git gc in its repository, counting what it copies", async () => {
+	const repo = repository("repo", { "a.txt": "one\n" });
+	const staged = randomBytes(200_000).toString("base64");
+	writeFileSync(join(repo, "staged.txt"), staged);
+	git(repo, "add", "staged.txt");
+	const result = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			yield* turn("s1", "r1", [repo], () =>
+				writeFileSync(join(repo, "a.txt"), "two\n"),
+			);
+			writeFileSync(join(repo, "staged.txt"), "replaced\n");
+			git(repo, "add", "staged.txt");
+			git(repo, "gc", "--prune=now", "--quiet");
+			const before = yield* timeline.diskUse;
+			const bytes = yield* timeline.storeBytes("s1");
+			const checkpoint = yield* timeline.checkpoint("s1", "r1", repo);
+			yield* timeline.evict("s1", Effect.succeed(true));
+			return { before, bytes, checkpoint, after: yield* timeline.diskUse };
+		}),
+	);
+	const { checkpoint } = result;
+	if (!checkpoint) throw new Error("No checkpoint");
+	expect(show(checkpoint.store, checkpoint.start, "staged.txt")).toBe(staged);
+	expect(show(checkpoint.store, checkpoint.end, "staged.txt")).toBe(staged);
+	expect(show(checkpoint.store, checkpoint.end, "a.txt")).toBe("two");
+	expect(result.bytes).toBeGreaterThan(staged.length / 2);
+	expect(result.before - result.after).toBeGreaterThan(staged.length / 2);
+});
+
 type Entry = string;
 /** The folder as a restore must leave it: each path's type, exec bit and bytes or link target. */
 const listing = (directory: string): Entry[] =>
@@ -526,4 +558,88 @@ it("makes a run's start wait for an apply in its folder", async () => {
 	);
 	expect(result).toEqual({ startedMidApply: false, started: true });
 	expect(listing(repo)).not.toEqual(original);
+});
+
+// 82tn.54 audit rows 6, 9, 10: materialize writes a node's folder into a new checkout of its
+// repository, the way the node held it, and never reads or writes the source folder; two at
+// once each get the whole tree; a subfolder lands under its own prefix.
+it("writes a checkpoint's folder into new checkouts, two at once, leaving the dirty source as it is", async () => {
+	const repo = reshaped("repo");
+	const result = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			yield* turn("s1", "r1", [repo], reshape(repo));
+			yield* turn("s1", "r2", [repo], () =>
+				writeFileSync(join(repo, "a.txt"), "three\n"),
+			);
+			return yield* timeline.checkpoint("s1", "r1", repo);
+		}),
+	);
+	if (!result) throw new Error("No checkpoint");
+	writeFileSync(join(repo, "a.txt"), "dirty\n");
+	const checkouts = ["fork-1", "fork-2"].map((name) => {
+		git(repo, "worktree", "add", "-q", "-b", name, join(root, name), "HEAD");
+		return join(root, name);
+	});
+	const source = { files: listing(repo), user: userState(repo) };
+	const trees = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			return yield* Effect.all(
+				checkouts.map((into) => timeline.materialize(into, result.end)),
+				{ concurrency: "unbounded" },
+			);
+		}),
+	);
+	expect(trees).toEqual([result.end, result.end]);
+	for (const into of checkouts) {
+		expect(readFileSync(join(into, "a.txt"), "utf8")).toBe("two\n");
+		expect(readFileSync(join(into, "new/deep/n.txt"), "utf8")).toBe("new\n");
+		expect(existsSync(join(into, "gone.txt"))).toBe(false);
+		expect(lstatSync(join(into, "run.sh")).mode & 0o111).toBe(0);
+	}
+	expect({ files: listing(repo), user: userState(repo) }).toEqual(source);
+});
+
+it("writes a subfolder's checkpoint under its prefix in the new checkout, nothing outside it", async () => {
+	const repo = repository("repo", { "a.txt": "one\n", "sub/b.txt": "b\n" });
+	const folder = join(repo, "sub");
+	const result = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			yield* turn("s1", "r1", [folder], () => {
+				writeFileSync(join(folder, "b.txt"), "b2\n");
+				writeFileSync(join(folder, "c.txt"), "c\n");
+			});
+			const checkpoint = yield* timeline.checkpoint("s1", "r1", folder);
+			if (!checkpoint) throw new Error("No checkpoint");
+			writeFileSync(join(repo, "a.txt"), "dirty outside\n");
+			git(
+				repo,
+				"worktree",
+				"add",
+				"-q",
+				"-b",
+				"fork",
+				join(root, "fork"),
+				"HEAD",
+			);
+			writeFileSync(join(root, "fork", "a.txt"), "fork's own\n");
+			const tree = yield* timeline.materialize(
+				join(root, "fork", "sub"),
+				checkpoint.end,
+			);
+			return { checkpoint, tree };
+		}),
+	);
+	const { checkpoint, tree } = result;
+	expect(checkpoint.prefix).toBe("sub/");
+	expect(git(checkpoint.store, "rev-parse", `${tree}:sub`)).toBe(
+		git(checkpoint.store, "rev-parse", `${checkpoint.end}:sub`),
+	);
+	expect(readFileSync(join(root, "fork", "sub", "c.txt"), "utf8")).toBe("c\n");
+	expect(readFileSync(join(root, "fork", "a.txt"), "utf8")).toBe(
+		"fork's own\n",
+	);
+	expect(readFileSync(join(repo, "sub", "b.txt"), "utf8")).toBe("b2\n");
 });

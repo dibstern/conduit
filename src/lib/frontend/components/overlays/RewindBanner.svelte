@@ -13,7 +13,11 @@
 	} from "../../stores/ui.svelte.js";
 	import { chatState } from "../../stores/chat.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
-	import { planRewindFiles, rewindTo } from "../../stores/head-moves.svelte.js";
+	import {
+		branchIntoWorktree,
+		planRewindFiles,
+		rewindTo,
+	} from "../../stores/head-moves.svelte.js";
 	import Surface from "../ui/Surface.svelte";
 
 	const showBanner = $derived(uiState.rewindActive);
@@ -25,9 +29,20 @@
 		const message = chatState.messages.find((message) => message.uuid === uiState.rewindSelectedUuid);
 		return message && "messageId" in message ? message.messageId : undefined;
 	});
+	// 82tn.54: a branch keeps the conversation up to the last message before the selected one, so
+	// it starts where the rewind would land.
+	const branchFromId = $derived.by(() => {
+		const index = chatState.messages.findIndex((message) => message.uuid === uiState.rewindSelectedUuid);
+		return chatState.messages
+			.slice(0, Math.max(index, 0))
+			.flatMap((message) => ("messageId" in message && message.messageId ? [message.messageId] : []))
+			.at(-1);
+	});
 	// 82tn.53: the rewind with files, previewed on open: its Restore Plan (the paths that change),
 	// or why the files cannot go back. The conversation-only rewind stays open either way.
-	let files = $state<{ paths: string[] } | { refused: string } | undefined>();
+	let files = $state<
+		{ paths: string[] } | { refused: string; branchable: boolean } | undefined
+	>();
 	$effect(() => {
 		const sessionId = sessionState.currentId;
 		const messageId = selectedMessageId;
@@ -64,6 +79,13 @@
 		}
 		// A head move like the transcript's (82tn.51): it lands at once and the Head Log undoes it.
 		void rewindTo(sessionId, messageId, withFiles);
+	}
+
+	function handleBranch(): void {
+		const sessionId = sessionState.currentId;
+		const messageId = branchFromId;
+		exitRewindMode();
+		if (sessionId && messageId) branchIntoWorktree(sessionId, messageId);
 	}
 
 	function handleKeydown(e: KeyboardEvent): void {
@@ -150,6 +172,17 @@
 			>
 				Conversation only
 			</Button>
+			{#if files && "refused" in files && files.branchable && branchFromId}
+				<!-- 82tn.54: the files go back in a new worktree instead, leaving this folder alone. -->
+				<Button
+					variant="secondary"
+					size="content"
+					class="rounded-lg py-1.5 px-4 text-base"
+					onclick={handleBranch}
+				>
+					Branch into a worktree
+				</Button>
+			{/if}
 			<Button
 				variant="primary"
 				size="content"
