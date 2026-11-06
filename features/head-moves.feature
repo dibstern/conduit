@@ -208,3 +208,16 @@ Examples:
   | viewport | message                 | reason                             |
   | phone    | Add a migration section | Files from this point were pruned. |
   | desktop  | Add a migration section | Files from this point were pruned. |
+
+Scenario Outline: the composer says how the next message continues after a move
+  Given the viewport is a <viewport>
+  And the next message continues by <plan>
+  And a branched conversation is open
+  Then the composer says the next message <notice>
+
+Examples:
+  | viewport | plan    | notice                                                 |
+  | phone    | native  | Claude resumes its own session from here.              |
+  | desktop  | native  | Claude resumes its own session from here.              |
+  | phone    | handoff | Claude starts a new session, handed this conversation. |
+  | desktop  | handoff | Claude starts a new session, handed this conversation. |

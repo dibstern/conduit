@@ -89,6 +89,7 @@ export {
 	ResolveClaudeSettings,
 	type ResolveClaudeSettingsResponse,
 	RespondPermission,
+	type ResumePlan,
 	RewindSession,
 	type RewindSessionResponse,
 	type RpcLogLevel,

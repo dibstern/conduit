@@ -6,6 +6,7 @@ import {
 import type {
 	HeadLogEntry,
 	MoveIntent,
+	ResumePlan,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
@@ -645,6 +646,25 @@ export const headMovesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await openMessageMenu(world.page, Number(match[1]));
 			await world.page.getByRole("menuitem", { name: "Regenerate" }).click();
+		},
+	},
+	{
+		name: "the daemon plans how the next message continues",
+		match: /^the next message continues by (native|catch_up|handoff|refused)$/,
+		run: ({ world, match }) => {
+			const plan = match[1] as ResumePlan;
+			requireRpcControl(world.page).setStubs({
+				GetResumePlan: () => ({ plan }),
+			});
+		},
+	},
+	{
+		name: "the composer says how the next message continues",
+		match: /^the composer says the next message (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("composer-resume-plan")).toHaveText(
+				`Next message: ${match[1] ?? ""}`,
+			);
 		},
 	},
 	{

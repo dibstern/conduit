@@ -94,6 +94,7 @@
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { SessionPermissionMode } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
+	import type { ResumePlan } from "../../transport/ws-rpc.js";
 	import type { WorktreeInfo } from "../../../shared-types.js";
 
 	const inputAreaId = $props.id();
@@ -499,6 +500,27 @@
 		slash_command: "Commands can't steer; they queue.",
 	};
 	const contextWarning = $derived(isContextWarning(currentChat().contextPercent, composerPreferences.contextWarning));
+	// 82tn.52: how the next send continues, read again when the transcript or the account changes
+	// (every head move and provider switch does) and once a Run ends.
+	let resumePlan = $state<ResumePlan>("current");
+	const transcriptIds = $derived(currentChat().messages.map((message) => message.uuid).join(" "));
+	$effect(() => {
+		const sessionId = sessionState.currentId;
+		void [transcriptIds, accountId];
+		resumePlan = "current";
+		if (!sessionId || isProcessing()) return;
+		let current = true;
+		rpc("GetResumePlan", { sessionId })
+			.then(({ plan }) => { if (current) resumePlan = plan; })
+			.catch((error) => { if (current) toastFailure("Couldn't load how the next message continues")(error); });
+		return () => { current = false; };
+	});
+	const resumeCopy: Record<Exclude<ResumePlan, "current">, string> = {
+		native: "resumes its own session from here.",
+		catch_up: "resumes its session and is caught up on the turns it missed.",
+		handoff: "starts a new session, handed this conversation.",
+		refused: "can't continue from here. Switch back to the branch it last saw.",
+	};
 	const foldedDuo = $derived(sessionViewState.pose === "duo-folded-portrait");
 	// The folded Duo's rail holds the icon controls, whatever the saved preference.
 	const composerControls = $derived(foldedDuo ? "icons" : composerPreferences.controls);
@@ -1313,6 +1335,13 @@
 		{/if}
 
 		<UsageWarningStrip session={currentSession} projectSlug={composerProjectSlug} />
+
+		{#if resumePlan !== "current"}
+			<ComposerStrip tone={resumePlan === "refused" ? "risk" : "neutral"} data-testid="composer-resume-plan" data-plan={resumePlan} class="flex items-center gap-[8px]">
+				<Icon name={resumePlan === "refused" ? "triangle-alert" : "git-branch"} size={16} class="shrink-0" />
+				<span class="min-w-0 flex-1"><b class="font-semibold text-text">Next message:</b> {composerPresentation?.label ?? "The agent"} {resumeCopy[resumePlan]}</span>
+			</ComposerStrip>
+		{/if}
 
 		{#if contextWarning && !compacting && !contextDismissed}
 			<ComposerStrip tone="ask" data-testid="composer-context-warning" class="flex items-center gap-[8px]">
