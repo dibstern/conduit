@@ -492,6 +492,7 @@ export function makeMockOpenCodeAPI(
 			abort: vi.fn(async () => undefined),
 			fork: vi.fn(async () => ({ id: "ses_forked" })),
 			deleteMessage: vi.fn(async () => undefined),
+			holdAt: vi.fn(async () => undefined),
 			summarize: vi.fn(async () => undefined),
 			children: vi.fn(async () => []),
 		},

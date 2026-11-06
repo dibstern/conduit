@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import {
 	getProviderDriver,
@@ -100,11 +100,70 @@ export const readOwedRealignment = (
 		};
 	}).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 
+const OpenCodeNatives = Schema.fromJsonString(
+	Schema.Struct({
+		current: Schema.optionalKey(Schema.String),
+		sessions: Schema.Record(
+			Schema.String,
+			Schema.Struct({
+				/** Each copied message or part id -> the Conduit id it copies. */
+				copies: Schema.Record(Schema.String, Schema.String),
+				/** Its newest message, under its Conduit id, when the session left it. */
+				tip: Schema.optionalKey(Schema.String),
+			}),
+		),
+	}),
+);
+export type OpenCodeNatives = typeof OpenCodeNatives.Type;
+
+/**
+ * 82tn.52: the OpenCode sessions one Conduit session runs on. One is current; the others hold a
+ * branch it left. Only OpenCodeSessionIds writes it.
+ */
+export const OPENCODE_NATIVES_KEY = "opencode.natives";
+
+export const readOpenCodeNatives = (
+	sql: SqlClient.SqlClient,
+	sessionId: string,
+) =>
+	sql<{ value: string }>`
+		SELECT value FROM provider_state
+		WHERE session_id = ${sessionId} AND key = ${OPENCODE_NATIVES_KEY}`.pipe(
+		Effect.flatMap(([row]) =>
+			row
+				? Schema.decodeUnknownEffect(OpenCodeNatives)(row.value).pipe(
+						Effect.orDie,
+					)
+				: Effect.succeed<OpenCodeNatives>({ sessions: {} }),
+		),
+	);
+
+/** The OpenCode sessions a Conduit session left whose path holds `node`, with their newest message. */
+export const readOpenCodeHolders = (
+	sql: SqlClient.SqlClient,
+	sessionId: string,
+	node: string,
+) =>
+	Effect.gen(function* () {
+		const { current, sessions } = yield* readOpenCodeNatives(sql, sessionId);
+		const holders: { native: string; tip: string }[] = [];
+		for (const [native, { tip }] of Object.entries(sessions)) {
+			if (native === current || tip === undefined) continue;
+			const [row] = yield* sql<{ node: string | null }>`
+				SELECT history_node_id AS node FROM messages WHERE id = ${tip}
+				UNION ALL SELECT node_id FROM history_off_head
+				WHERE source_table = 'messages' AND row_key = ${tip}`;
+			if ((yield* pathToRoot(sessionId, row?.node ?? null)).includes(node))
+				holders.push({ native, tip });
+		}
+		return holders;
+	}).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+
 /**
  * 82tn.52: the Turn Launcher's resume plan, read from the store before a send (the composer, a
  * head move's preview) as the launch reads it. The provider holds the path to the Head before the
  * first move it has not heard of; a native revert (Codex, OpenCode) can only drop turns from it,
- * so a Head off that path is refused. Claude resumes its own session at the Head when it has one,
+ * so a Head off that path is refused, unless an OpenCode session it left holds the Head. Claude resumes its own session at the Head when it has one,
  * otherwise it, like Cursor, starts fresh from a recorded handoff. A switch back to a provider
  * with a native session catches it up. A refused native resume still falls back to a handoff at
  * launch, recorded with its reason, so a "native" plan is the expected path, not a promise.
@@ -136,7 +195,9 @@ export const readResumePlan = (
 			return (
 				!moved
 					? "current"
-					: at === null || (yield* pathToRoot(sessionId, held)).includes(at)
+					: at === null ||
+							(yield* pathToRoot(sessionId, held)).includes(at) ||
+							(yield* readOpenCodeHolders(sql, sessionId, at)).length > 0
 						? "native"
 						: "refused"
 			) satisfies ResumePlan;

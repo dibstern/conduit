@@ -60,6 +60,31 @@ const renameSessionIds = (
 	};
 };
 
+/** The event's message and part ids a native copy re-ided, as the Conduit ids they copy. */
+const renameCopyIds = (
+	properties: Fields,
+	copies: Readonly<Record<string, string>>,
+): Fields => {
+	const renamed = (value: Fields, keys: readonly string[]) => ({
+		...value,
+		...Object.fromEntries(
+			keys.flatMap((key) => {
+				const id = value[key];
+				return typeof id === "string" && copies[id] ? [[key, copies[id]]] : [];
+			}),
+		),
+	});
+	const part = fields(properties["part"]);
+	const info = fields(properties["info"]);
+	return {
+		...renamed(properties, ["messageID", "partID"]),
+		...(part ? { part: renamed(part, ["id", "messageID"]) } : {}),
+		...(info && "sessionID" in info
+			? { info: renamed(info, ["id", "parentID"]) }
+			: {}),
+	};
+};
+
 /**
  * One OpenCode event subscription per registered project, held for the
  * daemon's life rather than a tab's (82tn.16, S3). Each event goes to the
@@ -164,14 +189,29 @@ export const makeOpenCodeProjectStreamsLive = (
 						);
 						if (mapped !== id) conduit.set(id, mapped);
 					}
-					if (conduit.size === 0) return message;
+					// 82tn.52: a Conduit session runs on one native session; the others it left or
+					// copied a branch into only replay history it holds. A copy reads as what it copies.
+					const info = fields(properties["info"]);
+					const own =
+						properties["sessionID"] ??
+						fields(properties["part"])?.["sessionID"] ??
+						(info && ("sessionID" in info ? info["sessionID"] : info["id"]));
+					const copies: Readonly<Record<string, string>> = {};
+					if (typeof own === "string") {
+						const owner = conduit.get(own) ?? own;
+						if ((yield* sessionIds.value.native(owner)) !== own)
+							return undefined;
+						Object.assign(copies, yield* sessionIds.value.copies(owner, own));
+					}
+					if (conduit.size === 0 && Object.keys(copies).length === 0)
+						return message;
 					return {
 						...message,
 						payload: {
 							...payload,
-							properties: renameSessionIds(
-								properties,
-								(id) => conduit.get(id) ?? id,
+							properties: renameCopyIds(
+								renameSessionIds(properties, (id) => conduit.get(id) ?? id),
+								copies,
 							),
 						},
 					};
@@ -204,6 +244,7 @@ export const makeOpenCodeProjectStreamsLive = (
 					}
 					if (received._tag !== "event") return deliver(slug, entry, received);
 					const message = yield* toConduitIds(received);
+					if (!message) return;
 					const payload = message.payload as Partial<SSEEvent> | null;
 					const sessionId = payload?.properties
 						? extractSessionId(payload as SSEEvent)
