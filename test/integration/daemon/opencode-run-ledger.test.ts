@@ -798,6 +798,51 @@ describe("OpenCode on the Run Ledger", () => {
 		expect(after.b.runs.map(({ status }) => status)).toEqual(["completed"]);
 	});
 
+	// The send's try was issued with no outcome, so it may have reached OpenCode and is never
+	// relaunched (CONTRACT.md 689-691); main's restart recovery ends it once the instance is proven
+	// down, as it ends a held Run whose process died with the daemon.
+	// test-waits-allow timeout-override: a daemon restart takes seconds.
+	it("a daemon restart while a send waits for its instance ends that Run once, never sends its prompt, and the next message runs (82tn.32.52)", async () => {
+		const { fixture, sessionId, gate } = await startingSend("restarted");
+		await until(() => expect(read(fixture, sessionId).runs).toHaveLength(2));
+		await fixture.terminate();
+		rmSync(gate, { force: true });
+		await fixture.restart();
+		await until(
+			() =>
+				expect(
+					read(fixture, sessionId).runs.map(({ status }) => status),
+				).toEqual(["completed", "error"]),
+			30_000,
+		);
+		const recovered = read(fixture, sessionId);
+		const browser = await fixture.connect();
+		await browser.send(sessionId, "next", 60_000);
+		await until(() =>
+			expect(read(fixture, sessionId).ends.map(({ reason }) => reason)).toEqual(
+				["completed", "provider_error", "completed"],
+			),
+		);
+		const after = read(fixture, sessionId);
+		proofs.push({ scenario: "restart-while-starting", recovered, after });
+		expect(
+			prompted(fixture, sessionId).map(({ body }) =>
+				["restarted", "next"].filter((text) => body.includes(text)),
+			),
+		).toEqual([[], ["next"]]);
+		expect(after.runs.map(({ status }) => status)).toEqual([
+			"completed",
+			"error",
+			"completed",
+		]);
+		expect(after.ends).toEqual(
+			after.runs.map(({ id }, index) => ({
+				runId: id,
+				reason: index === 1 ? "provider_error" : "completed",
+			})),
+		);
+	}, 60_000);
+
 	it("a prompt whose send comes back unknown and then runs late keeps its Run live while the work runs, probes until an idle read after the work, and ends it once", async () => {
 		const fixture = await start(instanceId, 500);
 		const browser = await fixture.connect();

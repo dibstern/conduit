@@ -800,7 +800,11 @@ export const getManagedOpenCodeProcessIdentity = (instanceId: string) =>
 			: undefined;
 	});
 
-/** Cached stopped status can also mean failed adoption of a still-live process. */
+/**
+ * Cached stopped status can also mean failed adoption of a still-live process, so this reads the
+ * record. A record naming no process proves none runs: identity is saved before readiness, and a
+ * stop that cannot verify ownership keeps it (82tn.32.52: a restart after a start it stopped).
+ */
 export const isManagedOpenCodeStopped = (instanceId: string) =>
 	withManagedOpenCodeLock(
 		Effect.gen(function* () {
@@ -816,8 +820,6 @@ export const isManagedOpenCodeStopped = (instanceId: string) =>
 				getProviderDriver(instance.value.driver ?? "opencode")
 					?.runsOpenCodeServer === true &&
 				Option.isSome(record) &&
-				(record.value.pid !== undefined ||
-					record.value.processIdentity !== undefined) &&
 				(!record.value.pid || !isProcessAlive(record.value.pid)) &&
 				(!record.value.processIdentity ||
 					!isProcessAlive(record.value.processIdentity.supervisorPid))
