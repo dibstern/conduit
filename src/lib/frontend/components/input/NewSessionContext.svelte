@@ -12,7 +12,8 @@
 	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
-	import { projectAccent } from "../session/session-list-project.js";
+	import { SCRATCH_PROJECT_SLUG, SCRATCH_PROJECT_TITLE } from "../../../contracts/scratch-project.js";
+	import { projectAccent, projectDisplayName } from "../session/session-list-project.js";
 	import ProjectSquare from "../session/ProjectSquare.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -39,7 +40,9 @@
 
 	const slug = $derived(getDraftProject());
 	const project = $derived(projectState.projects.find((p) => p.slug === slug));
-	const title = $derived(project?.title || slug || "Choose a project");
+	// A No-project session runs in its own daemon-made folder, so it has no workspace to pick.
+	const scratch = $derived(slug === SCRATCH_PROJECT_SLUG);
+	const title = $derived(slug ? projectDisplayName(slug) : "Choose a project");
 	const branch = $derived(project?.git?.branch);
 	const currentBranch = $derived(branchList === undefined ? branch : branchList.current);
 	const baseBranch = $derived(worktreeBase ?? currentBranch);
@@ -158,7 +161,7 @@
 	<Menu ariaLabel="Start in project" {presentation} onCloseAutoFocus={focusComposerAfterPick}>
 		{#snippet trigger({ props })}
 			<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Project" data-testid="draft-project-chip">
-				{#if slug}<ProjectSquare label={title} accent={projectAccent(slug)} />{/if}
+				{#if slug && !scratch}<ProjectSquare label={title} accent={projectAccent(slug)} />{/if}
 				<span class="truncate">{title}</span>
 				<Icon name="chevron-down" size={12} />
 			</Button>
@@ -174,6 +177,9 @@
 						</span>
 					</MenuRadioItem>
 				{/each}
+				<MenuRadioItem value={SCRATCH_PROJECT_SLUG} class={rowClass} data-testid="draft-no-project">
+					<span class="flex min-w-0 items-center gap-2"><Icon name="folder" size={12} /><span class="truncate">{SCRATCH_PROJECT_TITLE}</span></span>
+				</MenuRadioItem>
 			</MenuRadioGroup>
 		</MenuGroup>
 		{#if missing.length > 0}
@@ -196,6 +202,9 @@
 		<MenuItem class={rowClass} data-testid="draft-new-project" onselect={() => { addProjectOpen = true; }}>New project…</MenuItem>
 	</Menu>
 
+	{#if scratch}
+		<span class="truncate font-sans text-[11.5px] md:text-[11px] text-text-muted" data-testid="draft-scratch-folder">its own folder</span>
+	{:else}
 	<Menu ariaLabel="Where the session starts" {presentation} onCloseAutoFocus={focusComposerAfterPick} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
 		{#snippet trigger({ props })}
 			<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Where it starts" data-testid="draft-start-chip" aria-describedby={startDescription}>
@@ -241,6 +250,7 @@
 			</MenuGroup>
 		{/if}
 	</Menu>
+	{/if}
 
 	{#if newWorktree}
 		<Menu ariaLabel="Base branch" {presentation} onCloseAutoFocus={focusComposerAfterPick} onopenchange={(open) => { if (open) void openBranches(); }}>

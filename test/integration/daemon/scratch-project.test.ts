@@ -185,6 +185,15 @@ describe("No-project sessions through the built daemon", () => {
 			undefined,
 			SCRATCH_PROJECT_SLUG,
 		);
+		// A fresh browser's shell feed carries both rows under No project.
+		await restarted.followSessions();
+		for (const { id } of [alpha, beta])
+			await restarted.waitFor(
+				(message) =>
+					message["type"] === "session_row" &&
+					message["projectSlug"] === SCRATCH_PROJECT_SLUG &&
+					message["id"] === id,
+			);
 		await restarted.view(alpha.id);
 		await restarted.send(alpha.id, "workspace-isolation-write gamma", 120_000);
 		expect(file(alpha.folder)).toBe("workspace-isolation-write gamma");

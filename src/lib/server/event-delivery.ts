@@ -8,6 +8,7 @@ import {
 	Stream,
 } from "effect";
 import type { Rpc, RpcGroup } from "effect/rpc";
+import { SCRATCH_PROJECT_SLUG } from "../contracts/scratch-project.js";
 import {
 	type PtyEnvelope,
 	type ShellProjectsFrame,
@@ -291,9 +292,11 @@ export const deliverSessionRows = <
 							hold.update(
 								{
 									...initial,
-									projects: new Set(
-										envelope.projects.map((project) => project.slug),
-									),
+									// The frame never lists No project; its rows still reach every browser.
+									projects: new Set([
+										...envelope.projects.map((project) => project.slug),
+										SCRATCH_PROJECT_SLUG,
+									]),
 								},
 								true,
 							);

@@ -1,7 +1,12 @@
+import {
+	SCRATCH_PROJECT_SLUG,
+	SCRATCH_PROJECT_TITLE,
+} from "../../../contracts/scratch-project.js";
 import { projectState } from "../../stores/project.svelte.js";
 import type { SessionInfo } from "../../types.js";
 
 export function projectDisplayName(slug: string): string {
+	if (slug === SCRATCH_PROJECT_SLUG) return SCRATCH_PROJECT_TITLE;
 	return (
 		projectState.projects.find((project) => project.slug === slug)?.title ||
 		slug
