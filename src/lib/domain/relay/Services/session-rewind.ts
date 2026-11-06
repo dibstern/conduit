@@ -225,8 +225,10 @@ export const readSessionResumePlan = (
 /** A proposal for an intent: its id and whether the files there are kept (82tn.51). */
 export const previewHeadMove = (sessionId: string, intent: MoveIntent) =>
 	Effect.gen(function* () {
-		const plan = yield* planHeadMove(sessionId, intent);
+		// A busy session says so first: a running Run has no History Node yet, so planning a
+		// target inside it would read as history no longer kept.
 		yield* admitOrRefuse(sessionId, { kind: "head_move" });
+		const plan = yield* planHeadMove(sessionId, intent);
 		return {
 			moveId: plan.moveId,
 			files: plan.files,
