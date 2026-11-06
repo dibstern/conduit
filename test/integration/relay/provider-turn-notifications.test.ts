@@ -138,7 +138,7 @@ it.each([
 				relayPublisher: {
 					publish: (message) =>
 						publishProviderRelayMessage(message, {
-							wsHandler: { getClientsForSession: () => [] },
+							isViewed: () => false,
 							pushManager: { sendToAll },
 							log: createSilentLogger(),
 							slug: "project",

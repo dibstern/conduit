@@ -107,12 +107,18 @@ export interface EffectOpenCodeRuntimeIngressPort {
 	stopStatsLogging(): void;
 }
 
+/** One project's OpenCode ingress, built with the project (82tn.16). */
+export class OpenCodeRuntimeIngressTag extends Context.Service<
+	OpenCodeRuntimeIngressTag,
+	EffectOpenCodeRuntimeIngress
+>()("OpenCodeRuntimeIngress") {}
+
 export class OpenCodeHistoryReconcileTag extends Context.Service<
 	OpenCodeHistoryReconcileTag,
 	{ reconcileSession(sessionId: string): Effect.Effect<void> }
 >()("OpenCodeHistoryReconcile") {}
 
-/** The relay's ingress, for a send that links its process before the Run is written. */
+/** The project's ingress, for a send that links its process before the Run is written. */
 export class OpenCodeProcessLinkTag extends Context.Service<
 	OpenCodeProcessLinkTag,
 	{ linkProcess(sessionId: string, processId: string): Effect.Effect<void> }

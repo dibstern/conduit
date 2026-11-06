@@ -12,7 +12,8 @@ import { SessionActivityTag } from "../domain/daemon/Services/session-activity.j
 import { AttachmentStoreTag } from "../domain/persistence/Services/attachment-store.js";
 import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
-import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
+import { makeReadOpenCodeMessages } from "../domain/relay/Layers/project-ingestion-layer.js";
+import { OpenCodeRuntimeIngressTag } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import type { ProjectSettingsTag } from "../domain/relay/Services/project-settings.js";
 import { makeEventSinkFactory } from "../domain/relay/Services/provider-turn-dispatch.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
@@ -20,10 +21,9 @@ import { restoreAsyncQuestionsFromStore } from "../domain/relay/Services/restore
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import {
 	type ConfigTag,
-	type LoggerTag,
-	type OrchestrationEngineTag,
 	PollerManagerTag,
 	StatusPollerTag,
+	TranslatorTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../domain/relay/Services/session-attention.js";
@@ -39,19 +39,13 @@ import {
 	setDefaultPermissionMode,
 	setDefaultVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
-import {
-	backfillSessionPicks,
-	loadServerSessionPick,
-} from "../domain/relay/Services/session-pick.js";
+import { backfillSessionPicks } from "../domain/relay/Services/session-pick.js";
 import { SessionSetupTag } from "../domain/relay/Services/session-setup.js";
 import {
 	PollerPubSubTag,
 	PollerStateTag,
 } from "../domain/relay/Services/session-status-poller.js";
-import {
-	makeSessionOpenCodeClient,
-	SessionWorkspaceTag,
-} from "../domain/relay/Services/session-workspace.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
@@ -60,7 +54,6 @@ import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
-import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { retireAsksOnProjectRemoval } from "../persistence/effect/retire-pending-prompts.js";
 import { GOAL_READ_TEXT, goalCommandText } from "../provider/goal-tracker.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
@@ -69,10 +62,7 @@ import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { wireMonitoringEffect } from "./monitoring-wiring.js";
 import { wirePollersEffect } from "./poller-wiring.js";
-import {
-	type createProjectRelayLayers,
-	TranslatorTag,
-} from "./project-relay-layers.js";
+import type { createProjectRelayLayers } from "./project-relay-layers.js";
 import type { parseDefaultModel, RelaySettings } from "./relay-settings.js";
 import { RelayCreationAbortedError } from "./relay-stack.js";
 import { wireSSEConsumerEffect } from "./sse-wiring.js";
@@ -246,7 +236,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const sessionManagerService = yield* projectSessionManager;
 		// Read-model only: creating a first session could call OpenCode, so attach
 		// creates it instead (getDefaultSessionId).
-		const readQueryEffect = yield* ReadQueryEffectTag;
 		const sessionsResult = yield* Effect.result(readPersistedStartupSessions);
 		if (sessionsResult._tag === "Success" && sessionsResult.success.count > 0)
 			yield* statusSnapshot.setSessionCount(sessionsResult.success.count);
@@ -264,64 +253,11 @@ function acquireStartupServices(inputs: StartupInputs) {
 		yield* PollerPubSubTag;
 		const statusPoller = yield* StatusPollerTag;
 		const pollerManager = yield* PollerManagerTag;
-		const sessionClient = yield* makeSessionOpenCodeClient;
 		const instances = yield* OpenCodeInstancesTag;
 		const workspace = yield* SessionWorkspaceTag;
-		const readOpenCodeMessages = (
-			sessionId: string,
-			instanceId?: string,
-			signal?: AbortSignal,
-			directory?: string,
-		) =>
-			Effect.gen(function* () {
-				const client = yield* sessionClient(sessionId, instanceId, directory);
-				if (Option.isNone(client))
-					return yield* Effect.fail(
-						new Error(`Session ${sessionId} has no OpenCode instance`),
-					);
-				return yield* Effect.tryPromise({
-					try: () =>
-						client.value.session.messages(
-							sessionId,
-							signal === undefined ? undefined : { signal },
-						),
-					catch: (cause) => cause,
-				});
-			}).pipe(Effect.scoped);
-		const pickContext = yield* Effect.context<
-			AccountDirectory | ConfigTag | LoggerTag | OrchestrationEngineTag
-		>();
-		const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
-			log.child("opencode-runtime-ingress"),
-			readOpenCodeMessages,
-			(sessionId, messageId, compaction) =>
-				orchestration.openCodeInstance.inputIdForUserEcho(
-					sessionId,
-					messageId,
-					compaction,
-				),
-			(instanceId, parentId) =>
-				Effect.gen(function* () {
-					const parent = parentId
-						? yield* readQueryEffect.getSession(parentId)
-						: undefined;
-					return yield* loadServerSessionPick("opencode", instanceId, parent, {
-						startIfStopped: false,
-					});
-				}).pipe(
-					Effect.provide(pickContext),
-					Effect.catch((cause) =>
-						Effect.sync(() => {
-							log.warn("Could not resolve native OpenCode session pick", {
-								instanceId,
-								parentId,
-								cause: formatErrorDetail(cause),
-							});
-							return undefined;
-						}),
-					),
-				),
-		);
+		const readOpenCodeMessages = yield* makeReadOpenCodeMessages;
+		// The project's ingress: built with the project, not with this relay (82tn.16).
+		const opencodeRuntimeIngress = yield* OpenCodeRuntimeIngressTag;
 		const accounts = yield* (yield* AccountDirectory).snapshot;
 		const recoveryCommands = yield* runningRunnerCommands(
 			sql,
@@ -397,7 +333,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 			)
 			.pipe(Effect.andThen(recoverObservedRuns));
 
-		layers.setHistoryIngress(opencodeRuntimeIngress);
 		if (config.signal?.aborted) {
 			return yield* Effect.fail(
 				new RelayCreationAbortedError({ slug: config.slug }),

@@ -177,11 +177,27 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"makeRelayStatusSnapshot",
 			"OpenCodeModelServiceLive",
 			"makePersistenceProjectLayer",
+			"makeProjectIngestionLive",
+			"makeProjectOpenCodeIngressLive",
+			"makeProviderRuntimeIngestionLive",
+			"makeEffectOpenCodeRuntimeIngress",
 		]);
 		expect(tally(server, named(builders))).toEqual(
 			new Map([
-				// ProjectServices: each project's session-manager parts and generation.
-				[`${daemon}/Layers/project-services-layer.ts`, 8],
+				// ProjectServices: each project's session-manager parts and generation,
+				// with its ingestion side (82tn.16 slice 4).
+				[`${daemon}/Layers/project-services-layer.ts`, 12],
+				// The ingestion side's definitions: pending interactions, alert ledger,
+				// provider ingestion and the OpenCode ingress with its history ports.
+				["src/lib/domain/relay/Layers/project-ingestion-layer.ts", 6],
+				[
+					"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts",
+					1,
+				],
+				[
+					"src/lib/domain/relay/Services/provider-runtime-ingestion-service.ts",
+					2,
+				],
 				// Definitions, and a store opened without the daemon.
 				["src/lib/domain/relay/Services/session-manager-service.ts", 3],
 				["src/lib/domain/relay/Services/relay-status-snapshot.ts", 3],
@@ -189,7 +205,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/persistence/effect/live.ts", 2],
 				// relay: a standalone relay's own copies.
 				["src/lib/domain/relay/Layers/relay-layer.ts", 2],
-				[`${relay}/project-relay-layers.ts`, 8],
+				[`${relay}/project-relay-layers.ts`, 12],
 			]),
 		);
 	});
@@ -231,8 +247,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/handlers/types.ts", 1],
 				[`${relay}/monitoring-wiring.ts`, 5],
 				[`${relay}/poller-wiring.ts`, 2],
-				[`${relay}/project-relay-layers.ts`, 2],
-				[`${relay}/project-relay-publisher.ts`, 1],
+				[`${relay}/project-relay-layers.ts`, 1],
 				[`${relay}/project-relay-startup.ts`, 2],
 				[`${relay}/relay-stack.ts`, 1],
 				[`${relay}/sse-wiring.ts`, 2],

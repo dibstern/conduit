@@ -5,11 +5,21 @@ import type {
 } from "../../../persistence/effect/live.js";
 import { daemonStorePath } from "../../../persistence/project-storage.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
-import type { OpenCodeSessionCreationGateTag } from "../../relay/Services/opencode-runtime-ingress-service.js";
+import type { AlertLedgerTag } from "../../relay/Services/alert-ledger.js";
+import type { ContinuationTag } from "../../relay/Services/continuation.js";
+import type {
+	OpenCodeHistoryReconcileTag,
+	OpenCodeProcessLinkTag,
+	OpenCodeRuntimeIngressTag,
+	OpenCodeSessionCreationGateTag,
+} from "../../relay/Services/opencode-runtime-ingress-service.js";
+import type { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
+import type { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
 import type { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
 import type {
 	ConfigTag,
 	OpenCodeModelServiceTag,
+	TranslatorTag,
 } from "../../relay/Services/services.js";
 import type { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import type {
@@ -32,7 +42,16 @@ export type ProjectGenerationParts =
 	| OpenCodeSessionCreationGateTag
 	| OpenCodeModelServiceTag
 	| PersistenceProjectContext
-	| PersistenceStoreContext;
+	| PersistenceStoreContext
+	// The ingestion side (82tn.16 slice 4).
+	| PendingInteractionServiceTag
+	| AlertLedgerTag
+	| ProviderRuntimeIngestionTag
+	| ContinuationTag
+	| TranslatorTag
+	| OpenCodeRuntimeIngressTag
+	| OpenCodeHistoryReconcileTag
+	| OpenCodeProcessLinkTag;
 
 /** Everything a call naming the project runs with, built by the daemon. */
 export type ProjectParts =

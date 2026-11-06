@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	Context,
 	Deferred,
 	Effect,
 	Fiber,
@@ -29,6 +30,7 @@ import {
 	type OpenCodeInstanceEvent,
 	OpenCodeInstancesTag,
 } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import {
@@ -399,10 +401,11 @@ describe("Daemon Effect OpenCode runtime ingress", () => {
 				projectDir,
 				slug: "workspace-provider-race",
 			});
-			const log = await project.run(
-				Effect.gen(function* () {
-					return yield* LoggerTag;
-				}),
+			// The project's ingestion logs with the project's logger (82tn.16), not the relay's.
+			const log = await project.daemon.runPromise(
+				Effect.flatMap(ProjectServices, (projects) =>
+					projects.forProject("workspace-provider-race"),
+				).pipe(Effect.map((context) => Context.get(context, LoggerTag))),
 			);
 			const warning = vi.spyOn(log, "warn");
 			const program = Effect.scoped(
