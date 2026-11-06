@@ -167,6 +167,33 @@ describe("per-project relay stays retired (82tn.16)", () => {
 		);
 	});
 
+	it("builds each project's context in the daemon, from the registry", () => {
+		const builders = new Set([
+			"makeSessionManagers",
+			"ownSessionManagersLive",
+			"attachSessionManagerLive",
+			"SessionManagersOrOwn",
+			"RelayStatusSnapshotLive",
+			"makeRelayStatusSnapshot",
+			"OpenCodeModelServiceLive",
+			"makePersistenceProjectLayer",
+		]);
+		expect(tally(server, named(builders))).toEqual(
+			new Map([
+				// ProjectServices: each project's session-manager parts and generation.
+				[`${daemon}/Layers/project-services-layer.ts`, 8],
+				// Definitions, and a store opened without the daemon.
+				["src/lib/domain/relay/Services/session-manager-service.ts", 3],
+				["src/lib/domain/relay/Services/relay-status-snapshot.ts", 3],
+				["src/lib/domain/relay/Services/services.ts", 1],
+				["src/lib/persistence/effect/live.ts", 2],
+				// relay: a standalone relay's own copies.
+				["src/lib/domain/relay/Layers/relay-layer.ts", 2],
+				[`${relay}/project-relay-layers.ts`, 8],
+			]),
+		);
+	});
+
 	it("opens project and session lifetimes only in Owner Scopes", () => {
 		expect(tally(server, named(scopeOpeners))).toEqual(
 			new Map([

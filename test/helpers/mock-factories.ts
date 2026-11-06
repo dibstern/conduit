@@ -119,9 +119,8 @@ import {
 import { SessionInboxTag } from "../../src/lib/domain/relay/Services/session-inbox.js";
 import { SessionManagerError } from "../../src/lib/domain/relay/Services/session-manager-error.js";
 import {
-	attachSessionManagerLive,
+	ownSessionManagersLive,
 	type SessionManagerService,
-	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 	type SessionManagers,
 } from "../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -251,7 +250,6 @@ afterAll(() => rmSync(mockConfigRoot, { recursive: true, force: true }));
 
 function createMockConfig(): HandlerDeps["config"] {
 	return {
-		httpServer: {} as HandlerDeps["config"]["httpServer"],
 		opencodeUrl: "http://localhost:4096",
 		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
@@ -616,7 +614,6 @@ export const mockSessionManagers = (
 	service: SessionManagerService = makeMockSessionManagerService(),
 ): SessionManagers => ({
 	forProject: () => service,
-	attach: () => Effect.void,
 	parts: (projectId) =>
 		Effect.fail(
 			new SessionManagerError({
@@ -628,12 +625,11 @@ export const mockSessionManagers = (
 
 /**
  * The real session manager as a standalone relay builds it: its own daemon
- * manager, with the relay's project (ConfigTag) attached.
+ * manager, serving the relay's project (ConfigTag).
  */
-export const standaloneSessionManagerLive = attachSessionManagerLive.pipe(
+export const standaloneSessionManagerLive = ownSessionManagersLive.pipe(
 	Layer.provide(
 		Layer.mergeAll(
-			SessionManagerServiceLive,
 			Layer.effect(
 				SessionManagerCoordinationTag,
 				makeSessionManagerCoordination(),

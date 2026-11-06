@@ -11,16 +11,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import type http from "node:http";
-import {
-	Context,
-	Data,
-	Effect,
-	Layer,
-	Option,
-	PubSub,
-	Queue,
-	Ref,
-} from "effect";
+import { Context, Data, Effect, Layer, Option, Ref } from "effect";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	ProjectSaveRejected,
@@ -75,7 +66,7 @@ import {
 } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonOrchestration } from "../Services/daemon-orchestration.js";
-import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
+import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	listArchivedSessions,
 	listDaemonSessions as listEffectDaemonSessions,
@@ -101,12 +92,15 @@ import { ProjectContext } from "../Services/project-context.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	type broadcastProjectList,
-	getEffectiveWorktreeCleanup,
 	projectInfos as getEffectProjectInfos,
 	ProjectRegistryTag,
 	type removeProjectFromEffectRegistry,
 	type saveProject,
 } from "../Services/project-registry-service.js";
+import {
+	ProjectServices,
+	projectConfig,
+} from "../Services/project-services.js";
 import { ProviderAdapters } from "../Services/provider-adapters.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionDirectory } from "../Services/session-directory.js";
@@ -263,6 +257,7 @@ export const RelayFactoryLive = (
 			const sessionManagers = yield* Effect.serviceOption(
 				SessionManagerServiceTag,
 			);
+			const projectServices = yield* Effect.serviceOption(ProjectServices);
 			const daemonTurns = yield* Effect.serviceOption(DaemonTurns);
 			const providerTurns = yield* Effect.serviceOption(ProviderTurns);
 			const storeContext = yield* persistenceStoreContext;
@@ -531,7 +526,7 @@ export const RelayFactoryLive = (
 								reason: unavailableReason,
 							});
 						}
-						const dbPath = daemonStorePath(configDir);
+						const _dbPath = daemonStorePath(configDir);
 						const storageDir = projectStorageDir(configDir, project.slug);
 						yield* Effect.try({
 							try: () => {
@@ -575,7 +570,6 @@ export const RelayFactoryLive = (
 						const relay = yield* Effect.tryPromise({
 							try: () => {
 								creation = createProjectRelay({
-									httpServer,
 									daemonConfigContext: Context.make(
 										DaemonConfigRefTag,
 										configRef,
@@ -690,6 +684,11 @@ export const RelayFactoryLive = (
 													: Context.empty(),
 											),
 											Context.merge(
+												Option.isSome(projectServices)
+													? Context.make(ProjectServices, projectServices.value)
+													: Context.empty(),
+											),
+											Context.merge(
 												Option.isSome(daemonTurns)
 													? Context.make(DaemonTurns, daemonTurns.value)
 													: Context.empty(),
@@ -748,45 +747,19 @@ export const RelayFactoryLive = (
 											}
 										: {}),
 									...(usage ? { usage } : {}),
-									projectDir: project.folders[0],
-									extraFolders: project.folders.slice(1),
-									...(envResolver && {
-										shellEnv: (directory: string) =>
-											envResolver.getSnapshot(directory, project.slug),
-										prepareShellEnv: (directory: string) =>
-											envResolver.waitUntilReady(directory, project.slug),
+									...projectConfig(project, {
+										configDir,
+										claudeSdk,
+										pollerTimings,
+										environments: envResolver,
+										cleanupQueue,
+										registry: projectRegistry,
+										configRef,
+										eventBus,
 									}),
-									slug: project.slug,
-									...(claudeSdk && { claudeSdk }),
-									...pollerTimings,
 									noServer: true,
 									signal: ac.signal,
-									configDir,
-									persistenceDbPath: dbPath,
 									tracer,
-									requestWorktreeCleanup: () =>
-										cleanupQueue._tag === "Some"
-											? Queue.offer(cleanupQueue.value, {
-													projectSlug: project.slug,
-												}).pipe(Effect.asVoid)
-											: Effect.void,
-									getWorktreeCleanup: () =>
-										getEffectiveWorktreeCleanup(project.slug).pipe(
-											Effect.provideService(
-												ProjectRegistryTag,
-												projectRegistry,
-											),
-											Effect.provideService(DaemonConfigRefTag, configRef),
-											Effect.orElseSucceed(() => "off" as const),
-										),
-									publishGlobalSetting: (tag) =>
-										PubSub.publish(
-											eventBus,
-											DaemonEvent.GlobalSettingChanged({
-												originSlug: project.slug,
-												tag,
-											}),
-										).pipe(Effect.asVoid),
 									...(relayPushSender != null && {
 										pushManager: relayPushSender,
 									}),

@@ -9,7 +9,6 @@ import {
 	Option,
 	PubSub,
 	Ref,
-	type Scope,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
@@ -73,7 +72,6 @@ import { PersistenceProjectTag } from "../../persistence/Services/persistence-se
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { DraftChange } from "./input-drafts.js";
 import { InputDraftsTag } from "./input-drafts.js";
-import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -837,9 +835,8 @@ export interface SessionManagerService {
 }
 
 /**
- * What a relay still builds for its project and lends to the daemon's session
- * manager: the OpenCode client, status snapshot and retention scheduler wait on
- * 10.7/10.9, and the project's store binding lives with the relay.
+ * What the session manager runs with for one project: the daemon builds it
+ * from the registry (82tn.16); a standalone relay is its own daemon.
  */
 export type ProjectSessionManagerParts =
 	| AccountDirectory
@@ -864,18 +861,13 @@ export type ProjectSessionManagerParts =
 /** The daemon's one session manager; every call names its project. */
 export interface SessionManagers {
 	readonly forProject: (projectId: string) => SessionManagerService;
-	/** The parts a project's relay lent, for work that lands in that project. */
+	/** The parts a call naming the project runs with. */
 	readonly parts: (
 		projectId: string,
 	) => Effect.Effect<
 		Context.Context<ProjectSessionManagerParts>,
 		SessionManagerError
 	>;
-	/** Lend a relay's parts for its project until the relay's scope closes. */
-	readonly attach: (
-		projectId: string,
-		parts: Context.Context<ProjectSessionManagerParts>,
-	) => Effect.Effect<void, never, Scope.Scope>;
 }
 
 export class SessionManagerServiceTag extends Context.Service<
@@ -1575,145 +1567,114 @@ const makeProjectSessionManager: Effect.Effect<
 });
 
 /**
- * Built once in the daemon scope (a standalone relay builds its own as its
- * daemon). Each call runs against the newest relay lent for the project.
+ * One delegating service per project. Each call builds the manager from the
+ * project's parts as they are now, so it never holds a stale view.
  */
-export const SessionManagerServiceLive = Layer.sync(
+export const makeSessionManagers = (
+	resolve: (
+		projectId: string,
+	) => Effect.Effect<
+		Context.Context<
+			Exclude<ProjectSessionManagerParts, SessionManagerServiceTag>
+		>,
+		SessionManagerError
+	>,
+): SessionManagers => {
+	const services = new Map<string, SessionManagerService>();
+	const project = (projectId: string) =>
+		Effect.flatMap(managers.parts(projectId), (parts) =>
+			Effect.provide(makeProjectSessionManager, parts),
+		);
+	const managers: SessionManagers = {
+		parts: (projectId) =>
+			Effect.map(resolve(projectId), (parts) =>
+				Context.add(parts, SessionManagerServiceTag, managers),
+			),
+		forProject: (projectId) => {
+			const existing = services.get(projectId);
+			if (existing) return existing;
+			const run = <A, E>(
+				use: (service: SessionManagerService) => Effect.Effect<A, E>,
+			) => Effect.flatMap(project(projectId), use);
+			const service: SessionManagerService = {
+				initialize: (title) => run((s) => s.initialize(title)),
+				getDefaultSessionId: (title) =>
+					run((s) => s.getDefaultSessionId(title)),
+				getLastKnownSessionCount: () =>
+					run((s) => s.getLastKnownSessionCount()),
+				listSessions: (options) => run((s) => s.listSessions(options)),
+				sessionExists: (id) => run((s) => s.sessionExists(id)),
+				createSession: (title, options) =>
+					run((s) => s.createSession(title, options)),
+				establishOpenCodeSession: (session, instanceId) =>
+					run((s) => s.establishOpenCodeSession(session, instanceId)),
+				deleteSession: (id, options) =>
+					run((s) => s.deleteSession(id, options)),
+				deleteArchivedSessions: (windowMs, now) =>
+					run((s) => s.deleteArchivedSessions(windowMs, now)),
+				renameSession: (id, title) => run((s) => s.renameSession(id, title)),
+				markSessionRead: (id) => run((s) => s.markSessionRead(id)),
+				markSessionSeen: (id, upTo) => run((s) => s.markSessionSeen(id, upTo)),
+				setSessionSettled: (id, options) =>
+					run((s) => s.setSessionSettled(id, options)),
+				setSessionArchived: (id, options) =>
+					run((s) => s.setSessionArchived(id, options)),
+				restoreSessionForSend: (id) => run((s) => s.restoreSessionForSend(id)),
+				setSessionAutoSettleDisabled: (id, disabled) =>
+					run((s) => s.setSessionAutoSettleDisabled(id, disabled)),
+				setSessionJev: (id, jev) => run((s) => s.setSessionJev(id, jev)),
+				setSessionDiffBase: (id, base) =>
+					run((s) => s.setSessionDiffBase(id, base)),
+				setSessionPinned: (id, pinned) =>
+					run((s) => s.setSessionPinned(id, pinned)),
+				snoozeSession: (id, until) => run((s) => s.snoozeSession(id, until)),
+				unsnoozeSession: (id) => run((s) => s.unsnoozeSession(id)),
+				markSessionUnread: (id) => run((s) => s.markSessionUnread(id)),
+				loadPreRenderedHistory: (id) =>
+					run((s) => s.loadPreRenderedHistory(id)),
+				holdSession: (id) => run((s) => s.holdSession(id)),
+				recordMessageActivity: (id, timestamp) =>
+					run((s) => s.recordMessageActivity(id, timestamp)),
+				addToParentMap: (childId, parentId) =>
+					run((s) => s.addToParentMap(childId, parentId)),
+				getSessionParentMap: (options) =>
+					run((s) => s.getSessionParentMap(options)),
+				setForkEntry: (id, entry) => run((s) => s.setForkEntry(id, entry)),
+				refreshSessionLineage: () => run((s) => s.refreshSessionLineage()),
+			};
+			services.set(projectId, service);
+			return service;
+		},
+	};
+	return managers;
+};
+
+/** A standalone relay is its own daemon: it serves its one project from its own parts. */
+export const ownSessionManagersLive = Layer.effect(
 	SessionManagerServiceTag,
-	(): SessionManagers => {
-		const attached = new Map<
-			string,
-			Array<Context.Context<ProjectSessionManagerParts>>
-		>();
-		const services = new Map<string, SessionManagerService>();
-		const parts = (projectId: string) =>
-			Effect.suspend(() => {
-				const lent = attached.get(projectId)?.at(-1);
-				return lent
-					? Effect.succeed(lent)
-					: Effect.fail(
-							new SessionManagerError({
-								operation: "forProject",
-								cause: `No relay serves project ${projectId}`,
-							}),
-						);
-			});
-		const project = (projectId: string) =>
-			Effect.flatMap(parts(projectId), (lent) =>
-				Effect.provide(makeProjectSessionManager, lent),
-			);
-		return {
-			parts,
-			attach: (projectId, parts) =>
-				Effect.acquireRelease(
-					Effect.sync(() =>
-						attached.set(projectId, [
-							...(attached.get(projectId) ?? []),
-							parts,
-						]),
-					),
-					() =>
-						Effect.sync(() => {
-							const rest = (attached.get(projectId) ?? []).filter(
-								(entry) => entry !== parts,
-							);
-							if (rest.length > 0) attached.set(projectId, rest);
-							else {
-								attached.delete(projectId);
-								services.delete(projectId);
-							}
+	Effect.gen(function* () {
+		// The whole relay context: a fork into this project also reads its
+		// OpenCode creation gate and bound provider state.
+		const parts =
+			yield* Effect.context<
+				Exclude<ProjectSessionManagerParts, SessionManagerServiceTag>
+			>();
+		const { slug } = yield* ConfigTag;
+		return makeSessionManagers((projectId) =>
+			projectId === slug
+				? Effect.succeed(parts)
+				: Effect.fail(
+						new SessionManagerError({
+							operation: "forProject",
+							cause: `No relay serves project ${projectId}`,
 						}),
-				),
-			forProject: (projectId) => {
-				const existing = services.get(projectId);
-				if (existing) return existing;
-				const run = <A, E>(
-					use: (service: SessionManagerService) => Effect.Effect<A, E>,
-				) => Effect.flatMap(project(projectId), use);
-				const service: SessionManagerService = {
-					initialize: (title) => run((s) => s.initialize(title)),
-					getDefaultSessionId: (title) =>
-						run((s) => s.getDefaultSessionId(title)),
-					getLastKnownSessionCount: () =>
-						run((s) => s.getLastKnownSessionCount()),
-					listSessions: (options) => run((s) => s.listSessions(options)),
-					sessionExists: (id) => run((s) => s.sessionExists(id)),
-					createSession: (title, options) =>
-						run((s) => s.createSession(title, options)),
-					establishOpenCodeSession: (session, instanceId) =>
-						run((s) => s.establishOpenCodeSession(session, instanceId)),
-					deleteSession: (id, options) =>
-						run((s) => s.deleteSession(id, options)),
-					deleteArchivedSessions: (windowMs, now) =>
-						run((s) => s.deleteArchivedSessions(windowMs, now)),
-					renameSession: (id, title) => run((s) => s.renameSession(id, title)),
-					markSessionRead: (id) => run((s) => s.markSessionRead(id)),
-					markSessionSeen: (id, upTo) =>
-						run((s) => s.markSessionSeen(id, upTo)),
-					setSessionSettled: (id, options) =>
-						run((s) => s.setSessionSettled(id, options)),
-					setSessionArchived: (id, options) =>
-						run((s) => s.setSessionArchived(id, options)),
-					restoreSessionForSend: (id) =>
-						run((s) => s.restoreSessionForSend(id)),
-					setSessionAutoSettleDisabled: (id, disabled) =>
-						run((s) => s.setSessionAutoSettleDisabled(id, disabled)),
-					setSessionJev: (id, jev) => run((s) => s.setSessionJev(id, jev)),
-					setSessionDiffBase: (id, base) =>
-						run((s) => s.setSessionDiffBase(id, base)),
-					setSessionPinned: (id, pinned) =>
-						run((s) => s.setSessionPinned(id, pinned)),
-					snoozeSession: (id, until) => run((s) => s.snoozeSession(id, until)),
-					unsnoozeSession: (id) => run((s) => s.unsnoozeSession(id)),
-					markSessionUnread: (id) => run((s) => s.markSessionUnread(id)),
-					loadPreRenderedHistory: (id) =>
-						run((s) => s.loadPreRenderedHistory(id)),
-					holdSession: (id) => run((s) => s.holdSession(id)),
-					recordMessageActivity: (id, timestamp) =>
-						run((s) => s.recordMessageActivity(id, timestamp)),
-					addToParentMap: (childId, parentId) =>
-						run((s) => s.addToParentMap(childId, parentId)),
-					getSessionParentMap: (options) =>
-						run((s) => s.getSessionParentMap(options)),
-					setForkEntry: (id, entry) => run((s) => s.setForkEntry(id, entry)),
-					refreshSessionLineage: () => run((s) => s.refreshSessionLineage()),
-				};
-				services.set(projectId, service);
-				return service;
-			},
-		};
-	},
+					),
+		);
+	}),
 );
 
 /** The daemon's session manager for the calling relay's project. */
 export const projectSessionManager = Effect.map(
 	Effect.all([SessionManagerServiceTag, ConfigTag]),
 	([managers, config]) => managers.forProject(config.slug),
-);
-
-/** A relay lends its parts to the daemon manager and hands callers that manager. */
-export const attachSessionManagerLive = Layer.effect(
-	SessionManagerServiceTag,
-	Effect.gen(function* () {
-		const managers = yield* SessionManagerServiceTag;
-		const parts = yield* Effect.context<ProjectSessionManagerParts>();
-		// A fork into this project creates its OpenCode session under this gate.
-		const gate = yield* Effect.serviceOption(OpenCodeSessionCreationGateTag);
-		yield* managers.attach(
-			(yield* ConfigTag).slug,
-			gate._tag === "Some"
-				? Context.add(parts, OpenCodeSessionCreationGateTag, gate.value)
-				: parts,
-		);
-		return managers;
-	}),
-);
-
-/** The daemon's session managers when it lends them; a standalone relay is its own daemon. */
-export const SessionManagersOrOwn = Layer.unwrap(
-	Effect.map(Effect.serviceOption(SessionManagerServiceTag), (shared) =>
-		Option.isSome(shared)
-			? Layer.succeed(SessionManagerServiceTag, shared.value)
-			: SessionManagerServiceLive,
-	),
 );
