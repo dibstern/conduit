@@ -508,11 +508,13 @@ export class PtyHostClient {
 	async list(
 		cwd: string,
 		allProjects = false,
+		projectId?: string,
 	): Promise<Array<{ pty: PtyInfo; exitCode: number | null }>> {
 		const reply = await this.request({
 			type: "list",
 			cwd: resolve(cwd),
 			...(allProjects ? { allProjects: true } : {}),
+			...(projectId === undefined ? {} : { projectId }),
 		});
 		if (reply.type !== "list")
 			throw new PtyHostError({ message: "Unexpected PTY host list response" });
@@ -528,6 +530,7 @@ export class PtyHostClient {
 	async create(options: {
 		cwd: string;
 		projectDir?: string;
+		projectId?: string;
 		cols?: number | undefined;
 		rows?: number | undefined;
 		shell?: string;
@@ -551,6 +554,9 @@ export class PtyHostClient {
 			...(options.projectDir
 				? { projectDir: resolve(options.projectDir) }
 				: {}),
+			...(options.projectId === undefined
+				? {}
+				: { projectId: options.projectId }),
 			cols: options.cols ?? 80,
 			rows: options.rows ?? 24,
 			shell:

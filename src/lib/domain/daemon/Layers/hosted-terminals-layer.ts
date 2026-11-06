@@ -1,4 +1,4 @@
-import { Effect, Exit, Layer, PubSub, Stream } from "effect";
+import { Effect, Exit, Layer, PubSub } from "effect";
 import { createLogger } from "../../../logger.js";
 import type { StoredProject } from "../../../types.js";
 import { LoggerTag } from "../../relay/Services/services.js";
@@ -7,7 +7,7 @@ import {
 	makeLocalPtyServiceLive,
 } from "../../relay/Services/terminal-service.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
-import { OwnerScopes } from "../Services/owner-scopes.js";
+import { type OwnerScope, OwnerScopes } from "../Services/owner-scopes.js";
 import {
 	allProjects,
 	ProjectRegistryTag,
@@ -23,8 +23,9 @@ const RemovedProjectTerminalsLive = Layer.effectDiscard(
 		const localPty = yield* LocalPtyServiceTag;
 		const owners = yield* OwnerScopes;
 		const registry = yield* ProjectRegistryTag;
-		const closeHosted = (projectDir: string) =>
-			localPty.list(projectDir).pipe(
+		// Projects can share a folder: close only this project's terminals (82tn.78).
+		const closeHosted = (slug: string, projectDir: string) =>
+			localPty.list(projectDir, false, slug).pipe(
 				Effect.flatMap((hosted) =>
 					Effect.forEach(
 						hosted,
@@ -46,38 +47,39 @@ const RemovedProjectTerminalsLive = Layer.effectDiscard(
 					),
 				),
 			);
+		// One watch per project generation: a removed and re-added project opens a new owner scope.
+		const bound = new WeakSet<OwnerScope>();
 		const bind = ({ slug, folders: [projectDir] }: StoredProject) =>
 			projectDir === undefined
 				? Effect.void
 				: owners.projectScope(slug).pipe(
-						Effect.flatMap((scope) =>
-							scope.acquire(
+						Effect.flatMap((scope) => {
+							if (bound.has(scope)) return Effect.void;
+							bound.add(scope);
+							return scope.acquire(
 								Effect.addFinalizer((exit) =>
 									Exit.isSuccess(exit) && exit.value === "remove"
-										? closeHosted(projectDir)
+										? closeHosted(slug, projectDir)
 										: Effect.void,
 								),
-							),
-						),
+							);
+						}),
 						Effect.ignore,
 					);
-		const registered = allProjects.pipe(
+		const bindRegistered = allProjects.pipe(
 			Effect.provideService(ProjectRegistryTag, registry),
-		);
-		const added = yield* PubSub.subscribe(yield* DaemonEventBusTag);
-		yield* Effect.forEach(yield* registered, bind, { discard: true });
-		yield* Stream.fromSubscription(added).pipe(
-			Stream.runForEach((event) =>
-				event._tag === "InstanceAdded"
-					? Effect.flatMap(registered, (projects) =>
-							Effect.forEach(
-								projects.filter(({ slug }) => slug === event.instanceId),
-								bind,
-								{ discard: true },
-							),
-						)
-					: Effect.void,
+			Effect.flatMap((projects) =>
+				Effect.forEach(projects, bind, { discard: true }),
 			),
+		);
+		// The bus slides: a listener that is behind loses its oldest messages, a project's add
+		// among them, but only to make room for newer ones. Re-reading the registry on every batch
+		// therefore finds every added project (82tn.77).
+		const added = yield* PubSub.subscribe(yield* DaemonEventBusTag);
+		yield* bindRegistered;
+		yield* PubSub.takeAll(added).pipe(
+			Effect.andThen(bindRegistered),
+			Effect.forever,
 			Effect.forkScoped,
 		);
 	}),
