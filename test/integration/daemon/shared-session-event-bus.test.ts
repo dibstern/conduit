@@ -1,9 +1,9 @@
 /*
- * Failure modes: daemon relays accidentally retain local buses; disposing one
- * relay closes the shared bus; a sibling's turn runs workspace resolution with
- * the wrong project; sidebar advances stop reaching daemon status, transcript
- * advances trigger needless refreshes, or a continuous burst loses its final
- * refresh.
+ * Failure modes: a project's context accidentally retains a local bus; removing
+ * one project closes the shared bus; a sibling's turn runs workspace resolution
+ * with the wrong project; sidebar advances stop reaching daemon status,
+ * transcript advances trigger needless refreshes, or a continuous burst loses
+ * its final refresh.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -18,19 +18,25 @@ import {
 	Fiber,
 	Layer,
 	ManagedRuntime,
-	Option,
 	PubSub,
 	Stream,
 } from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
-import { RelayFactoryTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import {
+	addWithoutRelay,
+	remove,
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	type ProjectParts,
+	ProjectServices,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
 import {
 	SessionActivityDaemonLive,
 	SessionActivityTag,
@@ -44,15 +50,9 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
-
-const relayBus = async (relay: ProjectRelay) => {
-	const context = await relay.effectRuntime.runtime.context();
-	return Option.getOrThrow(Context.getOption(context, SessionEventBusTag));
-};
 
 describe("daemon-wide committed session signals", () => {
-	it("shares the daemon bus across real relays and keeps it alive after relay disposal", async () => {
+	it("shares the daemon bus across registered projects and keeps it alive after one is removed", async () => {
 		const root = mkdtempSync(join(tmpdir(), "conduit-shared-bus-"));
 		const projects = ["alpha", "beta"].map((slug) => {
 			const folder = join(root, slug);
@@ -102,23 +102,26 @@ describe("daemon-wide committed session signals", () => {
 				smartDefault: false,
 			}).pipe(Layer.provide(NodePath.layer)),
 		);
-		const relays: ProjectRelay[] = [];
 		try {
 			const bus = await daemon.runPromise(SessionEventBusTag);
-			for (const project of projects)
-				relays.push(
+			// Registered projects, as the daemon serves them: no relay (82tn.84).
+			const contexts: Context.Context<ProjectParts>[] = [];
+			for (const project of projects) {
+				await daemon.runPromise(addWithoutRelay(project, { silent: true }));
+				contexts.push(
 					await daemon.runPromise(
-						Effect.flatMap(RelayFactoryTag, (factory) =>
-							factory.create(project),
+						Effect.flatMap(ProjectServices, (services) =>
+							services.forProject(project.slug),
 						),
 					),
 				);
-			const [alpha, beta] = relays;
-			if (!alpha || !beta) throw new Error("Both project relays must start");
-			expect(await relayBus(alpha)).toBe(bus);
-			expect(await relayBus(beta)).toBe(bus);
+			}
+			const [alpha, beta] = contexts;
+			if (!alpha || !beta) throw new Error("Both project contexts must build");
+			expect(Context.get(alpha, SessionEventBusTag)).toBe(bus);
+			expect(Context.get(beta, SessionEventBusTag)).toBe(bus);
 
-			// Relays borrow one workspace service; each turn must reach it once.
+			// Projects borrow one workspace service; each turn must reach it once.
 			const workspace = await daemon.runPromise(SessionWorkspaceTag);
 			const resolve = vi
 				.spyOn(workspace, "resolve")
@@ -134,8 +137,12 @@ describe("daemon-wide committed session signals", () => {
 						reset: true,
 					});
 				});
-			const turn = (relay: ProjectRelay, sessionId: string, suffix: string) =>
-				relay.effectRuntime.runtime.runPromise(
+			const turn = (
+				project: Context.Context<ProjectParts>,
+				sessionId: string,
+				suffix: string,
+			) =>
+				daemon.runPromise(
 					Effect.gen(function* () {
 						const store = yield* EventStoreEffectTag;
 						const commit = yield* makeCommitAndSignal;
@@ -165,7 +172,7 @@ describe("daemon-wide committed session signals", () => {
 								messageId: `message-${suffix}`,
 							}),
 						]);
-					}),
+					}).pipe(Effect.provideContext(project)),
 				);
 			await turn(alpha, "alpha-session", "alpha-first");
 			await turn(beta, "beta-session", "beta-first");
@@ -191,8 +198,7 @@ describe("daemon-wide committed session signals", () => {
 			);
 			resolve.mockRestore();
 
-			await alpha.stop();
-			relays.splice(0, 1);
+			await daemon.runPromise(remove("alpha"));
 			const received = await Effect.runPromise(
 				Effect.scoped(
 					Effect.gen(function* () {
@@ -205,16 +211,16 @@ describe("daemon-wide committed session signals", () => {
 							Effect.forkScoped,
 						);
 						yield* Effect.promise(() =>
-							beta.effectRuntime.runtime.runPromise(
+							daemon.runPromise(
 								Effect.flatMap(makeCommitAndSignal, (commit) =>
 									commit([
 										canonicalEvent("session.created", "after-disposal", {
 											sessionId: "after-disposal",
 											provider: "claude",
-											title: "Surviving relay",
+											title: "Surviving project",
 										}),
 									]),
-								),
+								).pipe(Effect.provideContext(beta)),
 							),
 						);
 						return yield* Fiber.join(next);
@@ -225,7 +231,6 @@ describe("daemon-wide committed session signals", () => {
 				{ projectId: "beta", sessionId: "after-disposal" },
 			]);
 		} finally {
-			for (const relay of relays.reverse()) await relay.stop();
 			await daemon.dispose();
 			rmSync(root, { recursive: true, force: true });
 		}
