@@ -125,6 +125,10 @@ import {
 	ProjectManagementServiceLive,
 	ProjectManagementServiceTag,
 } from "../domain/relay/Services/project-management-service.js";
+import {
+	ProjectSettingsLive,
+	ProjectSettingsTag,
+} from "../domain/relay/Services/project-settings.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
 	attachProviderTurnsLive,
@@ -179,6 +183,10 @@ import {
 	type PollerStateTag,
 	StatusPollerCoreTag,
 } from "../domain/relay/Services/session-status-poller.js";
+import {
+	makeSessionTitleServiceLive,
+	SessionTitleServiceTag,
+} from "../domain/relay/Services/session-title-service.js";
 import type { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { SessionWorkspaceHintStateTag } from "../domain/relay/Services/session-workspace-hint-state.js";
 import { SSEStreamLive } from "../domain/relay/Services/sse-stream-service.js";
@@ -979,6 +987,12 @@ export function createProjectRelayLayers({
 			statusSnapshotLayer: fromProject(
 				Context.pick(RelayStatusSnapshotTag),
 				RelayStatusSnapshotLive,
+			),
+			titlesLayer: fromProject(
+				Context.pick(ProjectSettingsTag, SessionTitleServiceTag),
+				makeSessionTitleServiceLive().pipe(
+					Layer.provideMerge(ProjectSettingsLive),
+				),
 			),
 			...(Option.isSome(sharedSessionManager) && {
 				sessionManagerStateLayer: Layer.effectContext(

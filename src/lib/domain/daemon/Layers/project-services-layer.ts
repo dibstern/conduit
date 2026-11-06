@@ -18,6 +18,7 @@ import {
 import type { ProjectionRunnerError } from "../../../persistence/effect/projection-runner-effect.js";
 import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-module.js";
 import { defaultClaudeSessionForkSdk } from "../../../provider/claude/claude-session-fork.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { createTranslator } from "../../../relay/event-translator.js";
 import type { ClaudeSdkSeam } from "../../../types.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
@@ -29,6 +30,7 @@ import {
 import type { AlertsTag } from "../../relay/Services/alerts.js";
 import type { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { OpenCodeSessionCreationGateTag } from "../../relay/Services/opencode-runtime-ingress-service.js";
+import { ProjectSettingsLive } from "../../relay/Services/project-settings.js";
 import {
 	makeRelayStatusSnapshot,
 	RelayStatusSnapshotTag,
@@ -51,6 +53,7 @@ import {
 	SessionManagerStateTag,
 } from "../../relay/Services/session-manager-state.js";
 import type { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
+import { makeSessionTitleServiceLive } from "../../relay/Services/session-title-service.js";
 import type { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
@@ -70,7 +73,7 @@ import {
 	ProjectServicesError,
 	projectConfig,
 } from "../Services/project-services.js";
-import type { ProviderAdapters } from "../Services/provider-adapters.js";
+import { ProviderAdapters } from "../Services/provider-adapters.js";
 import type { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionManagerOwner } from "../Services/session-manager-owner.js";
 import type { Usage } from "../Services/usage.js";
@@ -234,6 +237,10 @@ export const makeProjectServicesLive = (options: {
 										Context.add(LoggerTag, log),
 										Context.add(OrchestrationEngineTag, engine),
 										Context.add(OpenCodeSessionCreationGateTag, gate),
+										Context.add(
+											ProviderRegistryTag,
+											Context.get(ingestionShared, ProviderAdapters).registry,
+										),
 									);
 									// Once per project, so a replaced relay keeps its pending
 									// interactions, translator and ingress (82tn.16 slice 4).
@@ -251,11 +258,20 @@ export const makeProjectServicesLive = (options: {
 											),
 										),
 									);
+									// A relay's title in flight and its discovered catalogs outlived
+									// the relay that started them (82tn.16 slice 5).
+									const titles = yield* Layer.build(
+										makeSessionTitleServiceLive().pipe(
+											Layer.provideMerge(ProjectSettingsLive),
+											Layer.provide(Layer.succeedContext(projectBase)),
+										),
+									);
 									const parts = Context.mergeAll(
 										persistence,
 										models,
 										ingestion,
 										ingress,
+										titles,
 									).pipe(
 										Context.add(
 											RelayStatusSnapshotTag,

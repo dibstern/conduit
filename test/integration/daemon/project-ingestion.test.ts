@@ -14,6 +14,16 @@
  *    check read the relay's own client list.
  * Rows 81 (removal), 84 (reconnect) and 85 (store isolation) are covered by
  * project-services.test.ts, daemon-session-manager.test.ts and row 83 here.
+ *
+ * Slice 5 (rows 88-97): project settings and session titles are built once
+ * per project too:
+ * 88/89 a project no relay has opened, or added while running, has none;
+ * 90 a relay replaced while registered drops a title in flight and the
+ *    discovered model catalogs with the old relay;
+ * 91 two projects sharing a folder share settings or titles.
+ * Rows 92-95 are covered by project-services.test.ts (removal, reconnect) and
+ * row 91 here (store isolation). The turn service and inbox stay with the
+ * relay: they hold the project's folders from when they were built.
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -37,8 +47,10 @@ import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { ProjectSettingsTag } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { TranslatorTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
@@ -330,5 +342,70 @@ describe("82tn.16: each project's ingestion side lives with the project", () => 
 		};
 		evidence.observed = observed;
 		expect(observed.rows).toEqual([{ id: "s1", history_complete: 0 }]);
+	});
+});
+
+/** The project's settings and titles, as a call naming it sees them. */
+const titleParts = Effect.all({
+	settings: ProjectSettingsTag,
+	titles: SessionTitleServiceTag,
+});
+
+/** The same parts as the relay's runtime holds them (its type predates them). */
+const relayParts = (relay: {
+	readonly effectRuntime: { readonly runtime: unknown };
+}) =>
+	(
+		relay.effectRuntime.runtime as ManagedRuntime.ManagedRuntime<
+			Effect.Services<typeof titleParts>,
+			never
+		>
+	).runPromise(titleParts);
+
+describe("82tn.16: each project's settings and titles live with the project", () => {
+	it("serves a project's settings and titles with no relay open", async () => {
+		const daemon = start("titles-cold").boot();
+		await daemon.register("alpha");
+		const parts = await daemon.inProject("alpha", titleParts);
+		const observed = {
+			settings: parts.settings !== undefined,
+			titles: parts.titles !== undefined,
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({ settings: true, titles: true });
+	});
+
+	it("keeps one settings and title service across a relay replaced while registered", async () => {
+		const daemon = start("titles-relay-replaced").boot();
+		await daemon.register("alpha");
+		const project = await daemon.inProject("alpha", titleParts);
+		const first = await daemon.relay("alpha");
+		const firstParts = await relayParts(first);
+		await first.stop();
+		const second = await daemon.relay("alpha");
+		const secondParts = await relayParts(second);
+		await second.stop();
+		const same = (parts: typeof project) =>
+			parts.settings === project.settings && parts.titles === project.titles;
+		const observed = { first: same(firstParts), second: same(secondParts) };
+		evidence.observed = observed;
+		expect(observed).toEqual({ first: true, second: true });
+	});
+
+	it("keeps two projects sharing a folder apart", async () => {
+		const daemon = start("titles-shared-folder").boot();
+		await daemon.register("alpha");
+		await daemon.register("beta");
+		const alpha = await daemon.inProject(
+			"alpha",
+			Effect.tap(titleParts, ({ settings }) => settings.browsers.add(1)),
+		);
+		const beta = await daemon.inProject("beta", titleParts);
+		const observed = {
+			titles: alpha.titles === beta.titles,
+			betaBrowsers: beta.settings.browsers.count(),
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({ titles: false, betaBrowsers: 0 });
 	});
 });

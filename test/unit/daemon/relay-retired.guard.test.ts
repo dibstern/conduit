@@ -181,12 +181,15 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"makeProjectOpenCodeIngressLive",
 			"makeProviderRuntimeIngestionLive",
 			"makeEffectOpenCodeRuntimeIngress",
+			"makeSessionTitleServiceLive",
+			"ProjectSettingsLive",
 		]);
 		expect(tally(server, named(builders))).toEqual(
 			new Map([
 				// ProjectServices: each project's session-manager parts and generation,
-				// with its ingestion side (82tn.16 slice 4).
-				[`${daemon}/Layers/project-services-layer.ts`, 12],
+				// with its ingestion side (82tn.16 slice 4) and its settings and
+				// titles (slice 5).
+				[`${daemon}/Layers/project-services-layer.ts`, 16],
 				// The ingestion side's definitions: pending interactions, alert ledger,
 				// provider ingestion and the OpenCode ingress with its history ports.
 				["src/lib/domain/relay/Layers/project-ingestion-layer.ts", 6],
@@ -198,14 +201,17 @@ describe("per-project relay stays retired (82tn.16)", () => {
 					"src/lib/domain/relay/Services/provider-runtime-ingestion-service.ts",
 					2,
 				],
+				["src/lib/domain/relay/Services/project-settings.ts", 1],
+				["src/lib/domain/relay/Services/session-title-service.ts", 1],
 				// Definitions, and a store opened without the daemon.
 				["src/lib/domain/relay/Services/session-manager-service.ts", 3],
 				["src/lib/domain/relay/Services/relay-status-snapshot.ts", 3],
 				["src/lib/domain/relay/Services/services.ts", 1],
 				["src/lib/persistence/effect/live.ts", 2],
-				// relay: a standalone relay's own copies.
-				["src/lib/domain/relay/Layers/relay-layer.ts", 2],
-				[`${relay}/project-relay-layers.ts`, 12],
+				// relay: a standalone relay's own copies, which a relay of a registered
+				// project builds only when the daemon cannot build the project.
+				["src/lib/domain/relay/Layers/relay-layer.ts", 7],
+				[`${relay}/project-relay-layers.ts`, 16],
 			]),
 		);
 	});

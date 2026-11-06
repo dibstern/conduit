@@ -9,7 +9,10 @@ import { DaemonEventBusLive } from "../../daemon/Services/daemon-pubsub.js";
 import { makeOpenCodeRuntimeStateLive } from "../../daemon/Services/instance-manager-service.js";
 import { AlertsLive, type AlertsTag } from "../Services/alerts.js";
 import { InputDraftsLive } from "../Services/input-drafts.js";
-import { ProjectSettingsLive } from "../Services/project-settings.js";
+import {
+	ProjectSettingsLive,
+	type ProjectSettingsTag,
+} from "../Services/project-settings.js";
 import { PtyManagerStateLive } from "../Services/pty-manager-service.js";
 import { RelayEventBusLive } from "../Services/relay-event-bus.js";
 import {
@@ -35,7 +38,10 @@ import {
 	makePollerPubSubLive,
 	makePollerStateLive,
 } from "../Services/session-status-poller.js";
-import { makeSessionTitleServiceLive } from "../Services/session-title-service.js";
+import {
+	makeSessionTitleServiceLive,
+	type SessionTitleServiceTag,
+} from "../Services/session-title-service.js";
 import { RateLimiterLive } from "./rate-limiter-layer.js";
 
 /**
@@ -54,6 +60,12 @@ export const makeRelayStateLive = (
 		readonly testSendLimit?: number;
 		/** Daemon relays borrow the daemon bus; standalone relays own a local bus. */
 		readonly sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>;
+		/** Daemon relays borrow the project's settings and titles (82tn.16). */
+		readonly titlesLayer?: Layer.Layer<
+			ProjectSettingsTag | SessionTitleServiceTag,
+			never,
+			Layer.Services<ReturnType<typeof makeSessionTitleServiceLive>>
+		>;
 		/** Borrowing relays must leave session overrides and timers with the daemon. */
 		readonly overridesStateLayer?: Layer.Layer<OverridesStateTag>;
 		/** Daemon relays borrow the project's session manager state from the daemon. */
@@ -85,16 +97,12 @@ export const makeRelayStateLive = (
 	return Layer.mergeAll(
 		// Session state
 		makeSessionRegistryStateLive(),
-		Layer.provideMerge(
-			makeSessionTitleServiceLive(),
-			Layer.mergeAll(
-				ProjectSettingsLive,
-				Layer.merge(
-					sessionManagerParts,
-					options.overridesStateLayer ?? makeOverridesStateLive(),
-				),
+		options.titlesLayer ??
+			makeSessionTitleServiceLive().pipe(
+				Layer.provideMerge(ProjectSettingsLive),
 			),
-		),
+		sessionManagerParts,
+		options.overridesStateLayer ?? makeOverridesStateLive(),
 		// Poller state
 		makePollerStateLive(),
 		makePollerPubSubLive(),

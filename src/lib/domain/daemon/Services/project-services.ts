@@ -14,6 +14,7 @@ import type {
 	OpenCodeSessionCreationGateTag,
 } from "../../relay/Services/opencode-runtime-ingress-service.js";
 import type { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
+import type { ProjectSettingsTag } from "../../relay/Services/project-settings.js";
 import type { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
 import type { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
 import type {
@@ -26,6 +27,7 @@ import type {
 	ProjectSessionManagerParts,
 	SessionManagerServiceTag,
 } from "../../relay/Services/session-manager-service.js";
+import type { SessionTitleServiceTag } from "../../relay/Services/session-title-service.js";
 import type { ProjectShellEnvTag } from "../Layers/project-shell-env-layer.js";
 import type { PollerTimings } from "../Layers/relay-factory-layer.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
@@ -51,7 +53,10 @@ export type ProjectGenerationParts =
 	| TranslatorTag
 	| OpenCodeRuntimeIngressTag
 	| OpenCodeHistoryReconcileTag
-	| OpenCodeProcessLinkTag;
+	| OpenCodeProcessLinkTag
+	// Settings and titles (82tn.16 slice 5).
+	| ProjectSettingsTag
+	| SessionTitleServiceTag;
 
 /** Everything a call naming the project runs with, built by the daemon. */
 export type ProjectParts =
