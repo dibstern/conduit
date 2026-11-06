@@ -28,11 +28,16 @@ import {
 	makeProjectIngestionLive,
 	makeProjectOpenCodeIngressLive,
 } from "../../relay/Layers/project-ingestion-layer.js";
+import { AgentServiceLive } from "../../relay/Services/agent-service.js";
 import type { AlertsTag } from "../../relay/Services/alerts.js";
 import { DirectoryListingServiceLive } from "../../relay/Services/directory-listing-service.js";
 import type { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { OpenCodeSessionCreationGateTag } from "../../relay/Services/opencode-runtime-ingress-service.js";
 import { ProjectSettingsLive } from "../../relay/Services/project-settings.js";
+import {
+	ProviderTurnServiceTag,
+	ProviderTurns,
+} from "../../relay/Services/provider-turn-service.js";
 import {
 	makeRelayStatusSnapshot,
 	RelayStatusSnapshotTag,
@@ -45,6 +50,7 @@ import {
 	TranslatorTag,
 } from "../../relay/Services/services.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { SessionInboxLive } from "../../relay/Services/session-inbox.js";
 import { SessionManagerError } from "../../relay/Services/session-manager-error.js";
 import {
 	makeSessionManagers,
@@ -55,6 +61,7 @@ import {
 	SessionManagerStateTag,
 } from "../../relay/Services/session-manager-state.js";
 import type { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
+import type { SessionSetupTag } from "../../relay/Services/session-setup.js";
 import { makeSessionTitleServiceLive } from "../../relay/Services/session-title-service.js";
 import type { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { ToolContentServiceLive } from "../../relay/Services/tool-content-service.js";
@@ -68,6 +75,7 @@ import { DaemonStoreAvailability } from "../Services/daemon-store-availability.j
 import type { DaemonTurns } from "../Services/daemon-turns.js";
 import type { MessageSurfacingSettings } from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import type { OpenCodeProjectStreams } from "../Services/opencode-project-streams.js";
 import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
 import {
@@ -78,9 +86,11 @@ import {
 } from "../Services/project-services.js";
 import { ProviderAdapters } from "../Services/provider-adapters.js";
 import type { SessionActivityTag } from "../Services/session-activity.js";
+import type { SessionGit } from "../Services/session-git.js";
 import { SessionManagerOwner } from "../Services/session-manager-owner.js";
 import type { Usage } from "../Services/usage.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
+import type { WorktreeServiceTag } from "../Services/worktree-service.js";
 import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
 import type { PollerTimings } from "./relay-factory-layer.js";
 
@@ -95,8 +105,7 @@ export const makeProjectServicesLive = (options: {
 	readonly claudeSdk?: ClaudeSdkSeam | undefined;
 	readonly pollerTimings?: PollerTimings | undefined;
 }) =>
-	Layer.effect(
-		ProjectServices,
+	Layer.effectContext(
 		Effect.gen(function* () {
 			const registry = yield* ProjectRegistryTag;
 			const owners = yield* OwnerScopes;
@@ -130,6 +139,7 @@ export const makeProjectServicesLive = (options: {
 				eventBus: yield* DaemonEventBusTag,
 			};
 			const managers = yield* SessionManagerOwner;
+			const providerTurns = yield* ProviderTurns;
 			const { engine } = yield* DaemonOrchestration;
 			const shared = yield* Effect.context<
 				| AccountDirectory
@@ -150,6 +160,14 @@ export const makeProjectServicesLive = (options: {
 				| CategorySet
 				| ProviderAdapters
 				| DaemonTurns
+			>();
+			// What a turn reads from the daemon beyond the project's own parts.
+			const turnShared = yield* Effect.context<
+				| OwnerScopes
+				| OpenCodeProjectStreams
+				| SessionGit
+				| SessionSetupTag
+				| WorktreeServiceTag
 			>();
 			const push = yield* PushManagerTag;
 			const log = createLogger("relay");
@@ -277,6 +295,37 @@ export const makeProjectServicesLive = (options: {
 											AgentLivenessLive,
 										).pipe(Layer.provide(Layer.succeedContext(projectBase))),
 									);
+									// Turns and the inbox drain, once per project (lane 16o). The
+									// project's config reads its folders from the registry at each use.
+									const turnContext = Context.mergeAll(
+										projectBase,
+										turnShared,
+										models,
+										ingestion,
+										ingress,
+										titles,
+										readers,
+									).pipe(
+										Context.add(SessionManagerServiceTag, sessionManagers),
+									);
+									const turns = yield* providerTurns.own(
+										projectId,
+										turnContext,
+									);
+									const inbox = yield* Layer.build(
+										SessionInboxLive.pipe(
+											Layer.provideMerge(AgentServiceLive),
+											Layer.provide(
+												Layer.succeedContext(
+													Context.add(
+														turnContext,
+														ProviderTurnServiceTag,
+														turns,
+													),
+												),
+											),
+										),
+									);
 									const parts = Context.mergeAll(
 										persistence,
 										models,
@@ -284,7 +333,9 @@ export const makeProjectServicesLive = (options: {
 										ingress,
 										titles,
 										readers,
+										inbox,
 									).pipe(
+										Context.add(ProviderTurnServiceTag, turns),
 										Context.add(
 											RelayStatusSnapshotTag,
 											makeRelayStatusSnapshot(),
@@ -319,50 +370,46 @@ export const makeProjectServicesLive = (options: {
 							SqlError: storeUnavailable(projectId),
 						}),
 					);
-			return {
-				generation,
-				forProject: (projectId) =>
-					Effect.gen(function* () {
-						const project = yield* registered(projectId);
-						environments?.register(
-							project.folders[0],
-							project.shellEnv,
-							projectId,
+			const forProject: ProjectServices["Service"]["forProject"] = (
+				projectId,
+			) =>
+				Effect.gen(function* () {
+					const project = yield* registered(projectId);
+					environments?.register(
+						project.folders[0],
+						project.shellEnv,
+						projectId,
+					);
+					const parts = yield* generation(projectId);
+					const manager = yield* managers
+						.project(projectId)
+						.pipe(
+							Effect.mapError((error) =>
+								refuse(projectId, formatErrorDetail(error)),
+							),
 						);
-						const parts = yield* generation(projectId);
-						const manager = yield* managers
-							.project(projectId)
-							.pipe(
-								Effect.mapError((error) =>
-									refuse(projectId, formatErrorDetail(error)),
-								),
-							);
-						return Context.merge(shared, parts).pipe(
-							Context.add(ConfigTag, projectConfig(project, daemon)),
-							Context.add(LoggerTag, log),
-							Context.add(OrchestrationEngineTag, engine),
-							Context.add(SessionManagerStateTag, manager.state),
-							Context.add(SessionManagerCoordinationTag, manager.coordination),
-						);
-					}),
-			};
+					return Context.merge(shared, parts).pipe(
+						Context.add(ConfigTag, projectConfig(project, daemon)),
+						Context.add(LoggerTag, log),
+						Context.add(OrchestrationEngineTag, engine),
+						Context.add(SessionManagerStateTag, manager.state),
+						Context.add(SessionManagerCoordinationTag, manager.coordination),
+					);
+				});
+			// The daemon's one session manager; a project's turns call it too.
+			const sessionManagers = makeSessionManagers((projectId) =>
+				forProject(projectId).pipe(
+					Effect.mapError(
+						(error) =>
+							new SessionManagerError({
+								operation: "forProject",
+								cause: error.reason,
+							}),
+					),
+				),
+			);
+			return Context.make(ProjectServices, { generation, forProject }).pipe(
+				Context.add(SessionManagerServiceTag, sessionManagers),
+			);
 		}),
 	);
-
-/** The daemon's session managers: every project's parts come from ProjectServices. */
-export const DaemonSessionManagersLive = Layer.effect(
-	SessionManagerServiceTag,
-	Effect.map(ProjectServices, (projects) =>
-		makeSessionManagers((projectId) =>
-			projects.forProject(projectId).pipe(
-				Effect.mapError(
-					(error) =>
-						new SessionManagerError({
-							operation: "forProject",
-							cause: error.reason,
-						}),
-				),
-			),
-		),
-	),
-);

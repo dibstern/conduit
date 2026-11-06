@@ -57,6 +57,7 @@ import { workspaceFolderPresent } from "../../../session/workspace-directories.j
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { DaemonTurns } from "../../daemon/Services/daemon-turns.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
+import { OpenCodeProjectStreams } from "../../daemon/Services/opencode-project-streams.js";
 import { OwnerScopes } from "../../daemon/Services/owner-scopes.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
@@ -89,7 +90,6 @@ import {
 	recreateSessionWorktrees,
 	SessionWorkspaceTag,
 } from "./session-workspace.js";
-import { SSEStreamTag } from "./sse-stream-service.js";
 import { makeFailTurn, makeSilenceNotice } from "./turn-failure.js";
 
 export const CLAUDE_PROVIDER_ID = "claude";
@@ -647,9 +647,13 @@ const prepareEngineTurnInput = (
 			},
 		);
 		if (traits.runsOpenCodeServer) {
-			const stream = yield* Effect.serviceOption(SSEStreamTag);
-			if (stream._tag === "Some")
-				yield* stream.value.includeDirectory(folders.workspaceRoot);
+			// The daemon's streams, so a turn built with no relay still hears its folder.
+			const streams = yield* Effect.serviceOption(OpenCodeProjectStreams);
+			if (streams._tag === "Some")
+				yield* streams.value.includeDirectory(
+					(yield* ConfigTag).slug,
+					folders.workspaceRoot,
+				);
 		}
 		const inputId = resolvedInput.commandId;
 		if (

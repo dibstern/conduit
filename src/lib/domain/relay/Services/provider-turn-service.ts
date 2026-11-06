@@ -217,6 +217,12 @@ export class ProviderTurns extends Context.Service<
 			projectId: string,
 			parts: Context.Context<ProviderTurnParts>,
 		) => Effect.Effect<ProviderTurnService, never, Scope.Scope>;
+		/** The project's one turn service, built in its owner scope (the caller's)
+		 *  and lent until that scope closes. */
+		readonly own: (
+			projectId: string,
+			parts: Context.Context<ProviderTurnParts>,
+		) => Effect.Effect<ProviderTurnService, never, Scope.Scope>;
 		/** The newest turn service lent for the project; none while no relay serves it. */
 		readonly served: (projectId: string) => Option.Option<ProviderTurnService>;
 	}
@@ -544,61 +550,82 @@ export const ProviderTurnsLive = Layer.effect(
 							Effect.asVoid(Effect.forkIn(worker, daemonScope)),
 						),
 					);
+		const forget = (projectId: string, project: ProjectTurns) =>
+			Effect.sync(() => {
+				if (projects.get(projectId) === project) projects.delete(projectId);
+			});
 		const bind = (projectId: string, project: ProjectTurns) =>
 			Option.isNone(owners) || project.bound
 				? Effect.void
 				: owners.value.projectScope(projectId).pipe(
 						Effect.flatMap((scope) =>
 							scope.acquire<void, never, never>(
-								Effect.addFinalizer(() =>
-									Effect.sync(() => {
-										if (projects.get(projectId) === project)
-											projects.delete(projectId);
-									}),
-								),
+								Effect.addFinalizer(() => forget(projectId, project)),
 							),
 						),
 						Effect.tap(() => Effect.sync(() => (project.bound = true))),
 						Effect.ignore,
 					);
+		const state = (projectId: string) =>
+			Effect.suspend(() => {
+				const existing = projects.get(projectId);
+				if (existing) return Effect.succeed(existing);
+				return Effect.map(PubSub.unbounded<string>(), (lifts) => {
+					const created: ProjectTurns = {
+						stopping: new Map(),
+						accountSwitches: new Map(),
+						lifts,
+						recovery: Semaphore.makeUnsafe(1),
+						recovered: false,
+						bound: false,
+					};
+					projects.set(projectId, created);
+					return created;
+				});
+			});
+		const lend = (
+			projectId: string,
+			project: ProjectTurns,
+			parts: Context.Context<ProviderTurnParts>,
+		) =>
+			Effect.gen(function* () {
+				const service = yield* makeProviderTurnService(
+					projectId,
+					project,
+					parts,
+					spawn,
+				);
+				yield* Effect.acquireRelease(
+					Effect.sync(() =>
+						lent.set(projectId, [...(lent.get(projectId) ?? []), service]),
+					),
+					() =>
+						Effect.sync(() => {
+							const rest = (lent.get(projectId) ?? []).filter(
+								(entry) => entry !== service,
+							);
+							if (rest.length > 0) lent.set(projectId, rest);
+							else lent.delete(projectId);
+						}),
+				);
+				return service;
+			});
 		return ProviderTurns.of({
 			forProject: (projectId, parts) =>
 				Effect.gen(function* () {
-					const project =
-						projects.get(projectId) ??
-						(yield* Effect.map(PubSub.unbounded<string>(), (lifts) => {
-							const created: ProjectTurns = {
-								stopping: new Map(),
-								accountSwitches: new Map(),
-								lifts,
-								recovery: Semaphore.makeUnsafe(1),
-								recovered: false,
-								bound: false,
-							};
-							projects.set(projectId, created);
-							return created;
-						}));
+					const project = yield* state(projectId);
 					yield* bind(projectId, project);
-					const service = yield* makeProviderTurnService(
-						projectId,
-						project,
-						parts,
-						spawn,
-					);
-					yield* Effect.acquireRelease(
-						Effect.sync(() =>
-							lent.set(projectId, [...(lent.get(projectId) ?? []), service]),
-						),
-						() =>
-							Effect.sync(() => {
-								const rest = (lent.get(projectId) ?? []).filter(
-									(entry) => entry !== service,
-								);
-								if (rest.length > 0) lent.set(projectId, rest);
-								else lent.delete(projectId);
-							}),
-					);
-					return service;
+					return yield* lend(projectId, project, parts);
+				}),
+			// The caller's scope is the project's owner scope, so it holds the state too.
+			own: (projectId, parts) =>
+				Effect.gen(function* () {
+					const project = yield* state(projectId);
+					if (!project.bound) {
+						project.bound = true;
+						yield* Effect.addFinalizer(() => forget(projectId, project));
+					}
+					return yield* lend(projectId, project, parts);
 				}),
 			served: (projectId) =>
 				Option.fromUndefinedOr(lent.get(projectId)?.at(-1)),

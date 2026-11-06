@@ -95,7 +95,10 @@ import { SessionWorkspaceOrOwn } from "../domain/relay/Layers/session-workspace-
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
 import { makeWsTransportLive } from "../domain/relay/Layers/ws-transport-layer.js";
-import { AgentServiceLive } from "../domain/relay/Services/agent-service.js";
+import {
+	AgentServiceLive,
+	AgentServiceTag,
+} from "../domain/relay/Services/agent-service.js";
 import { AlertLedgerTag } from "../domain/relay/Services/alert-ledger.js";
 import { AlertsLive, AlertsTag } from "../domain/relay/Services/alerts.js";
 import { ContinuationTag } from "../domain/relay/Services/continuation.js";
@@ -136,6 +139,7 @@ import {
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
 	attachProviderTurnsLive,
+	ProviderTurnServiceTag,
 	ProviderTurnsOrOwn,
 } from "../domain/relay/Services/provider-turn-service.js";
 import { makeRecapServiceLive } from "../domain/relay/Services/recap-service.js";
@@ -167,7 +171,10 @@ import {
 	SessionEventBusLive,
 	SessionEventBusTag,
 } from "../domain/relay/Services/session-event-bus.js";
-import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
+import {
+	SessionInboxLive,
+	SessionInboxTag,
+} from "../domain/relay/Services/session-inbox.js";
 import {
 	ownSessionManagersLive,
 	SessionManagerServiceTag,
@@ -942,6 +949,7 @@ export function createProjectRelayLayers({
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
 		sseStreamLayer,
+		projectStreamsLayer,
 		projectManagementServiceLayer,
 		daemonSessionQueryServiceLayer,
 		fromProject(
@@ -1069,7 +1077,7 @@ export function createProjectRelayLayers({
 		Layer.provide(recapSettingsLayer),
 	);
 	const relayStateServicesAndBridges = Layer.provideMerge(
-		AgentServiceLive,
+		fromProject(Context.pick(AgentServiceTag), AgentServiceLive),
 		relayStateWithRecaps,
 	);
 	// One translator per project, so a sessionless part never crosses projects.
@@ -1088,9 +1096,15 @@ export function createProjectRelayLayers({
 		SessionStateProjectionNotifierLive,
 		baseLayers,
 	);
+	// A registered project's turns and inbox are the daemon's (lane 16o).
 	const fullBaseLayers = Layer.provideMerge(
-		attachProviderTurnsLive.pipe(
-			Layer.provide(ProviderTurnsOrOwn.pipe(Layer.provide(daemonContextLayer))),
+		fromProject(
+			Context.pick(ProviderTurnServiceTag),
+			attachProviderTurnsLive.pipe(
+				Layer.provide(
+					ProviderTurnsOrOwn.pipe(Layer.provide(daemonContextLayer)),
+				),
+			),
 		),
 		Layer.merge(
 			SessionSetupOrOwn.pipe(
@@ -1121,7 +1135,10 @@ export function createProjectRelayLayers({
 	const wiringLayers = sessionLifecycleWiringLayer.pipe(
 		Layer.provide(Layer.merge(baseLayers, sessionWorkspaceLayer)),
 	);
-	const inboxLayer = SessionInboxLive.pipe(Layer.provide(sessionEventBusLayer));
+	const inboxLayer = fromProject(
+		Context.pick(SessionInboxTag),
+		SessionInboxLive.pipe(Layer.provide(sessionEventBusLayer)),
+	);
 	// Provide the borrowed daemon tracer to every layer, including fibers forked
 	// while building services such as the status poller.
 	const fullLayer = Layer.provideMerge(

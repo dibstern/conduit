@@ -1,10 +1,20 @@
-import { Context, Data, Effect, Option, PubSub, Queue } from "effect";
+import {
+	Context,
+	Data,
+	Effect,
+	HashMap,
+	Option,
+	PubSub,
+	Queue,
+	Ref,
+} from "effect";
 import type {
 	PersistenceProjectContext,
 	PersistenceStoreContext,
 } from "../../../persistence/effect/live.js";
 import { daemonStorePath } from "../../../persistence/project-storage.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
+import type { AgentServiceTag } from "../../relay/Services/agent-service.js";
 import type { AlertLedgerTag } from "../../relay/Services/alert-ledger.js";
 import type { ContinuationTag } from "../../relay/Services/continuation.js";
 import type { DirectoryListingServiceTag } from "../../relay/Services/directory-listing-service.js";
@@ -17,6 +27,7 @@ import type {
 import type { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
 import type { ProjectSettingsTag } from "../../relay/Services/project-settings.js";
 import type { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
+import type { ProviderTurnServiceTag } from "../../relay/Services/provider-turn-service.js";
 import type { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
 import type {
 	AgentLivenessTag,
@@ -25,6 +36,7 @@ import type {
 	TranslatorTag,
 } from "../../relay/Services/services.js";
 import type { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import type { SessionInboxTag } from "../../relay/Services/session-inbox.js";
 import type {
 	ProjectSessionManagerParts,
 	SessionManagerServiceTag,
@@ -63,7 +75,11 @@ export type ProjectGenerationParts =
 	// Stateless readers (82tn.16 slice 7).
 	| ToolContentServiceTag
 	| DirectoryListingServiceTag
-	| AgentLivenessTag;
+	| AgentLivenessTag
+	// Turns and the inbox drain, and the agent service a continuation reads (lane 16o).
+	| AgentServiceTag
+	| ProviderTurnServiceTag
+	| SessionInboxTag;
 
 /** Everything a call naming the project runs with, built by the daemon. */
 export type ProjectParts =
@@ -110,11 +126,24 @@ export const projectConfig = (
 		readonly eventBus: DaemonEventBusTag["Service"];
 	},
 ): ConfigTag["Service"] => {
-	const { slug, folders } = project;
+	const { slug } = project;
 	const { environments, cleanupQueue } = daemon;
+	// Read from the registry at each use, so a service built once per project sees
+	// a folder change, as t3code reads the cwd at each turn start
+	// (apps/server/src/orchestration-v2/Orchestrator.ts:1910). A removed project
+	// keeps the folders it had.
+	const folders = () =>
+		Option.match(HashMap.get(Ref.getUnsafe(daemon.registry), slug), {
+			onNone: () => project.folders,
+			onSome: (entry) => entry.project.folders,
+		});
 	return {
-		projectDir: folders[0],
-		extraFolders: folders.slice(1),
+		get projectDir() {
+			return folders()[0];
+		},
+		get extraFolders() {
+			return folders().slice(1);
+		},
 		slug,
 		configDir: daemon.configDir,
 		persistenceDbPath: daemonStorePath(daemon.configDir),

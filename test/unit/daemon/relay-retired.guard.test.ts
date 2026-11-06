@@ -186,14 +186,17 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"ToolContentServiceLive",
 			"DirectoryListingServiceLive",
 			"AgentLivenessLive",
+			"attachProviderTurnsLive",
+			"SessionInboxLive",
+			"AgentServiceLive",
 		]);
 		expect(tally(server, named(builders))).toEqual(
 			new Map([
 				// ProjectServices: each project's session-manager parts and generation,
 				// with its ingestion side (82tn.16 slice 4) and its settings and
 				// titles (slice 5), and its tool details, directory listing and agent
-				// liveness (slice 7).
-				[`${daemon}/Layers/project-services-layer.ts`, 22],
+				// liveness (slice 7), and its turns, inbox and agent service (lane 16o).
+				[`${daemon}/Layers/project-services-layer.ts`, 26],
 				// The ingestion side's definitions: pending interactions, alert ledger,
 				// provider ingestion, the OpenCode ingress with its history ports, and
 				// agent liveness.
@@ -210,6 +213,9 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/domain/relay/Services/session-title-service.ts", 1],
 				["src/lib/domain/relay/Services/tool-content-service.ts", 1],
 				["src/lib/domain/relay/Services/directory-listing-service.ts", 1],
+				["src/lib/domain/relay/Services/provider-turn-service.ts", 2],
+				["src/lib/domain/relay/Services/session-inbox.ts", 1],
+				["src/lib/domain/relay/Services/agent-service.ts", 1],
 				// Definitions, and a store opened without the daemon.
 				["src/lib/domain/relay/Services/session-manager-service.ts", 3],
 				["src/lib/domain/relay/Services/relay-status-snapshot.ts", 3],
@@ -218,7 +224,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				// relay: a standalone relay's own copies, which a relay of a registered
 				// project builds only when the daemon cannot build the project.
 				["src/lib/domain/relay/Layers/relay-layer.ts", 7],
-				[`${relay}/project-relay-layers.ts`, 22],
+				[`${relay}/project-relay-layers.ts`, 28],
 			]),
 		);
 	});

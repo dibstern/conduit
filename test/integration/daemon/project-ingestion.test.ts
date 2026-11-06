@@ -31,6 +31,15 @@
  * 100 a relay replaced while registered builds its own;
  * 101 two projects sharing a folder share one tool-details reader.
  * Store isolation is row 76 (the reader reads the project's bound store).
+ *
+ * Lane 16o (rows 103-107): the turn service and inbox are built once per
+ * project, and each turn reads the project's folders when it runs:
+ * 103 a project no relay has opened, or added while running, has neither;
+ * 104 a relay replaced while registered builds its own, so its drain dies
+ *    with it;
+ * 105 two projects sharing a folder share one inbox;
+ * 107 a removed project's turn service is still served.
+ * Row 106 (a folder change reaches the next turn) is project-extra-folders.
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -43,13 +52,23 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodePath } from "@effect/platform-node";
-import { type Context, Effect, Layer, ManagedRuntime, PubSub } from "effect";
+import {
+	type Context,
+	Effect,
+	Layer,
+	ManagedRuntime,
+	Option,
+	PubSub,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it } from "vitest";
 import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { RelayFactoryTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
-import { addWithoutRelay } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	addWithoutRelay,
+	remove,
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
@@ -58,9 +77,14 @@ import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Serv
 import { ProjectSettingsTag } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
+	ProviderTurnServiceTag,
+	ProviderTurns,
+} from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
+import {
 	AgentLivenessTag,
 	TranslatorTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { ToolContentServiceTag } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -473,5 +497,76 @@ describe("82tn.16: each project's tool details, directory listing and agent live
 		const observed = { sameTools: alpha.tools === beta.tools };
 		evidence.observed = observed;
 		expect(observed).toEqual({ sameTools: false });
+	});
+});
+
+/** The project's turn service and inbox. */
+const turnParts = Effect.all({
+	turns: ProviderTurnServiceTag,
+	inbox: SessionInboxTag,
+});
+
+describe("82tn.16: each project's turns and inbox live with the project", () => {
+	it("serves a project's turns and inbox with no relay open", async () => {
+		const daemon = start("turns-cold").boot();
+		await daemon.register("alpha");
+		const observed = await daemon.inProject(
+			"alpha",
+			Effect.map(turnParts, ({ turns, inbox }) => ({
+				fences: turns.turnFences("absent"),
+				inbox: inbox !== undefined,
+			})),
+		);
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			fences: { stopping: false, switching: false },
+			inbox: true,
+		});
+	});
+
+	it("keeps one turn service and inbox across a relay replaced while registered", async () => {
+		const daemon = start("turns-relay-replaced").boot();
+		await daemon.register("alpha");
+		const project = await daemon.inProject("alpha", turnParts);
+		const inRelay = async () => {
+			const relay = await daemon.relay("alpha");
+			const parts = await relayParts(relay, turnParts);
+			await relay.stop();
+			return parts.turns === project.turns && parts.inbox === project.inbox;
+		};
+		const observed = { first: await inRelay(), second: await inRelay() };
+		evidence.observed = observed;
+		expect(observed).toEqual({ first: true, second: true });
+	});
+
+	it("gives two projects sharing a folder their own turns and inbox", async () => {
+		const daemon = start("turns-shared-folder").boot();
+		await daemon.register("alpha");
+		await daemon.register("beta");
+		const alpha = await daemon.inProject("alpha", turnParts);
+		const beta = await daemon.inProject("beta", turnParts);
+		const observed = {
+			sameTurns: alpha.turns === beta.turns,
+			sameInbox: alpha.inbox === beta.inbox,
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({ sameTurns: false, sameInbox: false });
+	});
+
+	it("drops a removed project's turn service", async () => {
+		const daemon = start("turns-removed").boot();
+		await daemon.register("alpha");
+		await daemon.inProject("alpha", turnParts);
+		const served = () =>
+			daemon.daemon.runPromise(
+				Effect.map(ProviderTurns, (turns) =>
+					Option.isSome(turns.served("alpha")),
+				),
+			);
+		const before = await served();
+		await daemon.daemon.runPromise(remove("alpha"));
+		const observed = { before, after: await served() };
+		evidence.observed = observed;
+		expect(observed).toEqual({ before: true, after: false });
 	});
 });
