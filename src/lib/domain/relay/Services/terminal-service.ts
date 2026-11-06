@@ -14,7 +14,6 @@ import type { Account } from "../../../contracts/account.js";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import type { PtyEvent, PtyRow } from "../../../contracts/ws-rpc.js";
 import * as Failure from "../../../effect/failure-classification.js";
-import { DEFAULT_CONFIG_DIR } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { makeClaudeTerminalEnv } from "../../../provider/claude/claude-sdk-env.js";
 import { prepareCodexAccount } from "../../../provider/codex/codex-home.js";
@@ -33,7 +32,6 @@ import {
 	type OpenCodeClient,
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
-import { OwnerScopes } from "../../daemon/Services/owner-scopes.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import {
 	ConfigTag,
@@ -123,90 +121,100 @@ export class LocalPtyServiceTag extends Context.Service<
 	LocalPtyService
 >()("LocalPtyService") {}
 
-export const LocalPtyServiceLive: Layer.Layer<
-	LocalPtyServiceTag,
-	never,
-	ConfigTag | LoggerTag
-> = Layer.effect(
-	LocalPtyServiceTag,
-	Effect.gen(function* () {
-		const config = yield* ConfigTag;
-		const log = yield* LoggerTag;
-		let active: PtyHostClient | undefined;
-		let connecting: Promise<PtyHostClient> | undefined;
-		let disposed = false;
-		const connect = async (start: boolean): Promise<PtyHostClient> => {
-			if (disposed) throw new PtyHostError({ message: "PTY service disposed" });
-			if (active?.connected) return active;
-			if (connecting) {
-				try {
-					return await connecting;
-				} catch (error) {
-					if (!start || !isPtyHostUnavailable(error)) throw error;
-					return connect(true);
-				}
-			}
-			connecting = PtyHostClient.connect({
-				configDir: config.configDir ?? DEFAULT_CONFIG_DIR,
-				start,
-				log,
-			})
-				.then((client) => {
-					if (disposed) {
-						client.disconnect();
-						throw new PtyHostError({ message: "PTY service disposed" });
+/** The PTY host's client: one per daemon, since one host serves every project (82tn.16). */
+export const makeLocalPtyServiceLive = (
+	configDir: string,
+): Layer.Layer<LocalPtyServiceTag, never, LoggerTag> =>
+	Layer.effect(
+		LocalPtyServiceTag,
+		Effect.gen(function* () {
+			const log = yield* LoggerTag;
+			let active: PtyHostClient | undefined;
+			let connecting: Promise<PtyHostClient> | undefined;
+			let disposed = false;
+			const connect = async (start: boolean): Promise<PtyHostClient> => {
+				if (disposed)
+					throw new PtyHostError({ message: "PTY service disposed" });
+				if (active?.connected) return active;
+				if (connecting) {
+					try {
+						return await connecting;
+					} catch (error) {
+						if (!start || !isPtyHostUnavailable(error)) throw error;
+						return connect(true);
 					}
-					active = client;
-					return client;
+				}
+				connecting = PtyHostClient.connect({
+					configDir,
+					start,
+					log,
 				})
-				.finally(() => {
-					connecting = undefined;
-				});
-			return connecting;
-		};
-		yield* Effect.addFinalizer(() =>
-			Effect.promise(async () => {
-				disposed = true;
-				active?.disconnect();
-				await connecting?.catch(() => undefined);
-			}),
-		);
-		return {
-			create: (options) =>
-				Effect.tryPromise({
-					try: async () => (await connect(true)).create(options),
-					catch: (cause) =>
-						new TerminalServiceError({ operation: "create", cause }),
-				}),
-			list: (cwd, allProjects = false) =>
-				Effect.tryPromise({
-					try: async () => {
-						let host: PtyHostClient;
-						try {
-							host = await connect(false);
-						} catch (error) {
-							if (
-								isRecord(error) &&
-								["ENOENT", "ECONNREFUSED"].includes(String(error["code"]))
-							)
-								return [];
-							throw error;
+					.then((client) => {
+						if (disposed) {
+							client.disconnect();
+							throw new PtyHostError({ message: "PTY service disposed" });
 						}
-						// A failed exchange is not an authoritative empty terminal list.
-						return (await host.list(cwd, allProjects)).map(({ pty }) => pty);
-					},
-					catch: (cause) =>
-						new TerminalServiceError({ operation: "list", cause }),
+						active = client;
+						return client;
+					})
+					.finally(() => {
+						connecting = undefined;
+					});
+				return connecting;
+			};
+			yield* Effect.addFinalizer(() =>
+				Effect.promise(async () => {
+					disposed = true;
+					active?.disconnect();
+					await connecting?.catch(() => undefined);
 				}),
-			attach: (ptyId, cwd) =>
-				Effect.tryPromise({
-					try: async () => (await connect(false)).attach(ptyId, cwd),
-					catch: (cause) =>
-						new TerminalServiceError({ operation: "connect", ptyId, cause }),
-				}),
-		} satisfies LocalPtyService;
-	}),
-);
+			);
+			return {
+				create: (options) =>
+					Effect.tryPromise({
+						try: async () => (await connect(true)).create(options),
+						catch: (cause) =>
+							new TerminalServiceError({ operation: "create", cause }),
+					}),
+				list: (cwd, allProjects = false) =>
+					Effect.tryPromise({
+						try: async () => {
+							let host: PtyHostClient;
+							try {
+								host = await connect(false);
+							} catch (error) {
+								if (
+									isRecord(error) &&
+									["ENOENT", "ECONNREFUSED"].includes(String(error["code"]))
+								)
+									return [];
+								throw error;
+							}
+							// A failed exchange is not an authoritative empty terminal list.
+							return (await host.list(cwd, allProjects)).map(({ pty }) => pty);
+						},
+						catch: (cause) =>
+							new TerminalServiceError({ operation: "list", cause }),
+					}),
+				attach: (ptyId, cwd) =>
+					Effect.tryPromise({
+						try: async () => (await connect(false)).attach(ptyId, cwd),
+						catch: (cause) =>
+							new TerminalServiceError({ operation: "connect", ptyId, cause }),
+					}),
+			} satisfies LocalPtyService;
+		}),
+	);
+
+/** A daemon-served relay borrows the daemon's PTY host client; a standalone relay builds its own. */
+export const LocalPtyServiceOrOwn = (configDir: string) =>
+	Layer.unwrap(
+		Effect.map(Effect.serviceOption(LocalPtyServiceTag), (shared) =>
+			Option.isSome(shared)
+				? Layer.succeed(LocalPtyServiceTag, shared.value)
+				: makeLocalPtyServiceLive(configDir),
+		),
+	);
 
 type PtyInfoResult =
 	| { readonly _tag: "MissingId"; readonly raw: Record<string, unknown> }
@@ -626,38 +634,6 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 			),
 			{ uninterruptible: "inherit" },
 		);
-
-		// 82tn.14: a removed project's hosted terminals close with its owner scope; a detach keeps
-		// them in the host for the next daemon. Each relay binds once; a replaced relay's binding
-		// does nothing, so the newest relay closes them.
-		let live = true;
-		yield* Effect.addFinalizer(() => Effect.sync(() => (live = false)));
-		const owners = yield* Effect.serviceOption(OwnerScopes);
-		if (Option.isSome(owners))
-			yield* owners.value.projectScope(config.slug).pipe(
-				Effect.flatMap((scope) =>
-					scope.acquire<void, never, never>(
-						Effect.addFinalizer((exit) =>
-							live && Exit.isSuccess(exit) && exit.value === "remove"
-								? localPty.list(config.projectDir).pipe(
-										Effect.flatMap((hosted) =>
-											Effect.forEach(hosted, ({ id }) => terminal.close(id), {
-												discard: true,
-											}),
-										),
-										Effect.catchCause((cause) =>
-											Effect.logWarning(
-												"Could not close a removed project's terminals",
-												Failure.renderCause(cause),
-											),
-										),
-									)
-								: Effect.void,
-						),
-					),
-				),
-				Effect.ignore,
-			);
 
 		return terminal;
 	}),

@@ -175,10 +175,12 @@ import {
 	DaemonWsRpcHandlersTag,
 } from "./daemon-ws-rpc-layer.js";
 import { FolderTimelineEvictionLive } from "./folder-timeline-eviction-layer.js";
+import { makeHostedTerminalsLive } from "./hosted-terminals-layer.js";
 import { KeepAwakeLive } from "./keep-awake-layer.js";
 import { MessageSurfacingSettingsLive } from "./message-surfacing-settings-layer.js";
 import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
 import { OwnerScopesLive } from "./owner-scopes-layer.js";
+import { PermissionTimeoutLive } from "./permission-timeout-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
 import { makePreviewGateLive } from "./preview-gate-layer.js";
@@ -1099,9 +1101,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		DaemonTurnsLive,
 		ProviderTurnsLive,
 	).pipe(Layer.provideMerge(withEviction));
-	const withOrchestration = DaemonOrchestrationLive.pipe(
-		Layer.provideMerge(withSessionManager),
-	);
+	const withOrchestration = Layer.mergeAll(
+		DaemonOrchestrationLive,
+		PermissionTimeoutLive,
+		makeHostedTerminalsLive(configDir),
+	).pipe(Layer.provideMerge(withSessionManager));
 	const registries = RelayFactoryLive(
 		configDir,
 		options.claudeSdk,
