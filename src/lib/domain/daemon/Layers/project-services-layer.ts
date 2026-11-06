@@ -65,6 +65,7 @@ import type { OverridesStateTag } from "../../relay/Services/session-overrides-s
 import type { SessionSetupTag } from "../../relay/Services/session-setup.js";
 import { makeSessionTitleServiceLive } from "../../relay/Services/session-title-service.js";
 import type { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+import { SessionWorkspaceHintStateTag } from "../../relay/Services/session-workspace-hint-state.js";
 import {
 	LocalPtyServiceTag,
 	OpenCodeTerminalServiceLive,
@@ -90,7 +91,7 @@ import {
 	projectConfig,
 } from "../Services/project-services.js";
 import { ProviderAdapters } from "../Services/provider-adapters.js";
-import type { SessionActivityTag } from "../Services/session-activity.js";
+import { SessionActivityTag } from "../Services/session-activity.js";
 import type { SessionGit } from "../Services/session-git.js";
 import { SessionManagerOwner } from "../Services/session-manager-owner.js";
 import type { Usage } from "../Services/usage.js";
@@ -419,6 +420,11 @@ export const makeProjectServicesLive = (options: {
 						Context.add(OrchestrationEngineTag, engine),
 						Context.add(SessionManagerStateTag, manager.state),
 						Context.add(SessionManagerCoordinationTag, manager.coordination),
+						// Dismissals are the daemon's, keyed by session, as its relay reads them.
+						Context.add(
+							SessionWorkspaceHintStateTag,
+							Context.get(shared, SessionActivityTag).hintDismissals,
+						),
 					);
 				});
 			// The daemon's one session manager; a project's turns call it too.

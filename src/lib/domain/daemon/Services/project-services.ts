@@ -44,6 +44,7 @@ import type {
 	SessionManagerServiceTag,
 } from "../../relay/Services/session-manager-service.js";
 import type { SessionTitleServiceTag } from "../../relay/Services/session-title-service.js";
+import type { SessionWorkspaceHintStateTag } from "../../relay/Services/session-workspace-hint-state.js";
 import type { OpenCodeTerminalServiceTag } from "../../relay/Services/terminal-service.js";
 import type { ToolContentServiceTag } from "../../relay/Services/tool-content-service.js";
 import type { ProjectShellEnvTag } from "../Layers/project-shell-env-layer.js";
@@ -92,7 +93,8 @@ export type ProjectGenerationParts =
 export type ProjectParts =
 	| Exclude<ProjectSessionManagerParts, SessionManagerServiceTag>
 	| ProjectGenerationParts
-	| SessionEventBusTag;
+	| SessionEventBusTag
+	| SessionWorkspaceHintStateTag;
 
 export class ProjectServicesError extends Data.TaggedError(
 	"ProjectServicesError",

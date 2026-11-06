@@ -87,6 +87,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
+import { SessionWorkspaceHintStateTag } from "../../../src/lib/domain/relay/Services/session-workspace-hint-state.js";
 import { OpenCodeTerminalServiceTag } from "../../../src/lib/domain/relay/Services/terminal-service.js";
 import { ToolContentServiceTag } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -643,5 +644,30 @@ describe("82tn.16: one send limiter for the daemon", () => {
 			first: [true, true, true, true, true],
 			second: [false],
 		});
+	});
+});
+
+describe("82tn.16: workspace hint dismissals live with the daemon", () => {
+	it("keeps a dismissal made with no relay open for the relay opened after", async () => {
+		const daemon = start("hint-dismissal-cold").boot();
+		await daemon.register("alpha");
+		await daemon.inProject(
+			"alpha",
+			Effect.map(SessionWorkspaceHintStateTag, (dismissals) => {
+				dismissals.set("session-1", 3);
+			}),
+		);
+		const relay = await daemon.relay("alpha");
+		const observed = {
+			relaySees: await relayParts(
+				relay,
+				Effect.map(SessionWorkspaceHintStateTag, (dismissals) =>
+					dismissals.get("session-1"),
+				),
+			),
+		};
+		await relay.stop();
+		evidence.observed = observed;
+		expect(observed).toEqual({ relaySees: 3 });
 	});
 });
