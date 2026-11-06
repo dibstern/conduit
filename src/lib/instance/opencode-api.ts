@@ -80,11 +80,15 @@ export interface OpenCodeAPIOptions {
 }
 
 // OpenCodeAPI is Promise-shaped; its id map is the OpenCodeSessionIds service.
+function atSessionBoundary<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
+	return Effect.runPromise(effect);
+}
+
 function mapAtSessionBoundary(
 	mapped: Effect.Effect<string> | undefined,
 	id: string,
 ): Promise<string> {
-	return mapped ? Effect.runPromise(mapped) : Promise.resolve(id);
+	return mapped ? atSessionBoundary(mapped) : Promise.resolve(id);
 }
 
 export interface OpenCodeSessionIdMap {
@@ -92,7 +96,35 @@ export interface OpenCodeSessionIdMap {
 	native(sessionId: string): Effect.Effect<string>;
 	/** The Conduit session a native session belongs to. */
 	conduit(nativeId: string): Effect.Effect<string>;
+	/** Each copied message or part id in a native session -> the Conduit id it copies. */
+	copies(
+		sessionId: string,
+		nativeId: string,
+	): Effect.Effect<Readonly<Record<string, string>>>;
+	/** Native sessions the Conduit session left whose path holds the message. */
+	holders(
+		sessionId: string,
+		messageId: string,
+	): Effect.Effect<ReadonlyArray<{ native: string; tip: string }>>;
+	/** Run `step` inside the id map's gate and record the move it returns. */
+	rebind<E>(
+		sessionId: string,
+		step: Effect.Effect<OpenCodeRebind | undefined, E>,
+	): Effect.Effect<void, E>;
 }
+
+/** A move onto another native session, or a copy of one, for the id map to record (82tn.52). */
+export type OpenCodeRebind = {
+	readonly current: string;
+	/** The session left, with its newest message under its Conduit id. */
+	readonly left?: { readonly native: string; readonly tip: string };
+	/** A copy of `current` taken before it drops messages. */
+	readonly archive?: {
+		readonly native: string;
+		readonly copies: Readonly<Record<string, string>>;
+		readonly tip: string;
+	};
+};
 
 /**
  * Unified namespaced API adapter for OpenCode.
@@ -118,7 +150,7 @@ export class OpenCodeAPI {
 	private readonly client: OpencodeClient;
 	private readonly _baseUrl: string;
 	private readonly _authHeaders: Record<string, string>;
-	private readonly sessionIds: OpenCodeSessionIdMap | undefined;
+	readonly sessionIds: OpenCodeSessionIdMap | undefined;
 
 	readonly session: SessionNamespace;
 	readonly permission: PermissionNamespace;
@@ -288,6 +320,29 @@ export class OpenCodeAPI {
 		return mapAtSessionBoundary(this.sessionIds?.conduit(nativeId), nativeId);
 	}
 
+	/** Each copied id in a native session -> the Conduit id it copies (82tn.52). */
+	copies(
+		sessionId: string,
+		nativeId: string,
+	): Promise<Readonly<Record<string, string>>> {
+		return this.sessionIds
+			? atSessionBoundary(this.sessionIds.copies(sessionId, nativeId))
+			: Promise.resolve({});
+	}
+
+	/** A Conduit message id as a native session names it. */
+	async nativeMessageId(
+		sessionId: string,
+		nativeId: string,
+		messageId: string,
+	): Promise<string> {
+		const copies = await this.copies(sessionId, nativeId);
+		return (
+			Object.entries(copies).find(([, id]) => id === messageId)?.[0] ??
+			messageId
+		);
+	}
+
 	/** A session OpenCode returned, under its Conduit id and its parent's. */
 	async conduitSession(session: SessionDetail): Promise<SessionDetail> {
 		if (!this.sessionIds) return session;
@@ -304,15 +359,29 @@ export class OpenCodeAPI {
 
 // Response schemas validate the SDK's nested message envelope before flattening.
 // Messages of one native session read under the Conduit session's id.
+/** A copy OpenCode re-ided (82tn.52) reads under the Conduit ids it copies. */
 function flattenMessage(
 	message: OpenCodeMessageWithParts,
 	sessionID: string,
+	copies: Readonly<Record<string, string>> = {},
 ): Message {
+	const ids = <T extends object>(value: T, keys: readonly string[]): T => ({
+		...value,
+		...Object.fromEntries(
+			keys.flatMap((key) => {
+				const id: unknown = (value as Record<string, unknown>)[key];
+				return typeof id === "string" && copies[id] ? [[key, copies[id]]] : [];
+			}),
+		),
+	});
 	return {
-		...message.info,
+		...ids(message.info, ["id", "parentID"]),
 		sessionID,
 		parts: message.parts.map((part) =>
-			"sessionID" in part ? { ...part, sessionID } : part,
+			ids("sessionID" in part ? { ...part, sessionID } : part, [
+				"id",
+				"messageID",
+			]),
 		),
 	} as Message;
 }
@@ -320,8 +389,9 @@ function flattenMessage(
 function flattenMessages(
 	data: readonly OpenCodeMessageWithParts[],
 	sessionID: string,
+	copies?: Readonly<Record<string, string>>,
 ): Message[] {
-	return data.map((message) => flattenMessage(message, sessionID));
+	return data.map((message) => flattenMessage(message, sessionID, copies));
 }
 
 class SessionNamespace {
@@ -451,7 +521,19 @@ class SessionNamespace {
 		sessionId: string,
 		options?: { limit?: number; signal?: AbortSignal },
 	): Promise<Message[]> {
-		const native = await this.api.native(sessionId);
+		return this.nativeMessages(
+			sessionId,
+			await this.api.native(sessionId),
+			options,
+		);
+	}
+
+	/** One of a Conduit session's native sessions, under Conduit's ids. */
+	private async nativeMessages(
+		sessionId: string,
+		native: string,
+		options?: { limit?: number; signal?: AbortSignal },
+	): Promise<Message[]> {
 		const data = await this.api.sdk(
 			"session.messages",
 			decodeOpenCodeMessageListResponse,
@@ -464,7 +546,11 @@ class SessionNamespace {
 					options?.signal ? { signal: options.signal } : undefined,
 				),
 		);
-		return flattenMessages(data, sessionId);
+		return flattenMessages(
+			data,
+			sessionId,
+			await this.api.copies(sessionId, native),
+		);
 	}
 
 	/** Cursor paging uses the same endpoint and parameters as the former gap. */
@@ -473,6 +559,9 @@ class SessionNamespace {
 		options?: { limit?: number; before?: string },
 	): Promise<Message[]> {
 		const native = await this.api.native(sessionId);
+		const before =
+			options?.before &&
+			(await this.api.nativeMessageId(sessionId, native, options.before));
 		const data = await this.api.sdk(
 			"session.messagesPage",
 			decodeOpenCodeMessageListResponse,
@@ -481,7 +570,7 @@ class SessionNamespace {
 					{
 						sessionID: native,
 						...(options?.limit ? { limit: options.limit } : {}),
-						...(options?.before ? { before: options.before } : {}),
+						...(before ? { before } : {}),
 					},
 					{
 						// Gap calls were unscoped, even when the SDK had a default directory.
@@ -489,33 +578,50 @@ class SessionNamespace {
 					},
 				),
 		);
-		return flattenMessages(data, sessionId);
+		return flattenMessages(
+			data,
+			sessionId,
+			await this.api.copies(sessionId, native),
+		);
 	}
 
 	async message(sessionId: string, messageId: string): Promise<Message> {
 		const native = await this.api.native(sessionId);
+		const nativeId = await this.api.nativeMessageId(
+			sessionId,
+			native,
+			messageId,
+		);
 		const data = await this.api.sdk(
 			"session.message",
 			decodeOpenCodeMessageWithPartsResponse,
 			() =>
 				this.api._sdk.session.message({
 					sessionID: native,
-					messageID: messageId,
+					messageID: nativeId,
 				}),
 		);
-		return flattenMessage(data, sessionId);
+		return flattenMessage(
+			data,
+			sessionId,
+			await this.api.copies(sessionId, native),
+		);
 	}
 
-	// Message ids are the native session's own; a native fork (82tn.81) re-ids copies.
 	async deleteMessage(sessionId: string, messageId: string): Promise<void> {
 		const native = await this.api.native(sessionId);
+		const nativeId = await this.api.nativeMessageId(
+			sessionId,
+			native,
+			messageId,
+		);
 		await this.api.sdk(
 			"session.deleteMessage",
 			decodeOpenCodeBooleanResponse,
 			() =>
 				this.api._sdk.session.deleteMessage({
 					sessionID: native,
-					messageID: messageId,
+					messageID: nativeId,
 				}),
 		);
 	}
@@ -641,10 +747,109 @@ class SessionNamespace {
 		options?: { messageID?: string },
 	): Promise<SessionDetail> {
 		const native = await this.api.native(sessionId);
+		const messageID =
+			options?.messageID &&
+			(await this.api.nativeMessageId(sessionId, native, options.messageID));
 		// The fork is a new native session; its caller binds it (82tn.81).
 		return this.api.sdk("session.fork", decodeSessionDetailResponse, () =>
-			this.api._sdk.session.fork({ sessionID: native, ...options }),
+			this.api._sdk.session.fork({
+				sessionID: native,
+				...(messageID ? { messageID } : {}),
+			}),
 		);
+	}
+
+	/**
+	 * 82tn.52, after t3code's rollbackThread: before a resume at `messageId` (null: before the
+	 * first), point the session at a native session holding it, the one that ends there first.
+	 * A resume inside a session first copies it whole, unless a session it left already ends
+	 * where it does, so the messages the resume drops stay in OpenCode for a later switch.
+	 */
+	async holdAt(sessionId: string, messageId: string | null): Promise<void> {
+		const ids = this.api.sessionIds;
+		if (!ids) return;
+		const step = Effect.tryPromise(
+			async (): Promise<OpenCodeRebind | undefined> => {
+				const current = await this.api.native(sessionId);
+				const held = await this.messages(sessionId);
+				const holders =
+					messageId === null || held.some(({ id }) => id === messageId)
+						? []
+						: await atSessionBoundary(ids.holders(sessionId, messageId));
+				const native =
+					(holders.find(({ tip }) => tip === messageId) ?? holders[0])
+						?.native ?? current;
+				const kept =
+					native === current
+						? held
+						: await this.nativeMessages(sessionId, native);
+				const at =
+					messageId === null
+						? -1
+						: kept.findIndex(({ id }) => id === messageId);
+				// Not held anywhere: the send fails as before.
+				if (messageId !== null && at === -1) return undefined;
+				const tip = kept.at(-1)?.id;
+				const left = held.at(-1)?.id;
+				const copied =
+					tip === undefined ||
+					at === kept.length - 1 ||
+					(await atSessionBoundary(ids.holders(sessionId, tip))).some(
+						(holder) => holder.tip === tip && holder.native !== native,
+					);
+				const archive = copied
+					? undefined
+					: await this.copy(sessionId, native, kept);
+				if (native === current && !archive) return undefined;
+				return {
+					current: native,
+					...(native !== current &&
+						left && { left: { native: current, tip: left } }),
+					...(archive && { archive }),
+				};
+			},
+		);
+		await atSessionBoundary(ids.rebind(sessionId, step));
+	}
+
+	/** A whole copy of a native session, each copied id mapped by position to `kept`'s. */
+	private async copy(
+		sessionId: string,
+		native: string,
+		kept: readonly Message[],
+	): Promise<NonNullable<OpenCodeRebind["archive"]>> {
+		const fork = await this.api.sdk(
+			"session.fork",
+			decodeSessionDetailResponse,
+			() => this.api._sdk.session.fork({ sessionID: native }),
+		);
+		const copied = await this.nativeMessages(sessionId, fork.id);
+		const tip = kept.at(-1)?.id;
+		if (
+			tip === undefined ||
+			copied.length !== kept.length ||
+			copied.some(
+				(message, index) =>
+					(message.parts ?? []).length !== (kept[index]?.parts ?? []).length,
+			)
+		) {
+			await this.delete(fork.id).catch(() => undefined);
+			throw new OpenCodeApiError({
+				message: `OpenCode copy ${fork.id} of ${native} does not hold its ${kept.length} messages`,
+				endpoint: `/session/${native}/fork`,
+				responseStatus: 502,
+			});
+		}
+		const copies = Object.fromEntries(
+			copied.flatMap((message, index) => [
+				[message.id, kept[index]?.id ?? message.id],
+				...(message.parts ?? []).map((part, at) => [
+					part.id,
+					kept[index]?.parts?.[at]?.id ?? part.id,
+				]),
+			]),
+		);
+		return { native: fork.id, copies, tip };
 	}
 
 	async summarize(

@@ -692,7 +692,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					sessionIds:
 						sessionIds._tag === "Some"
 							? {
-									native: sessionIds.value.native,
+									...sessionIds.value,
 									conduit: (nativeId: string) =>
 										sessionIds.value.conduit(instanceId, nativeId),
 								}

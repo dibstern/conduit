@@ -47,7 +47,7 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 	},
 	{
 		path: "src/lib/instance/opencode-api.ts",
-		linePattern: /Effect\.runPromise\s*\(mapped\)/,
+		linePattern: /Effect\.runPromise\s*\(effect\)/,
 		reason:
 			"OpenCodeAPI is Promise-shaped; its session id map is an Effect service",
 	},

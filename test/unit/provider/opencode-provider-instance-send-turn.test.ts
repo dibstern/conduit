@@ -49,6 +49,7 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 			get: vi.fn(async () => ({ permission: [] })),
 			messages: vi.fn(async () => []),
 			deleteMessage: vi.fn(async () => {}),
+			holdAt: vi.fn(async () => {}),
 			statuses: vi.fn(async () => ({})),
 			update: vi.fn(async () => {}),
 			prompt: vi.fn(async () => {}),

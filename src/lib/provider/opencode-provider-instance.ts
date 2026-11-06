@@ -571,22 +571,32 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					Effect.gen({ self: this }, function* () {
 						if (input.rewind) {
 							const rewind = input.rewind;
-							const messages = yield* Effect.tryPromise({
+							const read = Effect.tryPromise({
 								try: () =>
 									client.session.messages(sessionId, { signal: abortSignal }),
 								catch: (cause) => cause,
-							});
-							messages.sort(
-								(a, b) =>
-									(a.time?.created ?? 0) - (b.time?.created ?? 0) ||
-									(a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+							}).pipe(
+								Effect.map((messages) =>
+									messages.sort(
+										(a, b) =>
+											(a.time?.created ?? 0) - (b.time?.created ?? 0) ||
+											(a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+									),
+								),
 							);
 							// An outbox retry must never delete its own submitted turn.
 							if (
-								!messages.some(
+								!(yield* read).some(
 									({ id }) => id === openCodeInputMessageId(input.inputId),
 								)
 							) {
+								// A branch the current native session dropped is held by one it left (82tn.52).
+								yield* Effect.tryPromise({
+									try: () =>
+										client.session.holdAt(sessionId, rewind.resumeSessionAt),
+									catch: (cause) => cause,
+								});
+								const messages = yield* read;
 								const anchor =
 									rewind.resumeSessionAt === null
 										? -1
@@ -616,7 +626,10 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 									});
 								}
 								if (abortSignal.aborted) return;
-								if (rewind.targetMessageId)
+								// A switch drops no cut of its own; the move's earliest row confirms it.
+								const confirmed =
+									rewind.targetMessageId ?? rewind.removedMessageIds?.[0];
+								if (confirmed)
 									yield* input.eventSink.push({
 										eventId: createEventId(),
 										type: "message.removed",
@@ -628,7 +641,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 											endpoint: "session.deleteMessage",
 										},
 										createdAt: Date.now(),
-										data: { messageId: rewind.targetMessageId },
+										data: { messageId: confirmed },
 									});
 							}
 						}
