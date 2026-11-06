@@ -1206,15 +1206,15 @@ async function main(): Promise<void> {
 			});
 			return owned;
 		};
-		const { RelayCacheTag } = (await import(
+		const { ProjectServices } = (await import(
 			pathToFileURL(
 				join(
 					codeRoot,
 					"lib/domain/daemon/Services",
-					`relay-cache.${extension}`,
+					`project-services.${extension}`,
 				),
 			).href
-		)) as typeof import("../../src/lib/domain/daemon/Services/relay-cache.js");
+		)) as typeof import("../../src/lib/domain/daemon/Services/project-services.js");
 		const { InputDraftsTag } = (await import(
 			pathToFileURL(
 				join(
@@ -1240,9 +1240,9 @@ async function main(): Promise<void> {
 				if (existsSync(detach)) {
 					const slug = readFileSync(detach, "utf8");
 					renameSync(detach, `${detach}.done`);
-					const cache = yield* Effect.serviceOption(RelayCacheTag);
-					if (cache._tag === "Some") {
-						yield* cache.value.invalidate(slug);
+					const projects = yield* Effect.serviceOption(ProjectServices);
+					if (projects._tag === "Some") {
+						yield* projects.value.close(slug);
 						record({ kind: "relay-gap", projectId: slug });
 					}
 				}
@@ -1292,19 +1292,19 @@ async function main(): Promise<void> {
 								}),
 						});
 					}
-					const service = yield* Effect.serviceOption(RelayCacheTag);
+					const service = yield* Effect.serviceOption(ProjectServices);
 					if (service._tag === "Some") {
-						const cache = service.value;
-						const get = cache.get;
-						cache.get = (slug) =>
+						const open = service.value.open;
+						const gated: typeof open = (slug) =>
 							Effect.gen(function* () {
 								const gate = join(root, `hold-relay-${slug}`);
 								if (existsSync(gate)) {
 									record({ kind: "relay-gap", projectId: slug });
 									while (existsSync(gate)) yield* Effect.sleep("10 millis");
 								}
-								return yield* get(slug);
+								return yield* open(slug);
 							});
+						Object.assign(service.value, { open: gated });
 						relayGateInstalled = true;
 					}
 				}

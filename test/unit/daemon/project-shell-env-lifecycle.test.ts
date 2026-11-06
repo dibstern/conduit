@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	buildDaemonConfigSnapshot,
@@ -24,7 +24,7 @@ import {
 	makeProjectRegistryFromDaemonStateLive,
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 let home: string | undefined;
@@ -90,10 +90,13 @@ describe("daemon project shell env lifecycle", () => {
 			makeInstanceManagerStateLive(undefined, [], {
 				launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 			}),
-			Layer.succeed(RelayCacheTag)({
-				get: () => Effect.die("A relay must not start during env resolution"),
-				peek: () => Effect.succeed(Option.none()),
-				invalidate: () => Effect.void,
+			Layer.succeed(ProjectServices)({
+				forProject: () => Effect.die("unused"),
+				generation: () => Effect.die("unused"),
+				open: () =>
+					Effect.die("A project must not start during env resolution"),
+				opened: () => Effect.succeedNone,
+				close: () => Effect.void,
 			}),
 		);
 		const layer = ProjectShellEnvWiringLive.pipe(Layer.provideMerge(deps));

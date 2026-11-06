@@ -33,7 +33,6 @@ import {
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { ProjectServices } from "../Services/project-services.js";
-import { RelayCacheTag } from "../Services/relay-cache.js";
 import { readColdWorktreeCleanupCandidates } from "../Services/worktree-cleanup-reader.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 import type { WorktreeServiceTag } from "../Services/worktree-service.js";
@@ -43,7 +42,6 @@ export const WorktreeCleanupLive = () =>
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const registry = yield* ProjectRegistryTag;
-			const cache = yield* RelayCacheTag;
 			const bus = yield* DaemonEventBusTag;
 			const storeContext = yield* persistenceStoreContext;
 			const requests = yield* WorktreeCleanupQueueTag;
@@ -114,7 +112,9 @@ export const WorktreeCleanupLive = () =>
 								),
 							);
 							// An open relay still marks the project as in use until S6.
-							const open = Option.isSome(yield* cache.peek(project.slug));
+							const open = Option.isSome(
+								yield* projectServices.opened(project.slug),
+							);
 							if (open)
 								yield* stopQuiescentSettledAgents(now).pipe(
 									Effect.provide(yield* projectContext(project.slug)),

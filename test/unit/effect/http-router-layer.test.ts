@@ -9,7 +9,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, HashMap, Layer, Option, Ref } from "effect";
+import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import { expect } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { TlsCertTag } from "../../../src/lib/domain/daemon/Layers/tls-cert-layer.js";
@@ -21,10 +21,22 @@ import {
 	type ProjectState,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
-	type Relay,
-	RelayCacheTag,
+	type ProjectParts,
+	ProjectServices,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
+import {
+	type ProjectSettings,
+	ProjectSettingsTag,
+} from "../../../src/lib/domain/relay/Services/project-settings.js";
+import {
 	type RelayStatusSnapshot,
-} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+	type RelayStatusSnapshotService,
+	RelayStatusSnapshotTag,
+} from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+import {
+	type RelayOpenCodeStream,
+	SSEStreamTag,
+} from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -35,6 +47,7 @@ import type {
 	PushDeliveryReport,
 	PushSubscriptionData,
 } from "../../../src/lib/server/push.js";
+import type { ConnectionHealth } from "../../../src/lib/types.js";
 
 /** The stub push layer has no subscribed devices, so nothing is delivered. */
 const noDevices: PushDeliveryReport = {
@@ -130,22 +143,28 @@ const daemonHandleStub = Layer.succeed(DaemonHandleTag)({
 	getInstances: () => Effect.succeed([]),
 });
 
-const relayWithSnapshot = (
-	slug: string,
-	snapshot: RelayStatusSnapshot,
-): Relay => ({
-	slug,
-	syncGlobalSetting: () => Effect.void,
-	refreshGlobalDefaults: () => Effect.void,
-	getStatusSnapshot: () => snapshot,
-	stop: () => {},
-});
+/** What an opened project reports: its snapshot, its browser count and its stream health. */
+type OpenedProjectStatus = RelayStatusSnapshot & {
+	readonly clients: number;
+	readonly sse: ConnectionHealth;
+};
+
+// The listing reads only these three services of an opened project.
+const openedWithStatus = ({ clients, sse, ...snapshot }: OpenedProjectStatus) =>
+	Context.make(RelayStatusSnapshotTag, {
+		getSnapshot: () => snapshot,
+	} as RelayStatusSnapshotService).pipe(
+		Context.add(ProjectSettingsTag, {
+			browsers: { count: () => clients },
+		} as ProjectSettings),
+		Context.add(SSEStreamTag, { getHealth: () => sse } as RelayOpenCodeStream),
+	) as Context.Context<ProjectParts>;
 
 const makeDaemonRouterLayer = (
 	staticDir: string,
 	options: {
 		readonly projects: ReadonlyArray<readonly [string, ProjectState]>;
-		readonly relaySnapshots?: ReadonlyMap<string, RelayStatusSnapshot>;
+		readonly relaySnapshots?: ReadonlyMap<string, OpenedProjectStatus>;
 		readonly persistedSessionCounts?: ReadonlyMap<string, number>;
 		readonly caCertDer?: Buffer;
 		readonly pushManager?: {
@@ -183,17 +202,18 @@ const makeDaemonRouterLayer = (
 			),
 		),
 		Layer.provideMerge(
-			Layer.succeed(RelayCacheTag)({
-				get: () => Effect.die("daemon project listing must not start relays"),
-				peek: (slug: string) => {
-					const snapshot = options.relaySnapshots?.get(slug);
+			Layer.succeed(ProjectServices)({
+				forProject: () => Effect.die("unused"),
+				generation: () => Effect.die("unused"),
+				open: () =>
+					Effect.die("daemon project listing must not start projects"),
+				opened: (slug: string) => {
+					const status = options.relaySnapshots?.get(slug);
 					return Effect.succeed(
-						snapshot
-							? Option.some(relayWithSnapshot(slug, snapshot))
-							: Option.none<Relay>(),
+						status ? Option.some(openedWithStatus(status)) : Option.none(),
 					);
 				},
-				invalidate: () => Effect.void,
+				close: () => Effect.void,
 			}),
 		),
 		Layer.provideMerge(

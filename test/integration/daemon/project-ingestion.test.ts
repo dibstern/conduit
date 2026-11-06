@@ -74,7 +74,6 @@ import {
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
-import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { RateLimiterTag } from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
@@ -806,9 +805,9 @@ describe("82tn.16: the daemon records which tabs view which session", () => {
 				yield* tab.pick("viewed", "tab-1");
 				const activity = yield* SessionActivityTag;
 				const viewed = activity.hasViewers("viewed");
-				const relays = yield* RelayCacheTag;
-				yield* relays.invalidate("alpha");
-				yield* relays.get("alpha");
+				const projects = yield* ProjectServices;
+				yield* projects.close("alpha");
+				yield* projects.open("alpha");
 				const result = {
 					viewed,
 					picked: activity.selectedSession("alpha", "tab-1"),
@@ -1021,9 +1020,9 @@ describe("82tn.16: a project's RPCs run on the daemon's project context", () => 
 				const tab = yield* openTab;
 				yield* tab.show("viewed");
 				const activity = yield* SessionActivityTag;
-				const relays = yield* RelayCacheTag;
-				yield* relays.invalidate("alpha");
-				yield* relays.get("alpha");
+				const projects = yield* ProjectServices;
+				yield* projects.close("alpha");
+				yield* projects.open("alpha");
 				const result = { viewed: activity.hasViewers("viewed") };
 				yield* tab.close;
 				return { ...result, afterClose: activity.hasViewers("viewed") };

@@ -70,6 +70,10 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "setSessionDiffBase"
 	// Retention parity and event reclamation are covered by auto-delete-archived-sweep.
 	| "deleteArchivedSessions"
+	// The settle sweep's read-model effects are covered by auto-settle-sweep.
+	| "settleIdleSessions"
+	// The archive sweep's are covered by the session-archive E2E.
+	| "archiveIdleSessions"
 >;
 
 type ReadModelMutation = Exclude<

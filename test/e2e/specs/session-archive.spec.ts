@@ -13,11 +13,8 @@ test.use({ recording: "chat-simple" });
 
 /** The daemon's automatic archive sweep over the replay project, once. */
 async function archiveIdleSessions(harness: ReplayHarness) {
-	const relay = await harness.project.relay();
-	if (!relay.archiveIdleSessions) throw new Error("The project cannot archive");
-	return Effect.runPromise(
-		relay.archiveIdleSessions(30 * 86_400_000, Date.now()),
-	);
+	const { archiveIdleSessions } = await harness.project.sessions();
+	return Effect.runPromise(archiveIdleSessions(30 * 86_400_000, Date.now()));
 }
 
 const row = (page: Page, id: string) =>

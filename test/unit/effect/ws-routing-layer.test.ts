@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit, Layer, Option, Ref, Scope } from "effect";
+import { Context, Effect, Exit, Layer, Option, Ref, Scope } from "effect";
 import { expect, type Mock, vi } from "vitest";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
@@ -14,7 +14,11 @@ import {
 	getEntry,
 	makeProjectRegistryLive,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { makeRelayCacheLive } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	type ProjectParts,
+	ProjectServices,
+	ProjectServicesError,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	ProjectRpcContextsTag,
@@ -111,13 +115,19 @@ const project: StoredProject = {
 
 const makeRouterLayer = (
 	projects: ReadonlyArray<StoredProject>,
-	factory: Parameters<typeof makeRelayCacheLive>[0],
+	open: ProjectServices["Service"]["open"],
 ) =>
 	WebSocketRelayRouterLive.pipe(
 		Layer.provideMerge(
 			Layer.mergeAll(
 				makeProjectRegistryLive(projects),
-				makeRelayCacheLive(factory),
+				Layer.succeed(ProjectServices)({
+					forProject: () => Effect.die("unused"),
+					generation: () => Effect.die("unused"),
+					open,
+					opened: () => Effect.succeedNone,
+					close: () => Effect.void,
+				}),
 				DaemonEventBusLive,
 				ConfigPersistenceNoopLive,
 			),
@@ -125,39 +135,29 @@ const makeRouterLayer = (
 	);
 
 describe("WebSocketRelayRouterLive", () => {
-	it.effect("starts one relay per project however often it is asked", () => {
-		const factory = vi.fn((slug: string) =>
-			Effect.succeed({
-				slug,
-				rpcWsHandler: {},
-				syncGlobalSetting: () => Effect.void,
-				refreshGlobalDefaults: () => Effect.void,
-				stop: vi.fn(),
-			}),
+	it.effect("opens the asked project and marks it ready", () => {
+		const open = vi.fn((_slug: string) =>
+			Effect.succeed(Context.empty() as Context.Context<ProjectParts>),
 		);
-		const layer = makeRouterLayer([project], factory);
+		const layer = makeRouterLayer([project], open);
 
 		return Effect.gen(function* () {
 			const router = yield* WebSocketRelayRouterTag;
 			yield* router.ensureRelayStarted("test-project");
 			yield* router.ensureRelayStarted("test-project");
 
-			expect(factory).toHaveBeenCalledTimes(1);
-			expect(factory.mock.calls[0]?.[0]).toBe("test-project");
+			// ProjectServices starts a project once however often it is opened.
+			expect(open.mock.calls).toEqual([["test-project"], ["test-project"]]);
+			const entry = Option.getOrThrow(yield* getEntry("test-project"));
+			expect(entry._tag).toBe("Ready");
 		}).pipe(Effect.provide(Layer.fresh(layer)));
 	});
 
-	it.effect("fails unknown slugs without invoking the relay factory", () => {
-		const factory = vi.fn((slug: string) =>
-			Effect.succeed({
-				slug,
-				rpcWsHandler: {},
-				syncGlobalSetting: () => Effect.void,
-				refreshGlobalDefaults: () => Effect.void,
-				stop: vi.fn(),
-			}),
+	it.effect("fails unknown slugs without opening a project", () => {
+		const open = vi.fn((_slug: string) =>
+			Effect.succeed(Context.empty() as Context.Context<ProjectParts>),
 		);
-		const layer = makeRouterLayer([], factory);
+		const layer = makeRouterLayer([], open);
 
 		return Effect.gen(function* () {
 			const router = yield* WebSocketRelayRouterTag;
@@ -171,15 +171,19 @@ describe("WebSocketRelayRouterLive", () => {
 				expect(result.failure.reason).toBe("relay_unavailable");
 				expect(result.failure.slug).toBe("missing-project");
 			}
-			expect(factory).not.toHaveBeenCalled();
+			expect(open).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(Layer.fresh(layer)));
 	});
 
-	it.effect("marks the project failed when relay creation fails", () => {
-		const factory = vi.fn((slug: string) =>
-			Effect.fail(new Error(`factory failed for ${slug}`)),
+	it.effect("marks the project failed when its start fails", () => {
+		const layer = makeRouterLayer([project], (projectId) =>
+			Effect.fail(
+				new ProjectServicesError({
+					projectId,
+					reason: `start failed for ${projectId}`,
+				}),
+			),
 		);
-		const layer = makeRouterLayer([project], factory);
 
 		return Effect.gen(function* () {
 			const router = yield* WebSocketRelayRouterTag;
@@ -197,7 +201,7 @@ describe("WebSocketRelayRouterLive", () => {
 			const state = Option.getOrThrow(entry);
 			expect(state._tag).toBe("Error");
 			if (state._tag === "Error") {
-				expect(state.error).toBe("factory failed for test-project");
+				expect(state.error).toBe("start failed for test-project");
 			}
 		}).pipe(Effect.provide(Layer.fresh(layer)));
 	});

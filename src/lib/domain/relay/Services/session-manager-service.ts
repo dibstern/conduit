@@ -48,7 +48,9 @@ import {
 	PickRequired,
 	type TurnSettings,
 } from "../../../provider/turn-settings.js";
+import { archiveIdleSessions } from "../../../session/auto-archive-sweep.js";
 import { deleteArchivedSessions } from "../../../session/auto-delete-archived-sweep.js";
+import { settleIdleSessions } from "../../../session/auto-settle-sweep.js";
 import type {
 	HistoryMessage,
 	SessionPermissionMode,
@@ -756,6 +758,16 @@ export interface SessionManagerService {
 		windowMs: number,
 		now: number,
 	): Effect.Effect<number, SessionManagerError>;
+	/** The automatic settle sweep: settles idle sessions no tab views. */
+	settleIdleSessions(
+		idleWindowMs: number,
+		now: number,
+	): Effect.Effect<number, SessionManagerError>;
+	/** The automatic archive sweep over idle sessions. */
+	archiveIdleSessions(
+		idleWindowMs: number,
+		now: number,
+	): Effect.Effect<number, SessionManagerError>;
 	renameSession(
 		sessionId: string,
 		title: string,
@@ -1014,6 +1026,21 @@ const makeProjectSessionManager: Effect.Effect<
 	// waits on the same triage lock and delete table.
 	const { triageLock, inFlightDeletes, hold } =
 		yield* SessionManagerCoordinationTag;
+	// The automatic sweeps read the project's store, as the delete sweep does.
+	const withSweepStore =
+		(operation: string) =>
+		<A, E>(
+			sweep: Effect.Effect<A, E, SqlClient.SqlClient | PersistenceProjectTag>,
+		) =>
+			sweep.pipe(
+				Effect.provideService(SqlClient.SqlClient, sql),
+				Effect.provideService(PersistenceProjectTag, {
+					projectId: eventStore.projectId,
+				}),
+				Effect.mapError(
+					(cause) => new SessionManagerError({ operation, cause }),
+				),
+			);
 	const { serviceListSessions, refreshSessionLineage } =
 		makeSessionListOperations({
 			stateRef,
@@ -1406,6 +1433,36 @@ const makeProjectSessionManager: Effect.Effect<
 				)
 				.pipe(Effect.provideService(ConfigTag, config));
 		},
+		// Each change goes through the daemon's service, which takes the triage lock.
+		settleIdleSessions: (idleWindowMs, now) =>
+			settleIdleSessions(
+				{
+					projectDir: config.projectDir,
+					hasViewer: activity.hasViewers,
+					hasLiveBackgroundWork: (id) => activity.background.hasLiveWork(id),
+					setSettled: (id) =>
+						managers
+							.forProject(config.slug)
+							.setSessionSettled(id, { settled: true, automatic: true }),
+				},
+				idleWindowMs,
+				now,
+			).pipe(withSweepStore("settleIdleSessions")),
+		archiveIdleSessions: (idleWindowMs, now) =>
+			archiveIdleSessions(
+				{
+					hasLiveBackgroundWork: activity.background.hasLiveWork,
+					setArchived: (id) =>
+						managers.forProject(config.slug).setSessionArchived(id, {
+							archived: true,
+							automatic: true,
+							idleWindowMs,
+							now,
+						}),
+				},
+				idleWindowMs,
+				now,
+			).pipe(withSweepStore("archiveIdleSessions")),
 		renameSession: (sessionId, title) =>
 			withSessionCommandServices(renameSession(sessionId, title)),
 		markSessionSeen: (sessionId, upTo) =>
@@ -1612,6 +1669,10 @@ export const makeSessionManagers = (
 					run((s) => s.deleteSession(id, options)),
 				deleteArchivedSessions: (windowMs, now) =>
 					run((s) => s.deleteArchivedSessions(windowMs, now)),
+				settleIdleSessions: (idleWindowMs, now) =>
+					run((s) => s.settleIdleSessions(idleWindowMs, now)),
+				archiveIdleSessions: (idleWindowMs, now) =>
+					run((s) => s.archiveIdleSessions(idleWindowMs, now)),
 				renameSession: (id, title) => run((s) => s.renameSession(id, title)),
 				markSessionRead: (id) => run((s) => s.markSessionRead(id)),
 				markSessionSeen: (id, upTo) => run((s) => s.markSessionSeen(id, upTo)),

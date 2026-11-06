@@ -77,13 +77,13 @@ async function fixture(initial = ["alpha", "beta"]) {
 		return { slug, title: slug, folders: [folder] as const };
 	});
 	const blocked = new Map<string, string>();
-	const factory = vi.fn(() =>
-		Effect.die("Shell subscriptions must not acquire a relay"),
+	const openProject = vi.fn(() =>
+		Effect.die("Shell subscriptions must not open a project"),
 	);
 	const runtime = ManagedRuntime.make(
 		makeDaemonRpcTestLayer(
 			projects.filter(({ slug }) => initial.includes(slug)),
-			factory,
+			{ open: openProject },
 			{ configDir: root },
 		).pipe(Layer.provide(Layer.succeed(DaemonStoreAvailability)(blocked))),
 	);
@@ -191,7 +191,7 @@ async function fixture(initial = ["alpha", "beta"]) {
 		runtime,
 		handlers,
 		blocked,
-		factory,
+		openProject,
 		route,
 		write,
 		version,
@@ -587,7 +587,7 @@ describe("daemon-wide shell feed", () => {
 		expect(await waitUpsert(feed.frames, "b", after)).toMatchObject({
 			sequence: await f.version("b"),
 		});
-		expect(f.factory).not.toHaveBeenCalled();
+		expect(f.openProject).not.toHaveBeenCalled();
 		expect(f.route).not.toHaveBeenCalled();
 		await feed.close();
 	});
@@ -675,7 +675,7 @@ describe("daemon-wide shell feed", () => {
 			feed.frames.some((frame) => frame._tag === "remove" && frame.deleted),
 		).toBe(false);
 		expect(await f.count()).toBe(2);
-		expect(f.factory).not.toHaveBeenCalled();
+		expect(f.openProject).not.toHaveBeenCalled();
 		await feed.close();
 	});
 
@@ -746,7 +746,7 @@ describe("daemon-wide shell feed", () => {
 				.rows.map(({ id }) => id)
 				.sort(),
 		).toEqual(["a", "b"]);
-		expect(f.factory).not.toHaveBeenCalled();
+		expect(f.openProject).not.toHaveBeenCalled();
 		await feed.close();
 	});
 

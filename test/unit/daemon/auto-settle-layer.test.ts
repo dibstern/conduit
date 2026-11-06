@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import {
+	Context,
 	Effect,
 	Exit,
 	Layer,
@@ -25,33 +26,53 @@ import {
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
-	type Relay,
-	RelayCacheTag,
-} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+	type ProjectParts,
+	ProjectServices,
+	ProjectServicesError,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
 import {
 	SessionGit,
 	type SessionGitChange,
 } from "../../../src/lib/domain/daemon/Services/session-git.js";
 import { PortWatcher } from "../../../src/lib/domain/persistence/Services/port-watcher.js";
+import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { makeMockSessionManagerService } from "../../helpers/mock-factories.js";
 
 const DAY = 86_400_000;
 
-function fakeRelay(
-	slug: string,
-	sweep: () => Effect.Effect<number, Error>,
-): Relay {
-	return {
-		slug,
-		syncGlobalSetting: () => Effect.void,
-		refreshGlobalDefaults: () => Effect.void,
-		stop: () => {},
-		settleIdleSessions: sweep,
-	};
-}
+// The sweep reads no project service, so an empty context stands in for an opened project.
+const openedContext = Context.empty() as Context.Context<ProjectParts>;
+
+const projectServices = (
+	overrides: Partial<ProjectServices["Service"]>,
+): Layer.Layer<ProjectServices> =>
+	Layer.succeed(ProjectServices)({
+		forProject: () => Effect.die("unused"),
+		generation: () => Effect.die("unused"),
+		open: () => Effect.succeed(openedContext),
+		opened: () => Effect.succeedNone,
+		close: () => Effect.void,
+		...overrides,
+	});
+
+// Each project's manager settles with `settle`; archive and delete find nothing.
+const sessionManagers = (
+	settle: (slug: string) => Effect.Effect<number, SessionManagerError>,
+) =>
+	Layer.succeed(SessionManagerServiceTag)({
+		forProject: (slug) =>
+			makeMockSessionManagerService({
+				settleIdleSessions: () => settle(slug),
+				archiveIdleSessions: () => Effect.succeed(0),
+				deleteArchivedSessions: () => Effect.succeed(0),
+			}),
+		parts: () => Effect.die("unused"),
+	});
 
 // The watcher has scanned, so nothing waits on its readiness.
 const knownWatcher = Layer.succeed(PortWatcher)({
@@ -67,7 +88,7 @@ describe("daemon automatic settlement layer", () => {
 				const directory = mkdtempSync(join(tmpdir(), "conduit-auto-missing-"));
 				const missingDirectory = join(directory, "missing");
 				const sweep = vi.fn(() => Effect.succeed(1));
-				const get = vi.fn(() => Effect.succeed(fakeRelay("cold", sweep)));
+				const open = vi.fn(() => Effect.succeed(openedContext));
 				const logs: Array<{ level: string; message: unknown }> = [];
 				const logger = Logger.make(({ logLevel, message }) => {
 					logs.push({ level: logLevel.toUpperCase(), message });
@@ -94,16 +115,16 @@ describe("daemon automatic settlement layer", () => {
 									folders: [missingDirectory],
 								},
 							]),
-							Layer.succeed(RelayCacheTag)({
-								peek: (slug) =>
+							projectServices({
+								opened: (slug) =>
 									Effect.succeed(
 										slug === "running"
-											? Option.some(fakeRelay(slug, sweep))
-											: Option.none<Relay>(),
+											? Option.some(openedContext)
+											: Option.none(),
 									),
-								get,
-								invalidate: () => Effect.void,
+								open,
 							}),
+							sessionManagers(sweep),
 							DaemonEventBusLive,
 							Logger.layer([logger]),
 						),
@@ -116,7 +137,7 @@ describe("daemon automatic settlement layer", () => {
 					);
 					yield* TestClock.adjust("1 millis");
 					yield* TestClock.adjust("2 minutes");
-					expect(get).not.toHaveBeenCalled();
+					expect(open).not.toHaveBeenCalled();
 					expect(sweep).not.toHaveBeenCalled();
 					expect(
 						logs.filter(
@@ -148,23 +169,27 @@ describe("daemon automatic settlement layer", () => {
 					PubSub.unbounded<SessionGitChange>(),
 					PubSub.shutdown,
 				);
-				const relays = new Map([
-					["broken", fakeRelay("broken", () => Effect.fail(new Error("boom")))],
+				const settles = new Map<
+					string,
+					() => Effect.Effect<number, SessionManagerError>
+				>([
+					[
+						"broken",
+						() =>
+							Effect.fail(
+								new SessionManagerError({ operation: "settle", cause: "boom" }),
+							),
+					],
 					[
 						"running",
-						fakeRelay("running", () =>
+						() =>
 							Effect.sync(() => {
 								calls.push("running");
 								return 1;
 							}),
-						),
 					],
 				]);
-				const get = vi.fn((slug: string) =>
-					Effect.succeed(
-						relays.get(slug) ?? fakeRelay(slug, () => Effect.succeed(0)),
-					),
-				);
+				const open = vi.fn((_slug: string) => Effect.succeed(openedContext));
 				const layer = AutoSettleLive().pipe(
 					Layer.provide(knownWatcher),
 					Layer.provide(makeDaemonSharedStoreLayer(dir, defaultDaemonConfig())),
@@ -193,12 +218,18 @@ describe("daemon automatic settlement layer", () => {
 									lastUsed: 1,
 								},
 							]),
-							Layer.succeed(RelayCacheTag)({
-								peek: (slug: string) =>
-									Effect.succeed(Option.fromNullishOr(relays.get(slug))),
-								get,
-								invalidate: () => Effect.void,
+							projectServices({
+								opened: (slug) =>
+									Effect.succeed(
+										settles.has(slug)
+											? Option.some(openedContext)
+											: Option.none(),
+									),
+								open,
 							}),
+							sessionManagers(
+								(slug) => settles.get(slug)?.() ?? Effect.succeed(0),
+							),
 							Layer.succeed(SessionGit)({
 								read: () => Effect.succeed(undefined),
 								changes: Stream.fromPubSub(changes),
@@ -213,7 +244,7 @@ describe("daemon automatic settlement layer", () => {
 					yield* Layer.buildWithScope(Layer.fresh(layer), scope);
 					yield* TestClock.adjust("1 millis");
 					expect(calls).toContain("running");
-					expect(get).not.toHaveBeenCalled();
+					expect(open).not.toHaveBeenCalledWith("cold");
 					const beforePublication = calls.length;
 					for (let version = 1; version <= 100; version++)
 						yield* PubSub.publish(changes, {
@@ -265,7 +296,7 @@ describe("daemon automatic settlement layer", () => {
 					}),
 				);
 				const sweep = vi.fn(() => Effect.succeed(1));
-				const get = vi.fn(() => Effect.succeed(fakeRelay("cold", sweep)));
+				const open = vi.fn((_slug: string) => Effect.succeed(openedContext));
 				const layer = AutoSettleLive().pipe(
 					Layer.provide(knownWatcher),
 					Layer.provide(makeDaemonSharedStoreLayer(dir, defaultDaemonConfig())),
@@ -282,11 +313,8 @@ describe("daemon automatic settlement layer", () => {
 									lastUsed: 1,
 								},
 							]),
-							Layer.succeed(RelayCacheTag)({
-								peek: () => Effect.succeed(Option.none<Relay>()),
-								get,
-								invalidate: () => Effect.void,
-							}),
+							projectServices({ open }),
+							sessionManagers(sweep),
 							DaemonEventBusLive,
 						),
 					),
@@ -296,7 +324,7 @@ describe("daemon automatic settlement layer", () => {
 					yield* TestClock.setTime(now);
 					yield* Layer.buildWithScope(Layer.fresh(layer), scope);
 					yield* TestClock.adjust("1 millis");
-					expect(get).toHaveBeenCalledWith("cold");
+					expect(open).toHaveBeenCalledWith("cold");
 					expect(sweep).toHaveBeenCalled();
 				} finally {
 					yield* Scope.close(scope, Exit.void);
@@ -309,8 +337,8 @@ describe("daemon automatic settlement layer", () => {
 		"disables settlement but still stops workers for missing projects",
 		() =>
 			Effect.gen(function* () {
-				const peek = vi.fn(() => Effect.succeed(Option.none<Relay>()));
-				const invalidate = vi.fn(() => Effect.void);
+				const opened = vi.fn(() => Effect.succeedNone);
+				const close = vi.fn((_slug: string) => Effect.void);
 				const dir = mkdtempSync(join(tmpdir(), "conduit-auto-disabled-"));
 				yield* Effect.addFinalizer(() =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
@@ -331,11 +359,18 @@ describe("daemon automatic settlement layer", () => {
 									lastUsed: 1,
 								},
 							]),
-							Layer.succeed(RelayCacheTag)({
-								peek,
-								get: () => Effect.fail(new Error("must skip")),
-								invalidate,
+							projectServices({
+								opened,
+								open: (projectId) =>
+									Effect.fail(
+										new ProjectServicesError({
+											projectId,
+											reason: "must skip",
+										}),
+									),
+								close,
 							}),
+							sessionManagers(() => Effect.die("must skip")),
 							DaemonEventBusLive,
 						),
 					),
@@ -343,8 +378,8 @@ describe("daemon automatic settlement layer", () => {
 				const scope = yield* Scope.make();
 				yield* Layer.buildWithScope(Layer.fresh(layer), scope);
 				yield* TestClock.adjust("1 minute");
-				expect(peek).not.toHaveBeenCalled();
-				expect(invalidate).toHaveBeenCalledWith("cold");
+				expect(opened).not.toHaveBeenCalled();
+				expect(close).toHaveBeenCalledWith("cold");
 				yield* Scope.close(scope, Exit.void);
 			}),
 	);

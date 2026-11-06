@@ -19,7 +19,7 @@ import {
 	DaemonWsRpcHandlersTag,
 } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { OwnerScopesLive } from "../../../src/lib/domain/daemon/Layers/owner-scopes-layer.js";
-import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
 import {
 	SessionGit,
 	SessionGitLive,
@@ -196,8 +196,10 @@ describe("session git publication through daemon RPC reads", () => {
 					const [counter] = yield* sql<{
 						value: number;
 					}>`SELECT value FROM read_model_counter WHERE id = 1`;
-					const cache = yield* RelayCacheTag;
-					expect(Option.isNone(yield* cache.peek("cold"))).toBe(true);
+					const projectServices = yield* ProjectServices;
+					expect(Option.isNone(yield* projectServices.opened("cold"))).toBe(
+						true,
+					);
 					const handlers = yield* DaemonWsRpcHandlersTag;
 					const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 						Effect.provide(
@@ -306,7 +308,9 @@ describe("session git publication through daemon RPC reads", () => {
 							}),
 						]),
 					});
-					expect(Option.isNone(yield* cache.peek("cold"))).toBe(true);
+					expect(Option.isNone(yield* projectServices.opened("cold"))).toBe(
+						true,
+					);
 				}).pipe(
 					Effect.provide(layer, { local: true }),
 					Effect.provideService(Subprocess, owner),

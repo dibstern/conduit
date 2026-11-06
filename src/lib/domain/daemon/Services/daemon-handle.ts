@@ -12,6 +12,8 @@ import { PersistenceStore } from "../../../persistence/effect/live.js";
 import type { FolderIssue } from "../../../project-folders.js";
 import type { RunnerProcessError } from "../../../provider/runner/runner-retirement.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
+import { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
+import { SSEStreamTag } from "../../relay/Services/sse-stream-service.js";
 import { KeepAwakeTag } from "../Layers/keep-awake-layer.js";
 import { AccountDirectory } from "./account-directory.js";
 import { ConfigPersistenceTag } from "./config-persistence-service.js";
@@ -33,7 +35,7 @@ import {
 	removeProjectFromEffectRegistry,
 	saveProject as saveProjectToRegistry,
 } from "./project-registry-service.js";
-import { RelayCacheTag } from "./relay-cache.js";
+import { ProjectServices } from "./project-services.js";
 
 export interface EffectDaemonHandle {
 	readonly port: Effect.Effect<number>;
@@ -84,7 +86,7 @@ export const DaemonHandleLive: Layer.Layer<
 	| ProjectSaveLockTag
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
-	| RelayCacheTag
+	| ProjectServices
 	| DaemonLifecycleContextTag
 	| InstanceManagerStateTag
 	| AccountDirectory
@@ -99,7 +101,7 @@ export const DaemonHandleLive: Layer.Layer<
 		const projectSaveLock = yield* ProjectSaveLockTag;
 		const bus = yield* DaemonEventBusTag;
 		const persistence = yield* ConfigPersistenceTag;
-		const relayCache = yield* RelayCacheTag;
+		const projectServices = yield* ProjectServices;
 		const lifecycleContext = yield* DaemonLifecycleContextTag;
 		const instanceState = yield* InstanceManagerStateTag;
 		const accounts = yield* AccountDirectory;
@@ -125,7 +127,7 @@ export const DaemonHandleLive: Layer.Layer<
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(ConfigPersistenceTag, persistence),
 					Effect.provideService(DaemonStateTag, daemonState),
-					Effect.provideService(RelayCacheTag, relayCache),
+					Effect.provideService(ProjectServices, projectServices),
 					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
 				);
 				yield* persistence.requestSave;
@@ -148,7 +150,7 @@ export const DaemonHandleLive: Layer.Layer<
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
 					Effect.provideService(DaemonEventBusTag, bus),
-					Effect.provideService(RelayCacheTag, relayCache),
+					Effect.provideService(ProjectServices, projectServices),
 					Effect.provideService(ConfigPersistenceTag, persistence),
 					Effect.provideService(DaemonStateTag, daemonState),
 				);
@@ -187,12 +189,14 @@ export const DaemonHandleLive: Layer.Layer<
 
 				for (const [slug, entry] of HashMap.entries(state)) {
 					if (slug === SCRATCH_PROJECT_SLUG) continue;
-					const relay = yield* relayCache.peek(slug);
-					const relayStatus = Option.isSome(relay)
-						? relay.value.getStatusSnapshot?.()
-						: undefined;
+					// An unopened project reads its persisted count and stays closed.
+					const opened = Option.getOrUndefined(
+						yield* projectServices.opened(slug),
+					);
 					sessionCount +=
-						relayStatus?.sessionCount ??
+						(opened &&
+							Context.get(opened, RelayStatusSnapshotTag).getSnapshot()
+								.sessionCount) ??
 						config.persistedSessionCounts.get(slug) ??
 						0;
 					projects.push({
@@ -203,8 +207,8 @@ export const DaemonHandleLive: Layer.Layer<
 						...(entry.project.lastUsed !== undefined && {
 							lastUsed: entry.project.lastUsed,
 						}),
-						...(relayStatus?.sse !== undefined && {
-							sse: relayStatus.sse,
+						...(opened && {
+							sse: Context.get(opened, SSEStreamTag).getHealth(),
 						}),
 					});
 				}

@@ -11,7 +11,6 @@ import {
 	Effect,
 	HashMap,
 	Layer,
-	Option,
 	PubSub,
 	Ref,
 	Stream,
@@ -60,8 +59,6 @@ import {
 	BrowserRpcConnectionsLive,
 	makeRoutedWsRpcServerLayer,
 } from "../../../server/ws-rpc.js";
-import { archiveIdleSessions } from "../../../session/auto-archive-sweep.js";
-import { settleIdleSessions } from "../../../session/auto-settle-sweep.js";
 import type { ClaudeSdkSeam } from "../../../types.js";
 import {
 	EventRetentionSchedulerTag,
@@ -78,23 +75,11 @@ import {
 	InputDraftsLive,
 	releaseInputDraftClaims,
 } from "../../relay/Services/input-drafts.js";
-import {
-	ProjectSettingsTag,
-	refreshGlobalDefaults,
-	syncGlobalSetting,
-} from "../../relay/Services/project-settings.js";
 import { ProviderTurnsLive } from "../../relay/Services/provider-turn-service.js";
-import { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
-import { ConfigTag } from "../../relay/Services/services.js";
 import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
-import { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
-import {
-	makeOverridesStateLive,
-	setDefaultAgent,
-} from "../../relay/Services/session-overrides-state.js";
+import { makeOverridesStateLive } from "../../relay/Services/session-overrides-state.js";
 import { DaemonSessionSetupLive } from "../../relay/Services/session-setup.js";
 import { SessionWorkspaceHintReactorLive } from "../../relay/Services/session-workspace-hint.js";
-import { SSEStreamTag } from "../../relay/Services/sse-stream-service.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -145,10 +130,7 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../Services/opencode-instances-service.js";
-import {
-	makeOpenCodeProjectStreamsLive,
-	OpenCodeProjectStreams,
-} from "../Services/opencode-project-streams.js";
+import { makeOpenCodeProjectStreamsLive } from "../Services/opencode-project-streams.js";
 import { OpenCodeSessionIdsLive } from "../Services/opencode-session-ids.js";
 import {
 	allProjects,
@@ -156,21 +138,9 @@ import {
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
-import {
-	type PollerTimings,
-	type ProjectParts,
-	ProjectServices,
-} from "../Services/project-services.js";
+import type { PollerTimings } from "../Services/project-services.js";
 import { ProviderAdapters } from "../Services/provider-adapters.js";
-import {
-	type Relay,
-	type RelayCache,
-	RelayCacheTag,
-} from "../Services/relay-cache.js";
-import {
-	SessionActivityDaemonLive,
-	SessionActivityTag,
-} from "../Services/session-activity.js";
+import { SessionActivityDaemonLive } from "../Services/session-activity.js";
 import { SessionDiffLive } from "../Services/session-diff.js";
 import {
 	makeSharedSessionDirectoryLive,
@@ -427,123 +397,6 @@ export const DaemonWiringLive: Layer.Layer<
 		);
 	}),
 );
-
-/** A project's daemon-side controls, read from its generation (lane 16q). */
-const projectHandle = (
-	slug: string,
-	context: Context.Context<ProjectParts | SessionManagerServiceTag>,
-): Relay => {
-	const run = <A, E>(effect: Effect.Effect<A, E, ProjectParts>) =>
-		effect.pipe(Effect.provideContext(context));
-	const manager = Context.get(context, SessionManagerServiceTag).forProject(
-		slug,
-	);
-	const activity = Context.get(context, SessionActivityTag);
-	return {
-		slug,
-		syncGlobalSetting: (tag) => run(syncGlobalSetting(tag)),
-		refreshGlobalDefaults: () => run(refreshGlobalDefaults.pipe(Effect.asVoid)),
-		settleIdleSessions: (idleWindowMs, now) =>
-			run(
-				settleIdleSessions(
-					{
-						projectDir: Context.get(context, ConfigTag).projectDir,
-						hasViewer: activity.hasViewers,
-						hasLiveBackgroundWork: (id) => activity.background.hasLiveWork(id),
-						setSettled: (id) =>
-							manager.setSessionSettled(id, { settled: true, automatic: true }),
-					},
-					idleWindowMs,
-					now,
-				),
-			),
-		archiveIdleSessions: (idleWindowMs, now) =>
-			run(
-				archiveIdleSessions(
-					{
-						hasLiveBackgroundWork: activity.background.hasLiveWork,
-						setArchived: (id) =>
-							manager.setSessionArchived(id, {
-								archived: true,
-								automatic: true,
-								idleWindowMs,
-								now,
-							}),
-					},
-					idleWindowMs,
-					now,
-				),
-			),
-		deleteArchivedSessions: (windowMs, now) =>
-			manager.deleteArchivedSessions(windowMs, now),
-		getStatusSnapshot: () => ({
-			...Context.get(context, RelayStatusSnapshotTag).getSnapshot(),
-			clients: Context.get(context, ProjectSettingsTag).browsers.count(),
-			sse: Context.get(context, SSEStreamTag).getHealth(),
-		}),
-		setDefaultAgent: (agent) => run(setDefaultAgent(agent)),
-	};
-};
-
-/**
- * The daemon's view of its open projects. A project opens in its generation
- * (ProjectServices.open) and closes with its owner scope; no relay starts, as
- * t3code starts its reactors in the server scope (apps/server/src/server.ts:540-627).
- */
-export const makeRelayCacheLayer = (): Layer.Layer<
-	RelayCacheTag,
-	never,
-	ProjectServices | SessionManagerServiceTag
-> =>
-	Layer.effect(
-		RelayCacheTag,
-		Effect.gen(function* () {
-			const projects = yield* ProjectServices;
-			const managers = yield* SessionManagerServiceTag;
-			const withManagers = Context.add(SessionManagerServiceTag, managers);
-			const cache: RelayCache = {
-				get: (slug) =>
-					projects
-						.open(slug)
-						.pipe(
-							Effect.map((context) =>
-								projectHandle(slug, withManagers(context)),
-							),
-						),
-				peek: (slug) =>
-					projects
-						.opened(slug)
-						.pipe(
-							Effect.map(
-								Option.map((context) =>
-									projectHandle(slug, withManagers(context)),
-								),
-							),
-						),
-				// A folder change or a missing folder ends the start; removal also
-				// closes the owner scope.
-				invalidate: projects.close,
-			};
-			// A project holding OpenCode events with no tab open starts in its generation (82tn.16).
-			const projectStreams = yield* Effect.serviceOption(
-				OpenCodeProjectStreams,
-			);
-			if (Option.isSome(projectStreams))
-				yield* Stream.fromQueue(projectStreams.value.wakes).pipe(
-					Stream.runForEach((slug) =>
-						projects
-							.open(slug)
-							.pipe(
-								Effect.catchCause((cause) =>
-									Effect.logError(`Failed to start project "${slug}"`, cause),
-								),
-							),
-					),
-					Effect.forkScoped,
-				);
-			return cache;
-		}),
-	);
 
 /**
  * HTTP(S) server layer — starts the HTTP (or TLS protocol-detection) server
@@ -1152,12 +1005,8 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		claudeSdk: options.claudeSdk,
 		pollerTimings: options.pollerTimings,
 	}).pipe(Layer.provideMerge(withOrchestration));
-	const withRelayCache = makeRelayCacheLayer().pipe(
-		Layer.provideMerge(withProjectServices),
-	);
-
 	const withKeepAwake = makeKeepAwakeLive(options.keepAwake).pipe(
-		Layer.provideMerge(withRelayCache),
+		Layer.provideMerge(withProjectServices),
 	);
 	const withDaemonControl = DaemonHandleLive.pipe(
 		Layer.provideMerge(withKeepAwake),

@@ -35,10 +35,13 @@ import {
 	addWithoutRelay,
 	startRelay,
 } from "../../src/lib/domain/daemon/Services/project-registry-service.js";
-import type { ProjectParts } from "../../src/lib/domain/daemon/Services/project-services.js";
+import {
+	type ProjectParts,
+	ProjectServices,
+} from "../../src/lib/domain/daemon/Services/project-services.js";
 import { ProviderAdapters } from "../../src/lib/domain/daemon/Services/provider-adapters.js";
-import { RelayCacheTag } from "../../src/lib/domain/daemon/Services/relay-cache.js";
 import { EventRetentionTag } from "../../src/lib/domain/persistence/Services/event-retention.js";
+import { SessionManagerServiceTag } from "../../src/lib/domain/relay/Services/session-manager-service.js";
 import { ProjectRpcContextsTag } from "../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { verifyReplayParity } from "../../src/lib/persistence/replay-parity.js";
 import { sdkDefaultClaudeConfigDir } from "../../src/lib/provider/claude/claude-sdk-env.js";
@@ -131,7 +134,7 @@ const makeDaemonRuntime = (options: Parameters<typeof makeDaemonLive>[0]) =>
 type DaemonRuntime = ReturnType<typeof makeDaemonRuntime>;
 type DaemonServices = ManagedRuntime.ManagedRuntime.Services<DaemonRuntime>;
 /** The project's RPC context, which the daemon builds (82tn.16). */
-type ProjectServices =
+type ProjectRpcServices =
 	| Layer.Services<typeof WsRpcServerLayer>
 	| RpcSubscriptionScopeTag
 	| ProjectParts;
@@ -269,7 +272,7 @@ export async function createDaemonProject(
 				);
 				// As foreground startup does, start every project with recovery work alongside this
 				// one, opened or not: recovery waits until each has lent its services.
-				const relays = yield* RelayCacheTag;
+				const projects = yield* ProjectServices;
 				yield* Effect.all(
 					[
 						startRelay(slug),
@@ -277,7 +280,7 @@ export async function createDaemonProject(
 							(yield* ProviderAdapters).recoveryProjects.filter(
 								(recovering) => recovering !== slug,
 							),
-							(recovering) => relays.get(recovering),
+							(recovering) => projects.open(recovering),
 							{ concurrency: "unbounded", discard: true },
 						),
 					],
@@ -306,7 +309,7 @@ export async function createDaemonProject(
 			}),
 		);
 		const run = <A, E>(
-			effect: Effect.Effect<A, E, ProjectServices | DaemonServices>,
+			effect: Effect.Effect<A, E, ProjectRpcServices | DaemonServices>,
 		) => daemon.runPromise(Effect.provide(effect, projectContext));
 		return {
 			slug,
@@ -326,10 +329,15 @@ export async function createDaemonProject(
 						),
 					),
 				),
-			/** The daemon's handle on the project relay (settle, archive, status). */
-			relay: () =>
+			/** The project's session manager once it is open (the automatic sweeps). */
+			sessions: () =>
 				daemon.runPromise(
-					Effect.flatMap(RelayCacheTag, (cache) => cache.get(slug)),
+					Effect.flatMap(ProjectServices, (projects) =>
+						projects.open(slug),
+					).pipe(
+						Effect.andThen(SessionManagerServiceTag),
+						Effect.map((managers) => managers.forProject(slug)),
+					),
 				),
 			async connectWsClient() {
 				const client = new TestWsClient(`ws://127.0.0.1:${port}/rpc?p=${slug}`);

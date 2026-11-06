@@ -29,11 +29,10 @@ import {
 	ProjectRegistryTag,
 	type ProjectState,
 } from "../../daemon/Services/project-registry-service.js";
-import {
-	type RelayCache,
-	RelayCacheTag,
-} from "../../daemon/Services/relay-cache.js";
+import { ProjectServices } from "../../daemon/Services/project-services.js";
 import { AttachmentStoreTag } from "../../persistence/Services/attachment-store.js";
+import { ProjectSettingsTag } from "../../relay/Services/project-settings.js";
+import { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
 import { StatusPollerCoreTag } from "../../relay/Services/session-status-poller.js";
 import { PushManagerTag } from "../Services/push-service.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
@@ -174,10 +173,10 @@ const routerStatusForProjectState = (
 const makeDaemonProjectsReader = (deps: {
 	readonly configRef: Ref.Ref<DaemonRuntimeConfig>;
 	readonly projectRegistry: Ref.Ref<HashMap.HashMap<string, ProjectState>>;
-	readonly relayCache: RelayCache;
+	readonly projects: ProjectServices["Service"];
 	readonly statusPoller: Option.Option<StatusPollerCoreTag["Service"]>;
 }) => {
-	const { configRef, projectRegistry, relayCache, statusPoller } = deps;
+	const { configRef, projectRegistry, projects, statusPoller } = deps;
 	return () =>
 		Effect.gen(function* () {
 			const config = yield* Ref.get(configRef);
@@ -191,12 +190,12 @@ const makeDaemonProjectsReader = (deps: {
 
 			return yield* Effect.forEach(entries, ([slug, entry]) =>
 				Effect.gen(function* () {
-					const cachedRelay = yield* relayCache.peek(slug);
-					const relayStatus = Option.isSome(cachedRelay)
-						? cachedRelay.value.getStatusSnapshot?.()
-						: undefined;
+					// An unopened project reads its persisted count and stays closed.
+					const opened = Option.getOrUndefined(yield* projects.opened(slug));
+					const snapshot =
+						opened && Context.get(opened, RelayStatusSnapshotTag).getSnapshot();
 					const sessions =
-						relayStatus?.sessionCount ||
+						snapshot?.sessionCount ||
 						config.persistedSessionCounts.get(slug) ||
 						0;
 					return {
@@ -205,12 +204,14 @@ const makeDaemonProjectsReader = (deps: {
 						title: entry.project.title,
 						status: routerStatusForProjectState(entry),
 						...(entry._tag === "Error" && { error: entry.error }),
-						clients: relayStatus?.clients ?? 0,
+						clients: opened
+							? Context.get(opened, ProjectSettingsTag).browsers.count()
+							: 0,
 						sessions,
 						// The daemon's poller answers for a project no tab has opened too.
 						isProcessing: Option.isSome(statusPoller)
 							? yield* statusPoller.value.isProcessing(slug)
-							: (relayStatus?.isProcessing ?? false),
+							: (snapshot?.isProcessing ?? false),
 					} satisfies RouterProjectInfo;
 				}),
 			);
@@ -250,7 +251,7 @@ export const makeDaemonHttpRouterLive = (staticDir: string) =>
 			const daemonHandle = yield* DaemonHandleTag;
 			const tls = yield* TlsCertTag;
 			const projectRegistry = yield* ProjectRegistryTag;
-			const relayCache = yield* RelayCacheTag;
+			const projects = yield* ProjectServices;
 			const statusPoller = yield* Effect.serviceOption(StatusPollerCoreTag);
 			const pushManager = yield* PushManagerTag;
 			const legacyPushManager = yield* pushManager.getLegacyManager;
@@ -277,7 +278,7 @@ export const makeDaemonHttpRouterLive = (staticDir: string) =>
 				getProjects: makeDaemonProjectsReader({
 					configRef,
 					projectRegistry,
-					relayCache,
+					projects,
 					statusPoller,
 				}),
 				getHealthResponse: () => daemonHandle.getStatus(),

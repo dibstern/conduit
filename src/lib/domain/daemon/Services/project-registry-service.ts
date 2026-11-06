@@ -8,7 +8,7 @@
 // for relay cancellation. This service replaces callbacks with DaemonEventBus
 // publishes, and AbortController with Effect Scope/interruption.
 //
-// Relay lifecycle is delegated to RelayCacheTag.
+// A project's start and end go through ProjectServices open and close.
 
 import {
 	lstatSync,
@@ -104,7 +104,7 @@ import {
 	transitionProjectUnavailable,
 } from "./daemon-store-availability.js";
 import { OwnerScopes } from "./owner-scopes.js";
-import { RelayCacheTag } from "./relay-cache.js";
+import { ProjectServices } from "./project-services.js";
 import { Subprocess } from "./subprocess.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
@@ -647,7 +647,7 @@ export const markError = (slug: string, error: string) =>
 	);
 
 /**
- * Remove a project. Invalidates its relay via RelayCacheTag.
+ * Remove a project and close its start (ProjectServices.close).
  * Publishes InstanceRemoved event. No-op if slug not registered.
  */
 export const remove = (slug: string) =>
@@ -659,7 +659,7 @@ export const remove = (slug: string) =>
 					return yield* new ProjectNotFound({ slug });
 				const ref = yield* ProjectRegistryTag;
 				const bus = yield* DaemonEventBusTag;
-				const relayCache = yield* RelayCacheTag;
+				const projects = yield* ProjectServices;
 
 				const removed = yield* Ref.modify(ref, (state) => {
 					const entry = HashMap.get(state, slug);
@@ -682,8 +682,8 @@ export const remove = (slug: string) =>
 										new WsRpcError({ message: formatErrorDetail(cause) }),
 								),
 							);
-					// Relay disposal only detaches; removal ends every registered runner afterwards.
-					yield* relayCache.invalidate(slug);
+					// Closing only detaches; removal ends every registered runner afterwards.
+					yield* projects.close(slug);
 					const overrides = yield* Effect.serviceOption(OverridesStateTag);
 					if (Option.isSome(overrides))
 						yield* clearProject(slug).pipe(
@@ -829,14 +829,14 @@ export const touchLastUsed = (slug: string) =>
 	);
 
 /**
- * Start a relay for a slug via RelayCacheTag.get(). Transitions
+ * Open a project (ProjectServices.open). Transitions
  * from Registering/Error → Ready on success, or → Error on failure.
  * Publishes appropriate InstanceStatusChanged events.
  */
 export const startRelay = (slug: string) =>
 	Effect.gen(function* () {
 		const ref = yield* ProjectRegistryTag;
-		const relayCache = yield* RelayCacheTag;
+		const projects = yield* ProjectServices;
 
 		// Verify the entry exists and is not already ready
 		const state = yield* Ref.get(ref);
@@ -856,9 +856,8 @@ export const startRelay = (slug: string) =>
 			}),
 		);
 
-		// Delegate relay creation to RelayCacheTag and keep the registry state
-		// honest for both typed startup failures and defects.
-		yield* relayCache.get(slug).pipe(
+		// Keep the registry state honest for both typed start failures and defects.
+		yield* projects.open(slug).pipe(
 			Effect.flatMap(() => markReady(slug)),
 			Effect.catch((cause) => markError(slug, formatRelayFailure(cause))),
 			Effect.catchDefect((defect) =>
@@ -873,13 +872,13 @@ export const startRelay = (slug: string) =>
 	);
 
 /**
- * Remove all projects and invalidate all relays.
+ * Remove all projects and close each one's start.
  * Publishes InstanceRemoved for each removed project.
  */
 export const removeAll = Effect.gen(function* () {
 	const ref = yield* ProjectRegistryTag;
 	const bus = yield* DaemonEventBusTag;
-	const relayCache = yield* RelayCacheTag;
+	const projects = yield* ProjectServices;
 
 	const state = yield* Ref.get(ref);
 	const allSlugs = Array.from(HashMap.keys(state)).filter(
@@ -893,12 +892,12 @@ export const removeAll = Effect.gen(function* () {
 	);
 	yield* refreshProjectRollups(allSlugs);
 
-	// Invalidate all relays and publish removal events
+	// Close each project's start and publish removal events
 	yield* Effect.forEach(
 		allSlugs,
 		(slug) =>
 			Effect.gen(function* () {
-				yield* relayCache.invalidate(slug);
+				yield* projects.close(slug);
 				const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 				if (Option.isSome(workspace)) workspace.value.forgetProject?.(slug);
 				yield* PubSub.publish(
@@ -925,14 +924,14 @@ export const evictOldestSessions = (count: number) =>
 	}).pipe(Effect.withSpan("projectRegistry.evictOldestSessions"));
 
 /**
- * Replace the relay for a slug. Invalidates the old relay via RelayCacheTag,
- * creates a new one, and transitions the project to Ready.
+ * Restart a project with its current folders: close its start, open it
+ * again, and transition the project to Ready.
  */
 export const replaceRelay = (slug: string) =>
 	Effect.gen(function* () {
-		const relayCache = yield* RelayCacheTag;
-		yield* relayCache.invalidate(slug);
-		yield* relayCache.get(slug).pipe(
+		const projects = yield* ProjectServices;
+		yield* projects.close(slug);
+		yield* projects.open(slug).pipe(
 			Effect.flatMap(() => markReady(slug)),
 			Effect.catch((cause) => markError(slug, formatRelayFailure(cause))),
 			Effect.catchDefect((defect) =>

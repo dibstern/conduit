@@ -1,7 +1,16 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Cause, Deferred, Effect, Exit, Layer, Option, Scope } from "effect";
+import {
+	Cause,
+	Context,
+	Deferred,
+	Effect,
+	Exit,
+	Layer,
+	Option,
+	Scope,
+} from "effect";
 import { afterEach, expect, vi } from "vitest";
 import {
 	DaemonLifecycleLayerError,
@@ -24,8 +33,20 @@ import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daem
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	type ProjectParts,
+	ProjectServices,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
+import {
+	type RelayStatusSnapshotService,
+	RelayStatusSnapshotTag,
+} from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+import {
+	type RelayOpenCodeStream,
+	SSEStreamTag,
+} from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import type { ConnectionHealth } from "../../../src/lib/types.js";
 import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 
 const fixtureDirs: string[] = [];
@@ -158,49 +179,40 @@ describe("DaemonHandleTag", () => {
 					},
 				],
 			]);
-			const relayCacheStub = Layer.succeed(RelayCacheTag)({
-				get: (slug: string) =>
-					Effect.succeed({
-						slug,
-						attach: () => () => {},
-						rpcWsHandler: {},
-						syncGlobalSetting: () => Effect.void,
-						refreshGlobalDefaults: () => Effect.void,
-						getStatusSnapshot: () => ({
-							sessionCount: slug === "existing" ? 5 : 4,
-							clients: 0,
-							isProcessing: false,
-							sse: relayHealthBySlug.get(slug) ?? {
-								connected: false,
-								lastEventAt: null,
-								reconnectCount: 0,
-								stale: false,
-							},
-						}),
-						stop: () => {},
-					}),
-				peek: (slug: string) => {
-					const sse = relayHealthBySlug.get(slug);
-					return sse === undefined
-						? Effect.succeed(Option.none())
-						: Effect.succeed(
-								Option.some({
-									slug,
-									attach: () => () => {},
-									rpcWsHandler: {},
-									syncGlobalSetting: () => Effect.void,
-									refreshGlobalDefaults: () => Effect.void,
-									getStatusSnapshot: () => ({
-										sessionCount: slug === "existing" ? 5 : 4,
-										clients: 0,
-										isProcessing: false,
-										sse,
-									}),
-									stop: () => {},
-								}),
-							);
+			// Status reads only the opened project's snapshot and stream health.
+			const openedProject = (
+				slug: string,
+				sse: ConnectionHealth = {
+					connected: false,
+					lastEventAt: null,
+					reconnectCount: 0,
+					stale: false,
 				},
-				invalidate: () => Effect.void,
+			) =>
+				Context.make(RelayStatusSnapshotTag, {
+					getSnapshot: () => ({
+						sessionCount: slug === "existing" ? 5 : 4,
+						isProcessing: false,
+					}),
+				} as RelayStatusSnapshotService).pipe(
+					Context.add(SSEStreamTag, {
+						getHealth: () => sse,
+					} as RelayOpenCodeStream),
+				) as Context.Context<ProjectParts>;
+			const projectServicesStub = Layer.succeed(ProjectServices)({
+				forProject: () => Effect.die("unused"),
+				generation: () => Effect.die("unused"),
+				open: (slug) =>
+					Effect.succeed(openedProject(slug, relayHealthBySlug.get(slug))),
+				opened: (slug) => {
+					const sse = relayHealthBySlug.get(slug);
+					return Effect.succeed(
+						sse === undefined
+							? Option.none()
+							: Option.some(openedProject(slug, sse)),
+					);
+				},
+				close: () => Effect.void,
 			});
 			const handleDeps = Layer.mergeAll(
 				makeDaemonStoreTestLayer(),
@@ -248,7 +260,7 @@ describe("DaemonHandleTag", () => {
 						lastUsed: 80,
 					},
 				]),
-				relayCacheStub,
+				projectServicesStub,
 				Layer.succeed(DaemonLifecycleContextTag)(lifecycleContext),
 				makeInstanceManagerStateLive(
 					undefined,

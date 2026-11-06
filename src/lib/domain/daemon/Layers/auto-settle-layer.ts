@@ -8,6 +8,7 @@ import {
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV } from "../../../env.js";
 import { PortWatcher } from "../../persistence/Services/port-watcher.js";
+import { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
@@ -20,14 +21,15 @@ import {
 	allProjects,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
-import { RelayCacheTag } from "../Services/relay-cache.js";
+import { ProjectServices } from "../Services/project-services.js";
 
 export const AutoSettleLive = () =>
 	Layer.effectDiscard(
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const registry = yield* ProjectRegistryTag;
-			const cache = yield* RelayCacheTag;
+			const projectServices = yield* ProjectServices;
+			const managers = yield* SessionManagerServiceTag;
 			const bus = yield* DaemonEventBusTag;
 			const storeContext = yield* persistenceStoreContext;
 			const watcher = yield* PortWatcher;
@@ -60,8 +62,8 @@ export const AutoSettleLive = () =>
 									},
 								);
 							}
-							// Stop any cached relay's pollers, even when settlement is disabled.
-							yield* cache.invalidate(project.slug);
+							// End the project's start (its pollers), even when settlement is disabled.
+							yield* projectServices.close(project.slug);
 							return;
 						}
 						missingDirectories.delete(mainFolder);
@@ -71,46 +73,44 @@ export const AutoSettleLive = () =>
 							deleteDays === null
 						)
 							return;
-						const running = yield* cache.peek(project.slug);
-						const relay = Option.isSome(running)
-							? running.value
-							: (idleWindowMs !== null &&
-										(yield* hasColdAutoSettleCandidate(
-											project,
-											now,
-											idleWindowMs,
-										).pipe(Effect.provide(storeContext)))) ||
-									(archiveDays !== null &&
-										(yield* hasColdAutoArchiveCandidate(
-											project,
-											now,
-											archiveWindowMs,
-										).pipe(Effect.provide(storeContext)))) ||
-									(deleteDays !== null &&
-										(yield* hasColdAutoDeleteCandidate(
-											project,
-											now,
-											deleteWindowMs,
-										).pipe(Effect.provide(storeContext))))
-								? yield* cache.get(project.slug)
-								: null;
-						if (relay === null) return;
+						// An unopened project opens only when a persisted session is due.
+						const due =
+							Option.isSome(yield* projectServices.opened(project.slug)) ||
+							(idleWindowMs !== null &&
+								(yield* hasColdAutoSettleCandidate(
+									project,
+									now,
+									idleWindowMs,
+								).pipe(Effect.provide(storeContext)))) ||
+							(archiveDays !== null &&
+								(yield* hasColdAutoArchiveCandidate(
+									project,
+									now,
+									archiveWindowMs,
+								).pipe(Effect.provide(storeContext)))) ||
+							(deleteDays !== null &&
+								(yield* hasColdAutoDeleteCandidate(
+									project,
+									now,
+									deleteWindowMs,
+								).pipe(Effect.provide(storeContext))));
+						if (!due) return;
+						yield* projectServices.open(project.slug);
+						const manager = managers.forProject(project.slug);
 						// 8.7: until the first scan and one hold have passed, servers are unknown and
 						// auto-settle waits.
 						const settled =
-							idleWindowMs === null ||
-							!watcher.known() ||
-							relay.settleIdleSessions === undefined
+							idleWindowMs === null || !watcher.known()
 								? 0
-								: yield* relay.settleIdleSessions(idleWindowMs, now);
+								: yield* manager.settleIdleSessions(idleWindowMs, now);
 						const archived =
-							archiveDays === null || relay.archiveIdleSessions === undefined
+							archiveDays === null
 								? 0
-								: yield* relay.archiveIdleSessions(archiveWindowMs, now);
+								: yield* manager.archiveIdleSessions(archiveWindowMs, now);
 						const deleted =
-							deleteDays === null || relay.deleteArchivedSessions === undefined
+							deleteDays === null
 								? 0
-								: yield* relay.deleteArchivedSessions(deleteWindowMs, now);
+								: yield* manager.deleteArchivedSessions(deleteWindowMs, now);
 						const count = settled + archived + deleted;
 						if (count > 0)
 							yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());

@@ -11,6 +11,7 @@ import {
 	ManagedRuntime,
 	Option,
 	Ref,
+	Scope,
 	Stream,
 } from "effect";
 import { RpcClient, RpcSerialization } from "effect/rpc";
@@ -27,10 +28,10 @@ import {
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
-	makeRelayCacheLive,
-	type Relay,
-	RelayCacheTag,
-} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+	type ProjectParts,
+	ProjectServices,
+	ProjectServicesError,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -43,7 +44,6 @@ import {
 import { HttpServerRefTag } from "../../../src/lib/domain/server/Services/http-server-ref.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
-import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import {
 	makeMockConfig,
@@ -71,21 +71,66 @@ type ProjectRpcContext = Effect.Success<
 	ReturnType<ProjectRpcContextsTag["Service"]>
 >;
 
-/** Test projects run their RPCs on a stand-in relay's handler runtime. */
+type StandInRuntime = {
+	readonly contextEffect: Effect.Effect<unknown, unknown>;
+};
+
+/**
+ * Stand-in project starts: `start` runs once per project, in the test's scope, and
+ * every open reads that runtime's context, so a disposed runtime fails its project.
+ */
+const standInProjectServices = (
+	start: (slug: string) => Effect.Effect<StandInRuntime, unknown, Scope.Scope>,
+) =>
+	Effect.gen(function* () {
+		const scope = yield* Effect.scope;
+		const starts = new Map<string, Effect.Effect<StandInRuntime, unknown>>();
+		return {
+			open: (projectId: string) =>
+				Effect.gen(function* () {
+					let started = starts.get(projectId);
+					if (started === undefined) {
+						started = yield* Effect.cached(
+							start(projectId).pipe(Scope.provide(scope)),
+						);
+						starts.set(projectId, started);
+					}
+					// The stand-in runtime carries the handler services, not every project part.
+					return (yield* (yield* started)
+						.contextEffect) as Context.Context<ProjectParts>;
+				}).pipe(
+					Effect.mapError(
+						(cause) =>
+							new ProjectServicesError({
+								projectId,
+								reason: cause instanceof Error ? cause.message : String(cause),
+							}),
+					),
+				),
+		} satisfies Partial<ProjectServices["Service"]>;
+	});
+
+const standInProjectServicesLayer = (
+	projects: Partial<ProjectServices["Service"]>,
+) =>
+	Layer.succeed(ProjectServices)({
+		forProject: () => Effect.die("unused"),
+		generation: () => Effect.die("unused"),
+		open: () => Effect.die("unused"),
+		opened: () => Effect.succeedNone,
+		close: () => Effect.void,
+		...projects,
+	});
+
+/** Test projects run their RPCs on a stand-in project runtime. */
 const standInProjectContexts = Effect.gen(function* () {
 	const router = yield* WebSocketRelayRouterTag;
-	const cache = yield* RelayCacheTag;
+	const projects = yield* ProjectServices;
 	return (slug: string) =>
 		Effect.gen(function* () {
 			yield* router.ensureRelayStarted(slug);
-			// The daemon's handle carries no handler; these stand-ins add one (lane 16q).
-			const relay = (yield* cache.get(slug)) as Relay & {
-				readonly rpcWsHandler: { readonly context?: Effect.Effect<unknown> };
-			};
-			const context = relay.rpcWsHandler.context;
-			if (!context) return yield* Effect.die("Stand-in relay has no context");
-			// The stand-in runtime carries the handler services, not every project part.
-			return (yield* context) as Context.Context<unknown> as ProjectRpcContext;
+			const context = yield* projects.open(slug);
+			return context as Context.Context<unknown> as ProjectRpcContext;
 		}).pipe(
 			// A disposed stand-in runtime dies; the RPC fails, as a closed project does.
 			Effect.catchCause((cause) =>
@@ -128,7 +173,7 @@ describe("daemon shared RPC routing", () => {
 			];
 			const activities = new Map<string, SessionActivityTag["Service"]>();
 			const startPolling = vi.fn();
-			const factory = (slug: string) =>
+			const standIns = yield* standInProjectServices((slug: string) =>
 				Effect.gen(function* () {
 					const pollerManager = {
 						on: vi.fn(),
@@ -138,37 +183,31 @@ describe("daemon shared RPC routing", () => {
 						stopPolling: vi.fn(),
 						notifySSEEvent: vi.fn(),
 					};
-					const runtime = ManagedRuntime.make(
-						Layer.mergeAll(
-							makeTestHandlerLayer({
-								config: makeMockConfig({ slug }),
-								persistenceLayer: makePersistenceEffectLayer(
-									daemonStorePath(root),
-									slug,
+					const runtime = yield* Effect.acquireRelease(
+						Effect.sync(() =>
+							ManagedRuntime.make(
+								Layer.mergeAll(
+									makeTestHandlerLayer({
+										config: makeMockConfig({ slug }),
+										persistenceLayer: makePersistenceEffectLayer(
+											daemonStorePath(root),
+											slug,
+										),
+										pollerManager,
+									}),
+									makeWsTransportLive({ noServer: true }),
 								),
-								pollerManager,
-							}),
-							makeWsTransportLive({ noServer: true }),
+							),
 						),
+						(runtime) => runtime.disposeEffect,
 					);
-					const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
-						runtime,
-					}).pipe(Effect.provide(yield* runtime.contextEffect));
 					activities.set(
 						slug,
 						yield* Effect.promise(() => runtime.runPromise(SessionActivityTag)),
 					);
-					return {
-						slug,
-						rpcWsHandler,
-						syncGlobalSetting: () => Effect.void,
-						refreshGlobalDefaults: () => Effect.void,
-						stop: async () => {
-							await rpcWsHandler.drain();
-							await runtime.dispose();
-						},
-					};
-				});
+					return runtime;
+				}),
+			);
 
 			const server = yield* Effect.acquireRelease(
 				Effect.callback<Server, Error>((resume) => {
@@ -188,7 +227,7 @@ describe("daemon shared RPC routing", () => {
 					Layer.provideMerge(
 						Layer.mergeAll(
 							makeProjectRegistryLive(projects),
-							makeRelayCacheLive(factory),
+							standInProjectServicesLayer(standIns),
 							DaemonEventBusLive,
 							ConfigPersistenceNoopLive,
 						),
@@ -201,7 +240,7 @@ describe("daemon shared RPC routing", () => {
 			yield* Layer.build(
 				WebSocketRoutingLive.pipe(
 					Layer.provide(
-						makeDaemonRpcTestLayer(projects, factory, { configDir: root }),
+						makeDaemonRpcTestLayer(projects, standIns, { configDir: root }),
 					),
 					Layer.provide(
 						Layer.mergeAll(
@@ -358,45 +397,38 @@ describe("daemon shared RPC routing", () => {
 					string,
 					ManagedRuntime.ManagedRuntime<unknown, unknown>
 				>();
-				const factory = vi.fn((slug: string) =>
+				const start = vi.fn((slug: string) =>
 					Effect.gen(function* () {
 						if (slug === "unavailable")
 							return yield* Effect.fail(new Error("startup failed"));
-						const runtime = ManagedRuntime.make(
-							Layer.merge(
-								makeTestHandlerLayer({
-									config: makeMockConfig({
-										slug,
-									}),
-									projectManagementService: {
-										list: () =>
-											Effect.succeed(
-												projects.filter((project) => project.slug === slug),
-											),
-										save: () => Effect.die(new Error("unused save")),
-										remove: () => Effect.die(new Error("unused remove")),
-									},
-								}),
-								makeWsTransportLive({ noServer: true }),
+						const runtime = yield* Effect.acquireRelease(
+							Effect.sync(() =>
+								ManagedRuntime.make(
+									Layer.merge(
+										makeTestHandlerLayer({
+											config: makeMockConfig({
+												slug,
+											}),
+											projectManagementService: {
+												list: () =>
+													Effect.succeed(
+														projects.filter((project) => project.slug === slug),
+													),
+												save: () => Effect.die(new Error("unused save")),
+												remove: () => Effect.die(new Error("unused remove")),
+											},
+										}),
+										makeWsTransportLive({ noServer: true }),
+									),
+								),
 							),
+							(runtime) => runtime.disposeEffect,
 						);
 						relays.set(slug, runtime);
-						const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
-							runtime,
-						}).pipe(Effect.provide(yield* runtime.contextEffect));
-						return {
-							slug,
-							wsHandler: {},
-							rpcWsHandler,
-							syncGlobalSetting: () => Effect.void,
-							refreshGlobalDefaults: () => Effect.void,
-							stop: async () => {
-								await rpcWsHandler.drain();
-								await runtime.dispose();
-							},
-						};
+						return runtime;
 					}),
 				);
+				const standIns = yield* standInProjectServices(start);
 				const server = yield* Effect.acquireRelease(
 					Effect.callback<Server, Error>((resume) => {
 						const server = createServer();
@@ -414,7 +446,7 @@ describe("daemon shared RPC routing", () => {
 					Layer.provideMerge(
 						Layer.mergeAll(
 							makeProjectRegistryLive(projects),
-							makeRelayCacheLive(factory),
+							standInProjectServicesLayer(standIns),
 							DaemonEventBusLive,
 							ConfigPersistenceNoopLive,
 						),
@@ -478,7 +510,7 @@ describe("daemon shared RPC routing", () => {
 						expect(result.failure.message).toContain(slug);
 					}
 				}
-				// A disposed relay fails context acquisition without killing other requests.
+				// A disposed project runtime fails context acquisition without killing other requests.
 				const firstRelay = relays.get("project-a");
 				if (!firstRelay) throw new Error("Project A was not started");
 				yield* firstRelay.disposeEffect;
@@ -494,7 +526,7 @@ describe("daemon shared RPC routing", () => {
 					yield* client.GetCommands({ projectSlug: "project-b" }),
 				).toMatchObject({ projectSlug: "project-b", commands: [] });
 				expect(upgrades).toHaveBeenCalledTimes(1);
-				expect(factory.mock.calls.map(([slug]) => slug)).not.toContain(
+				expect(start.mock.calls.map(([slug]) => slug)).not.toContain(
 					"missing-project",
 				);
 			}),

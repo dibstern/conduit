@@ -11,6 +11,7 @@ import {
 	Ref,
 	Scope,
 	Semaphore,
+	Stream,
 } from "effect";
 import type { SqlError } from "effect/sql/SqlError";
 import * as Failure from "../../../effect/failure-classification.js";
@@ -713,6 +714,21 @@ export const makeProjectServicesLive = (options: {
 					started.delete(scope);
 					yield* Scope.close(current.scope, Exit.void);
 				});
+			// A project holding OpenCode events with no tab open starts in its
+			// generation, as t3code starts its reactors in the server scope
+			// (apps/server/src/server.ts:540-627).
+			yield* Stream.fromQueue(
+				Context.get(turnShared, OpenCodeProjectStreams).wakes,
+			).pipe(
+				Stream.runForEach((slug) =>
+					open(slug).pipe(
+						Effect.catchCause((cause) =>
+							Effect.logError(`Failed to start project "${slug}"`, cause),
+						),
+					),
+				),
+				Effect.forkScoped,
+			);
 			return Context.make(ProjectServices, {
 				generation,
 				forProject,

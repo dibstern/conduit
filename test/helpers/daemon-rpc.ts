@@ -46,9 +46,9 @@ import {
 	type ProjectRegistryTag,
 } from "../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
-	makeRelayCacheLive,
-	type RelayFactory,
-} from "../../src/lib/domain/daemon/Services/relay-cache.js";
+	ProjectServices,
+	ProjectServicesError,
+} from "../../src/lib/domain/daemon/Services/project-services.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
@@ -92,7 +92,8 @@ export const makeDaemonStoreTestLayer = (filename = ":memory:") =>
 
 export const makeDaemonRpcTestLayer = (
 	projects: ReadonlyArray<StoredProject> = [],
-	factory: RelayFactory = () => Effect.die("Unexpected relay startup"),
+	/** Handler fixtures open no project unless a test lends these calls. */
+	projectServices: Partial<ProjectServices["Service"]> = {},
 	options: {
 		config?: Partial<DaemonRuntimeConfig>;
 		configDir?: string;
@@ -128,7 +129,26 @@ export const makeDaemonRpcTestLayer = (
 		CategorySetLive(options.configDir ?? "/tmp/daemon-rpc-fixture"),
 		Layer.effect(SessionActivityTag, makeSessionActivity),
 		makeProjectRegistryLive(projects),
-		makeRelayCacheLive(factory),
+		Layer.succeed(ProjectServices)({
+			forProject: (projectId) =>
+				Effect.fail(
+					new ProjectServicesError({
+						projectId,
+						reason: "This fixture serves no project contexts",
+					}),
+				),
+			generation: (projectId) =>
+				Effect.fail(
+					new ProjectServicesError({
+						projectId,
+						reason: "This fixture serves no project contexts",
+					}),
+				),
+			open: () => Effect.die("Unexpected project start"),
+			opened: () => Effect.succeedNone,
+			close: () => Effect.void,
+			...projectServices,
+		}),
 		DaemonEventBusLive,
 		makeAccountResourceScopesLive(),
 		BrowserRpcConnectionsLive,

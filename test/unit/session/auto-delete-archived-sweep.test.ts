@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option, PubSub, Ref } from "effect";
+import { Context, Effect, Layer, PubSub, Ref } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
@@ -24,9 +24,9 @@ import {
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
-	type Relay,
-	RelayCacheTag,
-} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+	type ProjectParts,
+	ProjectServices,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
@@ -215,15 +215,10 @@ describe("archived tree retention", () => {
 					yield* seed("outside-fork");
 					yield* sql`UPDATE sessions SET forked_from = 'fork-source-agent' WHERE id = 'outside-fork'`;
 					yield* sql`UPDATE sessions SET forked_from = 'internal-fork' WHERE id = 'internal-fork-side'`;
-					const relay: Relay = {
-						slug: "test-project",
-						syncGlobalSetting: () => Effect.void,
-						refreshGlobalDefaults: () => Effect.void,
-						stop: () => {},
-						deleteArchivedSessions: (windowMs, at) =>
-							service.deleteArchivedSessions(windowMs, at),
-					};
-					const get = vi.fn(() => Effect.succeed(relay));
+					// The sweep runs through the project's real session manager once it opens.
+					const open = vi.fn((_slug: string) =>
+						Effect.succeed(Context.empty() as Context.Context<ProjectParts>),
+					);
 					const bus = yield* DaemonEventBusTag;
 					const changes = yield* PubSub.subscribe(bus);
 					const activity = yield* SessionActivityTag;
@@ -237,23 +232,25 @@ describe("archived tree retention", () => {
 					yield* Layer.build(
 						AutoSettleLive().pipe(
 							Layer.provide(
-								Layer.succeed(RelayCacheTag)({
-									peek: () => Effect.succeed(Option.none<Relay>()),
-									get,
-									invalidate: () => Effect.void,
+								Layer.succeed(ProjectServices)({
+									forProject: () => Effect.die("unused"),
+									generation: () => Effect.die("unused"),
+									open,
+									opened: () => Effect.succeedNone,
+									close: () => Effect.void,
 								}),
 							),
 						),
 					);
 					yield* TestClock.adjust("1 millis");
-					expect(get).not.toHaveBeenCalled();
+					expect(open).not.toHaveBeenCalled();
 					expect(yield* read.getSession("eligible")).toBeDefined();
 					yield* Ref.update(configRef, (config) => ({
 						...config,
 						autoDeleteArchivedAfterDays: 30,
 					}));
 					yield* TestClock.adjust("1 minute");
-					expect(get).toHaveBeenCalledWith("test-project");
+					expect(open).toHaveBeenCalledWith("test-project");
 					for (const root of ["eligible", "internal-fork", "fork-source"])
 						for (const id of [root, `${root}-side`, `${root}-agent`]) {
 							expect(yield* read.getSession(id)).toBeUndefined();

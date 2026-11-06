@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Effect, Layer, ManagedRuntime, Option, Ref } from "effect";
+import { Effect, Layer, ManagedRuntime, Ref } from "effect";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -18,7 +18,10 @@ import {
 	makeProjectRegistryLive,
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	ProjectServices,
+	ProjectServicesError,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
@@ -123,10 +126,18 @@ describe("retained child sidebar roll-up", () => {
 				ConfigPersistenceNoopLive,
 				Layer.effect(SessionActivityTag, makeSessionActivity),
 				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
-				Layer.succeed(RelayCacheTag)({
-					get: () => Effect.fail(new Error("No relay needed")),
-					peek: () => Effect.succeed(Option.none()),
-					invalidate: () => Effect.void,
+				Layer.succeed(ProjectServices)({
+					forProject: () => Effect.die("unused"),
+					generation: () => Effect.die("unused"),
+					open: (projectId) =>
+						Effect.fail(
+							new ProjectServicesError({
+								projectId,
+								reason: "No project start needed",
+							}),
+						),
+					opened: () => Effect.succeedNone,
+					close: () => Effect.void,
 				}),
 			);
 			const runtime = ManagedRuntime.make(services);

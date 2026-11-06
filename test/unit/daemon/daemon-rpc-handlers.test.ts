@@ -1,5 +1,13 @@
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Result as Either, Layer, Ref } from "effect";
+import {
+	Context,
+	Deferred,
+	Effect,
+	Result as Either,
+	Layer,
+	Option,
+	Ref,
+} from "effect";
 import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { hashPin } from "../../../src/lib/auth.js";
@@ -13,7 +21,26 @@ import {
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonStateTag } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
-import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	type ProjectParts,
+	ProjectServicesError,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
+import {
+	type ProjectSettings,
+	ProjectSettingsTag,
+} from "../../../src/lib/domain/relay/Services/project-settings.js";
+import {
+	type RelayStatusSnapshotService,
+	RelayStatusSnapshotTag,
+} from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+import {
+	makeOverridesStateLive,
+	OverridesStateTag,
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import {
+	type RelayOpenCodeStream,
+	SSEStreamTag,
+} from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
 import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import { getLogLevel } from "../../../src/lib/logger.js";
 import { isServerSupervised } from "../../../src/lib/server/build-update.js";
@@ -46,25 +73,18 @@ describe("daemon control through the shared RPC group", () => {
 				reconnectCount: 2,
 				stale: false,
 			};
-			const factory = (slug: string) =>
-				Effect.succeed({
-					slug,
-					attach: () => () => {},
-					wsHandler: {},
-					rpcWsHandler: {},
-					syncGlobalSetting: () => Effect.void,
-					refreshGlobalDefaults: () => Effect.void,
-					getStatusSnapshot: () => ({
-						sessionCount: 3,
-						clients: 2,
-						isProcessing: true,
-						sse,
-					}),
-					stop: () => {},
-				});
+			// Status reads only these three services of an opened project.
+			const cached = Context.make(RelayStatusSnapshotTag, {
+				getSnapshot: () => ({ sessionCount: 3, isProcessing: true }),
+			} as RelayStatusSnapshotService).pipe(
+				Context.add(ProjectSettingsTag, {
+					browsers: { count: () => 2 },
+				} as ProjectSettings),
+				Context.add(SSEStreamTag, {
+					getHealth: () => sse,
+				} as RelayOpenCodeStream),
+			) as Context.Context<ProjectParts>;
 			return Effect.gen(function* () {
-				const cache = yield* RelayCacheTag;
-				yield* cache.get("cached");
 				const client = yield* makeClient;
 				const result = yield* client.GetStatus({});
 				expect(result).toMatchObject({
@@ -114,7 +134,12 @@ describe("daemon control through the shared RPC group", () => {
 								lastUsed: 2000,
 							},
 						],
-						factory,
+						{
+							opened: (slug) =>
+								Effect.succeed(
+									slug === "cached" ? Option.some(cached) : Option.none(),
+								),
+						},
 						{
 							config: {
 								host: "0.0.0.0",
@@ -500,75 +525,49 @@ describe("daemon control through the shared RPC group", () => {
 		},
 	);
 
-	it.effect(
-		"updates the project default agent through the cached relay",
-		() => {
-			const setDefaultAgent = vi.fn((_agent: string) => Effect.void);
-			return Effect.gen(function* () {
+	it.effect("updates the project default agent in the opened project", () =>
+		Effect.gen(function* () {
+			const overrides = yield* Layer.build(makeOverridesStateLive());
+			const open = vi.fn((_slug: string) =>
+				Effect.succeed(overrides as Context.Context<ProjectParts>),
+			);
+			yield* Effect.gen(function* () {
 				const client = yield* makeClient;
 				expect(
 					yield* client.SetAgent({ slug: "project", agent: "build" }),
 				).toEqual({ ok: true });
-				expect(setDefaultAgent).toHaveBeenCalledWith("build");
-			}).pipe(
-				Effect.provide(
-					makeDaemonRpcTestLayer([], (slug) =>
-						Effect.succeed({
-							slug,
-							attach: () => () => {},
-							wsHandler: {},
-							rpcWsHandler: {},
-							syncGlobalSetting: () => Effect.void,
-							refreshGlobalDefaults: () => Effect.void,
-							setDefaultAgent,
-							stop: () => {},
-						}),
-					),
-				),
-			);
-		},
+			}).pipe(Effect.provide(makeDaemonRpcTestLayer([], { open })));
+			expect(open).toHaveBeenCalledWith("project");
+			const state = yield* Ref.get(Context.get(overrides, OverridesStateTag));
+			expect(state.defaultAgent).toBe("build");
+		}),
 	);
 
-	it.effect(
-		"returns typed errors when a relay rejects default agent updates",
-		() =>
-			Effect.gen(function* () {
-				const client = yield* makeClient;
-				const agent = yield* Effect.result(
-					client.SetAgent({ slug: "project", agent: "build" }),
-				);
-				const rejected = yield* Effect.result(
-					client.SetAgent({ slug: "rejected", agent: "build" }),
-				);
-				expect(Either.isFailure(agent) && agent.failure.message).toBe(
-					'Relay "project" does not support default agent updates',
-				);
-				expect(Either.isFailure(rejected) && rejected.failure.message).toBe(
-					"agent unavailable",
-				);
-			}).pipe(
-				Effect.provide(
-					makeDaemonRpcTestLayer([], (slug) =>
-						Effect.succeed({
-							slug,
-							attach: () => () => {},
-							wsHandler: {},
-							rpcWsHandler: {},
-							syncGlobalSetting: () => Effect.void,
-							refreshGlobalDefaults: () => Effect.void,
-							...(slug === "rejected"
-								? {
-										setDefaultAgent: () =>
-											Effect.fail(
-												new WsRpcError({ message: "agent unavailable" }),
-											),
-									}
-								: {}),
-							stop: () => {},
-						}),
-					),
-				),
+	it.effect("returns typed errors when the project refuses to open", () =>
+		Effect.gen(function* () {
+			const client = yield* makeClient;
+			const rejected = yield* Effect.result(
+				client.SetAgent({ slug: "rejected", agent: "build" }),
+			);
+			expect(Either.isFailure(rejected) && rejected.failure).toBeInstanceOf(
+				WsRpcError,
+			);
+			expect(Either.isFailure(rejected) && rejected.failure.message).toBe(
+				"agent unavailable",
+			);
+		}).pipe(
+			Effect.provide(
+				makeDaemonRpcTestLayer([], {
+					open: (projectId) =>
+						Effect.fail(
+							new ProjectServicesError({
+								projectId,
+								reason: "agent unavailable",
+							}),
+						),
+				}),
 			),
+		),
 	);
 
 	for (const command of ["Shutdown", "RestartWithConfig"] as const) {

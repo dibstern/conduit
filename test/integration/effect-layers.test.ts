@@ -3,7 +3,7 @@ import { sdkDefaultClaudeConfigDir } from "../../src/lib/provider/claude/claude-
 // and key services work end-to-end.
 
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, PubSub, Schema } from "effect";
+import { Context, Effect, Layer, PubSub, Schema } from "effect";
 import { expect } from "vitest";
 import { WsRpcRequest } from "../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
@@ -22,9 +22,9 @@ import {
 	makeInstanceManagerStateLive,
 } from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
-	makeRelayCacheLive,
-	RelayCacheTag,
-} from "../../src/lib/domain/daemon/Services/relay-cache.js";
+	type ProjectParts,
+	ProjectServices,
+} from "../../src/lib/domain/daemon/Services/project-services.js";
 import {
 	RateLimiterLive,
 	RateLimiterTag,
@@ -55,16 +55,15 @@ const composedLayer = Layer.mergeAll(
 	makeInstanceManagerStateLive(undefined, [], {
 		launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 	}),
-	makeRelayCacheLive((slug) =>
-		Effect.succeed({
-			slug,
-			attach: () => () => {},
-			rpcWsHandler: {},
-			syncGlobalSetting: () => Effect.void,
-			refreshGlobalDefaults: () => Effect.void,
-			stop: () => {},
-		}),
-	),
+	Layer.succeed(ProjectServices)({
+		forProject: () =>
+			Effect.succeed(Context.empty() as Context.Context<ProjectParts>),
+		generation: () => Effect.die("unused"),
+		open: () =>
+			Effect.succeed(Context.empty() as Context.Context<ProjectParts>),
+		opened: () => Effect.succeedNone,
+		close: () => Effect.void,
+	}),
 	RateLimiterLive({ maxRequests: 3, windowMs: 60_000 }),
 	DaemonEventBusLive,
 	makeOverridesStateLive(),
@@ -77,7 +76,7 @@ describe("Integration: Full Layer Composition", () => {
 			const sessionState = yield* SessionManagerStateTag;
 			const pollerState = yield* PollerStateTag;
 			const instanceState = yield* InstanceManagerStateTag;
-			const relayCache = yield* RelayCacheTag;
+			const projectServices = yield* ProjectServices;
 			const limiter = yield* RateLimiterTag;
 			const eventBus = yield* DaemonEventBusTag;
 			const overrides = yield* OverridesStateTag;
@@ -86,7 +85,7 @@ describe("Integration: Full Layer Composition", () => {
 			expect(sessionState).toBeDefined();
 			expect(pollerState).toBeDefined();
 			expect(instanceState).toBeDefined();
-			expect(relayCache).toBeDefined();
+			expect(projectServices).toBeDefined();
 			expect(limiter).toBeDefined();
 			expect(eventBus).toBeDefined();
 			expect(overrides).toBeDefined();

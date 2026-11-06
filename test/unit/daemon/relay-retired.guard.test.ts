@@ -102,19 +102,10 @@ describe("per-project relay stays retired (82tn.16)", () => {
 		// Every remaining file that names the relay; all are relay.
 		expect(tally(server, named(relayNames))).toEqual(
 			new Map([
-				[`${daemon}/Layers/auto-settle-layer.ts`, 2],
-				[`${daemon}/Layers/daemon-layers.ts`, 3],
-				[`${daemon}/Layers/daemon-ws-rpc-layer.ts`, 4],
 				[`${daemon}/Layers/opencode-instances-layer.ts`, 2],
 				[`${daemon}/Layers/provider-adapters-layer.ts`, 3],
-				[`${daemon}/Layers/worktree-cleanup-layer.ts`, 2],
-				[`${daemon}/Services/daemon-handle.ts`, 5],
-				[`${daemon}/Services/project-registry-service.ts`, 5],
-				[`${daemon}/Services/relay-cache.ts`, 4],
 				["src/lib/domain/relay/Layers/relay-core-layers.ts", 2],
 				["src/lib/domain/relay/Services/services.ts", 3],
-				["src/lib/domain/server/Layers/http-router-layer.ts", 2],
-				["src/lib/domain/server/Layers/ws-routing-layer.ts", 3],
 				["src/lib/handlers/types.ts", 2],
 				[`${relay}/project-relay-layers.ts`, 3],
 				[`${relay}/project-relay-startup.ts`, 5],

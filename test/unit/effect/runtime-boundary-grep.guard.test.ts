@@ -991,7 +991,7 @@ describe("Effect runtime boundary grep", () => {
 		)?.[0];
 		expect(daemonRouterFactory).not.toBeUndefined();
 		expect(daemonRouterFactory).toContain("ProjectRegistryTag");
-		expect(daemonRouterFactory).toContain("RelayCacheTag");
+		expect(daemonRouterFactory).toContain("ProjectServices");
 		expect(daemonRouterFactory).not.toContain("options.getProjects");
 
 		const daemonMain = readFileSync(

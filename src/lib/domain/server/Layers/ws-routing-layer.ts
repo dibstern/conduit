@@ -40,7 +40,6 @@ import {
 	ProjectServices,
 } from "../../daemon/Services/project-services.js";
 import { ProviderAdapters } from "../../daemon/Services/provider-adapters.js";
-import { RelayCacheTag } from "../../daemon/Services/relay-cache.js";
 import type { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import type { SessionDirectory } from "../../daemon/Services/session-directory.js";
 import type { Usage } from "../../daemon/Services/usage.js";
@@ -194,11 +193,14 @@ const toRelayUnavailable = (slug: string, cause: unknown) =>
 export const WebSocketRelayRouterLive: Layer.Layer<
 	WebSocketRelayRouterTag,
 	never,
-	RelayCacheTag | ProjectRegistryTag | DaemonEventBusTag | ConfigPersistenceTag
+	| ProjectServices
+	| ProjectRegistryTag
+	| DaemonEventBusTag
+	| ConfigPersistenceTag
 > = Layer.effect(
 	WebSocketRelayRouterTag,
 	Effect.gen(function* () {
-		const relayCache = yield* RelayCacheTag;
+		const projects = yield* ProjectServices;
 		const projectRegistry = yield* ProjectRegistryTag;
 		const eventBus = yield* DaemonEventBusTag;
 		const configPersistence = yield* ConfigPersistenceTag;
@@ -224,7 +226,7 @@ export const WebSocketRelayRouterLive: Layer.Layer<
 
 		const loadRelay = (slug: string) =>
 			withProjectRegistry(getProject(slug)).pipe(
-				Effect.flatMap(() => relayCache.get(slug)),
+				Effect.flatMap(() => projects.open(slug)),
 				Effect.tap(() => withProjectRegistry(markReady(slug))),
 				Effect.catch((cause) => failRelayUnavailable(slug, cause)),
 				Effect.catchDefect((cause) => failRelayUnavailable(slug, cause)),

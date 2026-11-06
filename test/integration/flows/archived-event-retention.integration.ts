@@ -229,8 +229,7 @@ describe("archived event retention through the relay", () => {
 			const scheduledBefore = scheduledDrains.mock.calls.length;
 			scenario["eventsBeforeSweep"] = beforeSweep;
 			// The daemon invokes this effect outside the project's runtime.
-			const { deleteArchivedSessions } = await relay.relay();
-			if (!deleteArchivedSessions) throw new Error("No archive sweep");
+			const { deleteArchivedSessions } = await relay.sessions();
 			const sweepResult = await Effect.runPromise(
 				deleteArchivedSessions(30 * DAY, Date.now()),
 			);

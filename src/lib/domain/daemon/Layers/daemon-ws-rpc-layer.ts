@@ -72,7 +72,9 @@ import {
 	InputDraftsTag,
 	makeInputDrafts,
 } from "../../relay/Services/input-drafts.js";
+import { syncGlobalSetting } from "../../relay/Services/project-settings.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { setDefaultAgent } from "../../relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import {
 	readSessionCategoryCounts,
@@ -133,7 +135,6 @@ import {
 	resolveSessionMode,
 } from "../Services/project-registry-service.js";
 import { ProjectServices } from "../Services/project-services.js";
-import { RelayCacheTag } from "../Services/relay-cache.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionDirectory } from "../Services/session-directory.js";
 import { subscribeDaemonShell } from "../Services/shell-subscription.js";
@@ -165,7 +166,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			| DaemonEventBusTag
 			| ConfigPersistenceTag
 			| UserAvatar
-			| RelayCacheTag
+			| ProjectServices
 			| AccountDirectory
 			| CursorAccountResources
 			| InstanceManagerStateTag
@@ -203,12 +204,10 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			: yield* makeInputDrafts.pipe(Effect.provide(yield* PersistenceStore));
 		const directory = yield* SessionDirectory;
 		const bus = yield* DaemonEventBusTag;
-		const cache = yield* RelayCacheTag;
 		const watcher = yield* PortWatcher;
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
-		// Handler-only fixtures run without project contexts.
-		const projects = yield* Effect.serviceOption(ProjectServices);
+		const projects = yield* ProjectServices;
 		const usage = yield* Usage;
 		const messageSurfacing = yield* MessageSurfacingSettings;
 		const categorySet = yield* CategorySet;
@@ -241,9 +240,12 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 					return Effect.gen(function* () {
 						for (const project of yield* allProjects) {
 							if (project.slug === event.originSlug) continue;
-							const relay = yield* cache.peek(project.slug);
-							if (Option.isSome(relay))
-								yield* relay.value.syncGlobalSetting(event.tag);
+							// Only an opened project reloads; a closed one reads disk when it opens.
+							const opened = yield* projects.opened(project.slug);
+							if (Option.isSome(opened))
+								yield* syncGlobalSetting(event.tag).pipe(
+									Effect.provideContext(opened.value),
+								);
 						}
 					}).pipe(Effect.provide(context));
 				if (event._tag === "DaemonSessionsChanged") sessionsRevision++;
@@ -264,9 +266,11 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 								Queue.offerUnsafe(subscriber.changed, undefined);
 						if (event._tag === "InstancesChanged")
 							for (const project of yield* allProjects) {
-								const relay = yield* cache.peek(project.slug);
-								if (Option.isSome(relay))
-									yield* relay.value.syncGlobalSetting("titleGeneration");
+								const opened = yield* projects.opened(project.slug);
+								if (Option.isSome(opened))
+									yield* syncGlobalSetting("titleGeneration").pipe(
+										Effect.provideContext(opened.value),
+									);
 							}
 					}).pipe(Effect.provide(context));
 				return Effect.void;
@@ -286,7 +290,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				| SessionActivityTag
 				| ConfigPersistenceTag
 				| UserAvatar
-				| RelayCacheTag
+				| ProjectServices
 				| AccountDirectory
 				| CursorAccountResources
 				| InstanceManagerStateTag
@@ -756,14 +760,10 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			SetAgent: (request) =>
 				run(
 					Effect.gen(function* () {
-						const relay = yield* cache.get(request.slug);
-						const setDefaultAgent = relay.setDefaultAgent;
-						if (setDefaultAgent === undefined) {
-							return yield* new WsRpcError({
-								message: `Relay "${request.slug}" does not support default agent updates`,
-							});
-						}
-						yield* setDefaultAgent(request.agent);
+						const context = yield* projects.open(request.slug);
+						yield* setDefaultAgent(request.agent).pipe(
+							Effect.provideContext(context),
+						);
 						return { ok: true as const };
 					}),
 				),
@@ -1238,13 +1238,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 								"No Conduit session is bound to this OpenCode session and instance",
 						});
 					// The daemon's project context, never a relay's (82tn.16).
-					if (Option.isNone(projects))
-						return yield* new WsRpcError({
-							message: "This daemon serves no project contexts",
-						});
-					const projectContext = yield* projects.value.forProject(
-						target.projectSlug,
-					);
+					const projectContext = yield* projects.forProject(target.projectSlug);
 					return yield* Effect.gen(function* () {
 						const sessionId = yield* findOpenCodeSession(
 							{ projectIds: [target.projectSlug] },

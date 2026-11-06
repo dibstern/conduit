@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option, Stream } from "effect";
+import { Context, Effect, Layer, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterAll, afterEach, expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
@@ -27,9 +27,9 @@ import {
 	saveProject,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
-	type RelayCache,
-	RelayCacheTag,
-} from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+	type ProjectParts,
+	ProjectServices,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { SessionGit } from "../../../src/lib/domain/daemon/Services/session-git.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
@@ -49,29 +49,23 @@ afterEach(() => {
 		rmSync(directory, { recursive: true, force: true });
 });
 
-/** Stub RelayCache that records calls for assertions. */
-const makeStubRelayCache = (): RelayCache => ({
-	get: (_slug: string) =>
-		Effect.succeed({
-			slug: _slug,
-			attach: () => () => {},
-			rpcWsHandler: {},
-			syncGlobalSetting: () => Effect.void,
-			refreshGlobalDefaults: () => Effect.void,
-			stop: () => {},
-		}),
-	peek: () => Effect.succeed(Option.none()),
-	invalidate: (_slug: string) => Effect.void,
+/** Stub ProjectServices whose projects open at once and close quietly. */
+const makeStubProjectServices = (): ProjectServices["Service"] => ({
+	forProject: () => Effect.die("unused"),
+	generation: () => Effect.die("unused"),
+	open: () => Effect.succeed(Context.empty() as Context.Context<ProjectParts>),
+	opened: () => Effect.succeedNone,
+	close: (_slug: string) => Effect.void,
 });
 
-/** Compose a test layer with ProjectRegistry, DaemonEventBus, and a stub RelayCache. */
+/** Compose a test layer with ProjectRegistry, DaemonEventBus, and stub ProjectServices. */
 const testLayer = Layer.mergeAll(
 	makeDaemonStoreTestLayer(),
 	makeProjectRegistryLive(),
 	DaemonEventBusLive,
 	makeDaemonStateLive({ configDir }),
 	ConfigPersistenceNoopLive,
-	Layer.succeed(RelayCacheTag)(makeStubRelayCache()),
+	Layer.succeed(ProjectServices)(makeStubProjectServices()),
 );
 
 describe("projectInfos", () => {

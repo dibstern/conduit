@@ -37,7 +37,6 @@ import {
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
-import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type SessionManagerService,
@@ -266,7 +265,7 @@ describe("82tn.16: the daemon builds each project's context", () => {
 		const daemon = start("open").boot();
 		const opened = async () => {
 			await daemon.daemon.runPromise(
-				Effect.flatMap(RelayCacheTag, (projects) => projects.get("alpha")),
+				Effect.flatMap(ProjectServices, (projects) => projects.open("alpha")),
 			);
 			const context = await daemon.daemon.runPromise(
 				Effect.flatMap(ProjectServices, (services) =>
@@ -288,7 +287,9 @@ describe("82tn.16: the daemon builds each project's context", () => {
 			connected: firstStream.isConnected(),
 			open: Option.isSome(
 				await daemon.daemon.runPromise(
-					Effect.flatMap(RelayCacheTag, (projects) => projects.peek("alpha")),
+					Effect.flatMap(ProjectServices, (projects) =>
+						projects.opened("alpha"),
+					),
 				),
 			),
 		};

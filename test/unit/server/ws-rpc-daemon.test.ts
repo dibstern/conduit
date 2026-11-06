@@ -1,12 +1,19 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Stream } from "effect";
+import { Context, Effect, Option, type Semaphore, Stream } from "effect";
 import { RpcTest } from "effect/rpc";
 import { afterEach, expect, vi } from "vitest";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
-import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	type ProjectParts,
+	ProjectServices,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
+import {
+	type ProjectSettings,
+	ProjectSettingsTag,
+} from "../../../src/lib/domain/relay/Services/project-settings.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 
@@ -198,7 +205,7 @@ describe("daemon RPC handlers", () => {
 	);
 
 	it.effect(
-		"publishes project and instance changes to list subscribers without starting relays",
+		"publishes project and instance changes to list subscribers without starting projects",
 		() => {
 			const directory = mkdtempSync("/tmp/rpc-project-broadcast-");
 			fixtureDirs.push(directory);
@@ -211,21 +218,30 @@ describe("daemon RPC handlers", () => {
 					folders: [projectDir] as const,
 				};
 			});
-			const factory = vi.fn((slug: string) =>
-				Effect.succeed({
-					slug,
-					attach: () => () => {},
-					rpcWsHandler: {},
-					syncGlobalSetting: () => Effect.void,
-					refreshGlobalDefaults: () => Effect.void,
-					stop: vi.fn(),
+			// An opened project's settings sync records its slug and reads nothing else.
+			const synced: string[] = [];
+			const openedProjects = new Map<string, Context.Context<ProjectParts>>();
+			const open = vi.fn((slug: string) =>
+				Effect.sync(() => {
+					const context = Context.make(ProjectSettingsTag, {
+						globalSync: {
+							withPermits: () => () => Effect.sync(() => synced.push(slug)),
+						} as unknown as Semaphore.Semaphore,
+					} as ProjectSettings) as Context.Context<ProjectParts>;
+					openedProjects.set(slug, context);
+					return context;
+				}),
+			);
+			const close = vi.fn((slug: string) =>
+				Effect.sync(() => {
+					openedProjects.delete(slug);
 				}),
 			);
 			return Effect.gen(function* () {
-				const cache = yield* RelayCacheTag;
-				const firstRelay = yield* cache.get("a");
-				yield* cache.get("b");
-				factory.mockClear();
+				const projectServices = yield* ProjectServices;
+				yield* projectServices.open("a");
+				yield* projectServices.open("b");
+				open.mockClear();
 				const handlers = yield* DaemonWsRpcHandlersTag;
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 					Effect.provide(
@@ -265,21 +281,29 @@ describe("daemon RPC handlers", () => {
 						expect(instanceLists.at(-1)).toContainEqual(
 							expect.objectContaining({ id: "claude-2" }),
 						);
+						expect(synced).toEqual(expect.arrayContaining(["a", "b"]));
 					}),
 				);
-				expect(factory).not.toHaveBeenCalled();
+				expect(synced).not.toContain("cold");
+				expect(open).not.toHaveBeenCalled();
 				yield* client.AddInstance({
 					name: "Remote",
 					driver: "opencode",
 					url: "http://127.0.0.1:9",
 				});
-				expect(firstRelay.stop).not.toHaveBeenCalled();
-				expect(factory).not.toHaveBeenCalled();
-				expect((yield* cache.peek("a"))._tag).toBe("Some");
+				expect(close).not.toHaveBeenCalled();
+				expect(open).not.toHaveBeenCalled();
+				expect((yield* projectServices.opened("a"))._tag).toBe("Some");
 			}).pipe(
-				Effect.provide(makeDaemonRpcTestLayer(projects, factory), {
-					local: true,
-				}),
+				Effect.provide(
+					makeDaemonRpcTestLayer(projects, {
+						open,
+						opened: (slug) =>
+							Effect.succeed(Option.fromNullishOr(openedProjects.get(slug))),
+						close,
+					}),
+					{ local: true },
+				),
 			);
 		},
 	);
