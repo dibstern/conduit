@@ -74,6 +74,8 @@ export const PtyHostRequestSchema = Schema.Union([
 		requestId,
 		cwd: Schema.String,
 		projectDir: Schema.optionalKey(Schema.String),
+		/** The project that made the terminal; projects can share a folder (82tn.78). */
+		projectId: Schema.optionalKey(Schema.String),
 		cols: dimension,
 		rows: dimension,
 		shell: Schema.String,
@@ -84,6 +86,8 @@ export const PtyHostRequestSchema = Schema.Union([
 		requestId,
 		cwd: Schema.String,
 		allProjects: Schema.optionalKey(Schema.Boolean),
+		/** Only this project's terminals, and those made with no project recorded. */
+		projectId: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({
 		type: Schema.Literal("attach"),
