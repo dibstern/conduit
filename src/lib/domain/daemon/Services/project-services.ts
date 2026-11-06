@@ -5,17 +5,32 @@ import type {
 } from "../../../persistence/effect/live.js";
 import { daemonStorePath } from "../../../persistence/project-storage.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
-import type { OpenCodeSessionCreationGateTag } from "../../relay/Services/opencode-runtime-ingress-service.js";
+import type { AlertLedgerTag } from "../../relay/Services/alert-ledger.js";
+import type { ContinuationTag } from "../../relay/Services/continuation.js";
+import type { DirectoryListingServiceTag } from "../../relay/Services/directory-listing-service.js";
+import type {
+	OpenCodeHistoryReconcileTag,
+	OpenCodeProcessLinkTag,
+	OpenCodeRuntimeIngressTag,
+	OpenCodeSessionCreationGateTag,
+} from "../../relay/Services/opencode-runtime-ingress-service.js";
+import type { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
+import type { ProjectSettingsTag } from "../../relay/Services/project-settings.js";
+import type { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
 import type { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
 import type {
+	AgentLivenessTag,
 	ConfigTag,
 	OpenCodeModelServiceTag,
+	TranslatorTag,
 } from "../../relay/Services/services.js";
 import type { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import type {
 	ProjectSessionManagerParts,
 	SessionManagerServiceTag,
 } from "../../relay/Services/session-manager-service.js";
+import type { SessionTitleServiceTag } from "../../relay/Services/session-title-service.js";
+import type { ToolContentServiceTag } from "../../relay/Services/tool-content-service.js";
 import type { ProjectShellEnvTag } from "../Layers/project-shell-env-layer.js";
 import type { PollerTimings } from "../Layers/relay-factory-layer.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
@@ -32,7 +47,23 @@ export type ProjectGenerationParts =
 	| OpenCodeSessionCreationGateTag
 	| OpenCodeModelServiceTag
 	| PersistenceProjectContext
-	| PersistenceStoreContext;
+	| PersistenceStoreContext
+	// The ingestion side (82tn.16 slice 4).
+	| PendingInteractionServiceTag
+	| AlertLedgerTag
+	| ProviderRuntimeIngestionTag
+	| ContinuationTag
+	| TranslatorTag
+	| OpenCodeRuntimeIngressTag
+	| OpenCodeHistoryReconcileTag
+	| OpenCodeProcessLinkTag
+	// Settings and titles (82tn.16 slice 5).
+	| ProjectSettingsTag
+	| SessionTitleServiceTag
+	// Stateless readers (82tn.16 slice 7).
+	| ToolContentServiceTag
+	| DirectoryListingServiceTag
+	| AgentLivenessTag;
 
 /** Everything a call naming the project runs with, built by the daemon. */
 export type ProjectParts =

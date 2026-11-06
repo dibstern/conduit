@@ -79,6 +79,11 @@ import type { EventRetentionTag } from "../domain/persistence/Services/event-ret
 import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { makeRunLedgerSchedulerLive } from "../domain/persistence/Services/run-ledger-scheduler.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
+import {
+	AgentLivenessLive,
+	makeProjectIngestionLive,
+	makeProjectOpenCodeIngressLive,
+} from "../domain/relay/Layers/project-ingestion-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
 	makeProjectRelayConfigLive,
@@ -91,16 +96,17 @@ import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js"
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
 import { makeWsTransportLive } from "../domain/relay/Layers/ws-transport-layer.js";
 import { AgentServiceLive } from "../domain/relay/Services/agent-service.js";
-import {
-	AlertLedgerLive,
-	AlertLedgerTag,
-} from "../domain/relay/Services/alert-ledger.js";
+import { AlertLedgerTag } from "../domain/relay/Services/alert-ledger.js";
 import { AlertsLive, AlertsTag } from "../domain/relay/Services/alerts.js";
+import { ContinuationTag } from "../domain/relay/Services/continuation.js";
 import {
 	DaemonSessionQueryServiceLive,
 	DaemonSessionQueryServiceTag,
 } from "../domain/relay/Services/daemon-session-query-service.js";
-import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
+import {
+	DirectoryListingServiceLive,
+	DirectoryListingServiceTag,
+} from "../domain/relay/Services/directory-listing-service.js";
 import { DraftPreWarmOrOwn } from "../domain/relay/Services/draft-prewarm.js";
 import { makeGoalSummaryServiceLive } from "../domain/relay/Services/goal-summary-service.js";
 import { HandoffReceiptsLive } from "../domain/relay/Services/handoff-receipts.js";
@@ -109,15 +115,14 @@ import {
 	InstanceManagementServiceLive,
 	InstanceManagementServiceTag,
 } from "../domain/relay/Services/instance-management-service.js";
-import { makeMessageSurfacing } from "../domain/relay/Services/message-surfacing.js";
 import {
-	type EffectOpenCodeRuntimeIngressPort,
 	OpenCodeHistoryReconcileTag,
 	OpenCodeProcessLinkTag,
+	OpenCodeRuntimeIngressTag,
 	OpenCodeSessionCreationGateTag,
 } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import {
-	PendingInteractionServiceLive,
+	type PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../domain/relay/Services/pending-interaction-service.js";
 import {
@@ -125,9 +130,10 @@ import {
 	ProjectManagementServiceTag,
 } from "../domain/relay/Services/project-management-service.js";
 import {
-	makeProviderRuntimeIngestionLive,
-	type ProviderRuntimeIngestionTag,
-} from "../domain/relay/Services/provider-runtime-ingestion-service.js";
+	ProjectSettingsLive,
+	ProjectSettingsTag,
+} from "../domain/relay/Services/project-settings.js";
+import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
 	attachProviderTurnsLive,
 	ProviderTurnsOrOwn,
@@ -146,7 +152,7 @@ import {
 	BackgroundLivenessTag,
 	type ConfigTag,
 	LiveTaskListTag,
-	LoggerTag,
+	type LoggerTag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
 	OpenCodeModelServiceTag,
@@ -155,6 +161,7 @@ import {
 	type OrchestrationEngineTag,
 	SessionCompactionsTag,
 	SessionRetriesTag,
+	TranslatorTag,
 } from "../domain/relay/Services/services.js";
 import {
 	SessionEventBusLive,
@@ -180,20 +187,24 @@ import {
 	type PollerStateTag,
 	StatusPollerCoreTag,
 } from "../domain/relay/Services/session-status-poller.js";
-import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+import {
+	makeSessionTitleServiceLive,
+	SessionTitleServiceTag,
+} from "../domain/relay/Services/session-title-service.js";
+import type { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { SessionWorkspaceHintStateTag } from "../domain/relay/Services/session-workspace-hint-state.js";
 import { SSEStreamLive } from "../domain/relay/Services/sse-stream-service.js";
 import {
 	LocalPtyServiceOrOwn,
 	OpenCodeTerminalServiceLive,
 } from "../domain/relay/Services/terminal-service.js";
-import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
+import {
+	ToolContentServiceLive,
+	ToolContentServiceTag,
+} from "../domain/relay/Services/tool-content-service.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
-import { realWorkspacePath } from "../git/worktrees.js";
-import type { CommitAndSignalProject } from "../persistence/effect/commit-and-signal.js";
 import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import {
-	EventStoreError,
 	makeUnboundEventStoreEffect,
 	UnboundEventStoreEffectTag,
 } from "../persistence/effect/event-store-effect.js";
@@ -211,20 +222,17 @@ import {
 	ClaudeAccountScopes,
 	ClaudeAccountScopesLive,
 } from "../provider/claude/claude-account-scopes.js";
-import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
 import { codexUsageReader } from "../provider/codex/codex-usage.js";
 import { makeOrchestrationRuntimeLayer } from "../provider/orchestration-wiring.js";
-import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { usageAccounts } from "../provider/usage-reader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { createTranslator } from "./event-translator.js";
 import { createMonitoringWiringState } from "./monitoring-wiring.js";
-import { publishProviderRelayMessage } from "./project-relay-publisher.js";
 import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 
 /** Services promised to callers of ProjectRelay.effectRuntime. */
@@ -258,11 +266,6 @@ export type RelayRuntimeServices =
 	| InstanceManagementServiceTag
 	| SqlClient.SqlClient
 	| TranslatorTag;
-
-export class TranslatorTag extends Context.Service<
-	TranslatorTag,
-	ReturnType<typeof createTranslator>
->()("RelayTranslator") {}
 
 export interface RelayRuntime {
 	runtime: ManagedRuntime.ManagedRuntime<
@@ -625,9 +628,6 @@ export function createProjectRelayLayers({
 		: makeStandaloneOpenCodeInstancesLive(config).pipe(
 				Layer.provide(daemonConfigLayer),
 			);
-	const alertLedgerLayer = AlertLedgerLive.pipe(
-		Layer.provide(persistenceEffectLayer),
-	);
 	const worktreeLayer = config.worktreeContext
 		? Layer.succeedContext(config.worktreeContext)
 		: makeWorktreeLive(config.configDir ?? getConfigDir());
@@ -648,7 +648,6 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
-	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
 	const recapSettingsLayer = Layer.suspend(() => {
 		const shared = config.daemonConfigContext ?? Context.empty();
 		const settings = Context.getOption(shared, MessageSurfacingSettings);
@@ -679,128 +678,34 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
-	const providerRuntimeIngestionLayer = Layer.unwrap(
-		Effect.gen(function* () {
-			const ledger = yield* AlertLedgerTag;
-			const alerts = yield* AlertsTag;
-			const sql = yield* SqlClient.SqlClient;
-			const log = yield* LoggerTag;
-			const workspace = yield* SessionWorkspaceTag;
-			const activity = yield* SessionActivityTag;
-			return makeProviderRuntimeIngestionLive({
-				pendingInteractions: yield* PendingInteractionServiceTag,
-				usage: yield* Usage,
-				workspaceChanged: (event) =>
-					Effect.gen(function* () {
-						const { path, source } = event.data;
-						if (source === "start") {
-							const recorded = yield* workspace.get(event.sessionId);
-							const current = yield* realWorkspacePath(recorded).pipe(
-								Effect.orElseSucceed(() => recorded),
-							);
-							// The common case needs no history query, git discovery or cache refresh.
-							if (current === path) return;
-							if (
-								(yield* workspace.claudeWorktreeState(event.sessionId))
-									.pendingUserMove
-							)
-								return;
-						}
-						const target = yield* workspace.resolve(
-							event.sessionId,
-							path,
-							"agent",
-						);
-						return (project: CommitAndSignalProject) =>
-							Effect.gen(function* () {
-								// A user can move while resolution is in flight. Recheck intent under
-								// the commit permit before recording the declaration.
-								const state = yield* workspace.claudeWorktreeState(
-									event.sessionId,
-								);
-								if (
-									state.pendingUserMove &&
-									target.path !== state.requestedPath
-								)
-									return;
-								yield* workspace.record(event.sessionId, target, "agent", {
-									project,
-								});
-							}).pipe(
-								Effect.catchTag("WorkspaceMoveError", (error) =>
-									Effect.sync(() => {
-										log.warn("Invalid agent workspace move", {
-											sessionId: event.sessionId,
-											path,
-											reason: error.reason,
-										});
-									}),
-								),
-								Effect.mapError(
-									(cause) =>
-										new EventStoreError({
-											operation: "workspace.changed",
-											cause,
-										}),
-								),
-							);
-					}).pipe(
-						Effect.catchTag("WorkspaceMoveError", (error) =>
-							Effect.sync(() => {
-								log.warn("Invalid agent workspace move", {
-									sessionId: event.sessionId,
-									path: event.data.path,
-									reason: error.reason,
-								});
-								return undefined;
-							}),
-						),
-						Effect.mapError(
-							(cause) =>
-								new EventStoreError({ operation: "workspace.changed", cause }),
-						),
-					),
-				relayPublisher: {
-					publish: (msg) =>
-						publishProviderRelayMessage(msg, {
-							wsHandler: getWsHandler() ?? { getClientsForSession: () => [] },
-							log,
-							slug: config.slug,
-							...(config.pushManager
-								? { pushManager: config.pushManager }
-								: {}),
-							activityOf: (sessionId) =>
-								activity.background.activityOf(sessionId, {
-									approvals: 0,
-									questions: 0,
-								}),
-						}).pipe(
-							Effect.provideService(SqlClient.SqlClient, sql),
-							Effect.provideService(AlertLedgerTag, ledger),
-							Effect.provideService(AlertsTag, alerts),
-						),
-				},
-				compactions: activity.compactions,
-				retries: activity.retries,
-				goals: activity.goals,
-				surfacing: yield* makeMessageSurfacing,
-			});
-		}),
-	).pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				persistenceEffectLayer,
-				sessionWorkspaceLayer,
-				sessionEventBusLayer,
-				alertLedgerLayer,
-				pendingInteractionServiceLayer,
-				// The same reference makeRelayStateLive merges, so it memoizes to the
-				// one PubSub SubscribeAlerts reads.
-				alertsLayer,
-				loggerLayer,
-				usageLayer,
-				recapSettingsLayer,
-				daemonConfigLayer,
+	// A registered project's ingestion side is the daemon's (82tn.16 slice 4):
+	// one pending-interaction store, alert ledger and ingestion per project,
+	// whichever relay serves it. One layer reference, so every relay reader
+	// shares the instance the engine's reactor uses.
+	const ingestionLayer = fromProject(
+		Context.pick(
+			PendingInteractionServiceTag,
+			AlertLedgerTag,
+			ProviderRuntimeIngestionTag,
+			ContinuationTag,
+		),
+		makeProjectIngestionLive(
+			Effect.succeed(Option.fromNullishOr(config.pushManager)),
+		).pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					persistenceEffectLayer,
+					sessionWorkspaceLayer,
+					sessionEventBusLayer,
+					// The same reference makeRelayStateLive merges, so it memoizes to the
+					// one PubSub SubscribeAlerts reads.
+					alertsLayer,
+					configLayer,
+					loggerLayer,
+					usageLayer,
+					recapSettingsLayer,
+					daemonConfigLayer,
+				),
 			),
 		),
 	);
@@ -847,8 +752,7 @@ export function createProjectRelayLayers({
 		// The engine commits input.sent through commit-and-signal, which
 		// announces on the same bus as the relay's subscribers.
 		sessionEventBusLayer,
-		pendingInteractionServiceLayer,
-		providerRuntimeIngestionLayer,
+		ingestionLayer,
 		openCodeInstancesLayer,
 		instanceManagementLayer,
 	);
@@ -858,19 +762,10 @@ export function createProjectRelayLayers({
 		Layer.provide(providerOrchestrationDeps),
 		Layer.provideMerge(providerAdaptersLayer),
 	);
-	const agentLivenessLayer = Layer.effect(
-		AgentLivenessTag,
-		Effect.gen(function* () {
-			const registry = yield* ProviderRegistryTag;
-			return (sessionId: string) =>
-				Effect.suspend(() => {
-					const instance = registry.getInstance("claude");
-					return instance instanceof ClaudeProviderInstance
-						? instance.hasLiveProcessEffect(sessionId)
-						: Effect.succeed(false);
-				});
-		}),
-	).pipe(Layer.provide(providerOrchestrationLayer));
+	const agentLivenessLayer = fromProject(
+		Context.pick(AgentLivenessTag),
+		AgentLivenessLive.pipe(Layer.provide(providerOrchestrationLayer)),
+	);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
 	);
@@ -918,7 +813,7 @@ export function createProjectRelayLayers({
 				configLayer,
 				persistenceEffectLayer,
 				sessionEventBusLayer,
-				pendingInteractionServiceLayer,
+				ingestionLayer,
 			),
 		),
 	);
@@ -1002,18 +897,37 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
-	const toolContentServiceLayer = ToolContentServiceLive.pipe(
-		Layer.provideMerge(persistenceEffectLayer),
+	const toolContentServiceLayer = fromProject(
+		Context.pick(ToolContentServiceTag),
+		ToolContentServiceLive.pipe(Layer.provide(persistenceEffectLayer)),
+	).pipe(Layer.provideMerge(persistenceEffectLayer));
+	const creationGateLayer = fromProject(
+		Context.pick(OpenCodeSessionCreationGateTag),
+		Layer.effect(OpenCodeSessionCreationGateTag, Semaphore.make(1)),
 	);
-	let historyIngress: EffectOpenCodeRuntimeIngressPort | undefined;
-	const historyReconcileLayer = Layer.sync(OpenCodeHistoryReconcileTag, () => ({
-		reconcileSession: (sessionId: string) =>
-			historyIngress?.reconcileSession(sessionId) ?? Effect.void,
-	}));
-	const processLinkLayer = Layer.sync(OpenCodeProcessLinkTag, () => ({
-		linkProcess: (sessionId: string, processId: string) =>
-			historyIngress?.linkProcess(sessionId, processId) ?? Effect.void,
-	}));
+	// The project's ingress and history ports, built with the project (82tn.16).
+	const openCodeIngressLayer = fromProject(
+		Context.pick(
+			OpenCodeRuntimeIngressTag,
+			OpenCodeHistoryReconcileTag,
+			OpenCodeProcessLinkTag,
+		),
+		makeProjectOpenCodeIngressLive.pipe(
+			Layer.provide(
+				Layer.mergeAll(
+					persistenceEffectLayer,
+					ingestionLayer,
+					sessionWorkspaceLayer,
+					openCodeInstancesLayer,
+					creationGateLayer,
+					configLayer,
+					loggerLayer,
+					daemonConfigLayer,
+					providerOrchestrationLayer,
+				),
+			),
+		),
+	);
 
 	const coreBridgeLayers = Layer.mergeAll(
 		sessionWorkspaceLayer,
@@ -1022,23 +936,22 @@ export function createProjectRelayLayers({
 		daemonConfigLayer,
 		worktreeLayer,
 		usageLayer,
-		historyReconcileLayer,
-		processLinkLayer,
-		fromProject(
-			Context.pick(OpenCodeSessionCreationGateTag),
-			Layer.effect(OpenCodeSessionCreationGateTag, Semaphore.make(1)),
-		),
+		openCodeIngressLayer,
+		creationGateLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,
 		sseStreamLayer,
 		projectManagementServiceLayer,
 		daemonSessionQueryServiceLayer,
-		DirectoryListingServiceLive.pipe(Layer.provide(configLayer)),
+		fromProject(
+			Context.pick(DirectoryListingServiceTag),
+			DirectoryListingServiceLive.pipe(Layer.provide(configLayer)),
+		),
 		scanServiceLayer,
 		openCodeTerminalServiceLayer,
 		localPtyServiceLayer,
-		pendingInteractionServiceLayer,
+		ingestionLayer,
 		toolContentServiceLayer,
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
@@ -1050,8 +963,7 @@ export function createProjectRelayLayers({
 		providerOrchestrationLayer,
 		openCodeInstancesLayer,
 		persistenceEffectLayer,
-		alertLedgerLayer,
-		providerRuntimeIngestionLayer,
+		ingestionLayer,
 	);
 
 	// Optional bridge layers (only included when deps are present)
@@ -1075,6 +987,12 @@ export function createProjectRelayLayers({
 			statusSnapshotLayer: fromProject(
 				Context.pick(RelayStatusSnapshotTag),
 				RelayStatusSnapshotLive,
+			),
+			titlesLayer: fromProject(
+				Context.pick(ProjectSettingsTag, SessionTitleServiceTag),
+				makeSessionTitleServiceLive().pipe(
+					Layer.provideMerge(ProjectSettingsLive),
+				),
 			),
 			...(Option.isSome(sharedSessionManager) && {
 				sessionManagerStateLayer: Layer.effectContext(
@@ -1154,7 +1072,11 @@ export function createProjectRelayLayers({
 		AgentServiceLive,
 		relayStateWithRecaps,
 	);
-	const translatorLayer = Layer.sync(TranslatorTag, () => createTranslator());
+	// One translator per project, so a sessionless part never crosses projects.
+	const translatorLayer = fromProject(
+		Context.pick(TranslatorTag),
+		Layer.sync(TranslatorTag, () => createTranslator()),
+	);
 	const draftPreWarmLayer = DraftPreWarmOrOwn.pipe(
 		Layer.provide(daemonContextLayer),
 	);
@@ -1220,8 +1142,5 @@ export function createProjectRelayLayers({
 		relayManagedRuntime,
 		effectRuntime,
 		monitoringStateAccess,
-		setHistoryIngress: (ingress: EffectOpenCodeRuntimeIngressPort) => {
-			historyIngress = ingress;
-		},
 	};
 }

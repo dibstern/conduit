@@ -8,19 +8,31 @@ import {
 	Ref,
 	Semaphore,
 } from "effect";
+import type { SqlError } from "effect/sql/SqlError";
 import { formatErrorDetail } from "../../../errors.js";
 import { createLogger } from "../../../logger.js";
 import {
 	makePersistenceProjectLayer,
 	PersistenceStore,
 } from "../../../persistence/effect/live.js";
+import type { ProjectionRunnerError } from "../../../persistence/effect/projection-runner-effect.js";
 import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-module.js";
 import { defaultClaudeSessionForkSdk } from "../../../provider/claude/claude-session-fork.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
+import { createTranslator } from "../../../relay/event-translator.js";
 import type { ClaudeSdkSeam } from "../../../types.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import type { PersistenceError } from "../../persistence/Services/persistence-service.js";
+import {
+	AgentLivenessLive,
+	makeProjectIngestionLive,
+	makeProjectOpenCodeIngressLive,
+} from "../../relay/Layers/project-ingestion-layer.js";
+import type { AlertsTag } from "../../relay/Services/alerts.js";
+import { DirectoryListingServiceLive } from "../../relay/Services/directory-listing-service.js";
 import type { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { OpenCodeSessionCreationGateTag } from "../../relay/Services/opencode-runtime-ingress-service.js";
+import { ProjectSettingsLive } from "../../relay/Services/project-settings.js";
 import {
 	makeRelayStatusSnapshot,
 	RelayStatusSnapshotTag,
@@ -30,6 +42,7 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceLive,
 	OrchestrationEngineTag,
+	TranslatorTag,
 } from "../../relay/Services/services.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionManagerError } from "../../relay/Services/session-manager-error.js";
@@ -42,12 +55,18 @@ import {
 	SessionManagerStateTag,
 } from "../../relay/Services/session-manager-state.js";
 import type { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
+import { makeSessionTitleServiceLive } from "../../relay/Services/session-title-service.js";
 import type { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+import { ToolContentServiceLive } from "../../relay/Services/tool-content-service.js";
+import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
+import type { CategorySet } from "../Services/category-set.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonOrchestration } from "../Services/daemon-orchestration.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
+import type { DaemonTurns } from "../Services/daemon-turns.js";
+import type { MessageSurfacingSettings } from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
 import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
@@ -57,8 +76,10 @@ import {
 	ProjectServicesError,
 	projectConfig,
 } from "../Services/project-services.js";
+import { ProviderAdapters } from "../Services/provider-adapters.js";
 import type { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionManagerOwner } from "../Services/session-manager-owner.js";
+import type { Usage } from "../Services/usage.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
 import type { PollerTimings } from "./relay-factory-layer.js";
@@ -121,6 +142,16 @@ export const makeProjectServicesLive = (options: {
 				| SessionEventBusTag
 				| EventRetentionSchedulerTag
 			>();
+			// What a project's ingestion side reads from the daemon.
+			const ingestionShared = yield* Effect.context<
+				| AlertsTag
+				| Usage
+				| MessageSurfacingSettings
+				| CategorySet
+				| ProviderAdapters
+				| DaemonTurns
+			>();
+			const push = yield* PushManagerTag;
 			const log = createLogger("relay");
 			const generations = new Map<
 				string,
@@ -141,6 +172,15 @@ export const makeProjectServicesLive = (options: {
 					if (reason !== undefined) return yield* refuse(projectId, reason);
 					return entry.value.project;
 				});
+			const storeUnavailable =
+				(projectId: string) =>
+				(error: PersistenceError | ProjectionRunnerError | SqlError) =>
+					Effect.fail(
+						refuse(
+							projectId,
+							`Project "${projectId}" store is unavailable: ${formatErrorDetail(error)}`,
+						),
+					);
 			const generation = (
 				projectId: string,
 			): Effect.Effect<
@@ -156,7 +196,7 @@ export const makeProjectServicesLive = (options: {
 							const scope = yield* owners.projectScope(projectId);
 							return yield* scope.acquire<
 								Context.Context<ProjectGenerationParts>,
-								PersistenceError,
+								PersistenceError | ProjectionRunnerError | SqlError,
 								never
 							>(
 								Effect.gen(function* () {
@@ -190,15 +230,67 @@ export const makeProjectServicesLive = (options: {
 											),
 										),
 									);
-									const parts = Context.mergeAll(persistence, models).pipe(
+									const gate = yield* Semaphore.make(1);
+									const projectBase = Context.mergeAll(
+										shared,
+										ingestionShared,
+										persistence,
+									).pipe(
+										Context.add(ConfigTag, projectConfig(project, daemon)),
+										Context.add(LoggerTag, log),
+										Context.add(OrchestrationEngineTag, engine),
+										Context.add(OpenCodeSessionCreationGateTag, gate),
+										Context.add(
+											ProviderRegistryTag,
+											Context.get(ingestionShared, ProviderAdapters).registry,
+										),
+									);
+									// Once per project, so a replaced relay keeps its pending
+									// interactions, translator and ingress (82tn.16 slice 4).
+									const ingestion = yield* Layer.build(
+										makeProjectIngestionLive(push.getLegacyManager).pipe(
+											Layer.provide(Layer.succeedContext(projectBase)),
+										),
+									);
+									const ingress = yield* Layer.build(
+										makeProjectOpenCodeIngressLive.pipe(
+											Layer.provide(
+												Layer.succeedContext(
+													Context.merge(projectBase, ingestion),
+												),
+											),
+										),
+									);
+									// A relay's title in flight and its discovered catalogs outlived
+									// the relay that started them (82tn.16 slice 5).
+									const titles = yield* Layer.build(
+										makeSessionTitleServiceLive().pipe(
+											Layer.provideMerge(ProjectSettingsLive),
+											Layer.provide(Layer.succeedContext(projectBase)),
+										),
+									);
+									// Stateless readers, built here so no relay has to (slice 7).
+									const readers = yield* Layer.build(
+										Layer.mergeAll(
+											ToolContentServiceLive,
+											DirectoryListingServiceLive,
+											AgentLivenessLive,
+										).pipe(Layer.provide(Layer.succeedContext(projectBase))),
+									);
+									const parts = Context.mergeAll(
+										persistence,
+										models,
+										ingestion,
+										ingress,
+										titles,
+										readers,
+									).pipe(
 										Context.add(
 											RelayStatusSnapshotTag,
 											makeRelayStatusSnapshot(),
 										),
-										Context.add(
-											OpenCodeSessionCreationGateTag,
-											yield* Semaphore.make(1),
-										),
+										Context.add(OpenCodeSessionCreationGateTag, gate),
+										Context.add(TranslatorTag, createTranslator()),
 									);
 									generations.set(projectId, parts);
 									yield* Effect.addFinalizer(() =>
@@ -222,13 +314,9 @@ export const makeProjectServicesLive = (options: {
 										`Project "${projectId}" is closing (${error.reason})`,
 									),
 								),
-							PersistenceError: (error) =>
-								Effect.fail(
-									refuse(
-										projectId,
-										`Project "${projectId}" store is unavailable: ${formatErrorDetail(error)}`,
-									),
-								),
+							PersistenceError: storeUnavailable(projectId),
+							ProjectionRunnerError: storeUnavailable(projectId),
+							SqlError: storeUnavailable(projectId),
 						}),
 					);
 			return {

@@ -3,7 +3,6 @@ import { SqlClient } from "effect/sql";
 import { publishAlert } from "../domain/relay/Services/alerts.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
-import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import type { RelayMessage, SessionActivityView } from "../shared-types.js";
 import { resolveNotifications } from "./notification-policy.js";
 import { sendPushForEventEffect } from "./sse-wiring.js";
@@ -11,7 +10,8 @@ import { sendPushForEventEffect } from "./sse-wiring.js";
 export const publishProviderRelayMessage = (
 	msg: Extract<RelayMessage, { type: "done" }>,
 	deps: {
-		wsHandler: Pick<WebSocketHandlerShape, "getClientsForSession">;
+		/** A browser is viewing the session: its turn end needs no alert. */
+		isViewed: (sessionId: string) => boolean;
 		pushManager?: Pick<PushNotificationSender, "sendToAll">;
 		log: Logger;
 		slug: string;
@@ -36,7 +36,7 @@ export const publishProviderRelayMessage = (
 		);
 		const notification = resolveNotifications(
 			msg,
-			deps.wsHandler.getClientsForSession(sessionId).length > 0
+			deps.isViewed(sessionId)
 				? { action: "send", sessionId }
 				: { action: "drop", reason: "no viewers" },
 			rows[0]?.parent_id != null,

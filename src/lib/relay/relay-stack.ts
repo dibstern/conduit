@@ -640,7 +640,7 @@ export async function createProjectRelay(
 			// Quiesce monitoring before runtime disposal so late status changes
 			// cannot restart message pollers during scoped shutdown.
 			startup.stopMonitoring();
-			startup.opencodeRuntimeIngress.shutdown();
+			// The ingress is the project's: its owner scope shuts it, not a relay (82tn.16).
 			await rpcWsHandler.drain();
 			// Scoped finalizers own SSE drain, command-gate stop, provider instance
 			// shutdown, status-poller drain, and other Effect-managed resources.

@@ -177,19 +177,48 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"makeRelayStatusSnapshot",
 			"OpenCodeModelServiceLive",
 			"makePersistenceProjectLayer",
+			"makeProjectIngestionLive",
+			"makeProjectOpenCodeIngressLive",
+			"makeProviderRuntimeIngestionLive",
+			"makeEffectOpenCodeRuntimeIngress",
+			"makeSessionTitleServiceLive",
+			"ProjectSettingsLive",
+			"ToolContentServiceLive",
+			"DirectoryListingServiceLive",
+			"AgentLivenessLive",
 		]);
 		expect(tally(server, named(builders))).toEqual(
 			new Map([
-				// ProjectServices: each project's session-manager parts and generation.
-				[`${daemon}/Layers/project-services-layer.ts`, 8],
+				// ProjectServices: each project's session-manager parts and generation,
+				// with its ingestion side (82tn.16 slice 4) and its settings and
+				// titles (slice 5), and its tool details, directory listing and agent
+				// liveness (slice 7).
+				[`${daemon}/Layers/project-services-layer.ts`, 22],
+				// The ingestion side's definitions: pending interactions, alert ledger,
+				// provider ingestion, the OpenCode ingress with its history ports, and
+				// agent liveness.
+				["src/lib/domain/relay/Layers/project-ingestion-layer.ts", 7],
+				[
+					"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts",
+					1,
+				],
+				[
+					"src/lib/domain/relay/Services/provider-runtime-ingestion-service.ts",
+					2,
+				],
+				["src/lib/domain/relay/Services/project-settings.ts", 1],
+				["src/lib/domain/relay/Services/session-title-service.ts", 1],
+				["src/lib/domain/relay/Services/tool-content-service.ts", 1],
+				["src/lib/domain/relay/Services/directory-listing-service.ts", 1],
 				// Definitions, and a store opened without the daemon.
 				["src/lib/domain/relay/Services/session-manager-service.ts", 3],
 				["src/lib/domain/relay/Services/relay-status-snapshot.ts", 3],
 				["src/lib/domain/relay/Services/services.ts", 1],
 				["src/lib/persistence/effect/live.ts", 2],
-				// relay: a standalone relay's own copies.
-				["src/lib/domain/relay/Layers/relay-layer.ts", 2],
-				[`${relay}/project-relay-layers.ts`, 8],
+				// relay: a standalone relay's own copies, which a relay of a registered
+				// project builds only when the daemon cannot build the project.
+				["src/lib/domain/relay/Layers/relay-layer.ts", 7],
+				[`${relay}/project-relay-layers.ts`, 22],
 			]),
 		);
 	});
@@ -209,8 +238,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/provider/runner/runner-entry-lifecycle.ts", 1],
 				["src/lib/provider/runner/runner-provider-instance.ts", 1],
 				["src/lib/provider/runner/send-scope.ts", 1],
-				// relay
-				["src/lib/domain/relay/Layers/message-poller-manager-layer.ts", 1],
+				// The HTTP edge's per-request scope.
 				["src/lib/domain/server/Layers/http-router-layer.ts", 1],
 			]),
 		);
@@ -231,8 +259,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/handlers/types.ts", 1],
 				[`${relay}/monitoring-wiring.ts`, 5],
 				[`${relay}/poller-wiring.ts`, 2],
-				[`${relay}/project-relay-layers.ts`, 2],
-				[`${relay}/project-relay-publisher.ts`, 1],
+				[`${relay}/project-relay-layers.ts`, 1],
 				[`${relay}/project-relay-startup.ts`, 2],
 				[`${relay}/relay-stack.ts`, 1],
 				[`${relay}/sse-wiring.ts`, 2],

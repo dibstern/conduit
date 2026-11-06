@@ -36,9 +36,7 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 			yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at, parent_id) VALUES ('child', 'child', 'claude', 1, 1, 's1')`;
 			const ledger = yield* makeAlertLedger;
 			const deps = {
-				wsHandler: {
-					getClientsForSession: () => [],
-				},
+				isViewed: () => false,
 				pushManager: { sendToAll },
 				log: createSilentLogger(),
 				slug: "project",
