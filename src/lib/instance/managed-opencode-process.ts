@@ -69,6 +69,8 @@ export interface ManagedOpenCodeRecord {
 	env?: Record<string, string>;
 	version?: string;
 	processIdentity?: ManagedOpenCodeProcessIdentity;
+	/** Conduit stopped this record's process and verified it through its supervisor. */
+	processStopped?: true;
 }
 
 export function publicManagedOpenCodeEnv(

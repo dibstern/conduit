@@ -920,10 +920,17 @@ describe("a send claimed before daemon SIGKILL", () => {
 		}
 	}, 60_000);
 
+	// A record that names no process is not proof that none runs (CONTRACT.md 3046-3047: a failed
+	// health check alone is not loss); the orphan waits for its own fact (659-661).
 	it.each([
-		"recorded",
-		"missing",
-	])("defers an orphan while managed OpenCode is unhealthy with %s process identity", async (identity) => {
+		{ health: "unhealthy", record: "recorded process identity" },
+		{ health: "unhealthy", record: "missing process identity" },
+		{ health: "healthy", record: "missing process identity" },
+		{ health: "unhealthy", record: "no instance record" },
+	])("defers an orphan while managed OpenCode is $health with $record", async ({
+		health,
+		record,
+	}) => {
 		const { fixture, sessionId, directory, prompt } =
 			await startOpenCodeTurn(false);
 		const pidsFile = join(fixture.configDir, "fake-opencode-pids.jsonl");
@@ -932,18 +939,18 @@ describe("a send claimed before daemon SIGKILL", () => {
 		await fixture.kill();
 		const configPath = join(fixture.configDir, "daemon.json");
 		const savedConfig = readFileSync(configPath, "utf8");
-		if (identity === "missing") {
-			const config = JSON.parse(savedConfig) as {
-				instances: Array<Record<string, unknown>>;
-			};
+		const config = JSON.parse(savedConfig) as {
+			instances: Array<Record<string, unknown>>;
+		};
+		if (record === "missing process identity")
 			config.instances = config.instances.map(
 				({ pid: _pid, processIdentity: _identity, ...instance }) => instance,
 			);
-			writeFileSync(configPath, JSON.stringify(config));
-		}
-		writeFileSync(hold, "hold");
+		if (record === "no instance record") config.instances = [];
+		writeFileSync(configPath, JSON.stringify(config));
+		if (health === "unhealthy") writeFileSync(hold, "hold");
 		const proof: Record<string, unknown> = {
-			case: `managed OpenCode unhealthy with ${identity} process identity`,
+			case: `managed OpenCode ${health} with ${record}`,
 			sessionId,
 			before: snapshot(fixture, sessionId, prompt),
 		};
@@ -962,7 +969,7 @@ describe("a send claimed before daemon SIGKILL", () => {
 			expect(readFileSync(pidsFile, "utf8")).toBe(processes);
 			await fixture.kill();
 			writeFileSync(configPath, savedConfig);
-			rmSync(hold);
+			rmSync(hold, { force: true });
 			await fixture.setOpenCodeStatus(directory, sessionId, { type: "idle" });
 			await fixture.restart({ skipBrowserProbe: true });
 			await vi.waitFor(
@@ -980,6 +987,57 @@ describe("a send claimed before daemon SIGKILL", () => {
 			proof["after"] = snapshot(fixture, sessionId, prompt);
 		}
 	}, 60_000);
+
+	// The wait has no deadline (CONTRACT.md 659-661), so the user's Stop is what ends it, never re-sent.
+	it("a Stop ends an orphan deferred while managed OpenCode is unhealthy with missing process identity", async () => {
+		const { fixture, sessionId, prompt } = await startOpenCodeTurn(false);
+		const pidsFile = join(fixture.configDir, "fake-opencode-pids.jsonl");
+		const processes = readFileSync(pidsFile, "utf8");
+		const hold = join(fixture.configDir, "fake-opencode-hold-health");
+		await fixture.kill();
+		const configPath = join(fixture.configDir, "daemon.json");
+		const config = JSON.parse(readFileSync(configPath, "utf8")) as {
+			instances: Array<Record<string, unknown>>;
+		};
+		config.instances = config.instances.map(
+			({ pid: _pid, processIdentity: _identity, ...instance }) => instance,
+		);
+		writeFileSync(configPath, JSON.stringify(config));
+		writeFileSync(hold, "hold");
+		const proof: Record<string, unknown> = {
+			case: "Stop while an orphan waits on unhealthy OpenCode with missing process identity",
+			sessionId,
+			before: snapshot(fixture, sessionId, prompt),
+		};
+		proofs.push(proof);
+		try {
+			await fixture.restart({ skipBrowserProbe: true });
+			await fixture.connect(sessionId);
+			proof["waiting"] = snapshot(fixture, sessionId, prompt);
+			expect(snapshot(fixture, sessionId, prompt).outbox[0]?.status).toBe(
+				"running",
+			);
+			expect(readFileSync(pidsFile, "utf8")).toBe(processes);
+			await fixture.requestRpc({
+				_tag: "CancelSession",
+				sessionId,
+				commandId: randomUUID(),
+			});
+			// test-waits-allow polling: the end comes from the daemon's idle probe, and the send row is read from its store.
+			await vi.waitFor(
+				() => {
+					const state = snapshot(fixture, sessionId, prompt);
+					expect(state.outbox[0]?.status).toBe("failed");
+					expect(state.inbox).toEqual({ busy: false, in_flight: false });
+					expect(state.providerPromptCount).toBe(1);
+				},
+				{ timeout: 15_000 },
+			);
+		} finally {
+			rmSync(hold, { force: true });
+			proof["after"] = snapshot(fixture, sessionId, prompt);
+		}
+	});
 
 	it.each([
 		404, 503,
