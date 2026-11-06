@@ -692,9 +692,9 @@ it("proves daemon driver ownership, account isolation, launch context and contin
 			typeof data?.prompt === "string" ? data.prompt : data?.prompt?.text,
 		)
 		.at(-1);
-	// The handoff text itself is proven by ad4c-provider-switch.test.ts. Here
-	// the replay gives the new agent the old agent's fixed id, so the store's
-	// earlier run reads as an accepted seed and the prompt goes out bare.
+	// The fresh agent on Cursor B gets the kept history ahead of the prompt.
+	expect(switchSend).toContain("[Conduit context handoff]");
+	expect(switchSend).toContain("same-account-continuation-cursor");
 	expect(switchSend?.endsWith(switchPrompt)).toBe(true);
 	const handoffs = (() => {
 		const db = new Database(fixture.daemonStorePath(), { readonly: true });

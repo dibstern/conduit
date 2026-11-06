@@ -564,7 +564,7 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 							readFileSync(
 								join(
 									cursorSessionStorePath(fixture.configDir, id),
-									"trace-state.json",
+									`trace-state-${readCursorSessionIdentity(fixture.configDir, id)?.agentId}.json`,
 								),
 								"utf8",
 							),
