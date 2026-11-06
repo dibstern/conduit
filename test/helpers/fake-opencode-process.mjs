@@ -696,6 +696,16 @@ const server = createServer(async (request, response) => {
 			emitTyped(session.directory, "session.deleted", { info: session });
 			return;
 		}
+		const hold = join(configDir, "fake-opencode-hold-session");
+		if (existsSync(hold)) {
+			appendFileSync(
+				join(configDir, "fake-opencode-held-session.jsonl"),
+				`${JSON.stringify({ sessionID: session?.id })}\n`,
+			);
+			while (existsSync(hold))
+				// test-waits-allow real-wait: the hold is a file the test removes; it has no event.
+				await new Promise((done) => setTimeout(done, 10));
+		}
 		response.end(JSON.stringify(session ?? {}));
 	} else if (path === "/file" || path === "/file/content") {
 		try {

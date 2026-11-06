@@ -333,6 +333,8 @@ export interface SendTurnInput
 	/** Config snapshot admitted with the durable turn, including disabled idle exit. */
 	readonly autoSettleAfterDays?: number | null | undefined;
 	readonly abortSignal: AbortSignal;
+	/** A Stop of this send's Run: it recalls the prompt only while unsent (82tn.32.52). */
+	readonly stopSignal?: AbortSignal;
 	readonly permissionMode?: SessionPermissionMode;
 	/** Session rules enforce the Side Thread's mode. */
 	readonly sideThread?: boolean;

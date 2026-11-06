@@ -422,9 +422,14 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			images,
 			agent,
 			variant,
-			abortSignal,
+			abortSignal: cancelSignal,
 			extraFolders,
+			stopSignal,
 		} = input;
+		// Either signal keeps an unsent prompt from leaving.
+		const abortSignal = stopSignal
+			? AbortSignal.any([cancelSignal, stopSignal])
+			: cancelSignal;
 		const isCompaction = prompt.trim() === "/compact";
 		const compactionEvent = {
 			type: "session.compaction" as const,
@@ -469,13 +474,19 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		};
 		const recalled: TurnResult = { ...indeterminate, status: "cancelled" };
 		const recall = Effect.callback<TurnResult>((resume) => {
-			const onAbort = () =>
-				resume(Effect.succeed(submitted ? indeterminate : recalled));
-			if (abortSignal.aborted) onAbort();
-			else abortSignal.addEventListener("abort", onAbort, { once: true });
-			return Effect.sync(() =>
-				abortSignal.removeEventListener("abort", onAbort),
-			);
+			// A Stop recalls only an unsent prompt: a sent one keeps its own reply, as main does
+			// (82tn.32.52). A cancel calls a sent prompt unknown.
+			const onAbort = () => {
+				if (!submitted) resume(Effect.succeed(recalled));
+				else if (cancelSignal.aborted) resume(Effect.succeed(indeterminate));
+			};
+			for (const signal of [abortSignal, cancelSignal])
+				if (signal.aborted) onAbort();
+				else signal.addEventListener("abort", onAbort, { once: true });
+			return Effect.sync(() => {
+				for (const signal of [abortSignal, cancelSignal])
+					signal.removeEventListener("abort", onAbort);
+			});
 		});
 		return Effect.gen({ self: this }, function* () {
 			if (abortSignal.aborted) return recalled;

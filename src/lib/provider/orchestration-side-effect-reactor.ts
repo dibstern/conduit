@@ -362,7 +362,7 @@ export class ProviderSideEffectReactor {
 	>();
 	private readonly executingControls = new Set<string>();
 	private readonly executingSends = new Map<string, ProviderCommandOutboxRow>();
-	/** A direct send's recall by its Run, while its executor runs (82tn.32.51). */
+	/** A Stop's recall of a direct send by its Run, while its executor runs (82tn.32.51). */
 	private readonly sendRecalls = new Map<string, AbortController>();
 	private recoveryPrepared = false;
 	private ledgerWakeRegistered = false;
@@ -959,7 +959,7 @@ export class ProviderSideEffectReactor {
 			const cancellation = new AbortController();
 			if (row.effect_type === "send_turn" && row.run_id) {
 				ownedRecall = row.run_id;
-				this.sendRecalls.set(ownedRecall, cancellation);
+				this.sendRecalls.set(ownedRecall, new AbortController());
 			}
 			// 2.1 row 212: a claim past the cap sends nothing and fails its input through main's path.
 			const delivery = claimed.exhausted
@@ -2216,34 +2216,26 @@ export class ProviderSideEffectReactor {
 							const driver = getProviderDriver(
 								account?.driver ?? instance.providerId,
 							);
-							yield* instance
-								.interruptTurnEffect(
-									row.session_id,
-									// A Stop names its committed cohort's runs, never reusable input ids (4.6).
-									// A legacy payload keeps its turnIds; the predecessor omitted them for an
-									// empty Stop, so fence delivery without changing its committed payload.
-									payload.stop?.owners.map(({ runId }) => runId) ??
-										payload.turnIds ??
-										(driver?.keepsPendingSteersOnInterrupt ||
-										driver?.runsOpenCodeServer
-											? []
-											: undefined),
-									call,
-									context,
-								)
-								.pipe(
-									// A Stop that cannot reach OpenCode (it may still be starting) recalls its
-									// owners' sends still in hand. The adapter answers cancelled only when the
-									// prompt never left, so the ledger decides whether it was delivered
-									// (CONTRACT.md 664-666).
-									Effect.tapError(() =>
-										Effect.sync(() => {
-											if (driver?.runsOpenCodeServer)
-												for (const { runId } of stopOwners ?? [])
-													this.sendRecalls.get(runId)?.abort();
-										}),
-									),
-								);
+							// A Stop recalls its owners' OpenCode sends first, so a prompt not yet sent
+							// never leaves after it. The adapter recalls only an unsent prompt, so the
+							// ledger decides whether it was delivered (CONTRACT.md 664-666, 689-691).
+							if (driver?.runsOpenCodeServer)
+								for (const { runId } of stopOwners ?? [])
+									this.sendRecalls.get(runId)?.abort();
+							yield* instance.interruptTurnEffect(
+								row.session_id,
+								// A Stop names its committed cohort's runs, never reusable input ids (4.6).
+								// A legacy payload keeps its turnIds; the predecessor omitted them for an
+								// empty Stop, so fence delivery without changing its committed payload.
+								payload.stop?.owners.map(({ runId }) => runId) ??
+									payload.turnIds ??
+									(driver?.keepsPendingSteersOnInterrupt ||
+									driver?.runsOpenCodeServer
+										? []
+										: undefined),
+								call,
+								context,
+							);
 							break;
 						}
 						case "resolve_permission":
@@ -2541,9 +2533,15 @@ export class ProviderSideEffectReactor {
 							),
 							abortSignal: abortSignal ?? new AbortController().signal,
 						};
-						return yield* instance instanceof RunnerProviderInstance
-							? instance.sendTurnEffect(sendInput, prepareCall)
-							: instance.sendTurnEffect(sendInput);
+						if (instance instanceof RunnerProviderInstance)
+							return yield* instance.sendTurnEffect(sendInput, prepareCall);
+						// Only a direct send takes a Stop's recall; a runner's payload is plain data.
+						const stopSignal = row.run_id
+							? this.sendRecalls.get(row.run_id)?.signal
+							: undefined;
+						return yield* instance.sendTurnEffect(
+							stopSignal ? { ...sendInput, stopSignal } : sendInput,
+						);
 					});
 				const result = getProviderDriver(driver)?.supportsNativeResume
 					? yield* Effect.gen({ self: this }, function* () {

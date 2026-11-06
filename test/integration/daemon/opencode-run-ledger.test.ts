@@ -750,6 +750,53 @@ describe("OpenCode on the Run Ledger", () => {
 		]);
 	});
 
+	it("a Stop on a running instance before the prompt's send ends it interrupted at once and never sends its prompt (82tn.32.52)", async () => {
+		const fixture = await start();
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"Stop before the send",
+			instanceId,
+			"opencode",
+		);
+		await browser.send(sessionId, "first", 60_000);
+		// The send reads its session before it posts the prompt; the gate holds that read.
+		const gate = join(fixture.configDir, "fake-opencode-hold-session");
+		const held = join(fixture.configDir, "fake-opencode-held-session.jsonl");
+		writeFileSync(gate, "hold");
+		const sent = browser
+			.send(sessionId, "unsent", 60_000)
+			.catch((error: unknown) => error);
+		await until(() => expect(existsSync(held)).toBe(true), 15_000);
+		await fixture.requestRpc({
+			_tag: "CancelSession",
+			sessionId,
+			commandId: randomUUID(),
+		});
+		await until(
+			() => expect(turnEnds(fixture, sessionId)).toEqual(["turn.interrupted"]),
+			5_000,
+		);
+		const stopped = read(fixture, sessionId);
+		// As in 82tn.32.51: the Stopped input is placed after its end, so the browser's
+		// send settles on the next end.
+		const next = browser.send(sessionId, "next", 60_000);
+		rmSync(gate, { force: true });
+		await sent;
+		await next;
+		const after = read(fixture, sessionId);
+		proofs.push({ scenario: "stop-before-send", stopped, after });
+		expect(
+			prompted(fixture, sessionId).map(({ body }) =>
+				["first", "unsent", "next"].filter((text) => body.includes(text)),
+			),
+		).toEqual([["first"], ["next"]]);
+		expect(after.runs.map(({ status }) => status)).toEqual([
+			"completed",
+			"interrupted",
+			"completed",
+		]);
+	});
+
 	it("a Stop while a shared instance starts recalls only its own project's send (82tn.32.51)", async () => {
 		const {
 			fixture,
