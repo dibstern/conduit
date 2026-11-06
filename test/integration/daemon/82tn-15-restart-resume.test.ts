@@ -448,9 +448,11 @@ describe("82tn.15: running sessions resume after restart", () => {
 		writeFileSync(join(fixture.root, "release-upgrade-turn"), "release");
 		for (const session of [sessions.openCodeWorktree, sessions.openCodeMain]) {
 			await assistantText(session, "Finished after restart", true);
-			await fixture.setOpenCodeStatus(session.directory, session.sessionId, {
-				type: "idle",
-			});
+			await fixture.setOpenCodeStatus(
+				session.directory,
+				nativeOf(fixture, session.sessionId),
+				{ type: "idle" },
+			);
 		}
 		// test-waits-allow polling: durable run state of four sessions has no single event.
 		await vi.waitFor(
