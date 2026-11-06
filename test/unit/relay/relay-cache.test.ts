@@ -24,7 +24,6 @@ import {
 
 const makeTestRelay = (slug: string): Relay => ({
 	slug,
-	rpcWsHandler: {},
 	syncGlobalSetting: () => Effect.void,
 	refreshGlobalDefaults: () => Effect.void,
 	setDefaultAgent: vi.fn(() => Effect.void),

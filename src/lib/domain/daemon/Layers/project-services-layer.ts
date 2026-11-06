@@ -1,14 +1,19 @@
+import { existsSync, mkdirSync } from "node:fs";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import {
 	Context,
+	Deferred,
 	Effect,
+	Exit,
 	HashMap,
 	Layer,
 	Option,
 	Ref,
+	Scope,
 	Semaphore,
 } from "effect";
 import type { SqlError } from "effect/sql/SqlError";
+import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { createLogger } from "../../../logger.js";
 import {
@@ -16,6 +21,10 @@ import {
 	PersistenceStore,
 } from "../../../persistence/effect/live.js";
 import type { ProjectionRunnerError } from "../../../persistence/effect/projection-runner-effect.js";
+import {
+	projectStorageDir,
+	writeProjectStorageOwner,
+} from "../../../persistence/project-storage.js";
 import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-module.js";
 import { defaultClaudeSessionForkSdk } from "../../../provider/claude/claude-session-fork.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
@@ -31,13 +40,19 @@ import {
 	makeProjectOpenCodeIngressLive,
 } from "../../relay/Layers/project-ingestion-layer.js";
 import { makePtyRuntimeLive } from "../../relay/Layers/pty-manager-layer.js";
+import { SessionStateProjectionNotifierLive } from "../../relay/Layers/session-state-projection-notifier-layer.js";
+import { StatusPollerLive } from "../../relay/Layers/status-poller-layer.js";
 import { AgentServiceLive } from "../../relay/Services/agent-service.js";
 import type { AlertsTag } from "../../relay/Services/alerts.js";
 import { DirectoryListingServiceLive } from "../../relay/Services/directory-listing-service.js";
 import { makeGoalSummaryServiceLive } from "../../relay/Services/goal-summary-service.js";
+import { HandoffReceiptsLive } from "../../relay/Services/handoff-receipts.js";
 import type { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { OpenCodeSessionCreationGateTag } from "../../relay/Services/opencode-runtime-ingress-service.js";
-import { ProjectSettingsLive } from "../../relay/Services/project-settings.js";
+import {
+	ProjectSettingsLive,
+	refreshGlobalDefaults,
+} from "../../relay/Services/project-settings.js";
 import {
 	ProviderTurnServiceTag,
 	ProviderTurns,
@@ -69,9 +84,15 @@ import {
 } from "../../relay/Services/session-manager-state.js";
 import type { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
 import type { SessionSetupTag } from "../../relay/Services/session-setup.js";
+import {
+	makePollerPubSubLive,
+	makePollerStateLive,
+	StatusPollerCoreTag,
+} from "../../relay/Services/session-status-poller.js";
 import { makeSessionTitleServiceLive } from "../../relay/Services/session-title-service.js";
 import type { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { SessionWorkspaceHintStateTag } from "../../relay/Services/session-workspace-hint-state.js";
+import { SSEStreamLive } from "../../relay/Services/sse-stream-service.js";
 import {
 	LocalPtyServiceTag,
 	OpenCodeTerminalServiceLive,
@@ -88,7 +109,7 @@ import { DaemonStoreAvailability } from "../Services/daemon-store-availability.j
 import type { DaemonTurns } from "../Services/daemon-turns.js";
 import type { MessageSurfacingSettings } from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
-import type { OpenCodeProjectStreams } from "../Services/opencode-project-streams.js";
+import { OpenCodeProjectStreams } from "../Services/opencode-project-streams.js";
 import type { OpenCodeSessionIds } from "../Services/opencode-session-ids.js";
 import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
@@ -100,12 +121,13 @@ import {
 } from "../Services/project-services.js";
 import { ProviderAdapters } from "../Services/provider-adapters.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
-import type { SessionGit } from "../Services/session-git.js";
+import { SessionGit } from "../Services/session-git.js";
 import { SessionManagerOwner } from "../Services/session-manager-owner.js";
 import type { Usage } from "../Services/usage.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 import type { WorktreeServiceTag } from "../Services/worktree-service.js";
 import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
+import { startProject } from "./project-startup.js";
 import type { PollerTimings } from "./relay-factory-layer.js";
 
 /**
@@ -186,6 +208,7 @@ export const makeProjectServicesLive = (options: {
 				| SessionSetupTag
 				| WorktreeServiceTag
 			>();
+			const statusCore = yield* Effect.serviceOption(StatusPollerCoreTag);
 			const push = yield* PushManagerTag;
 			const localPty = yield* LocalPtyServiceTag;
 			const log = createLogger("relay");
@@ -229,6 +252,8 @@ export const makeProjectServicesLive = (options: {
 							const existing = generations.get(projectId);
 							if (existing) return existing;
 							const project = yield* registered(projectId);
+							// The status poller reads the project's session manager state.
+							const manager = yield* managers.project(projectId);
 							const scope = yield* owners.projectScope(projectId);
 							return yield* scope.acquire<
 								Context.Context<ProjectGenerationParts>,
@@ -377,6 +402,40 @@ export const makeProjectServicesLive = (options: {
 											Layer.provide(Layer.succeedContext(projectBase)),
 										),
 									);
+									// The project's OpenCode stream and status poller, so no relay holds
+									// them (lane 16q); t3code starts its reactors once, in the server
+									// scope (apps/server/src/server.ts:540-627).
+									const snapshot = makeRelayStatusSnapshot();
+									const streams = yield* Layer.build(
+										Layer.merge(
+											StatusPollerLive.pipe(
+												Layer.provideMerge(
+													Layer.merge(
+														makePollerStateLive(),
+														makePollerPubSubLive(),
+													),
+												),
+											),
+											SSEStreamLive,
+										).pipe(
+											Layer.provide(
+												Layer.succeedContext(
+													Context.mergeAll(
+														projectBase,
+														Context.pick(OpenCodeProjectStreams)(turnShared),
+														Context.make(RelayStatusSnapshotTag, snapshot),
+														Context.make(SessionManagerStateTag, manager.state),
+														Option.isSome(statusCore)
+															? Context.make(
+																	StatusPollerCoreTag,
+																	statusCore.value,
+																)
+															: Context.empty(),
+													),
+												),
+											),
+										),
+									);
 									// Recaps and goal summaries hold in-flight work and a cache, so one
 									// per project outlives a replaced relay; their one-shot query is the
 									// daemon's, which honours the process test module.
@@ -402,8 +461,32 @@ export const makeProjectServicesLive = (options: {
 											),
 										),
 									);
+									// The project's reactors over its committed events: a completed
+									// handoff is recorded, and a projected session state refreshes
+									// lineage (t3code: server.ts:540-627, one reactor set per scope).
+									const reactors = yield* Layer.build(
+										Layer.merge(
+											HandoffReceiptsLive,
+											SessionStateProjectionNotifierLive,
+										).pipe(
+											Layer.provide(
+												Layer.succeedContext(
+													Context.merge(
+														projectBase,
+														Context.pick(SessionGit)(turnShared),
+													).pipe(
+														Context.add(
+															SessionManagerServiceTag,
+															sessionManagers,
+														),
+													),
+												),
+											),
+										),
+									);
 									const parts = Context.mergeAll(
 										persistence,
+										reactors,
 										models,
 										ingestion,
 										ingress,
@@ -414,12 +497,10 @@ export const makeProjectServicesLive = (options: {
 										openCodeReaders,
 										summaries,
 										poller,
+										streams,
 									).pipe(
 										Context.add(ProviderTurnServiceTag, turns),
-										Context.add(
-											RelayStatusSnapshotTag,
-											makeRelayStatusSnapshot(),
-										),
+										Context.add(RelayStatusSnapshotTag, snapshot),
 										Context.add(OpenCodeSessionCreationGateTag, gate),
 										Context.add(TranslatorTag, createTranslator()),
 										// t3code ties output listeners to the scope that owns them
@@ -501,8 +582,143 @@ export const makeProjectServicesLive = (options: {
 					),
 				),
 			);
-			return Context.make(ProjectServices, { generation, forProject }).pipe(
+			// One start per generation, keyed by the generation's scope; a started
+			// generation is open until `close` or its owner scope closes.
+			const starts = new WeakMap<
+				Scope.Scope,
+				{
+					readonly done: Deferred.Deferred<void, ProjectServicesError>;
+					readonly scope: Scope.Closeable;
+				}
+			>();
+			const started = new WeakSet<Scope.Scope>();
+			const startContext = Context.mergeAll(ingestionShared, turnShared).pipe(
 				Context.add(SessionManagerServiceTag, sessionManagers),
+				Context.add(
+					ProviderRegistryTag,
+					Context.get(ingestionShared, ProviderAdapters).registry,
+				),
 			);
+			const open: ProjectServices["Service"]["open"] = (projectId) =>
+				Effect.gen(function* () {
+					const project = yield* registered(projectId);
+					const parts = generations.get(projectId);
+					const current =
+						parts && starts.get(Context.get(parts, RpcSubscriptionScopeTag));
+					// An open project keeps serving when its folder goes missing; a
+					// send reports the missing folder itself.
+					if (current) {
+						yield* Deferred.await(current.done);
+						return yield* forProject(projectId);
+					}
+					const folder = project.folders[0];
+					if (!existsSync(folder))
+						return yield* refuse(
+							projectId,
+							`Project directory does not exist: ${folder}`,
+						);
+					// Storage ownership is kept apart from the event store's.
+					yield* Effect.try({
+						try: () => {
+							mkdirSync(projectStorageDir(options.configDir, projectId), {
+								recursive: true,
+							});
+							writeProjectStorageOwner(options.configDir, projectId, folder);
+						},
+						catch: (cause) =>
+							refuse(
+								projectId,
+								`Failed to prepare project storage: ${formatErrorDetail(cause)}`,
+							),
+					});
+					const context = yield* forProject(projectId);
+					const scope = Context.get(context, RpcSubscriptionScopeTag);
+					const existing = starts.get(scope);
+					if (existing) {
+						yield* Deferred.await(existing.done);
+						return context;
+					}
+					const start = Deferred.makeUnsafe<void, ProjectServicesError>();
+					// Its own scope under the generation's: a failed start or `close`
+					// ends only what it wired, and removal closes both.
+					const startScope = yield* Scope.fork(scope);
+					starts.set(scope, { done: start, scope: startScope });
+					const pushManager = Option.getOrUndefined(
+						yield* push.getLegacyManager,
+					);
+					yield* Effect.forkIn(
+						startProject({ scope: startScope, pushManager }).pipe(
+							Effect.provideContext(Context.merge(context, startContext)),
+							Effect.andThen(
+								Effect.sync(() => {
+									started.add(scope);
+									// Child-process tests wait for the project to run their fake SDK.
+									if (testSdk && !options.claudeSdk && process.connected)
+										process.send?.({
+											channel: "conduit-process-test",
+											kind: "fake-sdk-active",
+											module: process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"],
+											projectDir: folder,
+										});
+								}),
+							),
+							// Startup may read defaults before a global write lands; once
+							// opened, broadcasts reach it, so read them again.
+							Effect.andThen(
+								refreshGlobalDefaults.pipe(Effect.provideContext(context)),
+							),
+							Effect.andThen(Deferred.succeed(start, undefined)),
+							Effect.onExit((exit) =>
+								Exit.isSuccess(exit)
+									? Effect.void
+									: Effect.gen(function* () {
+											// An interrupted start means the generation is closing.
+											const interrupted = Failure.isInterruptedOnly(exit.cause);
+											if (!interrupted) yield* Scope.close(startScope, exit);
+											starts.delete(scope);
+											yield* Deferred.fail(
+												start,
+												refuse(
+													projectId,
+													interrupted
+														? `Project "${projectId}" start was interrupted`
+														: `Project "${projectId}" failed to start: ${Failure.renderCause(exit.cause)}`,
+												),
+											);
+										}),
+							),
+						),
+						scope,
+					);
+					yield* Deferred.await(start);
+					return context;
+				});
+			const opened: ProjectServices["Service"]["opened"] = (projectId) => {
+				const parts = generations.get(projectId);
+				return parts && started.has(Context.get(parts, RpcSubscriptionScopeTag))
+					? forProject(projectId).pipe(Effect.option)
+					: Effect.succeed(Option.none());
+			};
+			const close: ProjectServices["Service"]["close"] = (projectId) =>
+				Effect.gen(function* () {
+					const parts = generations.get(projectId);
+					if (!parts) return;
+					const scope = Context.get(parts, RpcSubscriptionScopeTag);
+					const current = starts.get(scope);
+					if (!current) return;
+					// A start in flight finishes (or fails) before it is closed.
+					yield* Effect.exit(Deferred.await(current.done));
+					if (starts.get(scope) !== current) return;
+					starts.delete(scope);
+					started.delete(scope);
+					yield* Scope.close(current.scope, Exit.void);
+				});
+			return Context.make(ProjectServices, {
+				generation,
+				forProject,
+				open,
+				opened,
+				close,
+			}).pipe(Context.add(SessionManagerServiceTag, sessionManagers));
 		}),
 	);

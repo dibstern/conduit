@@ -29,6 +29,7 @@ import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daem
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	makeRelayCacheLive,
+	type Relay,
 	RelayCacheTag,
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
@@ -77,7 +78,10 @@ const standInProjectContexts = Effect.gen(function* () {
 	return (slug: string) =>
 		Effect.gen(function* () {
 			yield* router.ensureRelayStarted(slug);
-			const relay = yield* cache.get(slug);
+			// The daemon's handle carries no handler; these stand-ins add one (lane 16q).
+			const relay = (yield* cache.get(slug)) as Relay & {
+				readonly rpcWsHandler: { readonly context?: Effect.Effect<unknown> };
+			};
 			const context = relay.rpcWsHandler.context;
 			if (!context) return yield* Effect.die("Stand-in relay has no context");
 			// The stand-in runtime carries the handler services, not every project part.

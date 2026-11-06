@@ -9,14 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodePath } from "@effect/platform-node";
-import {
-	type Context,
-	Effect,
-	Layer,
-	ManagedRuntime,
-	Ref,
-	Result,
-} from "effect";
+import { Effect, Layer, ManagedRuntime, Ref, Result } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../src/lib/contracts/provider-instance.js";
 import { loadDaemonConfigStartupResult } from "../../src/lib/daemon/config-persistence.js";
 import {
@@ -50,7 +43,6 @@ import { ProjectRpcContextsTag } from "../../src/lib/domain/server/Layers/ws-rou
 import { verifyReplayParity } from "../../src/lib/persistence/replay-parity.js";
 import { sdkDefaultClaudeConfigDir } from "../../src/lib/provider/claude/claude-sdk-env.js";
 import { ProjectShellEnvResolver } from "../../src/lib/provider/project-shell-env.js";
-import type { createProjectRelayLayers } from "../../src/lib/relay/project-relay-layers.js";
 import type {
 	RpcSubscriptionScopeTag,
 	WsRpcServerLayer,
@@ -143,10 +135,6 @@ type ProjectServices =
 	| Layer.Services<typeof WsRpcServerLayer>
 	| RpcSubscriptionScopeTag
 	| ProjectParts;
-/** What the project's relay runtime still provides until S6. */
-type RelayServices = ManagedRuntime.ManagedRuntime.Services<
-	ReturnType<typeof createProjectRelayLayers>["relayManagedRuntime"]
->;
 
 /** Shell capture stand-in: a fixed environment, readiness from the test. */
 export class FixedShellEnv extends ProjectShellEnvResolver {
@@ -266,7 +254,7 @@ export async function createDaemonProject(
 	};
 	const projectDir = options.projectDir ?? process.cwd();
 	try {
-		const { port, projectContext, relayContext } = await daemon.runPromise(
+		const { port, projectContext } = await daemon.runPromise(
 			Effect.gen(function* () {
 				yield* addWithoutRelay(
 					{
@@ -311,27 +299,15 @@ export async function createDaemonProject(
 							: Effect.void,
 					{ discard: true },
 				);
-				const relay = yield* Effect.flatMap(RelayCacheTag, (cache) =>
-					cache.get(slug),
-				);
-				const relayContext = relay.rpcWsHandler.context;
-				if (!relayContext) return yield* Effect.die("Project has no relay");
 				return {
 					port: (yield* Ref.get(yield* DaemonConfigRefTag)).port,
 					projectContext: yield* (yield* ProjectRpcContextsTag)(slug),
-					// Relay-only services (its SSE stream and status poller) until S6.
-					relayContext: (yield* relayContext) as unknown as Context.Context<
-						ProjectServices | RelayServices
-					>,
 				};
 			}),
 		);
 		const run = <A, E>(
 			effect: Effect.Effect<A, E, ProjectServices | DaemonServices>,
 		) => daemon.runPromise(Effect.provide(effect, projectContext));
-		const runOnRelay = <A, E>(
-			effect: Effect.Effect<A, E, RelayServices | DaemonServices>,
-		) => daemon.runPromise(Effect.provide(effect, relayContext));
 		return {
 			slug,
 			port,
@@ -341,7 +317,6 @@ export async function createDaemonProject(
 			mock,
 			daemon,
 			run,
-			runOnRelay,
 			/** The managed OpenCode client for the project's folder. */
 			opencode: () =>
 				run(

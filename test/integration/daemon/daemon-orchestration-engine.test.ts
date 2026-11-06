@@ -1251,8 +1251,10 @@ describe("one daemon orchestration engine", () => {
 					_tag: "RemoveProject",
 					slug: "process-test",
 				});
-				expect(await connecting).toEqual(
-					expect.stringContaining("invalidated"),
+				const interrupted = await connecting;
+				evidence[`interruptedConnect${round}`] = interrupted;
+				expect(interrupted).toEqual(
+					expect.stringContaining("start was interrupted"),
 				);
 				unlinkSync(gate);
 			}

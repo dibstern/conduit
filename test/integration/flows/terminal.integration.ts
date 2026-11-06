@@ -93,7 +93,7 @@ async function signalDelivered(
 	type: PtyEvent["type"] = "pty.created",
 ) {
 	let delivered = 0;
-	(await harness.runOnRelay(SSEStreamTag)).on("event", (event) => {
+	(await harness.run(SSEStreamTag)).on("event", (event) => {
 		if (
 			isPtyEvent(event) &&
 			event.type === type &&
@@ -444,6 +444,28 @@ describe("Integration: Terminal (PTY)", () => {
 		).toHaveLength(0);
 		expect(manager.hasSession(pty.id)).toBe(false);
 	}, 20_000);
+
+	it("reconciles a PTY another client opens while no tab views the project", async () => {
+		// Lane 16q: the project's own SSE consumer, not a relay, tells its
+		// terminals; no browser has connected to this project.
+		const isolated = await createDaemonProject();
+		try {
+			const { manager } = await relayServices(isolated);
+			const pty = await createExternalPty(isolated);
+			const lists = listCount(isolated);
+			const reconciled = new Promise<void>((resolve) => {
+				manager.subscribe((event) => {
+					if (event._tag === "upsert" && event.item.id === pty.id) resolve();
+				});
+			});
+			signal(isolated, "pty.created", pty);
+			await reconciled;
+			expect(listCount(isolated)).toBeGreaterThan(lists);
+			expect(manager.hasSession(pty.id)).toBe(true);
+		} finally {
+			await isolated.stop();
+		}
+	});
 
 	it("does not start a stopped instance in response to a lifecycle signal", async () => {
 		const client = await connect(harness);

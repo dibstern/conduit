@@ -12,6 +12,7 @@ import type {
 	PersistenceProjectContext,
 	PersistenceStoreContext,
 } from "../../../persistence/effect/live.js";
+import type { SessionStateProjectionNotifierTag } from "../../../persistence/effect/session-state-projection-notifier.js";
 import { daemonStorePath } from "../../../persistence/project-storage.js";
 import type { RpcSubscriptionScopeTag } from "../../../server/ws-rpc.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
@@ -41,6 +42,7 @@ import type {
 	OpenCodeSettingsServiceTag,
 	PollerManagerTag,
 	PtyManagerTag,
+	StatusPollerTag,
 	TranslatorTag,
 } from "../../relay/Services/services.js";
 import type { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
@@ -49,8 +51,13 @@ import type {
 	ProjectSessionManagerParts,
 	SessionManagerServiceTag,
 } from "../../relay/Services/session-manager-service.js";
+import type {
+	PollerPubSubTag,
+	PollerStateTag,
+} from "../../relay/Services/session-status-poller.js";
 import type { SessionTitleServiceTag } from "../../relay/Services/session-title-service.js";
 import type { SessionWorkspaceHintStateTag } from "../../relay/Services/session-workspace-hint-state.js";
+import type { SSEStreamTag } from "../../relay/Services/sse-stream-service.js";
 import type { OpenCodeTerminalServiceTag } from "../../relay/Services/terminal-service.js";
 import type { ToolContentServiceTag } from "../../relay/Services/tool-content-service.js";
 import type { ProjectShellEnvTag } from "../Layers/project-shell-env-layer.js";
@@ -92,6 +99,8 @@ export type ProjectGenerationParts =
 	| SessionInboxTag
 	// Terminals (lane 16o).
 	| OpenCodeTerminalServiceTag
+	// Reactors over the project's committed events (lane 16q).
+	| SessionStateProjectionNotifierTag
 	| PtyManagerTag
 	| ConnectPtyUpstreamTag
 	// OpenCode file and catalog readers (lane 16o).
@@ -103,7 +112,12 @@ export type ProjectGenerationParts =
 	// The message poller (lane 16p).
 	| PollerManagerTag
 	// Streams a tab opens on the project end with the generation, not a relay (lane 16p).
-	| RpcSubscriptionScopeTag;
+	| RpcSubscriptionScopeTag
+	// The OpenCode stream and the status poller (lane 16q).
+	| SSEStreamTag
+	| StatusPollerTag
+	| PollerStateTag
+	| PollerPubSubTag;
 
 /** Everything a call naming the project runs with, built by the daemon. */
 export type ProjectParts =
@@ -134,6 +148,24 @@ export class ProjectServices extends Context.Service<
 			Context.Context<ProjectGenerationParts>,
 			ProjectServicesError
 		>;
+		/**
+		 * Starts the project in its generation once (recovery, its OpenCode stream,
+		 * the inbox) and waits for that start (lane 16q). A failed start is retried
+		 * by the next call.
+		 */
+		readonly open: (
+			projectId: string,
+		) => Effect.Effect<Context.Context<ProjectParts>, ProjectServicesError>;
+		/** The project's context if its current generation has started. Starts nothing. */
+		readonly opened: (
+			projectId: string,
+		) => Effect.Effect<Option.Option<Context.Context<ProjectParts>>>;
+		/**
+		 * Ends the project's start (its recovery, stream listeners and inbox) and
+		 * keeps the generation; the next `open` starts again with the current
+		 * folders. Commands wait meanwhile, as across a replaced relay.
+		 */
+		readonly close: (projectId: string) => Effect.Effect<void>;
 	}
 >()("ProjectServices") {}
 

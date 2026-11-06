@@ -135,7 +135,6 @@ const relayWithSnapshot = (
 	snapshot: RelayStatusSnapshot,
 ): Relay => ({
 	slug,
-	rpcWsHandler: {},
 	syncGlobalSetting: () => Effect.void,
 	refreshGlobalDefaults: () => Effect.void,
 	getStatusSnapshot: () => snapshot,

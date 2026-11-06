@@ -60,8 +60,8 @@ import {
 	type ProjectRegistryState,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
+import { ProjectServices } from "../Services/project-services.js";
 import { ProviderAdapters } from "../Services/provider-adapters.js";
-import { RelayCacheTag } from "../Services/relay-cache.js";
 import {
 	type DaemonLiveOptions,
 	makeDaemonLive,
@@ -220,7 +220,7 @@ type ForegroundRuntimeRequirements =
 	| DaemonConfigRefTag
 	| InstanceManagerStateTag
 	| ProjectRegistryTag
-	| RelayCacheTag
+	| ProjectServices
 	| ShutdownSignalTag
 	| ProviderAdapters
 	| DaemonOrchestration
@@ -514,18 +514,18 @@ export async function startForegroundDaemon(
 		await runRuntimeEffect(
 			runtime,
 			Effect.gen(function* () {
-				const relayCache = yield* RelayCacheTag;
+				const projects = yield* ProjectServices;
 				const adapters = yield* ProviderAdapters;
 				// Persist startup refreshes even when no project is saved this run.
 				yield* (yield* ConfigPersistenceTag).requestSave;
-				// Every recovery relay lends its project-owned services before the
-				// shared pass starts. Starting them together avoids serial startup
+				// Every recovery project opens in its generation before the shared
+				// pass starts. Starting them together avoids serial startup
 				// waiting on a project that has not yet reached the barrier.
 				yield* Effect.forEach(
 					adapters.recoveryProjects,
 					(slug) =>
-						relayCache
-							.get(slug)
+						projects
+							.open(slug)
 							.pipe(
 								Effect.catchCause((cause) =>
 									Failure.isInterruptedOnly(cause)
@@ -535,7 +535,7 @@ export async function startForegroundDaemon(
 												.pipe(
 													Effect.andThen(
 														Effect.logError(
-															`Failed to recover relay for project "${slug}"`,
+															`Failed to recover project "${slug}"`,
 															cause,
 														),
 													),

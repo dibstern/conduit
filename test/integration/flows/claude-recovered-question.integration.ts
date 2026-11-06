@@ -278,9 +278,11 @@ describe("Integration: recovered Claude questions", () => {
 					.get(sessionId);
 				// The compatibility handler has no command engine. A process-owned
 				// prompt must expire instead of turning its answer into a new input.
-				const contextEffect = (await fixture.relay()).rpcWsHandler.context;
-				if (!contextEffect) throw new Error("Missing RPC handler context");
-				const handlerContext = await run(contextEffect);
+				const handlerContext = await run(
+					Effect.context<
+						Effect.Services<ReturnType<typeof handleAskUserResponse>>
+					>(),
+				);
 				await expect(
 					Effect.runPromise(
 						handleAskUserResponse(client.getClientId(), {

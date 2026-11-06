@@ -219,7 +219,6 @@ describe("archived tree retention", () => {
 						slug: "test-project",
 						syncGlobalSetting: () => Effect.void,
 						refreshGlobalDefaults: () => Effect.void,
-						rpcWsHandler: {} as Relay["rpcWsHandler"],
 						stop: () => {},
 						deleteArchivedSessions: (windowMs, at) =>
 							service.deleteArchivedSessions(windowMs, at),

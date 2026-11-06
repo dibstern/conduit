@@ -4,7 +4,7 @@
 // unit test suite (~15s total). Run via `pnpm test:integration`.
 //
 // Covers:
-// - Lazy RPC activation and project status while relays register or fail
+// - Lazy RPC activation and project status while project starts run or fail
 // - Rejection of removed per-project socket paths
 // - WS upgrade rejection for non-matching URLs
 // - Instance status broadcast and health checking
@@ -13,7 +13,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Layer, ManagedRuntime } from "effect";
+import { Effect } from "effect";
 import {
 	afterEach,
 	assert,
@@ -29,8 +29,6 @@ import {
 	type ForegroundDaemonHandle,
 	startForegroundDaemon,
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
-import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
-import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 
 function makeTmpDir(prefix: string): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -42,6 +40,21 @@ function cleanTmpDir(dir: string): void {
 	} catch {
 		// ignore
 	}
+}
+
+const PROJECT_STARTUP =
+	"../../../src/lib/domain/daemon/Layers/project-startup.js";
+
+/** A fresh daemon module graph whose projects start with `startProject`. */
+async function withProjectStart(
+	startProject: () => Effect.Effect<void, Error>,
+) {
+	vi.resetModules();
+	vi.doMock(PROJECT_STARTUP, () => ({ startProject }));
+	const foreground = await import(
+		"../../../src/lib/domain/daemon/Layers/daemon-foreground.js"
+	);
+	return foreground.startForegroundDaemon;
 }
 
 function daemonOpts(tmpDir: string, port = 0) {
@@ -61,42 +74,24 @@ describe("daemon project readiness and socket routing", () => {
 	});
 
 	afterEach(() => {
+		vi.doUnmock(PROJECT_STARTUP);
 		cleanTmpDir(tmpDir);
 	});
 
-	it("reports a registering project as ready after its relay starts", async () => {
-		const { createMockProjectRelay, makeMockConfig, makeTestHandlerLayer } =
-			await import("../../helpers/mock-factories.js");
+	it("reports a registering project as ready after its start finishes", async () => {
+		let releaseStart!: () => void;
+		const startGate = new Promise<void>((resolve) => {
+			releaseStart = resolve;
+		});
+		const startProjectMock = vi.fn(() => Effect.promise(() => startGate));
+		const startDaemon = await withProjectStart(startProjectMock);
 		const slug = "ws-test-app";
-		const runtime = ManagedRuntime.make(
-			Layer.mergeAll(
-				makeTestHandlerLayer({ config: makeMockConfig({ slug }) }),
-				makeWsTransportLive({ noServer: true }),
-			),
-		);
-		const rpcWsHandler = await runtime.runPromise(
-			makeWsRpcWebSocketHandler({ runtime }),
-		);
-		const relay = createMockProjectRelay({ rpcWsHandler });
-
-		let releaseRelay!: () => void;
-		const relayGate = new Promise<void>((resolve) => {
-			releaseRelay = resolve;
-		});
-		const createProjectRelayMock = vi.fn(async () => {
-			await relayGate;
-			return relay;
-		});
-		vi.doMock("../../../src/lib/relay/relay-stack.js", () => ({
-			createProjectRelay: createProjectRelayMock,
-		}));
-
 		const projectDir = join(tmpDir, slug);
 		mkdirSync(projectDir, { recursive: true });
 		let d: ForegroundDaemonHandle | null = null;
 
 		try {
-			d = await startForegroundDaemon({
+			d = await startDaemon({
 				...daemonOpts(tmpDir),
 				opencodeUrl: "http://localhost:4096",
 			});
@@ -109,7 +104,7 @@ describe("daemon project readiness and socket routing", () => {
 			expect(
 				registering.projects.find((project) => project.slug === slug)?.status,
 			).toBe("registering");
-			expect(createProjectRelayMock).not.toHaveBeenCalled();
+			expect(startProjectMock).not.toHaveBeenCalled();
 			let attachmentSettled = false;
 			const attachment = sendRpcRequest(join(tmpDir, "relay.sock"), {
 				_tag: "GetCommands",
@@ -119,7 +114,7 @@ describe("daemon project readiness and socket routing", () => {
 			});
 
 			await vi.waitFor(() => {
-				expect(createProjectRelayMock).toHaveBeenCalledOnce();
+				expect(startProjectMock).toHaveBeenCalledOnce();
 			});
 			expect(attachmentSettled).toBe(false);
 			expect(
@@ -128,7 +123,7 @@ describe("daemon project readiness and socket routing", () => {
 					.projects.find((project) => project.slug === slug)?.status,
 			).toBe("registering");
 
-			releaseRelay();
+			releaseStart();
 			expect(await attachment).toMatchObject({ projectSlug: slug });
 
 			await vi.waitFor(() => {
@@ -145,14 +140,8 @@ describe("daemon project readiness and socket routing", () => {
 				ready.projects.find((project) => project.slug === slug)?.status,
 			).toBe("ready");
 		} finally {
-			releaseRelay();
-			try {
-				await d?.stop();
-			} finally {
-				await rpcWsHandler.drain();
-				await runtime.dispose();
-				vi.doUnmock("../../../src/lib/relay/relay-stack.js");
-			}
+			releaseStart();
+			await d?.stop();
 		}
 	});
 
@@ -194,22 +183,20 @@ describe("daemon project readiness and socket routing", () => {
 		}
 	});
 
-	it("reports failed relay startup while daemon RPC remains available", async () => {
-		const createProjectRelayMock = vi.fn(async () => {
-			throw new Error("Relay startup failed");
-		});
-		vi.doMock("../../../src/lib/relay/relay-stack.js", () => ({
-			createProjectRelay: createProjectRelayMock,
-		}));
+	it("reports a failed project start while daemon RPC remains available", async () => {
+		const startProjectMock = vi.fn(() =>
+			Effect.fail(new Error("Project startup failed")),
+		);
+		const startDaemon = await withProjectStart(startProjectMock);
 		const slug = "error-app";
 		let d: ForegroundDaemonHandle | null = null;
 
 		try {
-			d = await startForegroundDaemon(daemonOpts(tmpDir));
+			d = await startDaemon(daemonOpts(tmpDir));
 			const directory = join(tmpDir, slug);
 			mkdirSync(directory);
 			await d.addProject(directory);
-			expect(createProjectRelayMock).not.toHaveBeenCalled();
+			expect(startProjectMock).not.toHaveBeenCalled();
 			await expect(
 				sendRpcRequest(join(tmpDir, "relay.sock"), {
 					_tag: "GetCommands",
@@ -219,7 +206,7 @@ describe("daemon project readiness and socket routing", () => {
 				_tag: "WsRpcError",
 				message: expect.stringContaining(`Project "${slug}" unavailable`),
 			});
-			expect(createProjectRelayMock).toHaveBeenCalledOnce();
+			expect(startProjectMock).toHaveBeenCalledOnce();
 			const runningDaemon = d;
 			await vi.waitFor(() => {
 				const project = runningDaemon
@@ -234,11 +221,7 @@ describe("daemon project readiness and socket routing", () => {
 				failed.projects.find((project) => project.slug === slug)?.status,
 			).toBe("error");
 		} finally {
-			try {
-				await d?.stop();
-			} finally {
-				vi.doUnmock("../../../src/lib/relay/relay-stack.js");
-			}
+			await d?.stop();
 		}
 	});
 

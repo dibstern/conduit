@@ -179,6 +179,9 @@ const scopeOpenerSites = new Map([
 	// An account's resources, not a project's or session's.
 	[`${root}/Layers/account-resource-scopes-layer.ts:Scope.make`, 1],
 	[`${root}/Layers/keep-awake-layer.ts:Scope.fork`, 1],
+	// A project's start, a child of the generation Owner Scopes opened, so a
+	// failed start closes alone (lane 16q).
+	[`${root}/Layers/project-services-layer.ts:Scope.fork`, 1],
 	// The daemon's own runtime.
 	[`${root}/Layers/daemon-foreground.ts:ManagedRuntime.make`, 1],
 	// The relay's runtimes; 82tn.16 deletes the relay.

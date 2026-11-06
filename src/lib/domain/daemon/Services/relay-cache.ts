@@ -29,7 +29,6 @@ import type {
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
 import type { PersistenceEffectError } from "../../../persistence/effect/live.js";
-import type { RpcWebSocketHandlerShape } from "../../../server/ws-rpc-handler.js";
 import type { ConnectionHealth } from "../../../types.js";
 import type { SessionManagerError } from "../../relay/Services/session-manager-error.js";
 import type { RelayFactoryError } from "../Layers/relay-factory-layer.js";
@@ -59,11 +58,10 @@ export interface Relay {
 		now: number,
 	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
 	slug: string;
-	/** Relay-only services for tests until S6 (82tn.16); no RPC reads it. */
-	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 	getStatusSnapshot?: () => RelayStatusSnapshot;
 	setDefaultAgent?: (agent: string) => Effect.Effect<void, WsRpcError>;
-	stop: () => void | Promise<void>;
+	/** Only the standalone test cache stops one; a project's owner scope ends the daemon's. */
+	stop?: () => void | Promise<void>;
 }
 
 export class RelayStopError extends Data.TaggedError("RelayStopError")<{
@@ -126,7 +124,7 @@ type CacheMap = HashMap.HashMap<string, CacheEntry>;
 const stopRelayFinalizer = (relay: Relay) =>
 	Effect.tryPromise({
 		try: async () => {
-			await relay.stop();
+			await relay.stop?.();
 		},
 		catch: (cause) => new RelayStopError({ slug: relay.slug, cause }),
 	}).pipe(

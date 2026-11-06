@@ -46,14 +46,17 @@ describe("process harness supplied builds", () => {
 
 	it("rejects a build ignoring the fake selector before any SDK prompt", async () => {
 		const { root, dist } = copyBuild();
-		const relayPath = join(dist, "src/lib/relay/relay-stack.js");
-		const relay = readFileSync(relayPath, "utf8");
+		const selectorPath = join(
+			dist,
+			"src/lib/provider/claude/claude-sdk-module.js",
+		);
+		const loader = readFileSync(selectorPath, "utf8");
 		const selector =
-			'const testQueryModule = process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"];';
-		expect(relay).toContain(selector);
+			'const testModule = process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"];';
+		expect(loader).toContain(selector);
 		writeFileSync(
-			relayPath,
-			relay.replace(selector, "const testQueryModule = undefined;"),
+			selectorPath,
+			loader.replace(selector, "const testModule = undefined;"),
 		);
 		const runtimePath = join(
 			dist,

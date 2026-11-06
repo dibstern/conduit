@@ -1,11 +1,10 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Context, Effect, Fiber, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
-import { makeRelayCacheLayer } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
 	HttpServerRefTag,
@@ -18,13 +17,11 @@ import {
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
-import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { ProviderAdapters } from "../../../src/lib/domain/daemon/Services/provider-adapters.js";
-import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
@@ -571,130 +568,4 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			),
 		);
 	});
-
-	it.effect(
-		"threads relay-cache-owned project mutators into relay config",
-		() => {
-			const dir = mkdtempSync("/tmp/relay-project-mutators-");
-			const projectDir = join(dir, "project");
-			mkdirSync(projectDir);
-			const server = createServer();
-			const firstStop = vi.fn(async () => undefined);
-			const secondStop = vi.fn(async () => undefined);
-			createProjectRelayMock
-				.mockResolvedValueOnce({
-					syncGlobalSetting: () => Effect.void,
-					refreshGlobalDefaults: () => Effect.void,
-					stop: firstStop,
-				})
-				.mockResolvedValueOnce({
-					syncGlobalSetting: () => Effect.void,
-					refreshGlobalDefaults: () => Effect.void,
-					stop: secondStop,
-				});
-
-			const baseLayer = Layer.mergeAll(
-				DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
-				makeDaemonStateLive({ configDir: join(dir, "config") }),
-				ConfigPersistenceNoopLive,
-				DaemonEventBusLive,
-				Layer.effect(SessionActivityTag, makeSessionActivity),
-				makeProjectRegistryLive([
-					{
-						slug: "effect-project",
-						title: "Effect Project",
-						folders: [projectDir],
-					},
-				]),
-				makeInstanceManagerStateLive(
-					undefined,
-					[
-						{
-							id: "opencode",
-							name: "Default",
-							port: 4096,
-							managed: false,
-							url: "http://localhost:4096",
-						},
-						{
-							id: "remote",
-							name: "Remote",
-							port: 4321,
-							managed: false,
-							url: "http://localhost:4321",
-						},
-					],
-					{
-						...{ defaultOpencodeUrl: "http://localhost:4096" },
-						launchLogin: sdkDefaultClaudeConfigDir(
-							"/isolated-test-home/.claude",
-						),
-					},
-				),
-				NoopAuxiliaryDaemonServices,
-			);
-			const layer = makeRelayCacheLayer().pipe(
-				Layer.provideMerge(RelayFactoryLive(join(dir, "config"))),
-				Layer.provide(baseLayer),
-			);
-
-			return Effect.gen(function* () {
-				const httpServerRef = yield* HttpServerRefTag;
-				yield* Ref.set(httpServerRef, server);
-
-				const cache = yield* RelayCacheTag;
-				yield* cache.get("effect-project");
-
-				const config = createProjectRelayMock.mock.calls[0]?.[0];
-				const context = config?.daemonConfigContext;
-				if (!context) throw new Error("Missing daemon Effect context");
-				expect(config).not.toHaveProperty("saveProject");
-				expect(config).not.toHaveProperty("removeProject");
-				const service = Option.getOrThrow(
-					Context.getOption(context, ProjectManagementServiceTag),
-				);
-				const { project: added } = yield* service.save({
-					folders: [{ path: join(dir, "added"), create: { gitInit: false } }],
-				});
-				expect(added).toEqual(
-					expect.objectContaining({
-						title: "added",
-						folders: [realpathSync(join(dir, "added"))],
-					}),
-				);
-				yield* service.save({
-					slug: added.slug,
-					folders: added.folders,
-					title: "Added Project",
-				});
-				let projects = yield* service.list();
-				expect(projects).toContainEqual(
-					expect.objectContaining({ slug: added.slug, title: "Added Project" }),
-				);
-				const invalid = yield* Effect.result(
-					service.save({ folders: [join(dir, "missing")] }),
-				);
-				expect(invalid).toMatchObject({
-					_tag: "Failure",
-					failure: { _tag: "ProjectSaveRejected" },
-				});
-				projects = yield* service.remove(added.slug);
-				expect(projects.some((project) => project.slug === added.slug)).toBe(
-					false,
-				);
-
-				expect(firstStop).not.toHaveBeenCalled();
-				expect(createProjectRelayMock).toHaveBeenCalledOnce();
-			}).pipe(
-				Effect.provide(Layer.fresh(layer)),
-				Effect.ensuring(
-					Effect.sync(() => {
-						server.close();
-						rmSync(dir, { recursive: true, force: true });
-						createProjectRelayMock.mockReset();
-					}),
-				),
-			);
-		},
-	);
 });

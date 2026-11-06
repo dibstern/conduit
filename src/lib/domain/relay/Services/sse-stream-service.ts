@@ -208,6 +208,9 @@ export const SSEStreamLive: Layer.Layer<
 					if (detach) yield* detach;
 					detach = undefined;
 					main.markDisconnected();
+					// The next start wires each account's channel to its own consumers.
+					others.clear();
+					wirer = undefined;
 				}),
 			);
 		yield* Effect.addFinalizer(disconnectEffect);

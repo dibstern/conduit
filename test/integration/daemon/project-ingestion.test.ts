@@ -1049,11 +1049,12 @@ describe("82tn.16: a project's RPCs run on the daemon's project context", () => 
 		expect(observed).toEqual({ shown: true, afterRemove: false });
 	});
 
-	it("serves each project from its own context, with no relay's services in it", async () => {
+	it("serves each project from its own context, with its own stream and poller", async () => {
 		const daemon = start("rpc-context-no-relay").boot();
 		await daemon.register("alpha");
 		await daemon.register("beta");
 		const alphaPoller = await daemon.inProject("alpha", PollerManagerTag);
+		const alphaStream = await daemon.inProject("alpha", SSEStreamTag);
 		const observed = await daemon.daemon.runPromise(
 			Effect.gen(function* () {
 				const resolve = yield* ProjectRpcContextsTag;
@@ -1063,7 +1064,8 @@ describe("82tn.16: a project's RPCs run on the daemon's project context", () => 
 					alpha: Context.get(alpha, ConfigTag).slug,
 					beta: Context.get(beta, ConfigTag).slug,
 					projectPoller: Context.get(alpha, PollerManagerTag) === alphaPoller,
-					relayStream: Option.isSome(Context.getOption(alpha, SSEStreamTag)),
+					projectStream: Context.get(alpha, SSEStreamTag) === alphaStream,
+					sharedStream: Context.get(beta, SSEStreamTag) === alphaStream,
 				};
 			}),
 		);
@@ -1072,7 +1074,8 @@ describe("82tn.16: a project's RPCs run on the daemon's project context", () => 
 			alpha: "alpha",
 			beta: "beta",
 			projectPoller: true,
-			relayStream: false,
+			projectStream: true,
+			sharedStream: false,
 		});
 	});
 });

@@ -103,8 +103,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 		expect(tally(server, named(relayNames))).toEqual(
 			new Map([
 				[`${daemon}/Layers/auto-settle-layer.ts`, 2],
-				[`${daemon}/Layers/daemon-foreground.ts`, 3],
-				[`${daemon}/Layers/daemon-layers.ts`, 8],
+				[`${daemon}/Layers/daemon-layers.ts`, 3],
 				[`${daemon}/Layers/daemon-ws-rpc-layer.ts`, 4],
 				[`${daemon}/Layers/opencode-instances-layer.ts`, 2],
 				[`${daemon}/Layers/provider-adapters-layer.ts`, 3],
@@ -127,8 +126,8 @@ describe("per-project relay stays retired (82tn.16)", () => {
 	});
 
 	it("runs a project's RPCs on the daemon's project context, never a relay's", () => {
-		// Lane 16p: no RPC waits for a relay or reads its context. The cache entry
-		// still carries the relay's context for relay-only test reads until S6.
+		// Lane 16p: no RPC waits for a relay or reads its context. Lane 16q: the
+		// daemon's open projects carry no relay context either.
 		const relayRpc = new Set([
 			"rpcWsHandler",
 			"waitForRelay",
@@ -136,10 +135,22 @@ describe("per-project relay stays retired (82tn.16)", () => {
 		]);
 		expect(tally(server, named(relayRpc))).toEqual(
 			new Map([
-				[`${daemon}/Layers/daemon-layers.ts`, 2],
-				[`${daemon}/Services/relay-cache.ts`, 1],
 				[`${relay}/project-relay-startup.ts`, 4],
 				[`${relay}/relay-stack.ts`, 8],
+			]),
+		);
+	});
+
+	it("opens a registered project in its generation, never through a relay (lane 16q)", () => {
+		// Startup, the SSE consumer and the status poller run in the project's
+		// generation; only the relay factory itself still names a relay's maker.
+		expect(
+			tally(server, named(new Set(["RelayFactoryTag", "startProjectRelay"]))),
+		).toEqual(
+			new Map([
+				[`${daemon}/Layers/relay-factory-layer.ts`, 4],
+				[`${relay}/relay-stack.ts`, 2],
+				[`${relay}/project-relay-startup.ts`, 1],
 			]),
 		);
 	});
@@ -278,6 +289,8 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			new Map([
 				// Owner Scopes opens every project and session scope.
 				[`${daemon}/Layers/owner-scopes-layer.ts`, 1],
+				// A project's start, under its generation, so a failed start closes alone (lane 16q).
+				[`${daemon}/Layers/project-services-layer.ts`, 1],
 				// An account's resources and the keep-awake hold: not a project's or session's.
 				[`${daemon}/Layers/account-resource-scopes-layer.ts`, 1],
 				[`${daemon}/Layers/keep-awake-layer.ts`, 1],

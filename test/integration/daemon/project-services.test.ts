@@ -25,7 +25,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodePath } from "@effect/platform-node";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Layer, ManagedRuntime, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it } from "vitest";
 import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
@@ -35,11 +35,16 @@ import {
 	addWithoutRelay,
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
+import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { SSEStreamTag } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
@@ -222,6 +227,55 @@ describe("82tn.16: the daemon builds each project's context", () => {
 		evidence.observed = observed;
 		expect(observed.refused).toMatch(/Project "alpha" is not registered/);
 		expect(observed.rows).toEqual([{ id: "s1", project_id: "alpha" }]);
+	});
+
+	it("opens a project in its generation and removal ends its stream", async () => {
+		// Lane 16q, rows 144-145: the stream and status poller are the
+		// generation's; a re-added project gets fresh ones.
+		const daemon = start("open").boot();
+		const opened = async () => {
+			await daemon.daemon.runPromise(
+				Effect.flatMap(RelayCacheTag, (projects) => projects.get("alpha")),
+			);
+			const context = await daemon.daemon.runPromise(
+				Effect.flatMap(ProjectServices, (services) =>
+					services.forProject("alpha"),
+				),
+			);
+			return {
+				stream: Context.getOption(context, SSEStreamTag),
+				poller: Context.getOption(context, StatusPollerTag),
+				// A commit in the project's context refreshes lineage, as the relay's did.
+				notifier: Context.getOption(context, SessionStateProjectionNotifierTag),
+			};
+		};
+		await daemon.register("alpha");
+		const first = await opened();
+		const firstStream = Option.getOrThrow(first.stream);
+		await daemon.daemon.runPromise(remove("alpha"));
+		const afterRemoval = {
+			connected: firstStream.isConnected(),
+			open: Option.isSome(
+				await daemon.daemon.runPromise(
+					Effect.flatMap(RelayCacheTag, (projects) => projects.peek("alpha")),
+				),
+			),
+		};
+		await daemon.register("alpha");
+		const second = await opened();
+		const observed = {
+			poller: Option.isSome(first.poller),
+			notifier: Option.isSome(first.notifier),
+			afterRemoval,
+			fresh: Option.getOrThrow(second.stream) !== firstStream,
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			poller: true,
+			notifier: true,
+			afterRemoval: { connected: false, open: false },
+			fresh: true,
+		});
 	});
 
 	it("serves a project's stored sessions after a restart without a relay", async () => {
