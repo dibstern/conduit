@@ -172,7 +172,12 @@ export const taskDrillInHandlers: StepHandler[] = [
 				attention: undefined,
 				backgroundTasks: undefined,
 			});
-			upsertRow(world.page, { id: FLAKY_TEST_SESSION, status: "idle" });
+			upsertRow(world.page, {
+				id: FLAKY_TEST_SESSION,
+				status: "idle",
+				// The row's activity, not its status, ends the Child Session's turn.
+				activity: rowActivity(false),
+			});
 		},
 	},
 	{
