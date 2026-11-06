@@ -131,14 +131,16 @@ export function createTraceCursorSdkPort(
 	let contents: string | undefined;
 	let rows: TraceRow[] = [];
 	const stores = new WeakMap<CursorStore, string>();
-	// One file per agent, as Cursor's store keeps each agent's runs apart.
+	// One file per agent, as Cursor's store keeps each agent's runs apart. A runner
+	// built before that kept its one agent in trace-state.json; Cursor's store
+	// outlives a runner build, so that file still holds its agent's runs.
 	const statePath = (storePath: string, agentId: string) =>
 		join(storePath, `trace-state-${agentId}.json`);
-	const readState = (
-		storePath: string,
-		agentId: string,
-	): TraceAgentState | undefined => {
-		const file = statePath(storePath, agentId);
+	const statePaths = (storePath: string, agentId: string) => [
+		statePath(storePath, agentId),
+		join(storePath, "trace-state.json"),
+	];
+	const readStateFile = (file: string): TraceAgentState | undefined => {
 		if (!existsSync(file)) return undefined;
 		const value: unknown = JSON.parse(readFileSync(file, "utf8"));
 		if (
@@ -159,6 +161,10 @@ export function createTraceCursorSdkPort(
 			...(activeRun ? { activeRun } : {}),
 		};
 	};
+	const readState = (storePath: string, agentId: string) =>
+		statePaths(storePath, agentId)
+			.map(readStateFile)
+			.find((state) => state?.id === agentId);
 	const writeState = (storePath: string, state: TraceAgentState) => {
 		mkdirSync(storePath, { recursive: true, mode: 0o700 });
 		const file = statePath(storePath, state.id);
@@ -764,8 +770,8 @@ export function createTraceCursorSdkPort(
 					operation: "agent.delete",
 					reason: "Cursor requires an open conduit-owned store",
 				});
-			if (readState(storePath, agentId))
-				unlinkSync(statePath(storePath, agentId));
+			for (const file of statePaths(storePath, agentId))
+				if (readStateFile(file)?.id === agentId) unlinkSync(file);
 		},
 		async primeSandbox() {
 			result("sandbox.prime");
@@ -782,7 +788,7 @@ export function createTraceCursorSdkPort(
 			// (SDK 1.0.40 createAgent: `agentId ?? agent-<uuid>`). Replay keeps the
 			// captured id for the store's first agent and numbers later ones.
 			let id = created["agentId"];
-			for (let n = 2; existsSync(statePath(options.storePath, id)); n++)
+			for (let n = 2; readState(options.storePath, id); n++)
 				id = `${created["agentId"]}-${n}`;
 			return agent(id, options, customTools);
 		},
