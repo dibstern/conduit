@@ -19,6 +19,7 @@ import { SqlClient } from "effect/sql";
 import { SqlError } from "effect/sql/SqlError";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
@@ -39,6 +40,10 @@ import {
 	type SessionWorkspaceHintStateTag,
 } from "../../../src/lib/domain/relay/Services/session-workspace-hint-state.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import {
+	makeUnboundEventStoreEffect,
+	UnboundEventStoreEffectTag,
+} from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectContext,
@@ -844,7 +849,26 @@ describe("workspace hint resolution against real worktrees", () => {
 					};
 					Object.assign(sql, { withTransaction });
 					yield* Effect.gen(function* () {
-						yield* Layer.build(SessionWorkspaceHintReactorLive);
+						// The daemon's reactor finds the project's main folder in the registry.
+						yield* Layer.build(
+							SessionWorkspaceHintReactorLive.pipe(
+								Layer.provide(
+									Layer.merge(
+										makeProjectRegistryLive([
+											{
+												slug: "test-project",
+												title: "Hint",
+												folders: [folders.main],
+											},
+										]),
+										Layer.effect(
+											UnboundEventStoreEffectTag,
+											makeUnboundEventStoreEffect,
+										),
+									),
+								),
+							),
+						);
 						yield* commit([
 							canonicalEvent("message.created", sessionId, {
 								messageId,

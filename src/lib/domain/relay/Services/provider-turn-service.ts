@@ -210,12 +210,15 @@ interface ProjectTurns {
 export class ProviderTurns extends Context.Service<
 	ProviderTurns,
 	{
-		/** The project's turn service, run against the calling relay's parts.
-		 *  The project's outbox Stops are recovered once, before it returns. */
+		/** The project's turn service, run against the calling relay's parts and
+		 *  lent to the daemon until the caller's scope closes. The project's
+		 *  outbox Stops are recovered once, before it returns. */
 		readonly forProject: (
 			projectId: string,
 			parts: Context.Context<ProviderTurnParts>,
-		) => Effect.Effect<ProviderTurnService>;
+		) => Effect.Effect<ProviderTurnService, never, Scope.Scope>;
+		/** The newest turn service lent for the project; none while no relay serves it. */
+		readonly served: (projectId: string) => Option.Option<ProviderTurnService>;
 	}
 >()("ProviderTurns") {}
 
@@ -525,6 +528,7 @@ export const ProviderTurnsLive = Layer.effect(
 		const owners = yield* Effect.serviceOption(OwnerScopes);
 		const daemonScope = yield* Effect.scope;
 		const projects = new Map<string, ProjectTurns>();
+		const lent = new Map<string, readonly ProviderTurnService[]>();
 		const spawn = (
 			sessionId: string,
 			worker: Effect.Effect<unknown, unknown>,
@@ -575,13 +579,29 @@ export const ProviderTurnsLive = Layer.effect(
 							return created;
 						}));
 					yield* bind(projectId, project);
-					return yield* makeProviderTurnService(
+					const service = yield* makeProviderTurnService(
 						projectId,
 						project,
 						parts,
 						spawn,
 					);
+					yield* Effect.acquireRelease(
+						Effect.sync(() =>
+							lent.set(projectId, [...(lent.get(projectId) ?? []), service]),
+						),
+						() =>
+							Effect.sync(() => {
+								const rest = (lent.get(projectId) ?? []).filter(
+									(entry) => entry !== service,
+								);
+								if (rest.length > 0) lent.set(projectId, rest);
+								else lent.delete(projectId);
+							}),
+					);
+					return service;
 				}),
+			served: (projectId) =>
+				Option.fromUndefinedOr(lent.get(projectId)?.at(-1)),
 		});
 	}),
 );

@@ -126,6 +126,8 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"makeEventRetentionSchedulerLive",
 			"makeStatusPollerCoreLive",
 			"makeStatusPollerCore",
+			"GoalStuckStopReactorLive",
+			"SessionWorkspaceHintReactorLive",
 			"resolveOrphanedClaudePermissions",
 			"makeOrphanedClaudePermissions",
 			"PermissionTimeoutLive",
@@ -137,8 +139,11 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/domain/persistence/Services/port-watcher.ts", 1],
 				["src/lib/domain/persistence/Services/run-ledger-scheduler.ts", 1],
 				["src/lib/domain/persistence/Services/event-retention-scheduler.ts", 1],
+				// One reactor for every project, on the daemon's one session event bus.
+				["src/lib/domain/relay/Services/goal-stuck-stop.ts", 1],
+				["src/lib/domain/relay/Services/session-workspace-hint.ts", 1],
 				// Each one's import and its one build.
-				[`${daemon}/Layers/daemon-layers.ts`, 12],
+				[`${daemon}/Layers/daemon-layers.ts`, 16],
 				// Permission timeouts: one loop over every registered project, not one per relay.
 				[`${daemon}/Layers/permission-timeout-layer.ts`, 1],
 				// The PTY host's client: one for the daemon, which also closes a removed project's
