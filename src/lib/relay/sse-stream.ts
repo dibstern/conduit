@@ -60,6 +60,10 @@ export interface SSEStreamEvents {
 		event: K,
 		callback: SSEStreamCallbacks[K],
 	): void;
+	off<K extends keyof SSEStreamCallbacks>(
+		event: K,
+		callback: SSEStreamCallbacks[K],
+	): void;
 }
 
 export interface SSEStreamHealth {
@@ -138,6 +142,15 @@ export class SSEStream implements SSEStreamPort {
 		callback: SSEStreamCallbacks[K],
 	): void {
 		this.callbacks[event].push(callback);
+	}
+
+	off<K extends keyof SSEStreamCallbacks>(
+		event: K,
+		callback: SSEStreamCallbacks[K],
+	): void {
+		const list = this.callbacks[event];
+		const at = list.indexOf(callback);
+		if (at >= 0) list.splice(at, 1);
 	}
 
 	/** Start consuming SSE events. Does not throw — errors are notified via callbacks. */

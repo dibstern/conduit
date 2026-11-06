@@ -1,4 +1,4 @@
-import { Effect, Layer, PubSub, Scope } from "effect";
+import { Effect, Exit, Layer, PubSub, Scope } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
@@ -33,10 +33,12 @@ describe("wirePollers", () => {
 				on: vi.fn((_event, callback) => {
 					pollerEvents = callback;
 				}),
+				off: vi.fn(),
 				notifySSEEvent: vi.fn(),
 			},
 			sseStream: {
 				on: vi.fn(),
+				off: vi.fn(),
 			},
 			statusPoller: {
 				markMessageActivity: vi.fn(),
@@ -108,10 +110,12 @@ describe("wirePollers", () => {
 					on: vi.fn((_event, callback) => {
 						pollerEvents = callback;
 					}),
+					off: vi.fn(),
 					notifySSEEvent: vi.fn(),
 				},
 				sseStream: {
 					on: vi.fn(),
+					off: vi.fn(),
 				},
 				wsHandler: {
 					getClientsForSession: vi.fn(() => []),
@@ -127,7 +131,7 @@ describe("wirePollers", () => {
 					slug: "project",
 				},
 				pollerLog: createSilentLogger(),
-			}).pipe(Effect.provide(layer)),
+			}).pipe(Effect.provide(layer), Effect.scoped),
 		);
 
 		pollerEvents?.(
@@ -141,5 +145,44 @@ describe("wirePollers", () => {
 		expect([
 			...Effect.runSync(PubSub.takeUpTo(alertsSeen, Number.POSITIVE_INFINITY)),
 		]).toEqual([]);
+	});
+
+	// Lane 16o row 109: a relay replaced while the poller manager outlives it would
+	// handle each batch twice if its listeners stayed behind.
+	it("drops its poller and SSE listeners when the relay's scope closes", async () => {
+		const pollerListeners = new Set<(...args: never[]) => void>();
+		const sseListeners = new Set<(...args: never[]) => void>();
+		const markMessageActivity = vi.fn();
+		const layer = Layer.mergeAll(
+			Layer.succeed(AlertsTag)(Effect.runSync(PubSub.unbounded<Alert>())),
+			Layer.succeed(SessionManagerServiceTag)(mockSessionManagers({} as never)),
+			Layer.succeed(ConfigTag)(makeMockConfig()),
+			Layer.succeed(StatusPollerTag)({ markMessageActivity } as never),
+			makeOverridesStateLive(),
+		);
+		const scope = Effect.runSync(Scope.make());
+		await Effect.runPromise(
+			wirePollersEffect({
+				pollerManager: {
+					on: (_event, callback) => void pollerListeners.add(callback),
+					off: (_event, callback) => void pollerListeners.delete(callback),
+					notifySSEEvent: vi.fn(),
+				},
+				sseStream: {
+					on: (_event, callback) => void sseListeners.add(callback),
+					off: (_event, callback) => void sseListeners.delete(callback),
+				},
+				wsHandler: { getClientsForSession: vi.fn(() => []) } as never,
+				pipelineDeps: { log: createSilentLogger() },
+				sseTracker: { recordEvent: vi.fn() } as never,
+				config: { slug: "project" },
+				pollerLog: createSilentLogger(),
+			}).pipe(Effect.provide(layer), Scope.provide(scope)),
+		);
+		expect([pollerListeners.size, sseListeners.size]).toEqual([1, 1]);
+
+		await Effect.runPromise(Scope.close(scope, Exit.void));
+
+		expect([pollerListeners.size, sseListeners.size]).toEqual([0, 0]);
 	});
 });

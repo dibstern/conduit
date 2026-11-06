@@ -574,7 +574,8 @@ export async function startProjectRelay(inputs: StartupInputs) {
 					opencodeRuntimeIngress: services.opencodeRuntimeIngress,
 					stopMonitoring,
 				};
-			}),
+				// Listeners the startup wires are held until the relay closes.
+			}).pipe(Effect.provideService(Scope.Scope, relayManagedRuntime.scope)),
 			{ signal: config.signal },
 		);
 	} catch (err) {

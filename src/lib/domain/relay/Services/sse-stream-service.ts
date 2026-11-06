@@ -63,6 +63,14 @@ const makeChannel = (log: Logger | undefined) => {
 		) => {
 			callbacks[event].push(callback);
 		},
+		off: <K extends keyof SSEStreamCallbacks>(
+			event: K,
+			callback: SSEStreamCallbacks[K],
+		) => {
+			const list = callbacks[event];
+			const at = list.indexOf(callback);
+			if (at >= 0) list.splice(at, 1);
+		},
 		getHealth: () => health,
 		isConnected: () => health.connected,
 		markDisconnected: () => {
@@ -167,6 +175,7 @@ export const SSEStreamLive: Layer.Layer<
 					yield* wirer(
 						{
 							on: created.on,
+							off: created.off,
 							getHealth: created.getHealth,
 							isConnected: created.isConnected,
 							// The OpenCode Instances module owns the stream lifecycle.
@@ -204,6 +213,7 @@ export const SSEStreamLive: Layer.Layer<
 		yield* Effect.addFinalizer(disconnectEffect);
 		return {
 			on: main.on,
+			off: main.off,
 			getHealth: main.getHealth,
 			isConnected: main.isConnected,
 			includeDirectory: (directory) =>

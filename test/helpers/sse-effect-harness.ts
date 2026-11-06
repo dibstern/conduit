@@ -1,4 +1,4 @@
-import { Effect, Layer, PubSub } from "effect";
+import { Effect, Layer, PubSub, Scope } from "effect";
 import type { Alert } from "../../src/lib/contracts/ws-rpc.js";
 import {
 	type AlertLedger,
@@ -93,6 +93,8 @@ export async function wireSSEConsumerForTest(
 	await Effect.runPromise(
 		wireSSEConsumerEffect(deps, consumer).pipe(
 			Effect.provide(services.layer, { local: true }),
+			// The wiring lives for the test, as a relay's lives for its scope.
+			Scope.provide(Effect.runSync(Scope.make())),
 		),
 	);
 }

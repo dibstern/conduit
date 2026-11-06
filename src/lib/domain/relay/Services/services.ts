@@ -64,6 +64,14 @@ export interface PollerManagerShape {
 			hasActivity?: boolean,
 		) => void,
 	): void;
+	off(
+		event: "events",
+		callback: (
+			messages: RelayMessage[],
+			sessionId: string,
+			hasActivity?: boolean,
+		) => void,
+	): void;
 	isPolling(sessionId: string): boolean;
 	startPolling(sessionId: string, seedMessages?: Message[]): void;
 	stopPolling(sessionId: string): void;

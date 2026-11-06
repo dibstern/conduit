@@ -4,7 +4,7 @@
 //
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
-import { Deferred, Effect, Option } from "effect";
+import { Deferred, Effect, Option, type Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account, AccountRef } from "../contracts/account.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
@@ -643,6 +643,7 @@ export const wireMonitoringEffect = (
 	| OverridesStateTag
 	| AlertsTag
 	| AccountDirectory
+	| Scope.Scope
 > =>
 	Effect.gen(function* () {
 		const statusPoller = yield* StatusPollerTag;

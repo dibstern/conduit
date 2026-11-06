@@ -69,7 +69,11 @@ import {
 	isPtyEvent,
 	isSessionErrorEvent,
 } from "./opencode-events.js";
-import type { OpenCodeEventContext, SSEStreamEvents } from "./sse-stream.js";
+import type {
+	OpenCodeEventContext,
+	SSEStreamCallbacks,
+	SSEStreamEvents,
+} from "./sse-stream.js";
 
 // Built once: envelope decoder for the fail-closed ingestion gate (see the
 // consumer "event" handler). Returns Result<OpenCodeEvent, SchemaError>.
@@ -726,24 +730,28 @@ function wireSSEConsumerWithCallbacks(
 	deps: SSEWiringDeps,
 	consumer: SSEStreamEvents,
 	callbacks: SSEConsumerCallbacks,
-): void {
+): () => void {
 	const { log } = deps;
 	let hasConnected = false;
 
 	// Pending prompts and missed status are recovered upstream by OpenCode
 	// Instances and arrive as ordinary stream events.
-	consumer.on("connected", (providerProcessId) => {
+	const onConnected = (providerProcessId?: string) => {
 		log.info("Connected to OpenCode event stream");
 		// PTYs created before this connection, or while it was down, send no event.
 		deps.onPtysChanged?.(deps.providerInstanceId);
 		if (hasConnected) callbacks.onReconnect?.(providerProcessId);
 		hasConnected = true;
-	});
-	consumer.on("status", (status, managedStopped, stoppedProcessId) => {
+	};
+	const onStatus: SSEStreamCallbacks["status"] = (
+		status,
+		managedStopped,
+		stoppedProcessId,
+	) => {
 		log.info(`OpenCode ${status}`);
 		callbacks.onConnectionStatus(status, managedStopped, stoppedProcessId);
-	});
-	consumer.on("error", (err) => log.warn(`Error: ${err.message}`));
+	};
+	const onError = (err: Error) => log.warn(`Error: ${err.message}`);
 
 	// Decode boundary. OpenCodeEventSchema now models the full
 	// 1.17.18 event surface (all 89 event types), and the consumer guards are
@@ -753,7 +761,7 @@ function wireSSEConsumerWithCallbacks(
 	// a warning but ALWAYS forward the raw event — a hard fail-closed drop would
 	// silently lose live traffic (e.g. a future server event) and regress today's
 	// pass-through behavior. Field-level consumption stays guarded per translator.
-	consumer.on("event", (event: unknown, context?: OpenCodeEventContext) => {
+	const onEvent = (event: unknown, context?: OpenCodeEventContext) => {
 		if (Result.isFailure(decodeOpenCodeEvent(event))) {
 			const type =
 				typeof (event as { type?: unknown } | null)?.type === "string"
@@ -764,7 +772,17 @@ function wireSSEConsumerWithCallbacks(
 			);
 		}
 		callbacks.handleEvent(event as SSEEvent, context);
-	});
+	};
+	consumer.on("connected", onConnected);
+	consumer.on("status", onStatus);
+	consumer.on("error", onError);
+	consumer.on("event", onEvent);
+	return () => {
+		consumer.off("connected", onConnected);
+		consumer.off("status", onStatus);
+		consumer.off("error", onError);
+		consumer.off("event", onEvent);
+	};
 }
 
 export const wireSSEConsumerEffect = (
@@ -780,87 +798,91 @@ export const wireSSEConsumerEffect = (
 			| ProjectSettingsTag
 			| AlertsTag
 		>();
-		yield* Effect.sync(() => {
-			const runFork = Effect.runForkWith(runtime);
-			// Each session's last event still in hand: its next event waits for it, so ingestion and
-			// the translator see one session's events in arrival order. Sessions stay independent.
-			const sessionTails = new Map<string, Fiber.Fiber<void>>();
-			let connectionRevision = 0;
-			wireSSEConsumerWithCallbacks(deps, consumer, {
-				onConnectionStatus: (status, managedStopped, stoppedProcessId) => {
-					const revision = ++connectionRevision;
-					runFork(
-						Effect.gen(function* () {
-							yield* publishProjectSetting({
-								_tag: "opencodeConnection",
-								instanceId: deps.providerInstanceId,
-								status,
-							});
-							if (status === "connected") {
-								const models = yield* Effect.serviceOption(
-									OpenCodeModelServiceTag,
-								);
-								if (models._tag === "Some")
-									yield* models.value.listProviders().pipe(Effect.ignore);
-							}
-							yield* refreshModelSettings;
-							if (managedStopped) {
-								yield* deps.opencodeRuntimeIngress?.onInstanceStopped?.(
-									deps.providerInstanceId,
-									() => revision === connectionRevision,
-									stoppedProcessId,
-								) ?? Effect.void;
-								// Marks the end of stop work, which can outlive an immediate restart.
-								yield* Effect.logInfo("Managed stop settlement finished", {
+		// Held for the caller's scope, so a closed relay leaves no listener behind.
+		yield* Effect.acquireRelease(
+			Effect.sync(() => {
+				const runFork = Effect.runForkWith(runtime);
+				// Each session's last event still in hand: its next event waits for it, so ingestion and
+				// the translator see one session's events in arrival order. Sessions stay independent.
+				const sessionTails = new Map<string, Fiber.Fiber<void>>();
+				let connectionRevision = 0;
+				return wireSSEConsumerWithCallbacks(deps, consumer, {
+					onConnectionStatus: (status, managedStopped, stoppedProcessId) => {
+						const revision = ++connectionRevision;
+						runFork(
+							Effect.gen(function* () {
+								yield* publishProjectSetting({
+									_tag: "opencodeConnection",
 									instanceId: deps.providerInstanceId,
+									status,
 								});
-							}
-						}),
-					);
-				},
-				handleEvent: (event, context) => {
-					if (isPtyEvent(event)) {
-						deps.onPtysChanged?.(deps.providerInstanceId);
-						return;
-					}
-					const handle = handleSSEEventEffect(deps, event, context).pipe(
-						Effect.catchCause((cause) =>
-							Effect.sync(() =>
-								deps.log.warn(
-									`SSE event handling failed: ${Failure.renderCause(cause)}`,
+								if (status === "connected") {
+									const models = yield* Effect.serviceOption(
+										OpenCodeModelServiceTag,
+									);
+									if (models._tag === "Some")
+										yield* models.value.listProviders().pipe(Effect.ignore);
+								}
+								yield* refreshModelSettings;
+								if (managedStopped) {
+									yield* deps.opencodeRuntimeIngress?.onInstanceStopped?.(
+										deps.providerInstanceId,
+										() => revision === connectionRevision,
+										stoppedProcessId,
+									) ?? Effect.void;
+									// Marks the end of stop work, which can outlive an immediate restart.
+									yield* Effect.logInfo("Managed stop settlement finished", {
+										instanceId: deps.providerInstanceId,
+									});
+								}
+							}),
+						);
+					},
+					handleEvent: (event, context) => {
+						if (isPtyEvent(event)) {
+							deps.onPtysChanged?.(deps.providerInstanceId);
+							return;
+						}
+						const handle = handleSSEEventEffect(deps, event, context).pipe(
+							Effect.catchCause((cause) =>
+								Effect.sync(() =>
+									deps.log.warn(
+										`SSE event handling failed: ${Failure.renderCause(cause)}`,
+									),
 								),
 							),
-						),
-					);
-					const sessionId = extractSessionId(event);
-					const previous =
-						sessionId === undefined ? undefined : sessionTails.get(sessionId);
-					const fiber = runFork(
-						previous ? Effect.andThen(Fiber.await(previous), handle) : handle,
-					);
-					if (sessionId === undefined) return;
-					sessionTails.set(sessionId, fiber);
-					fiber.addObserver(() => {
-						if (sessionTails.get(sessionId) === fiber)
-							sessionTails.delete(sessionId);
-					});
-				},
-				onReconnect: (providerProcessId) => {
-					if (deps.opencodeRuntimeIngress)
-						runFork(
-							deps.opencodeRuntimeIngress
-								.onReconnect(deps.providerInstanceId, providerProcessId)
-								.pipe(
-									Effect.catchCause((cause) =>
-										Effect.sync(() =>
-											deps.log.warn(
-												`OpenCode reconnect backfill scheduling failed: ${Failure.renderCause(cause)}`,
+						);
+						const sessionId = extractSessionId(event);
+						const previous =
+							sessionId === undefined ? undefined : sessionTails.get(sessionId);
+						const fiber = runFork(
+							previous ? Effect.andThen(Fiber.await(previous), handle) : handle,
+						);
+						if (sessionId === undefined) return;
+						sessionTails.set(sessionId, fiber);
+						fiber.addObserver(() => {
+							if (sessionTails.get(sessionId) === fiber)
+								sessionTails.delete(sessionId);
+						});
+					},
+					onReconnect: (providerProcessId) => {
+						if (deps.opencodeRuntimeIngress)
+							runFork(
+								deps.opencodeRuntimeIngress
+									.onReconnect(deps.providerInstanceId, providerProcessId)
+									.pipe(
+										Effect.catchCause((cause) =>
+											Effect.sync(() =>
+												deps.log.warn(
+													`OpenCode reconnect backfill scheduling failed: ${Failure.renderCause(cause)}`,
+												),
 											),
 										),
 									),
-								),
-						);
-				},
-			});
-		});
+							);
+					},
+				});
+			}),
+			(off) => Effect.sync(off),
+		);
 	});

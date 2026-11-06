@@ -17,6 +17,7 @@ import {
 	PubSub,
 	Ref,
 	Schedule,
+	type Scope,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SessionScope } from "../../../contracts/session-scope.js";
@@ -436,14 +437,14 @@ export const startReconciliationLoop = <E, R>(
 // runtime bridge into the poller Ref.
 
 export interface SessionStatusPollerService {
-	/** Register a callback for the "changed" broadcast event (via PubSub subscription). */
+	/** Register a callback for the "changed" broadcast event until the caller's scope closes. */
 	on(
 		event: "changed",
 		callback: (
 			statuses: Record<string, SessionStatus>,
 			statusesChanged: boolean,
 		) => void | Promise<void>,
-	): Effect.Effect<void>;
+	): Effect.Effect<void, never, Scope.Scope>;
 	/** Start polling. Safe to call multiple times (idempotent). */
 	start(): Effect.Effect<void>;
 	/** Stop polling and clear the timer. */

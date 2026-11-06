@@ -347,8 +347,15 @@ export const StatusPollerLive: Layer.Layer<
 			{ uninterruptible: "inherit" },
 		);
 		const service: SessionStatusPollerService = {
+			// Held for the caller's scope, so a closed relay leaves no listener behind.
 			on: (_event, callback) =>
-				Ref.update(subscribers, (callbacks) => [...callbacks, callback]),
+				Effect.acquireRelease(
+					Ref.update(subscribers, (callbacks) => [...callbacks, callback]),
+					() =>
+						Ref.update(subscribers, (callbacks) =>
+							callbacks.filter((kept) => kept !== callback),
+						),
+				),
 			start: () =>
 				Effect.gen(function* () {
 					const wasStarted = yield* Ref.get(started);

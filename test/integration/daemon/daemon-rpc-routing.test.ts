@@ -91,6 +91,7 @@ describe("daemon shared RPC routing", () => {
 					const wsHandler = makeMockWebSocketHandler();
 					const pollerManager = {
 						on: vi.fn(),
+						off: vi.fn(),
 						isPolling: vi.fn(() => false),
 						startPolling,
 						stopPolling: vi.fn(),

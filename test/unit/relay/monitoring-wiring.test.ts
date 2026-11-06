@@ -967,7 +967,7 @@ async function createEffectHarness(
 		statusLog,
 		sseLog: createSilentLogger(),
 		pipelineLog: createSilentLogger(),
-	});
+	}).pipe(Effect.provideService(Scope.Scope, Effect.runSync(Scope.make())));
 	const runtime = pushManager
 		? ManagedRuntime.make(
 				Layer.merge(layer, Layer.provideMerge(AlertLedgerLive, persistence)),

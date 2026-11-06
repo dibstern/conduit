@@ -73,6 +73,7 @@ function makeSessionMetadataLayer(options: {
 	});
 	const pollerManager: PollerManagerShape = {
 		on: vi.fn(),
+		off: vi.fn(),
 		isPolling: vi.fn(() => true),
 		startPolling: vi.fn(),
 		stopPolling: vi.fn(),

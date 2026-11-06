@@ -283,6 +283,7 @@ export function createMockHandlerDeps(
 		},
 		pollerManager: {
 			on: vi.fn(),
+			off: vi.fn(),
 			isPolling: vi.fn().mockReturnValue(true),
 			startPolling: vi.fn(),
 			stopPolling: vi.fn(),
@@ -985,6 +986,7 @@ export function makeTestHandlerLayer(
 		opts?.statusPoller ?? makeMockStatusPoller();
 	const pollerManager: PollerManagerShape = opts?.pollerManager ?? {
 		on: vi.fn(),
+		off: vi.fn(),
 		isPolling: vi.fn(() => true),
 		startPolling: vi.fn(),
 		stopPolling: vi.fn(),

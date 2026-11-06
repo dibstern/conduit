@@ -199,24 +199,31 @@ describe("Shared OpenCode stream reconnect", () => {
 				onInstanceStopped,
 			},
 		});
-		await project.runPromise(wireSSEConsumerEffect(deps, stream));
+		// The wiring lives as long as the project, as a relay's does.
+		await project.runPromise(
+			wireSSEConsumerEffect(deps, stream).pipe(
+				Effect.provideService(Scope.Scope, project.scope),
+			),
+		);
 		stream.on("status", (status, managedStopped) =>
 			onStatus("opencode", status, managedStopped),
 		);
 		const connected = vi.fn();
 		stream.on("connected", connected);
 		await project.runPromise(
-			stream.wireInstanceStreams((channel, instanceId) =>
-				Effect.gen(function* () {
-					channel.on("status", (status, managedStopped) =>
-						onStatus(instanceId, status, managedStopped),
-					);
-					yield* wireSSEConsumerEffect(
-						{ ...deps, providerInstanceId: instanceId },
-						channel,
-					);
-				}),
-			),
+			stream
+				.wireInstanceStreams((channel, instanceId) =>
+					Effect.gen(function* () {
+						channel.on("status", (status, managedStopped) =>
+							onStatus(instanceId, status, managedStopped),
+						);
+						yield* wireSSEConsumerEffect(
+							{ ...deps, providerInstanceId: instanceId },
+							channel,
+						);
+					}),
+				)
+				.pipe(Effect.provideService(Scope.Scope, project.scope)),
 		);
 		await project.runPromise(stream.connectEffect());
 		return {

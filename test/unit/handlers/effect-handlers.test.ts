@@ -1395,6 +1395,7 @@ function makeForkSessionLayer(options?: {
 			})),
 		Layer.succeed(PollerManagerTag)({
 			on: vi.fn(),
+			off: vi.fn(),
 			isPolling: vi.fn(() => true),
 			startPolling: vi.fn(),
 			stopPolling: vi.fn(),
@@ -1446,6 +1447,7 @@ function makeSessionLifecycleLayer(options?: {
 			})),
 		Layer.succeed(PollerManagerTag)({
 			on: vi.fn(),
+			off: vi.fn(),
 			isPolling: vi.fn(() => true),
 			startPolling: vi.fn(),
 			stopPolling: vi.fn(),
@@ -2561,6 +2563,7 @@ describe("handleNewSession", () => {
 					})),
 				Layer.succeed(PollerManagerTag)({
 					on: vi.fn(),
+					off: vi.fn(),
 					isPolling: vi.fn(() => false),
 					startPolling,
 					stopPolling: vi.fn(),
@@ -2673,6 +2676,7 @@ describe("handleNewSession", () => {
 				Layer.succeed(StatusPollerTag)(makeMockStatusPoller()),
 				Layer.succeed(PollerManagerTag)({
 					on: vi.fn(),
+					off: vi.fn(),
 					isPolling: vi.fn(() => false),
 					startPolling,
 					stopPolling: vi.fn(),

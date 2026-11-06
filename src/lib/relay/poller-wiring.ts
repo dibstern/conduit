@@ -53,6 +53,14 @@ interface PollerManagerLike {
 			hasActivity?: boolean,
 		) => void,
 	): void;
+	off(
+		event: "events",
+		callback: (
+			messages: RelayMessage[],
+			sessionId: string,
+			hasActivity?: boolean,
+		) => void,
+	): void;
 	notifySSEEvent(sessionId: string): void;
 }
 
@@ -252,36 +260,46 @@ export const wirePollersEffect = (deps: EffectPollerWiringDeps) =>
 			| OverridesStateTag
 			| AlertsTag
 		>();
-		yield* Effect.sync(() => {
-			const runFork = Effect.runForkWith(runtime);
-			deps.pollerManager.on(
-				"events",
-				(events, polledSessionId, hasActivity) => {
-					runFork(
-						handlePollerEventsEffect(
-							deps,
-							events,
-							polledSessionId,
-							hasActivity,
-						).pipe(
-							Effect.catchCause((cause) =>
-								Effect.sync(() =>
-									deps.pollerLog.warn(
-										`Message poller event handling failed: ${Failure.renderCause(cause)}`,
-									),
-								),
+		const runFork = Effect.runForkWith(runtime);
+		const onPolled = (
+			events: RelayMessage[],
+			polledSessionId: string,
+			hasActivity?: boolean,
+		) => {
+			runFork(
+				handlePollerEventsEffect(
+					deps,
+					events,
+					polledSessionId,
+					hasActivity,
+				).pipe(
+					Effect.catchCause((cause) =>
+						Effect.sync(() =>
+							deps.pollerLog.warn(
+								`Message poller event handling failed: ${Failure.renderCause(cause)}`,
 							),
 						),
-					);
-				},
+					),
+				),
 			);
-
-			deps.sseStream.on("event", (event: unknown) => {
-				const sid = extractSessionId(event as SSEEvent);
-				if (sid) {
-					deps.sseTracker.recordEvent(sid, Date.now());
-					deps.pollerManager.notifySSEEvent(sid);
-				}
-			});
-		});
+		};
+		const onStreamed = (event: unknown) => {
+			const sid = extractSessionId(event as SSEEvent);
+			if (sid) {
+				deps.sseTracker.recordEvent(sid, Date.now());
+				deps.pollerManager.notifySSEEvent(sid);
+			}
+		};
+		// Held for the caller's scope, so a closed relay leaves no listener behind.
+		yield* Effect.acquireRelease(
+			Effect.sync(() => {
+				deps.pollerManager.on("events", onPolled);
+				deps.sseStream.on("event", onStreamed);
+			}),
+			() =>
+				Effect.sync(() => {
+					deps.pollerManager.off("events", onPolled);
+					deps.sseStream.off("event", onStreamed);
+				}),
+		);
 	});

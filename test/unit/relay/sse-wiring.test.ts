@@ -1,4 +1,4 @@
-import { Effect, Ref } from "effect";
+import { Effect, Exit, Ref, Scope } from "effect";
 import { assert, describe, expect, it, vi } from "vitest";
 import {
 	OverridesStateTag,
@@ -9,7 +9,7 @@ import {
 	extractSessionId,
 	handleSSEEventEffect,
 	type SSEWiringDeps,
-	type wireSSEConsumerEffect,
+	wireSSEConsumerEffect,
 } from "../../../src/lib/relay/sse-wiring.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
@@ -956,5 +956,34 @@ describe("alert published for dropped notification-worthy events", () => {
 			properties: { sessionID: "other-session" },
 		};
 		expect(await runSSEEvent(deps, event)).toEqual([]);
+	});
+});
+
+// Lane 16o row 110: a closed relay's SSE consumer listeners would handle the next
+// stream's events a second time.
+describe("wireSSEConsumerEffect scope", () => {
+	it("drops every listener it adds when the relay's scope closes", async () => {
+		const listeners = new Set<string>();
+		const consumer = partialFake<Parameters<typeof wireSSEConsumerEffect>[1]>({
+			on: (name: string) => void listeners.add(name),
+			off: (name: string) => void listeners.delete(name),
+		});
+		const scope = Effect.runSync(Scope.make());
+		await Effect.runPromise(
+			wireSSEConsumerEffect(createMockSSEWiringDeps(), consumer).pipe(
+				Effect.provide(makeSSETestServices().layer, { local: true }),
+				Scope.provide(scope),
+			),
+		);
+		expect([...listeners].sort()).toEqual([
+			"connected",
+			"error",
+			"event",
+			"status",
+		]);
+
+		await Effect.runPromise(Scope.close(scope, Exit.void));
+
+		expect([...listeners]).toEqual([]);
 	});
 });

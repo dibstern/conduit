@@ -364,6 +364,12 @@ export class MessagePollerManager {
 		this.eventsCallbacks.push(callback);
 	}
 
+	/** Remove a callback `on` registered, so a closed relay leaves none behind. */
+	off(_event: "events", callback: PollerManagerEventsCallback): void {
+		const at = this.eventsCallbacks.indexOf(callback);
+		if (at >= 0) this.eventsCallbacks.splice(at, 1);
+	}
+
 	/** Check if any browser client is viewing the given session. */
 	hasViewers(sessionId: string): boolean {
 		return this._hasViewers?.(sessionId) ?? false;

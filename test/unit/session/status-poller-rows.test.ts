@@ -1,4 +1,4 @@
-import { Effect, HashMap, Layer } from "effect";
+import { Deferred, Effect, Exit, HashMap, Layer, PubSub, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import {
@@ -18,6 +18,7 @@ import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Servi
 import {
 	makePollerPubSubLive,
 	makePollerStateLive,
+	PollerPubSubTag,
 } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -145,4 +146,34 @@ it("the poller returns source statuses without parent or message-activity augmen
 			}),
 		).pipe(Effect.provide(pollerLayer(api))),
 	);
+});
+
+// Lane 16o row 111: a closed relay's "changed" listener would recover commands and
+// reduce monitoring a second time for each status change after it was replaced.
+it("drops a changed listener when the scope that added it closes", async () => {
+	const seen = vi.fn();
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const poller = yield* StatusPollerTag;
+				const pubsub = yield* PollerPubSubTag;
+				const relay = yield* Scope.make();
+				yield* poller.on("changed", seen).pipe(Scope.provide(relay));
+				yield* Scope.close(relay, Exit.void);
+				const kept = yield* Deferred.make<void>();
+				yield* poller.on("changed", () => {
+					Deferred.doneUnsafe(kept, Exit.void);
+				});
+				// The poller subscribes in a fiber of its own; publish until it hears one.
+				yield* Effect.race(
+					Deferred.await(kept),
+					PubSub.publish(pubsub, { statuses: {}, statusesChanged: true }).pipe(
+						Effect.andThen(Effect.sleep("10 millis")),
+						Effect.forever,
+					),
+				);
+			}),
+		).pipe(Effect.provide(pollerLayer(makeMockOpenCodeAPI()))),
+	);
+	expect(seen).not.toHaveBeenCalled();
 });
