@@ -113,6 +113,14 @@ export interface OpenCodeInstances {
 	) => Effect.Effect<Option.Option<OpenCodeClient>, never, Scope.Scope>;
 	/** Positive managed-process termination proof; false also covers unknown/unavailable. */
 	readonly isManagedStopped: (instanceId: string) => Effect.Effect<boolean>;
+	/**
+	 * Holds the instance like `use`, starting it when it is not running, but returns its
+	 * prompt process id once that process exists, not once it answers. None when it cannot start.
+	 */
+	readonly holdProcess: (
+		instanceId: string,
+		directory: string | null,
+	) => Effect.Effect<Option.Option<string>, never, Scope.Scope>;
 	/** Hold a running instance and its stream for this scope; never start it. */
 	readonly useIfRunning: (
 		instanceId: string,
