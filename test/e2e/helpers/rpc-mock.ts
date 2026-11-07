@@ -1329,6 +1329,11 @@ export async function mockWsRpc(
 		}),
 		...control.catalogStubs(),
 		ResolveSessionMode: () => ({ mode: "local", source: "global" }),
+		// 82tn.52: the composer reads how its next message continues for every
+		// transcript; a session on its own path continues as it is.
+		GetResumePlan: () => ({ plan: "current" }),
+		// 82tn.51: the transcript reads where it branched whenever its user rows change.
+		GetHeadBranches: () => ({ forks: [] }),
 		GetCursorAuth: () => ({
 			source: "none",
 			status: "logged-out",
