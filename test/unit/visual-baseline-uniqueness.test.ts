@@ -50,6 +50,8 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"opening the phone drop-down forces the island bar open, so both end on the same sheet; each asserts different rows in play()",
 	"project-projectdialog--multi-folder-supported | project-projectdialog--multi-folder-unknown":
 		"an unknown multi-folder capability warns like a supported one, i.e. not at all; both assert the missing warning in play()",
+	"overlays-rewindbanner--with-claude-modal | overlays-rewindbanner--with-modal":
+		"82tn.53: conduit restores files for every driver, so the Claude session's rewind dialog matching the OpenCode one is the assertion",
 	"ui-useravatar--initial | ui-useravatar--missing-mac-picture":
 		"a Mac choice with no readable picture falls back to the initial, so matching Initial is the assertion",
 	"ui-useravatar--initial-light | ui-useravatar--missing-mac-picture-light":

@@ -61,20 +61,25 @@ export function placeSheet(
 	return glideMs;
 }
 
-/** --sheet-top is the header's bottom edge, --sheet-left and --sheet-right its column's insets. */
+/**
+ * --sheet-top is the header's bottom edge, --sheet-left and --sheet-right its column's insets, all measured
+ * in the fixed node's containing block: the viewport, or an ancestor that contains fixed boxes (offsetParent).
+ */
 function placeBelow(node: HTMLElement, header: HTMLElement): void {
 	const column = (
 		header.closest("#app, #sidebar") ?? header
 	).getBoundingClientRect();
+	const frame = node.offsetParent?.getBoundingClientRect() ?? {
+		top: 0,
+		left: 0,
+		right: document.documentElement.clientWidth,
+	};
 	node.style.setProperty(
 		"--sheet-top",
-		`${Math.max(0, header.getBoundingClientRect().bottom)}px`,
+		`${Math.max(0, header.getBoundingClientRect().bottom - frame.top)}px`,
 	);
-	node.style.setProperty("--sheet-left", `${column.left}px`);
-	node.style.setProperty(
-		"--sheet-right",
-		`${document.documentElement.clientWidth - column.right}px`,
-	);
+	node.style.setProperty("--sheet-left", `${column.left - frame.left}px`);
+	node.style.setProperty("--sheet-right", `${frame.right - column.right}px`);
 }
 
 /** Re-place `node` whenever the live header (the session's, else the list's) moves or changes. */

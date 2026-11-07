@@ -274,13 +274,19 @@
 	// The desktop panel hangs left from the trigger's right edge; a bar control outside the picker
 	// (permissions, checkout chip) anchors it to that control instead. A thin composer near the window's
 	// left edge would push it offscreen, so slide it right to the floating menus' 8px collision padding.
+	// A web font landing after it opens moves the bar under it, so it is placed again then.
 	function keepOnscreen(panel: HTMLElement) {
 		const opener = composerPickerState.request?.opener;
-		const parent = panel.offsetParent;
-		panel.style.translate = "";
-		if (opener && parent && !parent.contains(opener)) panel.style.right = `${parent.getBoundingClientRect().right - opener.getBoundingClientRect().right}px`;
-		const overflow = 8 - panel.getBoundingClientRect().left;
-		if (overflow > 0) panel.style.translate = `${overflow}px 0`;
+		const place = () => {
+			const parent = panel.offsetParent;
+			panel.style.translate = "";
+			if (opener && parent && !parent.contains(opener)) panel.style.right = `${parent.getBoundingClientRect().right - opener.getBoundingClientRect().right}px`;
+			const overflow = 8 - panel.getBoundingClientRect().left;
+			if (overflow > 0) panel.style.translate = `${overflow}px 0`;
+		};
+		place();
+		document.fonts.addEventListener("loadingdone", place);
+		return () => document.fonts.removeEventListener("loadingdone", place);
 	}
 
 	function closePicker() {

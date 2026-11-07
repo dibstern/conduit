@@ -611,10 +611,9 @@ export const LiveCollapsed: Story = {
 		const canvas = within(canvasElement);
 		const head = canvas.getByRole("button", { name: /^Collapse turn$/ });
 		await userEvent.click(head);
-		// Collapsing hands focus to the card for keyboard continuity.
-		const card = canvas.getByTestId("surfacing-card");
-		await expect(card).toHaveFocus();
-		card.blur();
+		// The toggle stays mounted through the collapse, so it keeps focus (o8pak).
+		await expect(head).toHaveFocus();
+		head.blur();
 		await expect(head).toHaveAccessibleName("Expand turn");
 		await expect(head).toHaveTextContent("Working");
 		await expect(canvas.queryByTestId("turn-show-bar")).not.toBeInTheDocument();
