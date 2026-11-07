@@ -3364,8 +3364,16 @@ for (const behavior of [
 					behavior !== "fork-uncovered" &&
 					preview._tag === "Success"
 				) {
+					// The dialog's budget is the delivered one. The cursor is not: a
+					// preview has no input, so it covers every event so far, while the
+					// delivery covers the events before its input (ad4c).
+					const { throughSequence, ...budget } = preview.success;
+					expect(throughSequence).toEqual(expect.any(Number));
 					const delivered = (await receipt()).handoff;
-					expect(delivered).toMatchObject(preview.success);
+					expect(delivered).toMatchObject({
+						...budget,
+						throughSequence: expect.any(Number),
+					});
 				}
 				await expect.poll(() => latest()?.limitRecovery).toBeNull();
 				await expect.poll(() => latest()?.status).toBe("idle");

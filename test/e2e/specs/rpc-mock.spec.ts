@@ -83,11 +83,18 @@ test("every declared error class reaches the browser", async ({
 				await Effect.runPromise(
 					Arbitrary.sampleEffect(
 						Arbitrary.schema(Schema.toEncoded(payloadSchema)).pipe(
-							Arbitrary.filter((payload) =>
-								Exit.isSuccess(
-									Schema.decodeUnknownExit(payloadSchema)(payload),
-								),
-							),
+							// Only a request the client can send: an optional key decoded
+							// from null holds undefined, which the JSON wire refuses.
+							Arbitrary.filter((payload) => {
+								const decoded =
+									Schema.decodeUnknownExit(payloadSchema)(payload);
+								return (
+									Exit.isSuccess(decoded) &&
+									Exit.isSuccess(
+										Schema.encodeUnknownExit(payloadSchema)(decoded.value),
+									)
+								);
+							}),
 							Arbitrary.map(Schema.decodeUnknownSync(payloadSchema)),
 						),
 						{ seed: 42, count: 1 },

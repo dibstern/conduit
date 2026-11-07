@@ -10,6 +10,7 @@ import type {
 	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { sealHistoryNode } from "../../../src/lib/persistence/effect/history-graph.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
@@ -35,7 +36,7 @@ const seed = (filename: string) =>
 					provider: "claude",
 					createdAt: start + index * 1000,
 				});
-			const messages: CanonicalEvent[] = allIds.flatMap((id, index) => [
+			const messages = (id: string, index: number): CanonicalEvent[] => [
 				event(index + 1, "message.created", {
 					messageId: id,
 					role: index % 2 === 0 ? "user" : "assistant",
@@ -55,7 +56,7 @@ const seed = (filename: string) =>
 								duration: 1000,
 							}),
 						]),
-			]);
+			];
 			yield* commit(
 				[
 					event(0, "session.created", {
@@ -64,10 +65,22 @@ const seed = (filename: string) =>
 						provider: "claude",
 						providerSessionId: SESSION,
 					}),
-					...messages,
 				],
 				{ publish: false },
 			);
+			// 82tn.50: a rewind target is a History Node, which a Run's end seals. Each
+			// user/assistant pair is one Run, so a cut at a user row goes back before it.
+			for (let index = 0; index < COUNT; index += 2) {
+				yield* commit(
+					[index, index + 1].flatMap((at) => messages(messageId(at), at)),
+					{ publish: false },
+				);
+				yield* sealHistoryNode(
+					SESSION,
+					`${SESSION}-run-${index / 2}`,
+					start + (index + 2) * 1000,
+				);
+			}
 		}).pipe(
 			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
@@ -191,15 +204,15 @@ test("deep rewind pages every older message once and undo restores the transcrip
 				};
 				await scrollToAll(allIds.slice(0, cut));
 				scenario["afterScroll"] = await ids();
+				// 82tn.51: the rewind takes every held row off the head, so the newest
+				// page before the cut refills the transcript as a page of its own.
+				// With the scroll's pages it holds every row before the cut, once each.
 				const rewindPages = olderPages.slice(pagesFrom);
 				scenario["rewindOlderPages"] = rewindPages;
-				if (cut > 50) {
-					expect(rewindPages.length).toBeGreaterThan(0);
-					expect(rewindPages.flatMap(({ ids }) => ids)).toEqual(
-						allIds.slice(0, cut - 50),
-					);
-					expect(rewindPages.at(-1)?.hasMore).toBe(false);
-				}
+				expect([...rewindPages].reverse().flatMap(({ ids }) => ids)).toEqual(
+					allIds.slice(0, cut),
+				);
+				expect(rewindPages.at(-1)?.hasMore).toBe(false);
 				await Effect.runPromise(
 					control.rpc.UndoRewind({
 						sessionId: SESSION,

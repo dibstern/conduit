@@ -4618,29 +4618,58 @@ test.describe("OpenCode draft inventory borrows", () => {
 						),
 					);
 					evidence["submit"] = submit;
-					expect(submit).toMatchObject({
-						_tag: "Failure",
-						failure: {
-							_tag: "WsRpcError",
-							message: expect.stringContaining("ModelNotInCatalog:"),
-						},
-					});
-					const rejected = readStoredState(harness, setup.slug, sessionId);
-					evidence["rejected"] = rejected;
-					expect(rejected).toEqual(beforeRejected);
-					const draft = await Effect.runPromise(
-						Stream.runHead(
-							browser.rpc.SubscribeInputDraft({ key: { session: sessionId } }),
-						),
-					);
-					evidence["rejectedDraft"] = draft;
-					expect(draft).toEqual(
-						Option.some({
-							_tag: "synchronized",
-							text: `${caseId}-rejected`,
-							attachments: [],
-						}),
-					);
+					if (catalogState === "refreshed") {
+						// A cached catalog refuses the pick at admission: nothing is written
+						// and the draft keeps the text.
+						expect(submit).toMatchObject({
+							_tag: "Failure",
+							failure: {
+								_tag: "WsRpcError",
+								message: expect.stringContaining("ModelNotInCatalog:"),
+							},
+						});
+						const rejected = readStoredState(harness, setup.slug, sessionId);
+						evidence["rejected"] = rejected;
+						expect(rejected).toEqual(beforeRejected);
+						const draft = await Effect.runPromise(
+							Stream.runHead(
+								browser.rpc.SubscribeInputDraft({
+									key: { session: sessionId },
+								}),
+							),
+						);
+						evidence["rejectedDraft"] = draft;
+						expect(draft).toEqual(
+							Option.some({
+								_tag: "synchronized",
+								text: `${caseId}-rejected`,
+								attachments: [],
+							}),
+						);
+					} else {
+						// 82tn.32.52: after a restart no catalog is cached, so the send is
+						// admitted unchecked and the named instance refuses the pick before
+						// its prompt: the turn ends in that error and the pick is unchanged.
+						expect(submit).toMatchObject({
+							_tag: "Success",
+							success: { handedOff: true },
+						});
+						await expect
+							.poll(
+								() =>
+									readStoredState(harness, setup.slug, sessionId).turnErrors
+										.length,
+							)
+							.toBe(beforeRejected.turnErrors.length + 1);
+						const rejected = readStoredState(harness, setup.slug, sessionId);
+						evidence["rejected"] = rejected;
+						expect(rejected.turnErrors.at(-1)?.data).toContain(
+							"ModelNotInCatalog:",
+						);
+						expect(rejected.lastInput?.data).toContain(`${caseId}-rejected`);
+						expect(rejected.pick).toEqual(beforeRejected.pick);
+						expect(rejected.pickEvents).toEqual(beforeRejected.pickEvents);
+					}
 					expect(openCodePrompts(harness)).toHaveLength(beforePrompts);
 					rmSync(rejectedModels, { force: true });
 					evidence["offeredInventory"] = await Effect.runPromise(
