@@ -64,6 +64,36 @@ export const joinHeadWhileIdle = (
 					WHERE session_id = ${sessionId} AND active_run_id IS NOT NULL)`;
 	});
 
+/**
+ * A fork whose provider copied the transcript (OpenCode, `inheritsHistory: false`) imports the
+ * copy as inherited rows. They are the fork point's node, the root of the fork's graph, so the
+ * fork's Runs follow it and a rewind of its first Run keeps the copy. A copy landing after a
+ * Run sealed still comes first.
+ */
+export const joinForkPoint = (
+	sessionId: string,
+	messageIds: readonly string[],
+	at: number,
+) =>
+	Effect.gen(function* () {
+		if (messageIds.length === 0) return;
+		const sql = yield* SqlClient.SqlClient;
+		const tagged = yield* sql<{
+			id: string;
+		}>`UPDATE messages SET history_node_id = 'fork-point'
+			WHERE session_id = ${sessionId} AND id IN ${sql.in(messageIds)}
+				AND is_inherited = 1 AND history_node_id IS NULL
+			RETURNING id`;
+		if (tagged.length === 0) return;
+		yield* sql`INSERT INTO history_nodes (session_id, id, parent_id, run_id, available, created_at)
+			VALUES (${sessionId}, 'fork-point', NULL, NULL, 1, ${at})
+			ON CONFLICT (session_id, id) DO NOTHING`;
+		yield* sql`UPDATE history_nodes SET parent_id = 'fork-point'
+			WHERE session_id = ${sessionId} AND parent_id IS NULL AND id != 'fork-point'`;
+		yield* sql`INSERT INTO history_heads (session_id, node_id) VALUES (${sessionId}, 'fork-point')
+			ON CONFLICT (session_id) DO UPDATE SET node_id = COALESCE(history_heads.node_id, excluded.node_id)`;
+	});
+
 /** The Head is the node of the newest tagged row on the head path (82tn.51: no pending cut). */
 export const refreshHistoryHead = (sessionId: string) =>
 	Effect.gen(function* () {

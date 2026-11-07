@@ -363,6 +363,63 @@ describe("an OpenCode fork bound through the id map", () => {
 		});
 	});
 
+	// 82tn.32.2.9 S2 failure cases: the copied transcript has no node, so the fork's first Run
+	// absorbs it and its rewind drops the copy too; the copy has a node but the Head stays at the
+	// root, so the Run's node hangs off the root and the rewind drops it anyway; the fork's own rows
+	// join the copy's node; OpenCode is told to drop a copied message, so the next send loses it.
+	it("rewinds the fork's first turn back to the fork point and keeps the copied transcript", async () => {
+		evidence["name"] = "fork-point-node";
+		const {
+			browser,
+			sourceId,
+			modelInputs,
+			transcript,
+			messageOf,
+			turn,
+			nodeOf,
+		} = await start();
+		await turn(sourceId, "fork-one");
+		await turn(sourceId, "fork-two");
+		const { sessionId: forkId } = await Effect.runPromise(
+			browser.rpc.ForkSession({
+				sessionId: sourceId,
+				originId: browser.originId,
+				messageId: await messageOf(sourceId, "Heard fork-one."),
+			}),
+		);
+		await transcript(forkId);
+		await turn(forkId, "fork-three");
+		const copied = nodeOf(await messageOf(forkId, "Heard fork-one."));
+		const own = nodeOf(await messageOf(forkId, "fork-three"));
+		const intent = {
+			_tag: "rewind" as const,
+			messageId: await messageOf(forkId, "fork-three"),
+		};
+		const { moveId } = await Effect.runPromise(
+			browser.rpc.PreviewHeadMove({ sessionId: forkId, intent }),
+		);
+		await Effect.runPromise(
+			browser.rpc.CommitHeadMove({ sessionId: forkId, intent, moveId }),
+		);
+		const rewound = await transcript(forkId);
+		const sent = await turn(forkId, "fork-four");
+		const proof = {
+			copiedHasNode: copied !== "",
+			ownNodeIsCopied: own === copied,
+			rewound,
+			sent,
+			modelSaw: modelInputs.at(-1),
+		};
+		evidence = { ...evidence, sourceId, forkId, proof };
+		expect(proof).toEqual({
+			copiedHasNode: true,
+			ownNodeIsCopied: false,
+			rewound: ["user: fork-one", "assistant: Heard fork-one."],
+			sent: "Heard fork-four.",
+			modelSaw: ["fork-one", "fork-four"],
+		});
+	});
+
 	it("forks with files into a worktree and runs the fork there", async () => {
 		evidence["name"] = "fork-with-files";
 		const {

@@ -25,6 +25,7 @@ import {
 } from "../tool-wire-projection.js";
 import {
 	headMoveDiff,
+	joinForkPoint,
 	joinHeadWhileIdle,
 	keepOffHead,
 	refreshHistoryHead,
@@ -1090,6 +1091,7 @@ export const makeMessageProjector = defineProjector(() => ({
 							metadata = excluded.metadata, rest_payload = excluded.rest_payload, version = excluded.version
 						WHERE message_parts.message_id = excluded.message_id`;
 				}
+				yield* joinForkPoint(event.sessionId, ids(written), event.createdAt);
 				return ids(written);
 			}
 
@@ -1171,6 +1173,11 @@ export const makeMessageProjector = defineProjector(() => ({
 							OR (${event.metadata.providerCreatedAt !== undefined ? 1 : 0} AND messages.created_at <> excluded.created_at)
 							OR (messages.input_id IS NULL AND excluded.input_id IS NOT NULL)
 						RETURNING id`;
+				yield* joinForkPoint(
+					event.data.sessionId,
+					ids(written),
+					event.createdAt,
+				);
 				// A corrected clock keeps the write order (conduit-test-lczrn.1).
 				return ids(written);
 			}
