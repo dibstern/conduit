@@ -1,14 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import {
-	Context,
-	Effect,
-	Exit,
-	Layer,
-	ManagedRuntime,
-	Option,
-	Scope,
-	Stream,
-} from "effect";
+import { Context, Effect, Exit, Layer, Option, Scope, Stream } from "effect";
 import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -21,7 +12,6 @@ import {
 	SessionDirectory,
 	SessionDirectoryReadError,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
-import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
 import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -32,10 +22,7 @@ import {
 	makeRoutedWsRpcServerLayer,
 	RpcSubscriptionScopeLive,
 } from "../../../src/lib/server/ws-rpc.js";
-import {
-	makeRoutedWsRpcWebSocketHandler,
-	makeWsRpcWebSocketHandler,
-} from "../../../src/lib/server/ws-rpc-handler.js";
+import { makeRoutedWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import {
 	makeMockConfig,
 	makeTestHandlerLayer,
@@ -296,29 +283,6 @@ describe("routed RPC server", () => {
 				yield* client.GetProjects({ projectSlug: "explicit" });
 				expect(resolve).toHaveBeenCalledWith("explicit");
 			}),
-	);
-
-	it.effect("does not return a disposed relay's context", () =>
-		Effect.gen(function* () {
-			const runtime = yield* Effect.acquireRelease(
-				Effect.sync(() =>
-					ManagedRuntime.make(
-						Layer.merge(
-							makeTestHandlerLayer(),
-							makeWsTransportLive({ noServer: true }),
-						),
-					),
-				),
-				(runtime) => runtime.disposeEffect,
-			);
-			const handler = yield* makeWsRpcWebSocketHandler({ runtime }).pipe(
-				Effect.provide(yield* runtime.contextEffect),
-			);
-			if (!handler.context) throw new Error("Missing relay context");
-			expect((yield* Effect.exit(handler.context))._tag).toBe("Success");
-			yield* runtime.disposeEffect;
-			expect((yield* Effect.exit(handler.context))._tag).toBe("Failure");
-		}),
 	);
 
 	it.effect(

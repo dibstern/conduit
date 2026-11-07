@@ -209,16 +209,6 @@ export const makeLocalPtyServiceLive = (
 		}),
 	);
 
-/** A daemon-served relay borrows the daemon's PTY host client; a standalone relay builds its own. */
-export const LocalPtyServiceOrOwn = (configDir: string) =>
-	Layer.unwrap(
-		Effect.map(Effect.serviceOption(LocalPtyServiceTag), (shared) =>
-			Option.isSome(shared)
-				? Layer.succeed(LocalPtyServiceTag, shared.value)
-				: makeLocalPtyServiceLive(configDir),
-		),
-	);
-
 type PtyInfoResult =
 	| { readonly _tag: "MissingId"; readonly raw: Record<string, unknown> }
 	| {

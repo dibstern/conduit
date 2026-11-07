@@ -1598,9 +1598,6 @@
 	"test/unit/server/ws-rpc-daemon.test.ts": {
 		"polling": 1
 	},
-	"test/unit/server/ws-rpc-handler.test.ts": {
-		"polling": 1
-	},
 	"test/unit/session/session-title-service.test.ts": {
 		"polling": 1
 	},

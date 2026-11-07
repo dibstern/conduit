@@ -1,11 +1,12 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { Effect, Fiber, Layer, ManagedRuntime } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { Effect, Exit, Layer, Option, Scope } from "effect";
+import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
-import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
-import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { BrowserRpcConnectionsTag } from "../../../src/lib/server/ws-rpc.js";
+import { makeRoutedWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 
 describe("WsRpcWebSocketHandler", () => {
 	const cleanups: Array<() => Promise<void> | void> = [];
@@ -14,23 +15,43 @@ describe("WsRpcWebSocketHandler", () => {
 	});
 
 	it("ends the connection fiber when the client disconnects", async () => {
-		const runtime = ManagedRuntime.make(
-			Layer.merge(
-				makeTestHandlerLayer(),
-				makeWsTransportLive({ noServer: true }),
+		const scope = Effect.runSync(Scope.make());
+		cleanups.push(() => Effect.runPromise(Scope.close(scope, Exit.void)));
+		// Each live connection holds one entry until its fiber's scope closes.
+		let markOpened = () => {};
+		let markEnded = () => {};
+		const opened = new Promise<void>((resolve) => {
+			markOpened = resolve;
+		});
+		const ended = new Promise<void>((resolve) => {
+			markEnded = resolve;
+		});
+		const connections = new (class extends Set<() => void> {
+			override add(entry: () => void) {
+				super.add(entry);
+				markOpened();
+				return this;
+			}
+			override delete(entry: () => void) {
+				const deleted = super.delete(entry);
+				if (this.size === 0) markEnded();
+				return deleted;
+			}
+		})();
+		const handler = await Effect.runPromise(
+			makeRoutedWsRpcWebSocketHandler(() =>
+				Effect.fail(new WsRpcError({ message: "unused" })),
+			).pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						Layer.succeed(SessionDirectory)({
+							projectOf: () => Effect.succeed(Option.none()),
+						}),
+						Layer.succeed(BrowserRpcConnectionsTag)(connections),
+					),
+				),
+				Scope.provide(scope),
 			),
-		);
-		cleanups.push(() => runtime.dispose());
-		const forked: Fiber.Fiber<unknown, unknown>[] = [];
-		const trackingRuntime = {
-			runFork: (effect: Effect.Effect<unknown, unknown, never>) => {
-				const fiber = runtime.runFork(effect);
-				forked.push(fiber);
-				return fiber;
-			},
-		} as unknown as ManagedRuntime.ManagedRuntime<unknown, unknown>;
-		const handler = await runtime.runPromise(
-			makeWsRpcWebSocketHandler({ runtime: trackingRuntime }),
 		);
 
 		const server = createServer();
@@ -48,17 +69,13 @@ describe("WsRpcWebSocketHandler", () => {
 			`ws://127.0.0.1:${(server.address() as AddressInfo).port}/rpc`,
 		);
 		await new Promise<void>((resolve) => ws.once("open", () => resolve()));
-		await vi.waitFor(() => expect(forked).toHaveLength(1));
+		await opened;
+		expect(connections.size).toBe(1);
 
 		ws.close();
 		await new Promise<void>((resolve) => ws.once("close", () => resolve()));
 
-		await expect(
-			runtime.runPromise(
-				Fiber.await(forked[0] as Fiber.Fiber<unknown, unknown>).pipe(
-					Effect.timeout("2 seconds"),
-				),
-			),
-		).resolves.toBeDefined();
+		await ended;
+		expect(connections.size).toBe(0);
 	});
 });

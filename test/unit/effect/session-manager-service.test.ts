@@ -1,5 +1,4 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
@@ -275,8 +274,6 @@ function makeNamedOpenCodeDaemonConfig(): DaemonConfig {
 
 function makeRelayConfig(configDir: string): ProjectRelayConfig {
 	return {
-		httpServer: createServer(),
-		opencodeUrl: "http://localhost:4096",
 		projectDir: "/tmp/project",
 		slug: "project",
 		persistenceDbPath: tempEventsDbPath(),
@@ -1125,8 +1122,6 @@ describe("SessionManagerService", () => {
 				projects: [],
 			};
 			const relayConfig: ProjectRelayConfig = {
-				httpServer: createServer(),
-				opencodeUrl: "http://localhost:4096",
 				projectDir: "/tmp/project",
 				slug: "project",
 				persistenceDbPath: tempEventsDbPath(),
@@ -1166,7 +1161,7 @@ describe("SessionManagerService", () => {
 				),
 			);
 			const claudeInstanceId = AccountIdSchema.make("claude");
-			const openCodeInstanceId = AccountIdSchema.make("opencode");
+			const openCodeAccountId = AccountIdSchema.make("opencode");
 
 			return Effect.gen(function* () {
 				yield* Effect.tryPromise(() => saveDaemonConfig(daemonConfig, tmpDir));
@@ -1192,7 +1187,7 @@ describe("SessionManagerService", () => {
 						account: {
 							driver: "opencode",
 							usageEligible: false,
-							id: openCodeInstanceId,
+							id: openCodeAccountId,
 							name: "OpenCode",
 						},
 						pick: openCodePick,

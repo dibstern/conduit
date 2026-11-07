@@ -2,7 +2,6 @@ import type { IncomingMessage } from "node:http";
 import { type EventLoopUtilization, performance } from "node:perf_hooks";
 import type { Duplex } from "node:stream";
 import { TLSSocket } from "node:tls";
-import type { ManagedRuntime } from "effect";
 import { Context, Effect, type Fiber, Layer, Option, Tracer } from "effect";
 import { NetAddress } from "effect/net";
 import { type RpcMessage, RpcSerialization, RpcServer } from "effect/rpc";
@@ -38,9 +37,8 @@ import {
 	type ResolveRpcContext,
 	RpcCaller,
 	RpcPinChangeResponse,
-	type RpcSubscriptionScopeTag,
 	WsRpcGroup,
-	WsRpcServerLayer,
+	type WsRpcServerLayer,
 } from "./ws-rpc.js";
 
 const RPC_CONNECTION_CONCURRENCY = 32;
@@ -225,25 +223,6 @@ export const withSlowRpcLogging = (
 	};
 };
 
-type RpcWebSocketHandlerOptions = (
-	| { readonly runtime: ManagedRuntime.ManagedRuntime<unknown, unknown> }
-	| {
-			readonly context: Effect.Effect<
-				Context.Context<
-					Layer.Services<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
-				>,
-				unknown
-			>;
-			readonly runFork: (
-				effect: Effect.Effect<
-					void,
-					never,
-					Layer.Services<typeof WsRpcServerLayer>
-				>,
-			) => void;
-	  }
-) & { readonly maxPayload?: number };
-
 type RpcTransportRunFork = <A, E>(
 	effect: Effect.Effect<A, E, WsTransportTag>,
 ) => Fiber.Fiber<A, E>;
@@ -252,21 +231,6 @@ interface RpcWebSocketHandlerRuntime {
 	readonly transport: WsTransport;
 	readonly runTransportFork: RpcTransportRunFork;
 	readonly runConnection: (ws: WebSocket, ip: string, secure?: boolean) => void;
-}
-
-export interface RpcWebSocketHandlerShape {
-	readonly context?: Effect.Effect<
-		Context.Context<
-			Layer.Services<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
-		>,
-		unknown
-	>;
-	readonly handleUpgrade: (
-		req: IncomingMessage,
-		socket: Duplex,
-		head: Buffer,
-	) => void;
-	readonly drain: () => Promise<void>;
 }
 
 const runRpcWebSocketConnection = <R>(
@@ -402,43 +366,6 @@ const runRpcWebSocketConnection = <R>(
 		}),
 	).pipe(Effect.provideService(RpcCaller, { kind: "browser", ip, secure }));
 
-export const makeWsRpcWebSocketHandler = (
-	options: RpcWebSocketHandlerOptions,
-): Effect.Effect<WsRpcWebSocketHandler, never, WsTransportTag> =>
-	Effect.gen(function* () {
-		const transport = yield* WsTransportTag;
-		const browserConnections = yield* Effect.serviceOption(
-			BrowserRpcConnectionsTag,
-		);
-		const context = yield* Effect.context<WsTransportTag>();
-		return new WsRpcWebSocketHandler(
-			"runtime" in options
-				? Effect.suspend(() => options.runtime.contextEffect)
-				: options.context,
-			{
-				transport,
-				runTransportFork: Effect.runForkWith(context),
-				runConnection: (ws, ip, secure) => {
-					const connection = runRpcWebSocketConnection(
-						ws,
-						ip,
-						WsRpcServerLayer,
-						undefined,
-						Option.getOrUndefined(browserConnections),
-						secure,
-					);
-					if ("runtime" in options) options.runtime.runFork(connection);
-					else options.runFork(connection);
-				},
-			},
-		);
-	});
-
-export class RoutedWsRpcWebSocketHandlerTag extends Context.Service<
-	RoutedWsRpcWebSocketHandlerTag,
-	RpcWebSocketHandlerShape
->()("RoutedWsRpcWebSocketHandler") {}
-
 export const makeRoutedWsRpcWebSocketHandler = (
 	resolveContext: ResolveRpcContext,
 	daemonHandlers?: DaemonRpcHandlers,
@@ -462,7 +389,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 			daemonHandlers,
 			defaultProjectSlug,
 		).pipe(Layer.provide(Layer.succeed(SessionDirectory, directory)));
-		const handler = new WsRpcWebSocketHandler(undefined, {
+		const handler = new WsRpcWebSocketHandler({
 			transport: Context.get(transportContext, WsTransportTag),
 			runTransportFork: Effect.runForkWith(context),
 			runConnection: (ws, ip, secure) =>
@@ -489,13 +416,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 		return handler;
 	});
 
-export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
-	readonly context?: Effect.Effect<
-		Context.Context<
-			Layer.Services<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
-		>,
-		unknown
-	>;
+export class WsRpcWebSocketHandler {
 	private readonly runConnection: (
 		ws: WebSocket,
 		ip: string,
@@ -506,11 +427,7 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 	private readonly clients = new Set<WebSocket>();
 	private closed = false;
 
-	constructor(
-		context: RpcWebSocketHandlerShape["context"],
-		runtime: RpcWebSocketHandlerRuntime,
-	) {
-		if (context) this.context = context;
+	constructor(runtime: RpcWebSocketHandlerRuntime) {
 		this.runConnection = runtime.runConnection;
 		this.transport = runtime.transport;
 		this.runTransportFork = runtime.runTransportFork;

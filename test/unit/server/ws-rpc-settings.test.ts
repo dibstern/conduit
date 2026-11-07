@@ -1,7 +1,6 @@
 // Failure modes: setters bypass runtime state, acknowledge an unfinished or
 // failed save, a later snapshot erases settings, or getters read stale disk.
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:http";
 import { join } from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import { Context, Effect, Result as Either, Layer, Ref } from "effect";
@@ -47,7 +46,6 @@ describe("settings RPC config persistence", () => {
 					launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 				}),
 				Layer.succeed(ConfigTag)({
-					httpServer: createServer(),
 					projectDir: configDir,
 					slug: "settings",
 					configDir,

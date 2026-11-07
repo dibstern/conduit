@@ -1065,6 +1065,7 @@ describe("shared-store relay project scope", () => {
 							Layer.provide(
 								Layer.mergeAll(
 									Layer.succeed(ConfigTag)(config()),
+									Layer.succeed(LoggerTag)(makeMockLogger()),
 									makeOpenCodeProjectStreamsLive(() => [
 										{ slug: A, folders: [store.root] },
 									]).pipe(

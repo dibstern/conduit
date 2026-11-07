@@ -3,7 +3,6 @@
 // resumes; a Resume during the refresh duplicates a turn or reports a refusal.
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
@@ -220,7 +219,6 @@ const withFixture = <A, E, R>(
 		}),
 		Effect.provide(AlertsLive),
 		Effect.provideService(ConfigTag, {
-			httpServer: createServer(),
 			projectDir: root,
 			slug: "usage-reset-continue",
 			configDir: join(root, "config"),

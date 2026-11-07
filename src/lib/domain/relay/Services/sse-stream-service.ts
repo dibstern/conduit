@@ -9,7 +9,7 @@ import type {
 import type { ConnectionHealth } from "../../../types.js";
 import type { OpenCodeInstanceEvent } from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeProjectStreams } from "../../daemon/Services/opencode-project-streams.js";
-import { ConfigTag } from "./services.js";
+import { ConfigTag, LoggerTag } from "./services.js";
 
 export interface RelayOpenCodeStream extends SSEStreamPort {
 	/** Register before dispatch; earlier directories remain live for in-flight turns. */
@@ -31,7 +31,7 @@ export class SSEStreamTag extends Context.Service<
 	RelayOpenCodeStream
 >()("SSEStream") {}
 
-const makeChannel = (log: Logger | undefined) => {
+const makeChannel = (log: Logger) => {
 	const callbacks: {
 		[K in keyof SSEStreamCallbacks]: SSEStreamCallbacks[K][];
 	} = {
@@ -53,7 +53,7 @@ const makeChannel = (log: Logger | undefined) => {
 		try {
 			callback();
 		} catch (error) {
-			log?.warn("OpenCode SSE subscriber callback failed", error);
+			log.warn("OpenCode SSE subscriber callback failed", error);
 		}
 	};
 	return {
@@ -116,7 +116,7 @@ const makeChannel = (log: Logger | undefined) => {
 export const SSEStreamLive: Layer.Layer<
 	SSEStreamTag,
 	never,
-	OpenCodeProjectStreams | ConfigTag
+	OpenCodeProjectStreams | ConfigTag | LoggerTag
 > = Layer.effect(
 	SSEStreamTag,
 	Effect.gen(function* () {
@@ -124,7 +124,7 @@ export const SSEStreamLive: Layer.Layer<
 		const config = yield* ConfigTag;
 		const retireReplacedPrompts = yield* makeRetireReplacedProcessPrompts;
 		const observedProcesses = new Map<string, string>();
-		const log = config.log;
+		const log = yield* LoggerTag;
 		const gate = yield* Semaphore.make(1);
 		// The main channel belongs to managed OpenCode; other accounts keep their ids.
 		const selectedId = MANAGED_OPENCODE_ACCOUNT_ID;

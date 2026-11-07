@@ -1,8 +1,5 @@
 // Canonical type definitions for conduit, derived from ticket specs.
 
-import type { Tracer } from "effect/Tracer";
-import type { Logger } from "./logger.js";
-import type { PushNotificationSender } from "./server/push.js";
 import type {
 	PartType,
 	PermissionId,
@@ -158,43 +155,12 @@ export interface ProjectRelayConfig {
 	) => import("./contracts/project-shell-env.js").ProjectShellEnvSnapshot;
 	/** Await the existing shell capture before speculative Claude boot only. */
 	prepareShellEnv?: (directory: string) => Promise<boolean>;
-	/**
-	 * Standalone relays' OpenCode server URL (e.g., "http://localhost:4096").
-	 * Daemon relays resolve theirs per request through `openCodeInstances`.
-	 */
-	opencodeUrl?: string;
-	/** Credentials for `opencodeUrl`. */
-	opencodeAuth?: { username: string; password: string };
-	/** Daemon-owned OpenCode Instances module shared by project relays. */
-	openCodeInstances?: import("./domain/daemon/Services/opencode-instances-service.js").OpenCodeInstances;
-	/** Usage readings shared by every relay in this daemon. */
-	usage?: import("./domain/daemon/Services/usage.js").UsageService;
-	/** Daemon-owned worktree lifecycle shared with its project relays. */
-	worktreeContext?: import("effect").Context.Context<
-		import("./domain/daemon/Services/worktree-service.js").WorktreeServiceTag
-	>;
-	/** Shared daemon services; must include the daemon-owned ProviderAdapters. */
-	daemonConfigContext?: import("effect").Context.Context<never>;
-	/** No relay reads this (relay-stack owns its server); S6 removes it. */
-	httpServer?: import("node:http").Server;
 	/** Project working directory */
 	projectDir: string;
 	/** Additional Claude workspace folders, fixed for this relay's lifetime. */
 	extraFolders?: readonly string[];
 	/** URL slug for this project */
 	slug: string;
-	/** Session title for the initial session */
-	sessionTitle?: string;
-	/** Logger instance — defaults to a console-backed root logger */
-	log?: Logger;
-	/** Ambient daemon tracer borrowed by the relay ManagedRuntime. */
-	tracer?: Tracer;
-	/**
-	 * Enables per-directory scoping via x-opencode-directory header.
-	 * WebSocket upgrades are always owned by the caller, which attaches sockets
-	 * to the relay.
-	 */
-	noServer?: boolean;
 	/** Request the daemon's serialized worktree sweep after a session settles. */
 	requestWorktreeCleanup?: () => import("effect").Effect.Effect<void>;
 	/** Read this project's current effective cleanup rules from the daemon. */
@@ -205,18 +171,8 @@ export interface ProjectRelayConfig {
 	publishGlobalSetting: (
 		tag: import("./contracts/ws-rpc.js").GlobalSettingTag,
 	) => import("effect").Effect.Effect<void>;
-	/** Optional push notification manager for server-side push delivery */
-	pushManager?: PushNotificationSender;
 	/** Config directory for cache storage (default: projectDir/.conduit) */
 	configDir?: string;
-	/**
-	 * Abort signal for cancelling relay creation mid-flight.
-	 *
-	 * Optional because standalone callers and tests don't need
-	 * cancellation — only the daemon passes a signal (via ProjectRegistry)
-	 * so it can abort in-flight relay creation when a project is removed.
-	 */
-	signal?: AbortSignal;
 	/**
 	 * Override the default poller gating config (SSE grace period, staleness
 	 * threshold, max concurrent pollers). Useful for tests that need

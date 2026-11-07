@@ -16,7 +16,10 @@ import {
 } from "../../../src/lib/domain/daemon/Layers/opencode-instances-layer.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { makeOpenCodeProjectStreamsLive } from "../../../src/lib/domain/daemon/Services/opencode-project-streams.js";
-import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	SSEStreamLive,
 	SSEStreamTag,
@@ -170,6 +173,7 @@ describe("Shared OpenCode stream reconnect", () => {
 								Layer.provide(Layer.succeed(OpenCodeInstancesTag)(instances)),
 							),
 							Layer.succeed(ConfigTag)(makeMockConfig({ projectDir })),
+							Layer.succeed(LoggerTag)(createSilentLogger()),
 						),
 					),
 				),

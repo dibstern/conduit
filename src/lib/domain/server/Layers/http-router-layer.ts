@@ -4,7 +4,6 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { Context, Effect, HashMap, Layer, Option, Ref, Scope } from "effect";
 import { HttpRouter } from "effect/http";
-import type { AuthManager } from "../../../auth.js";
 import { SCRATCH_PROJECT_SLUG } from "../../../contracts/scratch-project.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
@@ -36,11 +35,7 @@ import { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapsh
 import { StatusPollerCoreTag } from "../../relay/Services/session-status-poller.js";
 import { PushManagerTag } from "../Services/push-service.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
-import {
-	type AuthManagerService,
-	AuthManagerTag,
-	makeAuthManagerLive,
-} from "./auth-middleware.js";
+import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";
 
 export type { RouterProjectInfo };
 
@@ -63,18 +58,6 @@ export interface DaemonHttpRouterPushManager {
 		subscription: PushSubscriptionData,
 	) => void;
 	readonly removeSubscription: (endpoint: string) => void;
-}
-
-export interface StandaloneHttpRouterOptions {
-	readonly auth: AuthManager;
-	readonly staticDir: string;
-	readonly getProjects: () => RouterProjectInfo[];
-	readonly readAttachment?: HttpAttachmentReader | undefined;
-	readonly getPort: () => number;
-	readonly getIsTls: () => boolean;
-	readonly pushManager?: DaemonHttpRouterPushManager | null | undefined;
-	readonly caRootPath?: string | undefined;
-	readonly caCertDer?: Buffer | undefined;
 }
 
 interface HttpRouterRequestHandlerOptions {
@@ -217,26 +200,6 @@ const makeDaemonProjectsReader = (deps: {
 			);
 		});
 };
-
-export const makeStandaloneHttpRouterRequestHandler = (
-	options: StandaloneHttpRouterOptions,
-): DaemonHttpRequestHandler =>
-	Effect.runSync(
-		buildHttpRouterRequestHandlerEffect({
-			authLayer: makeAuthManagerLive(options.auth),
-			setupInfoLayer: Layer.succeed(SetupInfoProvider, {
-				getPort: () => Effect.sync(options.getPort),
-				getIsTls: () => Effect.sync(options.getIsTls),
-				getPublicUrl: () => Effect.succeed(null),
-			}),
-			staticDir: options.staticDir,
-			getProjects: () => Effect.sync(options.getProjects),
-			readAttachment: options.readAttachment,
-			pushManager: options.pushManager,
-			caRootPath: options.caRootPath,
-			caCertDer: options.caCertDer,
-		}).pipe(Effect.provideService(Scope.Scope, Scope.makeUnsafe())),
-	);
 
 export const makeDaemonHttpRouterLive = (staticDir: string) =>
 	Layer.effect(

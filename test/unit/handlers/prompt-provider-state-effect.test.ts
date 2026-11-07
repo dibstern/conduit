@@ -1,5 +1,4 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
@@ -183,8 +182,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 					),
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag)({
-						httpServer: createServer(),
-						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
 						slug: "provider-state-test",
 						configDir: dir,
@@ -317,8 +314,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 				),
 				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 				Layer.succeed(ConfigTag)({
-					httpServer: createServer(),
-					opencodeUrl: "http://127.0.0.1:1",
 					projectDir: MOCK_PROJECT_DIR,
 					slug: "history-test",
 					configDir: dir,
@@ -452,8 +447,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 					),
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag)({
-						httpServer: createServer(),
-						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
 						slug: "claude-user-effect-test",
 						configDir: dir,
@@ -613,8 +606,6 @@ describe("handleMessage with Effect provider state persistence", () => {
 					),
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag)({
-						httpServer: createServer(),
-						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
 						slug: "claude-sink-effect-test",
 						configDir: dir,

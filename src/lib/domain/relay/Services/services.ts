@@ -33,7 +33,6 @@ import {
 	OpenCodeInstancesTag,
 	type OpenCodeUnavailable,
 } from "../../daemon/Services/opencode-instances-service.js";
-import type { SessionBackground } from "../../daemon/Services/session-activity.js";
 import type { SessionStatusPollerService } from "./session-status-poller.js";
 
 /** Shape for the statusPoller field — methods needed by relay effects and lifecycle wiring. */
@@ -389,32 +388,11 @@ export class StatusPollerTag extends Context.Service<
 	StatusPollerShape
 >()("StatusPoller") {}
 
-export class BackgroundLivenessTag extends Context.Service<
-	BackgroundLivenessTag,
-	(sessionId: string) => SessionBackground | undefined
->()("BackgroundLiveness") {}
-
 /** Runner process ownership, independent of turn and background activity. */
 export class AgentLivenessTag extends Context.Service<
 	AgentLivenessTag,
 	(sessionId: string) => Effect.Effect<boolean>
 >()("AgentLiveness") {}
-
-/** A Claude runtime's live task ids; see SessionActivity's background.liveListOf. */
-export class LiveTaskListTag extends Context.Service<
-	LiveTaskListTag,
-	(
-		sessionId: string,
-	) =>
-		| { readonly taskIds: ReadonlySet<string>; readonly since: number }
-		| undefined
->()("LiveTaskList") {}
-
-/** The compaction in progress per session; see makeSessionCompactions. */
-export class SessionCompactionsTag extends Context.Service<
-	SessionCompactionsTag,
-	(sessionId: string) => string | undefined
->()("SessionCompactions") {}
 
 /** The provider retry a session is waiting on; see makeSessionRetries. */
 export class SessionRetriesTag extends Context.Service<

@@ -311,7 +311,6 @@ function mockConfig(
 	overrides?: Partial<ProjectRelayConfig>,
 ): ProjectRelayConfig {
 	return makeMockConfig({
-		opencodeUrl: "http://localhost:3000",
 		slug: "test-project",
 		projectDir: tmpdir(),
 		configDir: "/tmp/test-config",

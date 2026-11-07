@@ -29,12 +29,7 @@ import { createSdkClient } from "../../../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../../../logger.js";
 import { openCodePromptProcessId } from "../../../provider/opencode-process-identity.js";
 import { SSEStream } from "../../../relay/sse-stream.js";
-import type {
-	ConnectionHealth,
-	InstanceStatus,
-	ProjectRelayConfig,
-} from "../../../types.js";
-import { AccountDirectory } from "../Services/account-directory.js";
+import type { ConnectionHealth, InstanceStatus } from "../../../types.js";
 import { subscribeToDaemonEvents } from "../Services/daemon-pubsub.js";
 import {
 	checkInstanceHealth,
@@ -1401,45 +1396,3 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 		},
 	},
 );
-
-/** Relay without a daemon: endpoints use its startup-seeded account directory. */
-export const makeStandaloneOpenCodeInstancesLive = (
-	config: Pick<
-		ProjectRelayConfig,
-		"opencodeUrl" | "opencodeAuth" | "configDir" | "log"
-	>,
-) =>
-	Layer.unwrap(
-		Effect.gen(function* () {
-			const accounts = yield* AccountDirectory;
-			return makeOpenCodeInstancesLive(
-				(instanceId) =>
-					Effect.gen(function* () {
-						if (instanceId === MANAGED_OPENCODE_ACCOUNT_ID)
-							return config.opencodeUrl === undefined
-								? undefined
-								: {
-										url: config.opencodeUrl,
-										...(config.opencodeAuth
-											? { auth: config.opencodeAuth }
-											: {}),
-									};
-						const account = (yield* accounts.snapshot).accounts.find(
-							({ id }) => id === instanceId,
-						);
-						if (account?.driver === "opencode") {
-							const url =
-								account.managed === true
-									? `http://localhost:${account.port}`
-									: account.url;
-							const auth = openCodeAuth(account.env);
-							return url === undefined
-								? undefined
-								: { url, ...(auth ? { auth } : {}) };
-						}
-						return undefined;
-					}),
-				config.log ? { log: config.log.child("opencode") } : {},
-			);
-		}),
-	);

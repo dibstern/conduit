@@ -15,7 +15,6 @@ import type {
 	PreWarmSessionInput,
 	ProviderCall,
 } from "../../../provider/types.js";
-import { DaemonOrchestration } from "../../daemon/Services/daemon-orchestration.js";
 import { DaemonStoreAvailability } from "../../daemon/Services/daemon-store-availability.js";
 import { ProjectRegistryTag } from "../../daemon/Services/project-registry-service.js";
 import { LoggerTag } from "./services.js";
@@ -371,14 +370,4 @@ export const DraftPreWarmLive = Layer.effect(
 					.pipe(Effect.uninterruptible),
 		};
 	}),
-);
-
-/** The daemon's drafts when it lends its orchestration; a standalone relay is
- *  its own daemon. */
-export const DraftPreWarmOrOwn = Layer.unwrap(
-	Effect.map(Effect.serviceOption(DaemonOrchestration), (shared) =>
-		Option.isSome(shared)
-			? Layer.succeed(DraftPreWarmTag, shared.value.drafts)
-			: DraftPreWarmLive,
-	),
 );

@@ -4,7 +4,6 @@
 // racing Resumes dispatch twice, cancel the winner, or report a refusal.
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
@@ -353,7 +352,6 @@ const withSweep = <A, E, R>(
 		}),
 		Effect.provide(AlertsLive),
 		Effect.provideService(ConfigTag, {
-			httpServer: createServer(),
 			projectDir: root,
 			slug: "usage-reset-sweep",
 			configDir: join(root, "config"),

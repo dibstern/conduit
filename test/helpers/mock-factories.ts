@@ -95,7 +95,6 @@ import {
 import { RelayStatusSnapshotLive } from "../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import { ScanServiceLive } from "../../src/lib/domain/relay/Services/scan-service.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	type ConnectPtyUpstreamShape,
 	ConnectPtyUpstreamTag,
@@ -237,7 +236,6 @@ afterAll(() => rmSync(mockConfigRoot, { recursive: true, force: true }));
 
 function createMockConfig(): HandlerDeps["config"] {
 	return {
-		opencodeUrl: "http://localhost:4096",
 		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
 		configDir: mkdtempSync(join(mockConfigRoot, "config-")),
@@ -644,8 +642,6 @@ export function makeMockConfig(
 	overrides?: Partial<ProjectRelayConfig>,
 ): ProjectRelayConfig {
 	return {
-		httpServer: {} as ProjectRelayConfig["httpServer"],
-		opencodeUrl: "http://localhost:4096",
 		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
 		publishGlobalSetting: () => Effect.void,
@@ -897,13 +893,6 @@ export function makeTestHandlerLayer(
 	);
 	const loggerLayer = Layer.succeed(LoggerTag)(log);
 	const activityLayer = makeTestSessionActivityLayer(opts?.selectedSession);
-	const backgroundLayer = Layer.effect(
-		BackgroundLivenessTag,
-		Effect.map(
-			SessionActivityTag,
-			(activity) => activity.background.backgroundOf,
-		),
-	).pipe(Layer.provide(activityLayer));
 	const orchestrationLayer = Layer.succeed(OrchestrationEngineTag)(
 		opts?.orchestrationEngine ??
 			withDispatchEffect({
@@ -1099,7 +1088,6 @@ export function makeTestHandlerLayer(
 	return Layer.mergeAll(
 		openCodeApiLayer,
 		activityLayer,
-		backgroundLayer,
 		sessionWorkspaceLayer,
 		openCodeInstancesLayer,
 		openCodeFileServiceLayer,

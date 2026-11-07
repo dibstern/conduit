@@ -24,12 +24,6 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 		reason: "local CLI RPC adapter exposes a Promise API",
 	},
 	{
-		path: "src/lib/domain/server/Layers/http-router-layer.ts",
-		linePattern: /Effect\.runSync(?:Exit)?(?:With)?\s*\($/,
-		reason:
-			"standalone HTTP compatibility adapter from NodeHttpServer.makeHandler",
-	},
-	{
 		path: "src/lib/domain/daemon/Layers/preview-gate-layer.ts",
 		linePattern: /Effect\.runPromise\s*\(/,
 		reason:

@@ -70,10 +70,8 @@ import {
 } from "../../helpers/orchestration-engine-test-double.js";
 
 const config = {
-	opencodeUrl: "http://127.0.0.1:1",
 	projectDir: MOCK_PROJECT_DIR,
 	slug: "timeout-test",
-	noServer: true,
 } satisfies Partial<ProjectRelayConfig>;
 
 describe("prompt processing timeouts through Effect state", () => {

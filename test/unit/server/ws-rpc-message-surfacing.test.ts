@@ -210,7 +210,7 @@ describe("message surfacing RPC security", () => {
 						secure,
 					}),
 				);
-				new WsRpcWebSocketHandler(undefined, {
+				new WsRpcWebSocketHandler({
 					transport: {
 						wss,
 						handleUpgrade: () => Effect.die("Unexpected upgrade"),

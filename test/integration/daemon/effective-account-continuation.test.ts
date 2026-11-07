@@ -12,7 +12,6 @@
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
@@ -290,7 +289,6 @@ for (const scenario of [
 			}),
 			Effect.provide(AlertsLive),
 			Effect.provideService(ConfigTag, {
-				httpServer: createServer(),
 				projectDir: join(root, "project"),
 				slug: "effective-continuation",
 				configDir: join(root, "config"),

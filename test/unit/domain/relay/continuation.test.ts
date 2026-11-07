@@ -10,7 +10,6 @@
 // revalidation re-resolves an account instead of keeping the admitted snapshot.
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Semaphore, Stream } from "effect";
@@ -441,7 +440,6 @@ for (const scenario of [
 					}),
 					Effect.provide(AlertsLive),
 					Effect.provideService(ConfigTag, {
-						httpServer: createServer(),
 						projectDir: isolatedRoot,
 						slug: "gate-test",
 						configDir: isolatedRoot,
@@ -583,7 +581,6 @@ for (const boundId of ["claude-sdk", "unknown-account", "opencode"] as const) {
 					switchAgent: () => Effect.die("Prewarm must not change agents"),
 				}),
 				Effect.provideService(ConfigTag, {
-					httpServer: createServer(),
 					projectDir: isolatedRoot,
 					slug: "prewarm-test",
 					configDir: isolatedRoot,
