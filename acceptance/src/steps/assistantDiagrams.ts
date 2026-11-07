@@ -848,6 +848,14 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		match: /^I focus the wide diagram and press \+$/,
 		run: async ({ world }) => {
 			await noteFit(wideDrawing(world.page));
+			// pele's zoom resets to fit on its host's first resize callback, so a
+			// press before that frame lands is undone. Let it land first.
+			await world.page.evaluate(
+				() =>
+					new Promise((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(resolve)),
+					),
+			);
 			await wideDrawing(world.page).focus();
 			await world.page.keyboard.press("+");
 		},
