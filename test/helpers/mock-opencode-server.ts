@@ -1167,9 +1167,16 @@ export class MockOpenCodeServer {
 				this.getActiveQueue(this.exactQueues, exact) ??
 				this.getActiveQueue(this.normalizedQueues, normalized);
 			if (statusQueue) {
-				const shifted =
-					statusQueue.length > 1 ? statusQueue.shift() : undefined;
-				const statusEntry = shifted ?? statusQueue[0];
+				// As for any read: a status recorded after a prompt the test has not
+				// sent yet would report that turn busy before it starts, so the
+				// previous status repeats instead.
+				const lastRead = this.lastReads.get(statusQueue);
+				const statusEntry =
+					lastRead && (statusQueue[0]?.afterPrompts ?? 0) > this.promptsFired
+						? lastRead
+						: ((statusQueue.length > 1 ? statusQueue.shift() : undefined) ??
+							statusQueue[0]);
+				if (statusEntry) this.lastReads.set(statusQueue, statusEntry);
 				if (
 					statusEntry &&
 					(this.sseIdleSessions.size > 0 || this.sseBusySessions.size > 0)
