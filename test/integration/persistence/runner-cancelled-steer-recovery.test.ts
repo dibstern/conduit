@@ -83,7 +83,10 @@ it.each([
 					{ length: steerCount },
 					(_, index) => `steer-${index}`,
 				);
-				for (const [index, inputId] of ids.entries()) {
+				// The ledger reads the first request as the Run and the steers as its inputs. Its
+				// start, never held, was not yet delivered and goes back to the outbox (CONTRACT
+				// 664-681, D50); each steer's own command settles under its own run (1868-1869).
+				for (const [index, inputId] of ["start", ...ids].entries()) {
 					const runId = `run:${inputId}`;
 					yield* commit([
 						canonicalEvent(
@@ -164,6 +167,19 @@ it.each([
 				expect(
 					yield* sql`SELECT type FROM events WHERE type = 'input.requeued'`,
 				).toHaveLength(steerCount);
+				expect(
+					yield* sql`SELECT command.status, run.status AS run_status, pending.state
+						FROM provider_command_outbox command
+						JOIN provider_runs run ON run.id = command.run_id
+						JOIN pending_inputs pending ON pending.input_id = command.command_id
+						WHERE command.command_id = 'start'`,
+				).toEqual([
+					{
+						status: "retryable_failed",
+						run_status: "pending",
+						state: "steering",
+					},
+				]);
 			}),
 		);
 	} finally {
@@ -174,7 +190,8 @@ it.each([
 
 // Real gate, ingestion and recovery transactions: a removed project never refuses
 // a claimed steer (CONTRACT 3.11, 1053-1108); a surviving runner keeps intake
-// ownership, and confirmed loss releases only an unplaced steer.
+// ownership, and confirmed loss returns only an unplaced steer, never held, to the
+// outbox to be sent once under its command, with no terminal (CONTRACT 664-681, D50).
 // Repeated sweeps, an accepted message and a user cancellation must not resend.
 it.each(
 	(["claude", "cursor"] as const).flatMap((driver) =>
@@ -366,8 +383,9 @@ it.each(
 				]);
 				expect(beforeLoss.requeues).toHaveLength(0);
 				if (placement === "unplaced") {
-					yield* sql.unsafe(`CREATE TRIGGER fail_requeue BEFORE INSERT ON events
-						WHEN NEW.type = 'input.requeued'
+					// The write that returns the send to the outbox must fail recovery, not be swallowed.
+					yield* sql.unsafe(`CREATE TRIGGER fail_requeue BEFORE UPDATE ON provider_command_outbox
+						WHEN NEW.status = 'retryable_failed'
 						BEGIN SELECT RAISE(ABORT, 'requeue persistence failed'); END`);
 					const failed = yield* Effect.result(recover(new Set()));
 					expect(failed._tag).toBe("Failure");
@@ -395,34 +413,34 @@ it.each(
 				}
 				const afterLoss = yield* snapshot();
 				scenarios.push({ driver, placement, alive, beforeLoss, afterLoss });
-				// A cancelled steer is no runner candidate; only runner loss settles a running one.
+				// A cancelled steer is no runner candidate; only runner loss settles a running one,
+				// and an unplaced steer's loss settles nothing: its send goes back to the outbox.
 				expect(afterLoss.settlements).toEqual(
-					placement === "user-cancelled" ? [] : [{ command_id: "input" }],
+					placement === "accepted" ? [{ command_id: "input" }] : [],
 				);
 				expect(afterLoss.commands).toEqual([
-					placement === "user-cancelled"
-						? { status: "cancelled", error_code: "interrupted" }
-						: { status: "failed", error_code: "runner_stopped" },
+					placement === "unplaced"
+						? { status: "retryable_failed", error_code: null }
+						: placement === "user-cancelled"
+							? { status: "cancelled", error_code: "interrupted" }
+							: { status: "failed", error_code: "runner_stopped" },
 				]);
-				expect(afterLoss.runs).toEqual([{ status: "error" }]);
+				expect(afterLoss.runs).toEqual([
+					{ status: placement === "unplaced" ? "pending" : "error" },
+				]);
 				expect(afterLoss.inputs).toEqual([
 					{
 						input_id: "input",
-						state:
-							placement === "unplaced"
-								? "queued"
-								: placement === "accepted"
-									? "removed"
-									: "steering",
+						state: placement === "accepted" ? "removed" : "steering",
 					},
 				]);
 				expect(afterLoss.messages).toHaveLength(
 					placement === "accepted" ? 1 : 0,
 				);
-				expect(afterLoss.requeues).toHaveLength(
-					placement === "unplaced" ? 1 : 0,
+				expect(afterLoss.requeues).toHaveLength(0);
+				expect(afterLoss.terminals).toHaveLength(
+					placement === "unplaced" ? 0 : 1,
 				);
-				expect(afterLoss.terminals).toHaveLength(1);
 			}),
 		);
 		for (let restart = 0; restart < 2; restart++) {
@@ -439,26 +457,17 @@ it.each(
 					const persist = yield* ClaudeEventPersistEffectTag;
 					yield* requeueFailedSteers(sql, persist);
 					expect(yield* sql`SELECT state FROM pending_inputs`).toEqual([
-						{
-							state:
-								placement === "unplaced"
-									? "queued"
-									: placement === "accepted"
-										? "removed"
-										: "steering",
-						},
+						{ state: placement === "accepted" ? "removed" : "steering" },
 					]);
 					expect(
 						yield* sql`SELECT type FROM events WHERE type = 'input.requeued'`,
-					).toHaveLength(placement === "unplaced" ? 1 : 0);
+					).toHaveLength(0);
 					expect(
 						yield* sql`SELECT type FROM events WHERE type = 'turn.error'`,
-					).toHaveLength(1);
+					).toHaveLength(placement === "unplaced" ? 0 : 1);
 					expect(
 						yield* sql`SELECT command_id FROM receipt_settlements`,
-					).toEqual(
-						placement === "user-cancelled" ? [] : [{ command_id: "input" }],
-					);
+					).toEqual(placement === "accepted" ? [{ command_id: "input" }] : []);
 				}),
 			);
 		}
