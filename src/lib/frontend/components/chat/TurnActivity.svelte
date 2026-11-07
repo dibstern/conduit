@@ -655,7 +655,7 @@
 {/snippet}
 
 {#snippet turnLayout(strip: Snippet<[Snippet | undefined]>, card: Snippet, details: Snippet)}
-	<div class="turn-activity-head {fullLog ? 'turn-activity-sticky' : ''} px-[12px] pt-[10px] {fullLog && (surfacingActive || summaryEnabled) ? '' : 'pb-[2px] md:pb-[9px]'}">
+	<div class="turn-activity-head {fullLog ? 'turn-activity-sticky' : ''} px-[12px] pt-[10px] {fullLog && (surfacingActive || summaryEnabled || onsummarize) ? '' : 'pb-[2px] md:pb-[9px]'}">
 		{@render turnHeading()}
 		{@render strip(fullLog ? undefined : card)}
 		{#if !fullLog}{@render turnDetails(details)}{/if}
@@ -679,8 +679,9 @@
 	{:else if summaryEnabled}
 		{@render summaryPanel(surface, hoverCitation)}
 	{/if}
+	<!-- Below the sticky head (full log) a pull-up would slide the button under it. -->
 	{#if onsummarize && !minimised}
-		<Button variant="ghost" size="content" tone="default" align="start" touchTarget class="md:hidden w-full -mt-[8px] mb-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" onclick={onsummarize}>
+		<Button variant="ghost" size="content" tone="default" align="start" touchTarget class="md:hidden w-full {fullLog ? '' : '-mt-[8px]'} mb-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" onclick={onsummarize}>
 			<span>✦ Summary</span><Icon name="chevron-right" size={14} class="ml-auto text-text-dimmer" />
 		</Button>
 	{/if}
