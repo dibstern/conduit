@@ -342,6 +342,8 @@ async function showFilesTree(
 	await expectSessionVisible(context);
 	// The isolated layout has no selection runtime to establish a file scope.
 	fileTreeState.scope = "storybook:test-project";
+	// Load the lazy panel first: a cold import under load outlasts waitFor's 1 s.
+	await import("../file/SidebarFilePanel.svelte");
 	setRightPaneView("files");
 	// The pane mounts before its lazily imported panel, which is what listens
 	// for the listing.
