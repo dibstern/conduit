@@ -201,7 +201,13 @@ const test = base.extend<{
 				if (event.request.mode === "navigate") event.respondWith(caches.match("/").then(response => response || fetch(event.request)));
 			});`,
 		);
-		const mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
+		// The recording samples a busy status after its first prompt. Every
+		// project folder reads status on each connect, so without this a restart
+		// reaches that sample early and reports a session nobody has created yet.
+		const mock = new MockOpenCodeServer(
+			loadOpenCodeRecording("chat-simple"),
+			true,
+		);
 		let child: ChildProcess | undefined;
 		let diagnostics = "";
 		const stop = async () => {
