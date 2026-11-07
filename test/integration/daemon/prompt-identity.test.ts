@@ -313,6 +313,21 @@ describe("Conduit prompt identity through the daemon and Claude runner", () => {
 					),
 			).toBe(true);
 		}
+		// OpenCode echoes each reply as an event, and an echo resolves a pending
+		// row. One session's events are handled in order, so a later ask landing
+		// proves both echoes have, before the reset below reopens a row.
+		const beforeReplyBarrier = recovered.frames.length;
+		await harness.addOpenCodePrompt(
+			"permission",
+			harness.projectDir,
+			openCodePrompt("permission", "reply-barrier", session),
+		);
+		await recovered.waitFor(
+			(frame) =>
+				frame["type"] === "permission_pending" &&
+				frame["sessionId"] === session,
+			beforeReplyBarrier,
+		);
 
 		// Replayed asks cannot reopen resolved legacy cards or fill half a reference.
 		mutateStore(harness, (db) => {
@@ -337,7 +352,7 @@ describe("Conduit prompt identity through the daemon and Claude runner", () => {
 			harness.projectDir,
 			openCodePrompt("permission", "guard-barrier", session),
 		);
-		await vi.waitFor(() => expect(rows(harness)).toHaveLength(3));
+		await vi.waitFor(() => expect(rows(harness)).toHaveLength(4));
 		expect(
 			rows(harness).find(({ id }) => id === "permission-legacy"),
 		).toMatchObject({
@@ -368,7 +383,7 @@ describe("Conduit prompt identity through the daemon and Claude runner", () => {
 			harness.projectDir,
 			openCodePrompt("permission", "foreign-legacy", foreign),
 		);
-		await vi.waitFor(() => expect(rows(harness)).toHaveLength(4));
+		await vi.waitFor(() => expect(rows(harness)).toHaveLength(5));
 		expect(
 			rows(harness).find(({ id }) => id === "foreign-legacy"),
 		).toMatchObject({
