@@ -295,19 +295,24 @@ export const settleUnclaimedRunnerCommands = <E>(
 									)
 								)
 									return;
-								// CONTRACT 667-672, 689-691 (D50): a send its Run's ledger holds Launched with no
+								// CONTRACT 667-672, 682-691 (D50): a send its Run's ledger holds Launched with no
 								// evidence, never held, was not yet delivered; main returns it to the outbox to be
-								// sent once under its commandId, appending no terminal.
+								// sent once under its commandId, appending no terminal. A steer that Run issued
+								// stays its input (3.9) and goes back too, sent after its start (L2 case 2).
 								const ledger = yield* loadLedger(row.session_id).pipe(
 									Effect.provideService(SqlClient.SqlClient, sql),
 								);
 								const active = ledger && viewLedger(ledger.state).active;
 								if (
-									active?.runId === evidence.send.runId &&
-									active.tag === "Starting" &&
-									(yield* sql`SELECT 1 FROM provider_runs WHERE id = ${evidence.send.runId}
-										AND session_id = ${row.session_id} AND runner_id IS NULL
-										AND held_transmission IS NULL`).length > 0
+									active?.tag === "Starting" &&
+									(active.runId === evidence.send.runId ||
+										active.inputs.some(
+											({ inputId }) => inputId === row.user_message_id,
+										)) &&
+									(yield* sql`SELECT 1 FROM provider_runs
+										WHERE id IN (${evidence.send.runId}, ${active.runId}) AND session_id = ${row.session_id}
+											AND (runner_id IS NOT NULL OR held_transmission IS NOT NULL)`)
+										.length === 0
 								)
 									return yield* requeueLegacySend(
 										{ sql, project, stamp },
