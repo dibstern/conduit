@@ -2228,8 +2228,11 @@ export const SideThreadsOpen: Story = {
 				?.content,
 		).toBe(theme === "dark" ? "#0b0c0e" : "#b0b1b3");
 		const panel = within(canvasElement).getByTestId("side-threads-panel");
-		// The phone sheet spans the viewport.
-		expect(panel.getBoundingClientRect().width).toBe(window.innerWidth);
+		// The phone sheet spans the header's column, which on a phone is the viewport (tw49i.8).
+		expect(panel.getBoundingClientRect().width).toBe(
+			within(canvasElement).getByTestId("session-bar").getBoundingClientRect()
+				.width,
+		);
 	},
 };
 
