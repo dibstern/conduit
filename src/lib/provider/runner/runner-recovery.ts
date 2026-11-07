@@ -298,13 +298,15 @@ export const settleUnclaimedRunnerCommands = <E>(
 								// CONTRACT 667-672, 682-691 (D50): a send its Run's ledger holds Launched with no
 								// evidence, never held, was not yet delivered; main returns it to the outbox to be
 								// sent once under its commandId, appending no terminal. A steer that Run issued
-								// stays its input (3.9) and goes back too, sent after its start (L2 case 2).
+								// stays its input (3.9) and goes back too, sent after its start (L2 case 2). A
+								// Queued Run is not yet delivered either: an unlaunch's relaunch, claimed but not
+								// held, is its start's retry (CONTRACT 664, 675-676, 687-691).
 								const ledger = yield* loadLedger(row.session_id).pipe(
 									Effect.provideService(SqlClient.SqlClient, sql),
 								);
 								const active = ledger && viewLedger(ledger.state).active;
 								if (
-									active?.tag === "Starting" &&
+									(active?.tag === "Starting" || active?.tag === "Queued") &&
 									(active.runId === evidence.send.runId ||
 										active.inputs.some(
 											({ inputId }) => inputId === row.user_message_id,

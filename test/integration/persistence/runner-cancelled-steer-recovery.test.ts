@@ -12,6 +12,7 @@ import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { requeueFailedSteers } from "../../../src/lib/persistence/effect/input-requeue-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { loadLedgerView } from "../../../src/lib/persistence/effect/run-ledger-arm.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
@@ -38,8 +39,13 @@ afterAll(() => {
 });
 
 it.each([
-	2, 3,
-])("keeps %i recovered steers as their undelivered Run's input, sent after its start in admission order", async (steerCount) => {
+	{ steerCount: 2, released: false },
+	{ steerCount: 3, released: false },
+	{ steerCount: 2, released: true },
+])("keeps $steerCount recovered steers as their undelivered Run's input, sent after its start in admission order: released=$released", async ({
+	steerCount,
+	released,
+}) => {
 	const root = mkdtempSync(join(tmpdir(), "steer-order-"));
 	const persistence = makePersistenceEffectLayer(
 		join(root, "events.db"),
@@ -118,6 +124,45 @@ it.each([
 					yield* sql`INSERT INTO provider_command_outbox(request_sequence,command_id,project_key,session_id,provider_id,effect_type,payload_json,run_id,status,error_code,attempt_count,requested_at,updated_at)
 					VALUES(${index + 1},${inputId},'project','session','claude','send_turn',${JSON.stringify({ sessionId: "session", inputId, prompt: inputId, workspaceRoot: "/tmp/project", extraFolders: [], providerState: {}, history: [], configDir: configuredClaudeConfigDir(join(root, "claude")), folderSource: "account" })},${runId},'running',NULL,1,1,1)`;
 				}
+				// A release of every held send before any delivery unlaunches the Run back to Queued; its
+				// relaunch stays claimed, never held, until the restart (CONTRACT 664-670, 675, 689-691).
+				if (released) {
+					const holds = ["start", ...ids].map((commandId) => ({
+						runId: `run:${commandId}`,
+						runnerId: "runner",
+						commandId,
+						transmission: 1,
+					}));
+					yield* commit([
+						canonicalEvent(
+							"evidence.process_started",
+							"session",
+							{ runnerId: "runner", label: "runner:1", reattached: false },
+							{ provider: "claude" },
+						),
+						...holds.map((hold) =>
+							canonicalEvent("run.dispatched", "session", hold, {
+								provider: "claude",
+								metadata: { runId: hold.runId },
+							}),
+						),
+					]);
+					yield* commit(
+						holds.map((hold) =>
+							canonicalEvent(
+								"run.released",
+								"session",
+								{ ...hold, reason: "NotSent" },
+								{ provider: "claude", metadata: { runId: hold.runId } },
+							),
+						),
+					);
+				}
+				expect(
+					(yield* loadLedgerView("session").pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					))?.active?.tag,
+				).toBe(released ? "Queued" : "Starting");
 				const recover = () =>
 					settleUnclaimedRunnerCommands(
 						sql,
@@ -220,7 +265,7 @@ it.each([
 				});
 				for (let drain = 0; drain <= steerCount; drain++)
 					yield* reactor.drain();
-				scenarios.push({ steerCount, passes, recovered, sent });
+				scenarios.push({ steerCount, released, passes, recovered, sent });
 				expect(sent).toEqual(["start", ...ids]);
 			}),
 		);
