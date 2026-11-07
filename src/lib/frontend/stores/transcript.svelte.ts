@@ -1399,8 +1399,7 @@ function transcriptView(primary: boolean): TranscriptView {
 			const target = currentSlot;
 			const id = currentSessionId;
 			const entry = target?.messages.transcript;
-			if (!target || !id || !entry?.hasMore || !entry.rows[0])
-				return Promise.resolve();
+			if (!target || !id || !entry?.hasMore) return Promise.resolve();
 			const currentGeneration = generation;
 			const body = active;
 			const pageRevision = ++revision;
@@ -1413,9 +1412,12 @@ function transcriptView(primary: boolean): TranscriptView {
 				revision === pageRevision &&
 				currentSlot === target &&
 				paging === request;
+			// 82tn.51: a rewind can take every held row off the head, leaving none
+			// to page before; the head's newest page then refills the transcript.
+			const before = entry.rows[0]?.id;
 			const request = rpc("LoadMoreHistory", {
 				sessionId: id,
-				before: entry.rows[0].id,
+				...(before ? { before } : {}),
 			})
 				.then((response) => {
 					if (!current() || !target.messages.transcript) return;

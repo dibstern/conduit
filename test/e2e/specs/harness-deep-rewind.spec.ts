@@ -204,15 +204,15 @@ test("deep rewind pages every older message once and undo restores the transcrip
 				};
 				await scrollToAll(allIds.slice(0, cut));
 				scenario["afterScroll"] = await ids();
+				// 82tn.51: the rewind takes every held row off the head, so the newest
+				// page before the cut refills the transcript as a page of its own.
+				// With the scroll's pages it holds every row before the cut, once each.
 				const rewindPages = olderPages.slice(pagesFrom);
 				scenario["rewindOlderPages"] = rewindPages;
-				if (cut > 50) {
-					expect(rewindPages.length).toBeGreaterThan(0);
-					expect(rewindPages.flatMap(({ ids }) => ids)).toEqual(
-						allIds.slice(0, cut - 50),
-					);
-					expect(rewindPages.at(-1)?.hasMore).toBe(false);
-				}
+				expect([...rewindPages].reverse().flatMap(({ ids }) => ids)).toEqual(
+					allIds.slice(0, cut),
+				);
+				expect(rewindPages.at(-1)?.hasMore).toBe(false);
 				await Effect.runPromise(
 					control.rpc.UndoRewind({
 						sessionId: SESSION,
