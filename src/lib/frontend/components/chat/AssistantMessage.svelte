@@ -39,6 +39,10 @@
 	// before re-attaching on the next render, and on component destroy.
 	let tableScrollCleanup: (() => void) | null = null;
 
+	// A main thread that stays busy never yields an idle period; without a
+	// deadline its code blocks would wait unhighlighted until it does.
+	const idleDeadline = { timeout: 1000 };
+
 	async function postRender() {
 		if (!containerEl) return;
 		await tick();
@@ -80,7 +84,7 @@
 		// fires almost immediately since the main thread is idle between
 		// each streamed message.
 		if (typeof requestIdleCallback === "function") {
-			const handle = requestIdleCallback(() => postRender());
+			const handle = requestIdleCallback(() => postRender(), idleDeadline);
 			return () => cancelIdleCallback(handle);
 		}
 		// Fallback for environments without requestIdleCallback (SSR, old browsers)
@@ -179,7 +183,7 @@
 		};
 		// A cold import resumes all waiting messages together; spread the work out again.
 		if (typeof requestIdleCallback === "function") {
-			requestIdleCallback(highlight);
+			requestIdleCallback(highlight, idleDeadline);
 		} else {
 			highlight();
 		}
