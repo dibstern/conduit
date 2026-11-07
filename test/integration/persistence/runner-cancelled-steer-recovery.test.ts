@@ -12,7 +12,9 @@ import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { requeueFailedSteers } from "../../../src/lib/persistence/effect/input-requeue-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { loadLedgerView } from "../../../src/lib/persistence/effect/run-ledger-arm.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
@@ -37,8 +39,13 @@ afterAll(() => {
 });
 
 it.each([
-	2, 3,
-])("keeps %i recovered steers in admission order across orphan settlements", async (steerCount) => {
+	{ steerCount: 2, released: false },
+	{ steerCount: 3, released: false },
+	{ steerCount: 2, released: true },
+])("keeps $steerCount recovered steers as their undelivered Run's input, sent after its start in admission order: released=$released", async ({
+	steerCount,
+	released,
+}) => {
 	const root = mkdtempSync(join(tmpdir(), "steer-order-"));
 	const persistence = makePersistenceEffectLayer(
 		join(root, "events.db"),
@@ -83,9 +90,10 @@ it.each([
 					{ length: steerCount },
 					(_, index) => `steer-${index}`,
 				);
-				// The ledger reads the first request as the Run and the steers as its inputs. Its
-				// start, never held, was not yet delivered and goes back to the outbox (CONTRACT
-				// 664-681, D50); each steer's own command settles under its own run (1868-1869).
+				// The ledger reads the first request as the Run and the steers as its inputs. The
+				// Run, never held, was not yet delivered: its start and every steer it issued go back
+				// to the outbox, the steers staying its input, sent again after its start (CONTRACT
+				// 664-690, D50; 3.9; L2 case 2).
 				for (const [index, inputId] of ["start", ...ids].entries()) {
 					const runId = `run:${inputId}`;
 					yield* commit([
@@ -114,8 +122,47 @@ it.each([
 					]);
 					yield* sql`INSERT INTO command_receipts(command_id,project_key,session_id,status,created_at) VALUES(${inputId},'project','session','side_effect_failed',1)`;
 					yield* sql`INSERT INTO provider_command_outbox(request_sequence,command_id,project_key,session_id,provider_id,effect_type,payload_json,run_id,status,error_code,attempt_count,requested_at,updated_at)
-					VALUES(${index + 1},${inputId},'project','session','claude','send_turn',${JSON.stringify({ sessionId: "session", inputId, prompt: inputId })},${runId},'running',NULL,1,1,1)`;
+					VALUES(${index + 1},${inputId},'project','session','claude','send_turn',${JSON.stringify({ sessionId: "session", inputId, prompt: inputId, workspaceRoot: "/tmp/project", extraFolders: [], providerState: {}, history: [], configDir: configuredClaudeConfigDir(join(root, "claude")), folderSource: "account" })},${runId},'running',NULL,1,1,1)`;
 				}
+				// A release of every held send before any delivery unlaunches the Run back to Queued; its
+				// relaunch stays claimed, never held, until the restart (CONTRACT 664-670, 675, 689-691).
+				if (released) {
+					const holds = ["start", ...ids].map((commandId) => ({
+						runId: `run:${commandId}`,
+						runnerId: "runner",
+						commandId,
+						transmission: 1,
+					}));
+					yield* commit([
+						canonicalEvent(
+							"evidence.process_started",
+							"session",
+							{ runnerId: "runner", label: "runner:1", reattached: false },
+							{ provider: "claude" },
+						),
+						...holds.map((hold) =>
+							canonicalEvent("run.dispatched", "session", hold, {
+								provider: "claude",
+								metadata: { runId: hold.runId },
+							}),
+						),
+					]);
+					yield* commit(
+						holds.map((hold) =>
+							canonicalEvent(
+								"run.released",
+								"session",
+								{ ...hold, reason: "NotSent" },
+								{ provider: "claude", metadata: { runId: hold.runId } },
+							),
+						),
+					);
+				}
+				expect(
+					(yield* loadLedgerView("session").pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					))?.active?.tag,
+				).toBe(released ? "Queued" : "Starting");
 				const recover = () =>
 					settleUnclaimedRunnerCommands(
 						sql,
@@ -155,31 +202,71 @@ it.each([
 					}>`SELECT input_id FROM pending_inputs WHERE state = 'queued' ORDER BY admitted_at, rowid`;
 					passes.push(queued.map(({ input_id }) => input_id));
 				}
-				scenarios.push({ steerCount, passes });
-				expect(passes).toEqual([
-					[...ids, "queued"],
-					[...ids, "queued"],
-				]);
+				expect(passes).toEqual([["queued"], ["queued"]]);
 				for (const row of yield* sql<{
 					admitted_at: number;
 				}>`SELECT admitted_at FROM pending_inputs`)
 					expect(() => new Date(row.admitted_at).toISOString()).not.toThrow();
-				expect(
-					yield* sql`SELECT type FROM events WHERE type = 'input.requeued'`,
-				).toHaveLength(steerCount);
-				expect(
-					yield* sql`SELECT command.status, run.status AS run_status, pending.state
+				const recovered = {
+					requeues:
+						yield* sql`SELECT type FROM events WHERE type = 'input.requeued'`,
+					terminals:
+						yield* sql`SELECT type FROM events WHERE type IN ('turn.error', 'turn.interrupted')`,
+					commands:
+						yield* sql`SELECT command.command_id, command.status, run.status AS run_status, pending.state
 						FROM provider_command_outbox command
 						JOIN provider_runs run ON run.id = command.run_id
 						JOIN pending_inputs pending ON pending.input_id = command.command_id
-						WHERE command.command_id = 'start'`,
-				).toEqual([
-					{
+						ORDER BY command.request_sequence`,
+				};
+				expect(recovered).toEqual({
+					requeues: [],
+					terminals: [],
+					commands: ["start", ...ids].map((command_id) => ({
+						command_id,
 						status: "retryable_failed",
 						run_status: "pending",
 						state: "steering",
-					},
-				]);
+					})),
+				});
+				// The relaunch sends the start first, then each steer in admission order.
+				const sent: string[] = [];
+				const reactor = new ProviderSideEffectReactor({
+					sql,
+					registry: new ProviderRegistry([
+						{
+							providerId: "claude",
+							generateTextEffect: () => Effect.die("unused"),
+							discoverEffect: () => Effect.die("unused"),
+							sendTurnEffect: (input) =>
+								Effect.sync(() => {
+									sent.push(input.inputId);
+									return {
+										status: "completed" as const,
+										cost: 0,
+										tokens: { input: 0, output: 0 },
+										durationMs: 0,
+										providerStateUpdates: [],
+									};
+								}),
+							interruptTurnEffect: () => Effect.void,
+							resolvePermissionEffect: () => Effect.void,
+							resolveQuestionEffect: () => Effect.void,
+							endSessionEffect: () => Effect.void,
+							shutdownEffect: () => Effect.void,
+							hasLiveProcessEffect: () => Effect.succeed(true),
+							getControlProcessIdEffect: () => Effect.succeed("runner"),
+						},
+					]),
+					ingestion,
+					write: commit.write,
+					persistUserMessage: persist.persistUserMessage,
+					projectGate: () => Effect.succeed("served" as const),
+				});
+				for (let drain = 0; drain <= steerCount; drain++)
+					yield* reactor.drain();
+				scenarios.push({ steerCount, released, passes, recovered, sent });
+				expect(sent).toEqual(["start", ...ids]);
 			}),
 		);
 	} finally {
