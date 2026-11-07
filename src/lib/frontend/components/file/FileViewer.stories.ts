@@ -16,6 +16,7 @@ import {
 import { mockFileContent } from "../../stories/mocks.js";
 import { connectedSocket } from "../../stories/sockets.js";
 import { viewRelayStatus } from "../../transport/connection-status.svelte.js";
+import { loadHighlighter } from "../../utils/load-highlighter.js";
 import FileViewerHost from "./__fixtures__/FileViewerHost.svelte";
 
 const truncatedFileContent = "export const migrationBaseline = true;\n".repeat(
@@ -34,6 +35,9 @@ async function showFile(response: {
 		projectSlug: "storybook",
 		...response,
 	});
+	// The viewer highlights once the lazy highlighter loads. A cold load under
+	// load outlasts waitFor's one second, so wait on the load itself.
+	await loadHighlighter();
 }
 
 const meta = {
