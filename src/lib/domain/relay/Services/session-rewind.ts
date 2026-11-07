@@ -240,6 +240,7 @@ export const previewHeadMove = (sessionId: string, intent: MoveIntent) =>
 		return {
 			moveId: plan.moveId,
 			files: plan.files,
+			...("messageId" in plan.target ? { before: plan.target.messageId } : {}),
 			...(plan.folders
 				? {
 						restore: {

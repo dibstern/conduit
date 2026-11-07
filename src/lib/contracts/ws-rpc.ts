@@ -3176,6 +3176,8 @@ export const PreviewHeadMove = Rpc.make("PreviewHeadMove", {
 		moveId: NonEmptyString,
 		files: HeadMoveFilesSchema,
 		restore: Schema.optionalKey(RestorePlanSchema),
+		/** A rewind's cut: the first message of the picked message's Run, which it goes back before. */
+		before: Schema.optionalKey(Schema.String),
 	}),
 	error: Schema.Union([
 		WsRpcError,

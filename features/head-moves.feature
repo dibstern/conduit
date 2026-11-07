@@ -194,6 +194,23 @@ Examples:
   | phone    | Docs pass | /work/notes | Add a migration section | Docs pass changed files in /work/notes since this point. | hm-reply-1 | sess-head-moves-fork |
   | desktop  | Docs pass | /work/notes | Add a migration section | Docs pass changed files in /work/notes since this point. | hm-reply-1 | sess-head-moves-fork |
 
+Scenario Outline: a branch from a reply starts where the rewind would land, before the reply's turn
+  Given the viewport is a <viewport>
+  And the session <other> has run in <folder> since
+  And a branched conversation is open
+  When I open the head log from the first reply's message menu
+  And I choose to rewind to a message from the head log
+  And I pick the reply <reply> to rewind to
+  Then rewinding the files is unavailable because <reason>
+  When I choose to branch into a worktree
+  Then one fork with files keeps the conversation up to <messageId>
+  And the conversation did not move
+
+Examples:
+  | viewport | other     | folder      | reply                      | reason                                                    | messageId  |
+  | phone    | Docs pass | /work/notes | Added a migration section. | Docs pass changed files in /work/notes since this point. | hm-reply-1 |
+  | desktop  | Docs pass | /work/notes | Added a migration section. | Docs pass changed files in /work/notes since this point. | hm-reply-1 |
+
 Scenario Outline: files from pruned history cannot go into a new worktree either
   Given the viewport is a <viewport>
   And the files at every move's target were pruned

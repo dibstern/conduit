@@ -39,7 +39,10 @@ export const rewindTo = (
 export const planRewindFiles = (
 	sessionId: string,
 	messageId: string,
-): Promise<{ paths: string[] } | { refused: string; branchable: boolean }> =>
+): Promise<
+	| { paths: string[] }
+	| { refused: string; branchable: boolean; before?: string }
+> =>
 	rpc("PreviewHeadMove", {
 		sessionId,
 		intent: { _tag: "rewind", messageId, withFiles: true },
@@ -54,12 +57,26 @@ export const planRewindFiles = (
 				),
 			};
 		},
-		(error: unknown) => ({
-			refused: failureLine(error, "The files could not be checked."),
-			branchable:
-				error instanceof FilesRefused &&
-				(error.reason === "other_session" || error.reason === "changed"),
-		}),
+		async (error: unknown) => {
+			const refused = failureLine(error, "The files could not be checked.");
+			if (
+				!(error instanceof FilesRefused) ||
+				(error.reason !== "other_session" && error.reason !== "changed")
+			)
+				return { refused, branchable: false };
+			// A branch starts where the rewind would land: before the first message of the picked
+			// message's Run, which only the planner knows. The conversation-only preview names it.
+			const before = await rpc("PreviewHeadMove", {
+				sessionId,
+				intent: { _tag: "rewind", messageId },
+			}).then(
+				(preview) => preview.before,
+				() => undefined,
+			);
+			return before === undefined
+				? { refused, branchable: false }
+				: { refused, branchable: true, before };
+		},
 	);
 
 /** A fork from before a message into a new worktree holding the files kept there (82tn.54);
