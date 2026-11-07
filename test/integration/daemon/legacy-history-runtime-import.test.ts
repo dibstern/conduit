@@ -29,6 +29,7 @@ import {
 import { Socket } from "effect/socket";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it, vi } from "vitest";
+import { SCRATCH_PROJECT_SLUG } from "../../../src/lib/contracts/scratch-project.js";
 import {
 	type ProjectInfo,
 	type SessionInfo,
@@ -965,8 +966,10 @@ describe("legacy history added after daemon startup", () => {
 			expect(listed.sessions.map((session) => session.title)).toEqual([
 				"Sidecar history",
 			]);
+			// m379.10: the daemon's hidden No-project entry is read beside every saved project.
 			expect(listed.availability).toEqual([
 				{ projectSlug: saved.savedSlug, available: true },
+				{ projectSlug: SCRATCH_PROJECT_SLUG, available: true },
 			]);
 			expect(
 				(await readHistory(port, "sidecar-session")).messages,

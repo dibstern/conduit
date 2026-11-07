@@ -663,6 +663,19 @@ describe("OpenCode rewind through the relay", () => {
 			`DELETE /session/${sessionId}/message/c-cut-user`,
 			`POST /session/${sessionId}/prompt_async`,
 		]);
+		// 82tn.52: the send first copies the session whole, so the dropped tail stays in
+		// OpenCode for a later branch switch, then truncates the same session in place.
+		const sent = relay.mock.diagnostics
+			.slice(before)
+			.flatMap(({ event, detail }) =>
+				event === "request" && detail ? [detail.split("?")[0]] : [],
+			);
+		expect(
+			sent.filter((request) => request === `POST /session/${sessionId}/fork`),
+		).toHaveLength(1);
+		expect(sent.indexOf(`POST /session/${sessionId}/fork`)).toBeLessThan(
+			sent.indexOf(`DELETE /session/${sessionId}/message/d-hidden-assistant`),
+		);
 		expect(commitsBeforeDeletion).toEqual([0, 0]);
 		const native = await nativeIds(relay, sessionId);
 		expect(native).toEqual(expect.arrayContaining(keptIds));

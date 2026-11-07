@@ -1294,6 +1294,68 @@ export class MockOpenCodeServer {
 			return;
 		}
 
+		// OpenCode's fork copies the messages before messageID (all without one)
+		// into a new session, re-iding every message and part. Recordings rarely
+		// capture one; 82tn.52 copies a session whole before truncating it.
+		const forked = /^\/session\/([^/]+)\/fork$/.exec(basePath)?.[1];
+		if (!queue && method === "POST" && forked) {
+			const { messageID } = JSON.parse(rawBody || "{}") as {
+				messageID?: string;
+			};
+			const source = [...(this.sseMessages.get(forked)?.values() ?? [])];
+			const end = source.findIndex(({ info }) => info["id"] === messageID);
+			const id = `ses_mock${String(++this.sessionCounter).padStart(3, "0")}`;
+			const ids = new Map(
+				source.map(({ info }, index) => [
+					info["id"],
+					`msg_mockfork_${id}_${index}`,
+				]),
+			);
+			this.sseMessages.set(
+				id,
+				new Map(
+					source.slice(0, end < 0 ? undefined : end).map(({ info, parts }) => {
+						const copy = String(ids.get(info["id"]));
+						return [
+							copy,
+							{
+								info: {
+									...info,
+									id: copy,
+									sessionID: id,
+									...(typeof info["parentID"] === "string" && {
+										parentID: ids.get(info["parentID"]) ?? info["parentID"],
+									}),
+								},
+								parts: parts.map((part, at) => ({
+									...part,
+									id: `prt_mockfork_${copy}_${at}`,
+									sessionID: id,
+									messageID: copy,
+								})),
+							},
+						];
+					}),
+				),
+			);
+			const now = Date.now();
+			const session: Session = {
+				id,
+				slug: id,
+				projectID: "mock-project",
+				directory: this.sessionDirectories.get(forked) ?? this.defaultDirectory,
+				title: `${String(this.injectedSessions.get(forked)?.["title"] ?? forked)} (fork)`,
+				version: "1.19.1",
+				time: { created: now, updated: now },
+			};
+			this.sessionDirectories.set(id, session.directory);
+			this.injectedSessions.set(id, { ...session });
+			this.injectIntoSessionListFallback(session);
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(JSON.stringify(session));
+			return;
+		}
+
 		if (!queue) {
 			res.writeHead(404);
 			res.end(
