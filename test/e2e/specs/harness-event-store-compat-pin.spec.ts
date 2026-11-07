@@ -58,10 +58,12 @@ const SESSIONS = [
 ];
 // Rendered deltas since the fixture: "✦ Summary" (1436b56a), message dates
 // (818f9273), strip steps read aloud (4081bdba), the Log and Usage footer
-// (3a07b01e, c14985cf), and write order (conduit-test-lczrn.1): the imported
-// session's equal-time prompt now shows "You" before its reply.
+// (3a07b01e, c14985cf), write order (conduit-test-lczrn.1): the imported
+// session's equal-time prompt now shows "You" before its reply, and the turn
+// diff footer (192ebf81): the tools turn predates capture, so it reads
+// "Not captured · Branch diff".
 const RENDERED_HISTORY_HASH =
-	"24034467773d8192234a736438cb7a97ae489031a0a7009542aeaf6d7e5c7ab1";
+	"6e010f5b6e26eadbaaff3a2a843787cde991a42de9b1d33cc026ae685994131c";
 /** The fixture's history rows; its other tables are recorded, not pinned. */
 const FIXTURE_ROWS = {
 	sessions: 3,
