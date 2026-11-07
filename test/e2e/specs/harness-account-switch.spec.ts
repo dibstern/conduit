@@ -540,6 +540,9 @@ for (const dismiss of [false, true]) {
 					);
 					await page.screenshot({ path: join(artifacts, "01-limited.png") });
 				});
+				// The run's file capture lands after its turn settles (f02e9.8), and
+				// would move the snapshot taken here.
+				await expect.poll(() => harness.uncapturedRuns(sessionId)).toEqual([]);
 				const before = await snapshot();
 				writeFileSync(join(harness.root, "release-limit-repeats"), "release");
 				await expect
@@ -793,6 +796,9 @@ for (const decision of [
 					continued: false,
 				});
 			await expect.poll(() => latest()?.status).toBe("idle");
+			// The cut-off run's file capture lands after it settles (f02e9.8), and
+			// would move the gate's before snapshot.
+			await expect.poll(() => harness.uncapturedRuns(sessionId)).toEqual([]);
 			const cutOffMessageId = latest()?.limitRecovery?.cutOffMessageId;
 			if (!cutOffMessageId) throw new Error("No open cut-off");
 			const usageProbes = () =>
