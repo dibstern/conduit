@@ -63,8 +63,14 @@ function names(text: string): string[] {
 	return hits;
 }
 
+const mentions = new RegExp([...relayConstruction].join("|"));
+
+// Only a file that mentions a name is parsed: parsing every file ran past the
+// test's timeout under the pre-commit hook's load.
 const constructions = (text: string) =>
-	names(text).filter((name) => relayConstruction.has(name));
+	mentions.test(text)
+		? names(text).filter((name) => relayConstruction.has(name))
+		: [];
 
 describe("the per-project relay stays deleted (82tn.16)", () => {
 	it("has no src/lib/relay directory", () => {

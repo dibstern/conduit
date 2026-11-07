@@ -34,7 +34,9 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 // or its undo (11); an eviction between preview and commit restores from
 // pruned history, or sends the resend anyway (12). 82tn.32.2.9: a session whose
 // run ended before the target but whose background task still runs in the
-// folder is missed (13), or named as not running (14).
+// folder is missed (13), or named as not running (14). An undo that names no
+// files, as the Head Log's Undo (15) and the newest-entry undo (16) send, puts
+// the conversation back but leaves a file rewind's files rewound.
 const GIT_KEYS = [
 	"GIT_DIR",
 	"GIT_INDEX_FILE",
@@ -283,6 +285,39 @@ describe("Head moves with files through the built daemon", () => {
 		expect(evidence["journal"]).toEqual(['["<repo>"]', '["<repo>"]']);
 	});
 
+	it("puts the files back when an undo naming no files undoes a rewind with files, from the Head Log or the newest entry", async () => {
+		evidence["name"] = "undo-derives-files";
+		const { repo, browser, turn, move, visible } = await start();
+		const session = await browser.createSession("Undo with files");
+		await turn(session, "first", () =>
+			writeFileSync(join(repo, "first.txt"), "first\n"),
+		);
+		const second = await turn(session, "second", () =>
+			writeFileSync(join(repo, "tracked.txt"), "changed\n"),
+		);
+		const afterSecond = listing(repo);
+		const rewind = {
+			_tag: "rewind",
+			messageId: second,
+			withFiles: true,
+		} as const;
+
+		const { moveId } = await move(session, rewind);
+		expect(listing(repo)).not.toEqual(afterSecond);
+		// The Head Log's Undo sends only the entry's id.
+		await move(session, { _tag: "undo", moveId });
+		evidence["headLogUndo"] = listing(repo);
+		expect(listing(repo)).toEqual(afterSecond);
+		expect(await visible(session)).toContain(second);
+
+		await move(session, rewind);
+		expect(listing(repo)).not.toEqual(afterSecond);
+		await Effect.runPromise(browser.rpc.UndoRewind({ sessionId: session }));
+		evidence["newestUndo"] = listing(repo);
+		expect(listing(repo)).toEqual(afterSecond);
+		expect(await visible(session)).toContain(second);
+	});
+
 	it("refuses a rewind with files naming the other session in the folder, open or done, and the conversation-only rewind still goes", async () => {
 		evidence["name"] = "two-sessions";
 		const { repo, browser, query, turn, openTurn, refusal, move, visible } =
@@ -481,7 +516,7 @@ describe("Head moves with files through the built daemon", () => {
 			},
 		});
 		const before = listing(repo);
-		await move(mine, { _tag: "undo", moveId });
+		await move(mine, { _tag: "undo", moveId, withFiles: false });
 		expect(await visible(mine)).toContain(second);
 		expect(listing(repo)).toEqual(before);
 	});
