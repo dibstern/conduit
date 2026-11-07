@@ -262,6 +262,12 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 			await expect(fresh.locator("#messages")).toContainText(shown, {
 				timeout: 30_000,
 			});
+			// The reply header names the session account's provider, from the
+			// instance list, which loads beside the transcript. Until it lands
+			// the header reads "Assistant" and the cold tail is not settled yet.
+			await expect(
+				fresh.locator("#messages").getByText("Claude", { exact: true }).first(),
+			).toBeVisible();
 			return await transcriptOf(fresh);
 		} finally {
 			await context.close();
