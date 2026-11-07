@@ -97,7 +97,7 @@
 			{/if}
 			{#if fork && sessionId}<BranchSwitcher {fork} {sessionId} />{/if}
 			{#if sessionId && message.messageId && message.text && draft === undefined}
-				<Button variant="ghost" size="content" tone="dimmer" iconOnly icon="pencil" iconSize={14} touchTarget class="ml-auto size-[26px] self-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-100" title="Edit message" ariaLabel="Edit message" onclick={() => { draft = extractDisplayText(message.text); }} />
+				<Button variant="ghost" size="content" tone="dimmer" iconOnly icon="pencil" iconSize={14} touchTarget class="ml-auto -my-[4px] size-[26px] self-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-100" title="Edit message" ariaLabel="Edit message" onclick={() => { draft = extractDisplayText(message.text); }} />
 			{/if}
 		</div>
 		{#if draft !== undefined && sessionId && message.messageId}
