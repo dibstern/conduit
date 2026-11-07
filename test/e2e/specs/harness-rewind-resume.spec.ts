@@ -29,6 +29,7 @@ import type {
 	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { sealHistoryNode } from "../../../src/lib/persistence/effect/history-graph.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
@@ -104,7 +105,21 @@ const seed = (filename: string, events: readonly CanonicalEvent[]) =>
 	Effect.runPromise(
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
-			yield* commit([...events], { publish: false });
+			// 82tn.50: a rewind target is a History Node, which a Run's end seals. Each
+			// seeded turn is one Run, so it ends at its turn.completed.
+			let turn: CanonicalEvent[] = [];
+			for (const stored of events) {
+				turn.push(stored);
+				if (stored.type !== "turn.completed") continue;
+				yield* commit(turn, { publish: false });
+				yield* sealHistoryNode(
+					stored.sessionId,
+					`run-${stored.data.messageId}`,
+					stored.createdAt,
+				);
+				turn = [];
+			}
+			yield* commit(turn, { publish: false });
 		}).pipe(
 			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
