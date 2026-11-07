@@ -636,6 +636,12 @@ test("correction: delayed cancel between a result and pending steer preserves th
 			),
 		)
 		.toBe(true);
+	// The SDK held its result until it queued the steer, so the steer waits for the SDK to start it.
+	expect(
+		marks(harness)
+			.filter((mark) => mark["kind"] === "input-queued")
+			.map((mark) => mark["prompt"]),
+	).toEqual([steer]);
 	await expect(chat.stopBtn).toBeHidden();
 	const second = randomUUID();
 	await Effect.runPromise(

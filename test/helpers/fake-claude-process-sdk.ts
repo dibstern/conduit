@@ -2023,6 +2023,26 @@ function query(params: {
 						!closed
 					)
 						await new Promise<void>((done) => setTimeout(done, 20));
+				// The CLI queues a steer that arrives mid-turn behind the turn's result.
+				// Hold this result until the steer is queued, so the runner admits it into
+				// the running turn instead of as a new turn after the result.
+				// Closing the query ends the prompt stream, so this read cannot outlive it.
+				if (request.includes("correction-steer-boundary") && proof) {
+					queuedInput = inputs.next();
+					const queued = await queuedInput;
+					const content = queued.done ? [] : queued.value.message.content;
+					mark({
+						kind: "input-queued",
+						prompt:
+							typeof content === "string"
+								? content
+								: content
+										.filter((block) => block.type === "text")
+										.map((block) => block.text)
+										.join(""),
+						at: process.hrtime.bigint().toString(),
+					});
+				}
 				if (closed) return;
 				if (request.includes("correction-late-tool")) {
 					yield* correctionForegroundTool("correction-late-foreground");
