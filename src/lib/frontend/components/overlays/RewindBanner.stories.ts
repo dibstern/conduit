@@ -1,5 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { getOrCreateSessionActivity } from "../../stores/chat.svelte.js";
+import {
+	getOrCreateSessionActivity,
+	getOrCreateSessionMessages,
+} from "../../stores/chat.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import {
@@ -8,6 +11,7 @@ import {
 	mockSession,
 } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
+import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import RewindBanner from "./RewindBanner.svelte";
 
@@ -45,7 +49,43 @@ function seed({
 	applySessionChange({ _tag: "synchronized" });
 	openSessionForSetup(storySessionId, "conduit");
 	getOrCreateSessionActivity(storySessionId);
+	// The selected message and the files its rewind restores, so the dialog shows its plan.
+	const chat = getOrCreateSessionMessages(storySessionId);
+	const messages = chat.messages;
+	chat.messages = [
+		{
+			type: "user",
+			uuid: "msg-abc-123",
+			messageId: "msg_story_rewind",
+			text: "Add an unread count to each session row.",
+		},
+	];
+	const restoreSocket = connectedSocket();
+	const restorePreview = replyRpc("PreviewHeadMove", () => ({
+		moveId: "move-story-rewind",
+		files: "available",
+		restore: {
+			folders: [
+				{
+					directory: "/Users/dev/src/conduit",
+					changes: [
+						{
+							path: "src/lib/frontend/components/SessionRow.svelte",
+							change: "modified",
+						},
+						{
+							path: "src/lib/frontend/stores/unread.svelte.ts",
+							change: "added",
+						},
+					],
+				},
+			],
+		},
+	}));
 	return () => {
+		restorePreview();
+		restoreSocket();
+		chat.messages = messages;
 		instanceState.instances = instances;
 	};
 }
