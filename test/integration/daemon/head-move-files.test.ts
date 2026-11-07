@@ -36,7 +36,10 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 // run ended before the target but whose background task still runs in the
 // folder is missed (13), or named as not running (14). An undo that names no
 // files, as the Head Log's Undo (15) and the newest-entry undo (16) send, puts
-// the conversation back but leaves a file rewind's files rewound.
+// the conversation back but leaves a file rewind's files rewound. Sol r2 S5: the
+// check reads the whole ledger history of a session that ran in the folder and
+// can act no more (17), or a session there with no ledger refuses every later
+// restore (18).
 const GIT_KEYS = [
 	"GIT_DIR",
 	"GIT_INDEX_FILE",
@@ -408,6 +411,71 @@ describe("Head moves with files through the built daemon", () => {
 		});
 		const before = listing(repo);
 		await move(mine, { _tag: "rewind", messageId: first });
+		expect(await visible(mine)).not.toContain(first);
+		expect(listing(repo)).toEqual(before);
+	});
+
+	it("restores past sessions that ran in the folder and can act no more, reading none of their ledger history", async () => {
+		evidence["name"] = "quiescent-others";
+		const { fixture, repo, browser, query, turn, move, visible } =
+			await start();
+		const quiet = await browser.createSession("Quiet");
+		const unledgered = await browser.createSession("Unledgered");
+		const mine = await browser.createSession("Mine");
+		await turn(quiet, "quiet first", () =>
+			writeFileSync(join(repo, "quiet.txt"), "quiet\n"),
+		);
+		await turn(unledgered, "unledgered first", () =>
+			writeFileSync(join(repo, "unledgered.txt"), "unledgered\n"),
+		);
+		const before = listing(repo);
+		const first = await turn(mine, "mine first", () =>
+			writeFileSync(join(repo, "mine.txt"), "mine\n"),
+		);
+		const captured = (sessionId: string) =>
+			query(
+				`SELECT 1 FROM events e, json_each(e.data, '$.folders') f
+				WHERE e.session_id = ? AND e.type = 'run.changes_captured'
+					AND json_extract(f.value, '$.directory') = ?`,
+				sessionId,
+				repo,
+			);
+		expect(captured(quiet)).toHaveLength(1);
+		expect(captured(unledgered)).toHaveLength(1);
+		// (17) A fold of the quiet session's history now throws; its row still says Quiescent.
+		// (18) The other session has no ledger at all.
+		const db = new Database(fixture.daemonStorePath());
+		try {
+			db.prepare(`INSERT INTO run_ledger_entries
+				(session_id, entry_seq, event_sequence, stamp, entry_json)
+				SELECT session_id, MAX(entry_seq) + 1, MAX(event_sequence), MAX(stamp), 'unreadable'
+				FROM run_ledger_entries WHERE session_id = ?`).run(quiet);
+			db.prepare("DELETE FROM run_ledger_entries WHERE session_id = ?").run(
+				unledgered,
+			);
+			db.prepare("DELETE FROM run_ledger_sessions WHERE session_id = ?").run(
+				unledgered,
+			);
+		} finally {
+			db.close();
+		}
+		const ledger = (sessionId: string) =>
+			query(
+				`SELECT l.state AS state,
+					(SELECT COUNT(*) FROM run_ledger_entries e WHERE e.session_id = s.id) AS entries
+				FROM sessions s LEFT JOIN run_ledger_sessions l ON l.session_id = s.id
+				WHERE s.id = ?`,
+				sessionId,
+			)[0];
+		evidence["ledgers"] = {
+			quiet: ledger(quiet),
+			unledgered: ledger(unledgered),
+		};
+		expect(evidence["ledgers"]).toEqual({
+			quiet: { state: "Quiescent", entries: expect.any(Number) },
+			unledgered: { state: null, entries: 0 },
+		});
+		await move(mine, { _tag: "rewind", messageId: first, withFiles: true });
 		expect(await visible(mine)).not.toContain(first);
 		expect(listing(repo)).toEqual(before);
 	});

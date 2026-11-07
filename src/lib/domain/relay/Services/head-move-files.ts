@@ -162,29 +162,28 @@ const check = (
 					running: false,
 				},
 			});
-		// The sessions that ran in the folder: a run open now, or one ended at any time, whose
-		// background task may still act here after the run's capture left the timeline. A deleted
+		// CONTRACT.md 2849-2851: every liveness reader asks the Run Ledger's anythingMayAct. Its
+		// per-session row (822-825) is Open whenever anything may act (3.12 Load), so only an Open
+		// session is folded, and one with no row or a Quiescent row acts no more. Of those, the
+		// sessions that ran in the folder: a run open there now, or one ended at any time whose
+		// background task may still act there after its capture left the timeline. A deleted
 		// session's events wait for retention, but it acts no more.
-		const ran = yield* sql<{ id: string }>`
-			SELECT DISTINCT e.session_id AS id FROM events e
-			JOIN sessions s ON s.id = e.session_id WHERE ${touched}`;
-		const others = new Set([
-			...(yield* timeline.runsIn(directory)).map((run) => run.sessionId),
-			...ran.map(({ id }) => id),
-		]);
-		others.delete(sessionId);
-		for (const other of others) {
-			// CONTRACT.md 2849-2851: every liveness reader asks the Run Ledger's anythingMayAct; the
-			// timeline and the events only say which sessions ran in the folder.
-			const view = yield* loadLedgerView(other);
-			if (!(view?.anythingMayAct ?? true)) continue;
-			const [row] = yield* sql<{ title: string }>`
-				SELECT title FROM sessions WHERE id = ${other}`;
+		const live = new Set(
+			(yield* timeline.runsIn(directory)).map((run) => run.sessionId),
+		);
+		const open = yield* sql<{ id: string; title: string | null; ran: number }>`
+			SELECT l.session_id AS id, s.title AS title,
+				EXISTS (SELECT 1 FROM events e WHERE e.session_id = l.session_id AND ${touched}) AS ran
+			FROM run_ledger_sessions l JOIN sessions s ON s.id = l.session_id
+			WHERE l.state = 'Open' AND l.session_id != ${sessionId}`;
+		for (const other of open) {
+			if (!(other.ran || live.has(other.id))) continue;
+			if (!(yield* loadLedgerView(other.id))?.anythingMayAct) continue;
 			return yield* new FilesRefused({
 				sessionId,
 				reason: "other_session",
 				directory,
-				other: { sessionId: other, title: row?.title ?? "", running: true },
+				other: { sessionId: other.id, title: other.title ?? "", running: true },
 			});
 		}
 	});
