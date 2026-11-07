@@ -534,7 +534,10 @@ export const sessionSheetsHandlers: StepHandler[] = [
 		match: /^the relay refuses the auto-settle change$/,
 		run: ({ world }) => {
 			requireRpcControl(world.page).setStubs({
-				SetSessionAutoSettle: () => Promise.reject(new Error("Unavailable")),
+				// A declared error, as the daemon sends: a plain Error is a defect that
+				// resets the socket and fails every read still in flight.
+				SetSessionAutoSettle: () =>
+					Promise.reject(new WsRpcError({ message: "Unavailable" })),
 			});
 		},
 	},

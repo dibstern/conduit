@@ -899,6 +899,19 @@ export const sessionDiffHandlers: StepHandler[] = [
 			await expect(rows).toHaveCount(2);
 			await expect(rows.first()).toHaveAttribute("data-path", match[1] ?? "");
 			await expect(rows.last()).toHaveAttribute("data-path", match[2] ?? "");
+			// A patch paints plain first and its highlighting lands later from a
+			// worker, so wait for the highlighted tokens of each code file (a
+			// pruned file has no patch).
+			for (const [index, path] of [match[1], match[2]].entries())
+				if (!path?.endsWith(".txt"))
+					await expect(
+						rows
+							.nth(index)
+							.locator(
+								"span[style*='--diffs-token'], [data-testid='session-diff-pruned']",
+							)
+							.first(),
+					).toBeVisible();
 		},
 	},
 	{

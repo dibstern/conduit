@@ -408,4 +408,4 @@ Scenario: A failed Auto-settle change keeps the stored flag and shows a sheet pi
   When I open the overflow session sheet
   And I toggle Auto-settle in the session sheet
   Then the session sheet stays open with Auto-settle on
-  And the session sheet stays open under the reason toast Couldn't change auto-settle
+  And the session sheet stays open under the reason toast Couldn't change auto-settle Unavailable
