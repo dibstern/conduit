@@ -49,7 +49,7 @@ project can open a new owner generation; retained handles stay closed forever.
 An **Audience** names who an event is for: one session and its Project, one
 Project, every connection, or one PTY and its Project. A typed subscription table
 decides its Audience when it opens. Session Directory resolves ownership at open;
-relay-backed streams retain their producer's Project Provenance. Failed ownership
+streams a project's services produce retain that Project's Provenance. Failed ownership
 lookups and requests for another producer's Project fail the subscription.
 Mixed-project streams carry an Audience per row. Approvals and questions have
 global Audience.
@@ -146,7 +146,7 @@ Cleanup also keeps a checkout while its session's Claude runner owns a live
 process, including while stopping, exiting after idle, or being adopted after a
 daemon restart. Clean up now reports "Agent process is running". This guard is
 separate from quiescence and applies again at removal time, including immediate
-removal after deletion when ending the agent fails. It reads the relay's runner
+removal after deletion when ending the agent fails. It reads the daemon's runner
 pool, never discovers runners from disk. OpenCode sessions have no Claude runner
 and are unaffected. Every cleanup run first stops live agents of quiescent
 settled sessions, even when cleanup is Off. The sweep can then remove eligible
@@ -258,7 +258,7 @@ and timeout leave the session usable.
 
 `session.setup_started`, `session.setup_output` and `session.setup_finished` are
 canonical session commands. They project one notice in the durable transcript.
-Interrupted setup becomes a failed notice on shutdown or the next relay startup,
+Interrupted setup becomes a failed notice on shutdown or the project's next startup,
 so a restart never leaves it running forever.
 
 ## Project File

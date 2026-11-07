@@ -1,15 +1,16 @@
 flowchart LR
     browser[Browser SPA
     WS client]
-    ws[WebSocketHandler]
+    ws[WsRpcWebSocketHandler
+    shared /rpc socket]
     handlers[Message handlers
     src/lib/handlers/*]
     sessions[SessionManager
     and session registry]
     bridges[Permission and
     question bridges]
-    relayCore[Event pipeline
-    SSEConsumer
+    projectCore[Project services
+    event pipeline, OpenCode SSE
     pollers, PTY wiring]
     eventStore[SQLite event store
     projectors]
@@ -21,10 +22,10 @@ flowchart LR
     ws --> handlers
     handlers --> sessions
     handlers --> bridges
-    sessions --> relayCore
-    bridges --> relayCore
-    relayCore --> ws
-    relayCore --> provider
+    sessions --> projectCore
+    bridges --> projectCore
+    projectCore -->|Event Delivery| ws
+    projectCore --> provider
     provider -->|stream events| eventStore
     provider <-->|REST, SSE, PTY upstream| opencode
-    eventStore --> ws
+    eventStore -->|Event Delivery| ws

@@ -15,22 +15,22 @@ NEVER stash changes, you are interrupting other sessions and work.
 - `conduit serve` runs the server in the foreground. CLI commands use the browser RPC contract over a protected Unix socket; `conduit service install` optionally keeps the server running at login.
 - `src/lib/daemon/daemon.ts` owns process lifecycle, persisted config, the shared HTTP and IPC servers, project registration, and provider runtime coordination.
 - One daemon can host many projects. Browsers reach every project through one `/rpc` socket; each RPC names its `projectSlug`, and the server keeps no current project. `/p/<slug>` URLs are links that open the app.
-- The per-project relay (`src/lib/relay/relay-stack.ts`) is being retired (82tn.16): it still builds each project's OpenCode client, status poller, schedulers, `WebSocketHandler` and PTY wiring. `test/unit/daemon/relay-retired.guard.test.ts` pins what remains; do not add to it.
+- There is no per-project relay (deleted in 82tn.16). `ProjectServices` (`src/lib/domain/daemon/Layers/project-services-layer.ts`) builds a project's parts on first use (`open`, `opened`, `close`), and the shared `/rpc` handler routes each RPC to them. `test/unit/daemon/relay-retired.guard.test.ts` keeps `src/lib/relay` and every relay builder gone.
 - `src/lib/server/*` handles the shared HTTP and WebSocket edge; `src/lib/handlers/*` dispatch browser messages into focused domain handlers.
 - The SQLite event store is the source of truth for sessions and messages. Provider adapters are stateless execution engines that stream events into the store.
 
-Read `docs/agent-guide/architecture.md` before changing daemon behavior, project routing, relay wiring, event store, projectors, provider adapters, session flow, instance management, or PTY behavior.
+Read `docs/agent-guide/architecture.md` before changing daemon behavior, project routing, project services, event store, projectors, provider adapters, session flow, instance management, or PTY behavior.
 
 ## Source Map
 
 - `src/bin/`: CLI entrypoints.
 - `src/lib/daemon/`: daemon lifecycle, IPC,  config persistence, projects.
-- `src/lib/domain/`: Effect service and Layer owners, organized by daemon, relay, provider, persistence, and server domain.
+- `src/lib/domain/`: Effect service and Layer owners, organized by daemon, relay (per-project services; the folder keeps its old name), provider, persistence, and server domain.
 - `src/lib/contracts/`: implementation-free shared schemas and protocol declarations.
 - `src/lib/server/`: HTTP and WebSocket server, router, static files, push.
-- `src/lib/relay/`: the per-project relay being retired (82tn.16): provider event pipeline, pollers, PTY upstream wiring.
+- `src/lib/terminal/`: PTY manager and PTY upstream wiring.
 - `src/lib/persistence/`: SQLite event store, projectors, migrations.
-- `src/lib/provider/`: Provider adapters (OpenCode, Claude SDK).
+- `src/lib/provider/`: Provider adapters (OpenCode, Claude SDK) and the provider event pipeline; `provider/opencode/` holds OpenCode's SSE stream, pollers and event translation.
 - `src/lib/session/`: session orchestration and status polling.
 - `src/lib/instance/`: OpenCode instance management and SDK/API client access.
 - `src/lib/handlers/`: browser message handlers.

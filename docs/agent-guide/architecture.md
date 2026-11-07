@@ -1,6 +1,6 @@
 # Architecture Guide
 
-Use this guide before changing daemon behavior, project routing, relay wiring, event store, projectors, provider instances, session flow, instance management, or PTY behavior.
+Use this guide before changing daemon behavior, project routing, project services, event store, projectors, provider instances, session flow, instance management, or PTY behavior.
 
 ## Runtime Shape
 
@@ -22,36 +22,36 @@ Mermaid Diagram: docs/agent-guide/system-context-diagram.mermaid
 | CLI / control | `src/bin/*`, `src/lib/cli/*` | Operator-facing commands, setup, watcher, TLS helpers |
 | Daemon | `src/lib/daemon/*`, `src/lib/domain/daemon/*` | Process lifecycle, persisted state, local RPC, project and instance registration |
 | HTTP / WS edge | `src/lib/server/*` | Shared HTTP server, auth gate, static assets, project route dispatch, WebSocket upgrades |
-| Project relay | `src/lib/relay/*`, `src/lib/domain/relay/*` | Per-project relay composition, provider event ingestion, event translation, pollers, PTY upstreams |
+| Project services | `src/lib/domain/daemon/Layers/project-services-layer.ts`, `src/lib/domain/relay/*`, `src/lib/provider/opencode/*`, `src/lib/terminal/*` | Each project's services, provider event ingestion, OpenCode event translation and pollers, PTY upstreams. `src/lib/domain/relay` keeps its old name. |
 | Persistence | `src/lib/persistence/*`, `src/lib/domain/persistence/*` | SQLite event store, projectors (sessions, messages, turns, providers, approvals), migrations |
 | Provider instances | `src/lib/provider/*` | Stateless execution engines (OpenCode, Claude Agent SDK) that stream events into the event store |
 | Session domain | `src/lib/session/*` | Active session tracking, history paging, status polling, client-to-session registry |
 | OpenCode instances | `src/lib/instance/*` | Managed and unmanaged OpenCode SDK/API runtimes, health checks, URL resolution, spawn/stop |
 | Browser handlers | `src/lib/handlers/*` | Message-type dispatch into session, prompt, model, file, terminal, and instance actions |
 | Contracts | `src/lib/contracts/*` | Implementation-free shared schemas and protocol declarations |
-| Frontend SPA | `src/lib/frontend/*` | Svelte 5 app served by the relay |
+| Frontend SPA | `src/lib/frontend/*` | Svelte 5 app served by the daemon |
 
-## Per-Project Relay Flow Diagram
+## Project Flow Diagram
 
-Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
+Mermaid diagram: docs/agent-guide/project-flow-diagram.mermaid
 
 ## Key Boundaries
 
-`src/lib/relay/relay-stack.ts` builds each project relay with `createProjectRelay()`. The relay is being retired (82tn.16), following t3code's one process-wide orchestrator: `test/unit/daemon/relay-retired.guard.test.ts` pins every remaining per-project runtime, relay name, scope opener, per-project client registry, Run state writer and OpenCode home site, and each retirement slice shrinks its maps.
+There is no per-project relay (deleted in 82tn.16, following t3code's one process-wide orchestrator). `ProjectServices` builds a project's parts on first use: `open` builds them once, `opened` reads them without starting anything, and `close` ends them. `test/unit/daemon/relay-retired.guard.test.ts` keeps `src/lib/relay` and every relay builder gone.
 
 | Boundary | Meaning |
 |---|---|
-| Relay composition | Each relay requires the daemon's `ProviderAdapters` registry and combines project-owned session services, event pipeline modules, `WebSocketHandler`, pollers, PTY wiring, and permission/question handling. Relays never construct, recover or shut down driver adapters. |
+| Project composition | `ProjectServices` requires the daemon's `ProviderAdapters` registry and builds each project's session services, ingestion, model catalog, terminals, OpenCode readers and inbox on first use. It never constructs, recovers or shuts down driver adapters. |
 | Source of truth | Durable conversation state lives in conduit's SQLite event store. Provider instances are stateless execution engines that stream events into the store. |
-| Relay-owned state | Project services, provider activity and client subscriptions borrow the daemon store. Projectors maintain materialized views from the append-only event log. |
-| Session and turn owners | The daemon builds the engine, session managers, session setup, session workspace, drafts, `DaemonTurns` and `ProviderTurns` once. A relay builds none of them. The daemon builds each project's session-manager parts from the registry through `ProjectServices`, so an unopened project works and a removed one is refused with a reason; a relay borrows that project's generation parts (status snapshot, creation gate, model catalog, store binding). Turns still take a relay's parts through `attachProviderTurnsLive`, and `ownSessionManagersLive` and each `…OrOwn` layer are a standalone relay's own copy. `ProviderTurns` keeps one project's Stop fences, account-switch holds and lifts across relay replacements, recovers that project's outbox Stops once, and runs each Stop in its session's owner scope. Only Owner Scopes opens project and session scopes, and these owners reach clients only through Event Delivery. `test/unit/daemon/owner-scopes.guard.test.ts` checks all of this. |
-| Daemon-owned state | The config directory holds the protected local RPC socket, daemon config, recent projects, push settings, and all project history in one daemon store at `<configDir>/events.db`. Relays borrow this store for their lifetime. |
-| Frontend delivery | Frontend assets are built separately with Vite and served as static files by the relay server. |
+| Project-owned state | Project services, provider activity and client subscriptions borrow the daemon store. Projectors maintain materialized views from the append-only event log. |
+| Session and turn owners | The daemon builds the engine, session managers, session setup, session workspace, drafts, `DaemonTurns` and `ProviderTurns` once. The daemon builds each project's session-manager parts from the registry through `ProjectServices`, so an unopened project works and a removed one is refused with a reason. A project's turns run through `attachProviderTurnsLive`; test helpers still build their own owners through `ownSessionManagersLive` and the remaining `…OrOwn` layers. `ProviderTurns` keeps one project's Stop fences, account-switch holds and lifts across project reopenings, recovers that project's outbox Stops once, and runs each Stop in its session's owner scope. Only Owner Scopes opens project and session scopes, and these owners reach clients only through Event Delivery. `test/unit/daemon/owner-scopes.guard.test.ts` checks all of this. |
+| Daemon-owned state | The config directory holds the protected local RPC socket, daemon config, recent projects, push settings, and all project history in one daemon store at `<configDir>/events.db`. Each project's services borrow this store. |
+| Frontend delivery | Frontend assets are built separately with Vite and served as static files by the daemon's HTTP server. |
 
-Before relays start, offline startup migration imports registered and retained per-project stores from `<configDir>/projects/<slug>/events.db`, including legacy `<project>/.conduit/events.db` sources. Runtime `SaveProject` registration prepares and imports its primary folder's history before publishing the project or opening its relay. It reserves the live store's SQL connection without starting a transaction while the importer commits through its own connection. The importer normalizes private copies, commits history to the daemon store, and archives the sources as described in [ADR-0006](../adr/0006-daemon-store-import-normalises-copies-and-keeps-the-first-owner.md). A failed preparation or import makes only its project unavailable until restart retries it; committed imports with backup-only failures remain usable, as specified in [ADR-0008](../adr/0008-a-failed-import-blocks-its-project-and-removed-history-stays-hidden.md).
-Each project storage directory retains its main folder in `project.json`, so re-adding that folder reuses its inactive slug and history, while other folders reserve occupied or unowned storage slugs. Removing a project disposes its relay and retains its rows in the daemon store; the history stays hidden until the project is registered again.
+Before projects open, offline startup migration imports registered and retained per-project stores from `<configDir>/projects/<slug>/events.db`, including legacy `<project>/.conduit/events.db` sources. Runtime `SaveProject` registration prepares and imports its primary folder's history before publishing the project or opening its services. It reserves the live store's SQL connection without starting a transaction while the importer commits through its own connection. The importer normalizes private copies, commits history to the daemon store, and archives the sources as described in [ADR-0006](../adr/0006-daemon-store-import-normalises-copies-and-keeps-the-first-owner.md). A failed preparation or import makes only its project unavailable until restart retries it; committed imports with backup-only failures remain usable, as specified in [ADR-0008](../adr/0008-a-failed-import-blocks-its-project-and-removed-history-stays-hidden.md).
+Each project storage directory retains its main folder in `project.json`, so re-adding that folder reuses its inactive slug and history, while other folders reserve occupied or unowned storage slugs. Removing a project closes its services and retains its rows in the daemon store; the history stays hidden until the project is registered again.
 
-`SessionDirectory` exposes only `projectOf(sessionId)`. The daemon queries `sessions.project_id` in the shared store at lookup time and returns an owner only while that project is registered. Session IDs are primary keys, so each stored session has one owner. Standalone test fixtures supply an adapter owner and share its store; their WebSocket routing resolves only rows whose `project_id` matches the relay slug.
+`SessionDirectory` exposes only `projectOf(sessionId)`. The daemon queries `sessions.project_id` in the shared store at lookup time and returns an owner only while that project is registered. Session IDs are primary keys, so each stored session has one owner.
 
 Read-model subscribers detect dropped advance publications after a bus overflow.
 Catch-up sources read a shared window through the newest queued advance, including
@@ -66,16 +66,16 @@ detail resumes keep their existing policy.
 ## Effect Ownership Guardrails
 
 - The codebase runs on Effect 4, pinned to an exact `effect` version. RPC, SQL, HTTP and socket modules come from `effect/*` subpaths; only platform-node and opentelemetry remain separate `@effect/*` packages.
-- Daemon and relay internals should be owned by scoped Effect Layers and services. Do not add app-internal `Effect.runPromise`, `Effect.runSync`, `Runtime.runPromise`, `Runtime.runSync`, or object `.runPromise` / `.runSync` calls.
-- The surviving runtime boundaries are explicit compatibility edges: standalone HTTP handler construction, OpenCode SDK fetch, Claude SDK permission callback, frontend transport Promise API, and the public `createProjectRelay()` startup Promise API.
-- `relay-stack.ts` must not regain `Layer.succeed(Tag, alreadyConstructedInstance)` bridge composition. Relay state belongs in self-constructing domain Layers under `src/lib/domain/relay/*`.
+- Daemon and project internals should be owned by scoped Effect Layers and services. Do not add app-internal `Effect.runPromise`, `Effect.runSync`, `Runtime.runPromise`, `Runtime.runSync`, or object `.runPromise` / `.runSync` calls.
+- The surviving runtime boundaries are explicit compatibility edges: the local CLI RPC client, Preview Gate's `node:http` callback, OpenCode SDK fetch and `OpenCodeAPI`, Claude SDK permission callback, and the frontend transport Promise API. `test/unit/effect/runtime-boundary-grep.guard.test.ts` keeps the list.
+- Project state belongs in self-constructing domain Layers under `src/lib/domain/relay/*`, never in `Layer.succeed(Tag, alreadyConstructedInstance)` bridge composition.
 - CLI commands use the same `WsRpcGroup` and daemon handlers over a filesystem-protected Unix socket with NDJSON framing. Browser PIN authentication remains required on network WebSockets.
 - Browser real-time transport remains WebSocket-based. Effect RPC runs over the WebSocket protocol for migrated browser operations; raw PTY input remains the terminal data-plane path.
 
 ## Short-lived subprocesses
 
 `Subprocess` is an Effect `Context.Reference` with one shared default owner.
-`makeDaemonLive` supplies a scoped override, shared by its project relays.
+`makeDaemonLive` supplies a scoped override, shared by every project.
 Standalone callers use the default; tests can supply an isolated owner.
 `run(command, args, { cwd, timeoutMs, key?, priority? })` returns an Effect with
 `stdout`, `stderr`, and `exitCode`. Nonzero exit codes are results; spawn,
@@ -157,7 +157,7 @@ discoverable after a move or restart. Legacy creates use cwd as the owning folde
 Hosts advertise support for a separate owning folder. A retained older host can
 continue serving its terminals and creating terminals in the project folder;
 worktree creates fail before spawning until that host is restarted.
-The relay attaches to a snapshot
+A project's terminal service attaches to a snapshot
 of up to 50 KiB of UTF-8 scrollback followed by live output. Replay uses
 `pty_output` with `replace: true`, including empty history, so the browser resets
 its buffer and renderer before accepting live output. Replacing a disconnected
@@ -166,7 +166,7 @@ connection emits `pty_exited`; the next host list removes missing terminals with
 `pty_deleted`. Replacement replay for a confirmed running local terminal carries
 `restored: true`, allowing the browser to clear its exit flag. Ordinary lists
 preserve exit flags, including when an older RPC response arrives after an exit
-event. Unavailable input returns a `PTY_INPUT_FAILED` system error. Relay shutdown
+event. Unavailable input returns a `PTY_INPUT_FAILED` system error. Closing a project
 detaches its proxies; it does not kill hosted shells.
 
 Discovery errors preserve cached tabs until a successful host list or confirmed
@@ -263,9 +263,9 @@ server re-adopts it and reconciles; with no demand its grace timer arms.
 
 | Flow | Path |
 |---|---|
-| Browser to relay | Browser loads the SPA over HTTP, `RequestRouter` serves auth/setup/health/info/themes/project routes, the daemon upgrades `/ws` and attaches sockets to relay `WebSocketHandler`s, and `src/lib/handlers/index.ts` dispatches incoming message types to session, instance, file, terminal, and bridge services. |
-| Provider to event store to browser | Provider instances stream events into the SQLite event store. Projectors update materialized views (sessions, messages, turns). Pollers reconcile provider-side status. `WebSocketHandler` broadcasts normalized events to relevant clients or session viewers. |
-| CLI to daemon | Commands such as `status`, `stop`, `AddProject`, and `SetPin` use the browser RPC contract over the protected Unix socket; the daemon updates config and registries, mounts new relays on the shared HTTP and WebSocket surface, and rebroadcasts instance status changes. |
+| Browser to project | Browser loads the SPA over HTTP, `RequestRouter` serves auth/setup/health/info/themes/project routes, and the daemon upgrades `/rpc` into the routed `WsRpcWebSocketHandler`. Each RPC names its project; `ProjectServices` opens that project's parts and `src/lib/handlers/*` serve it from session, instance, file, terminal, and bridge services. |
+| Provider to event store to browser | Provider instances stream events into the SQLite event store. Projectors update materialized views (sessions, messages, turns). Pollers reconcile provider-side status. Event Delivery streams normalized events to the clients subscribed to each Audience. |
+| CLI to daemon | Commands such as `status`, `stop`, `AddProject`, and `SetPin` use the browser RPC contract over the protected Unix socket; the daemon updates config and registries, registers new projects, whose services open on first use, and rebroadcasts instance status changes. |
 
 ## Running the server
 
@@ -276,9 +276,9 @@ shell. The hidden `--foreground` alias keeps older units working.
 The server owns the HTTP/WS edge, project registry, config persistence, event
 store writes and projections, outbox and reactor, attachment to Claude runners,
 and supervision of the PTY host and managed OpenCode. Claude runners own their
-lifetime; relay disposal detaches started runners and stops unfinished spawns.
+lifetime; closing a project detaches started runners and stops unfinished spawns.
 Explicit full stop and project
-removal terminate registered runners after relay disposal. The server refuses
+removal terminate registered runners after the project closes. The server refuses
 an occupied configured port before acquiring runtime resources.
 
 `pnpm dev:all` rebuilds on save and restarts the running Conduit while sessions
@@ -301,11 +301,8 @@ the server is unavailable it prints guidance to run `conduit serve` or
 
 Browser session addresses are `/s/<id>`; `/` opens the session list without
 selecting or creating a session. `/?p=<slug>` hints which project to attach.
-The daemon accepts browser sockets only at `/ws` and `/rpc`, including query
-strings. The `/ws` socket follows explicit session navigation, with `?p=<slug>`
-as an initial project hint. Relays receive attached sockets and never handle
-browser upgrades. The test-only relay server also owns its `/ws` upgrade and
-preserves default-session bootstrap when attaching to its initial relay.
+The daemon accepts browser sockets only at `/rpc`, including query strings, and
+each RPC names its project.
 
 `GET /api/projects` remains only as a liveness probe, used by
 `test/integration/flows/daemon-lifecycle.integration.ts`,
@@ -323,7 +320,7 @@ configuration ignores retired settings and drops them on the next save.
 
 ## Provider Runtime Notes
 
-- `ProviderAdapters` owns one Claude, OpenCode and Cursor adapter for the daemon's lifetime. `DaemonOrchestration` owns one engine, command read model, reactor and outbox drain for every project. Commands resolve their project through `SessionDirectory`; streamed output and interactions use the current project services lent through `ProviderAdapters.registerProject`. Recovery relays finish startup and the shared adapter recovery pass before the daemon drain starts. Replacement relays borrow the same engine and reattach only their own retained sessions. Registered projects awaiting a relay keep their commands pending without an attempt; explicitly unavailable projects receive durable `project_unavailable` refusals, and removed projects receive `project_inactive`. Runtime relay registration prepares imported controls only for that project's rows, preserving other projects' live claims. While a save holds the existing project save lock, imported rows awaiting registry publication also stay pending; control refusal uses registration truth rather than the sidebar's filtered project list. Unstarted refused sends persist their failed user message and error atomically with the refusal. Claimed intake counts as started even before its start projection; unavailable projects retain it for recovery, while removal retires the verified session runner before cancelling its command. Runners awaiting project services keep their output unacknowledged until reattachment. Run ownership admits one terminal per run; later Claude background message accounting uses nonterminal `message.completed` events. Standalone relays keep their own engine and drain. Project disposal releases adapter attachments; daemon shutdown closes the shared engine and adapters.
+- `ProviderAdapters` owns one Claude, OpenCode and Cursor adapter for the daemon's lifetime. `DaemonOrchestration` owns one engine, command read model, reactor and outbox drain for every project. Commands resolve their project through `SessionDirectory`; streamed output and interactions use the current project services lent through `ProviderAdapters.registerProject`. Recovering projects finish startup and the shared adapter recovery pass before the daemon drain starts. A reopened project borrows the same engine and reattach only their own retained sessions. Registered projects awaiting their services keep their commands pending without an attempt; explicitly unavailable projects receive durable `project_unavailable` refusals, and removed projects receive `project_inactive`. Runtime project registration prepares imported controls only for that project's rows, preserving other projects' live claims. While a save holds the existing project save lock, imported rows awaiting registry publication also stay pending; control refusal uses registration truth rather than the sidebar's filtered project list. Unstarted refused sends persist their failed user message and error atomically with the refusal. Claimed intake counts as started even before its start projection; unavailable projects retain it for recovery, while removal retires the verified session runner before cancelling its command. Runners awaiting project services keep their output unacknowledged until reattachment. Run ownership admits one terminal per run; later Claude background message accounting uses nonterminal `message.completed` events. Test fixtures with no daemon build their own engine and drain (`src/lib/provider/orchestration-wiring.ts`). Project disposal releases adapter attachments; daemon shutdown closes the shared engine and adapters.
 - Adapter constructors take daemon services and SDK dependencies, never a project folder, extra folders or shell environment. Session launches and project discovery receive an explicit `ProviderCall`. It carries the project and session IDs, admitted account, effective workspace root, extra folders and frozen shell environment. The shared engine resolves these fields before adapter entry; durable commands re-resolve environment values rather than storing credentials. Account-scoped one-shot text generation uses its selected account and an isolated scratch folder.
 - Account resources have a separate lifetime from adapters and sessions. `AccountResourceScopes` lazily shares one resource per exact account ID and generation. Concurrent callers join the same open; invalidation interrupts that account's work and waits for its resource to close. A later open gets a new generation. Turns, pending prompts and background work hold demand through `use`; idle resources close after grace. Cursor uses these scopes for its SDK credential stores. OpenCode's account servers belong to `OpenCodeInstances`, whose scoped `use` is the adapter's only client route. Removing an account leaves other account resources and the three adapters alive.
 - `AccountDirectory` resolves Claude login folders when loading and changing accounts. Relative folders use the daemon's launch cwd; `~` and `~/` use its home. An account without a configured folder keeps the captured launch login and its SDK-default or configured kind. The original configured spelling remains in persisted settings. Runs, discovery and scratch text generation receive the same absolute account folder, regardless of project or query cwd. The legacy config resolver uses the same rule.
