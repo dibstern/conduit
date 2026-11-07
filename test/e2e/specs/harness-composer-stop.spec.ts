@@ -1,11 +1,12 @@
 // Real browser/RPC/runner IPC, with the task-stop SDK's independent result and
 // confirmation gates. Query marks prove continuity, including the runner PID.
-// Run with --workers=1 to collect all stop-and-run scenarios in one JSON artifact.
+// Each stop-and-run scenario records test-results/7hjw-stop-and-run/<project>-<title>.json.
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	renameSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -94,34 +95,34 @@ function queryMarks(harness: ProcessHarness, queryId: string, kind: string) {
 	);
 }
 
+// One file per project and scenario: parallel projects never share a file, and
+// the rename makes each write atomic when --repeat-each reruns one scenario.
 function recordStopAndRun(harness: ProcessHarness, testInfo: TestInfo) {
-	const artifact = join("test-results", "7hjw-stop-and-run.json");
-	mkdirSync("test-results", { recursive: true });
-	const previous: unknown = existsSync(artifact)
-		? JSON.parse(readFileSync(artifact, "utf8"))
-		: {};
-	if (!previous || typeof previous !== "object" || Array.isArray(previous))
-		throw new Error("Invalid stop-and-run artifact");
+	const dir = join("test-results", "7hjw-stop-and-run");
+	mkdirSync(dir, { recursive: true });
+	const name = `${testInfo.project.name}-${testInfo.title.replace(/[^a-z0-9]+/gi, "-")}`;
 	const observed = marks(harness);
+	const file = join(dir, `${name}.json`);
+	const pending = `${file}.${testInfo.workerIndex}.tmp`;
 	writeFileSync(
-		artifact,
+		pending,
 		JSON.stringify(
 			{
-				...previous,
-				[`${testInfo.project.name}/${testInfo.title}`]: {
-					status: testInfo.status,
-					requests: observed
-						.filter((mark) => mark["kind"] === "enqueue")
-						.map((mark) => mark["request"]),
-					interruptObserved: observed.some(
-						(mark) => mark["kind"] === "query-interrupted",
-					),
-				},
+				project: testInfo.project.name,
+				title: testInfo.title,
+				status: testInfo.status,
+				requests: observed
+					.filter((mark) => mark["kind"] === "enqueue")
+					.map((mark) => mark["request"]),
+				interruptObserved: observed.some(
+					(mark) => mark["kind"] === "query-interrupted",
+				),
 			},
 			null,
 			2,
 		),
 	);
+	renameSync(pending, file);
 }
 
 function cancel(browser: ProcessBrowser, sessionId: string) {
