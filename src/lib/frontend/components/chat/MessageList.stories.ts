@@ -195,7 +195,14 @@ export const AdjacentRepliesLight: Story = {
 };
 
 // The canvas, not #storybook-root: the Vitest runner mounts stories elsewhere.
-function liveTranscript(root: HTMLElement, phone = false) {
+async function liveTranscript(root: HTMLElement, phone = false) {
+	// Lay the transcript out once, in its final fonts. The visual harness's
+	// clock fakes requestAnimationFrame, so the list starts watching its rows
+	// late; a font swap before then grows it unseen and leaves it short of
+	// the bottom, which on Linux it was by 26px (hksc6).
+	await Promise.all(
+		["1em Geist", "1em 'Geist Mono'"].map((font) => document.fonts.load(font)),
+	);
 	const style = root.getAttribute("style");
 	root.setAttribute(
 		"style",
