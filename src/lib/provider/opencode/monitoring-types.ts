@@ -1,5 +1,5 @@
-// src/lib/relay/monitoring-types.ts
-import type { SessionStatus } from "../instance/sdk-types.js";
+// src/lib/provider/opencode/monitoring-types.ts
+import type { SessionStatus } from "../../instance/sdk-types.js";
 
 export type SessionMonitorPhase =
 	| { readonly phase: "idle" }

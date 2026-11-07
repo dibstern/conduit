@@ -47,12 +47,12 @@ export { tagWithSessionId } from "./shared-types.js";
 export type {
 	SSEEvent,
 	SSEEvent as OpenCodeEvent,
-} from "./relay/opencode-events.js";
+} from "./provider/opencode/opencode-events.js";
 
 /** OpenCode global SSE event (wrapped) */
 export interface GlobalEvent {
 	directory: string;
-	payload: import("./relay/opencode-events.js").SSEEvent;
+	payload: import("./provider/opencode/opencode-events.js").SSEEvent;
 }
 
 export interface PartState {
@@ -179,7 +179,7 @@ export interface ProjectRelayConfig {
 	 * accelerated timing without real-time waits.
 	 */
 	pollerGatingConfig?: Partial<
-		import("./relay/monitoring-types.js").PollerGatingConfig
+		import("./provider/opencode/monitoring-types.js").PollerGatingConfig
 	>;
 	/**
 	 * Override the session-status polling interval in milliseconds.

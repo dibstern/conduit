@@ -8,8 +8,8 @@ import type {
 import type { PromptOptions } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
-import type { PtyManager } from "../relay/pty-manager.js";
 import type { OpenCodeInstance } from "../shared-types.js";
+import type { PtyManager } from "../terminal/pty-manager.js";
 import type { ProjectRelayConfig } from "../types.js";
 
 /** Instance management capability group — only available in daemon mode. */

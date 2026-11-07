@@ -2237,7 +2237,7 @@ describe("Effect runtime boundary grep", () => {
 				optional: true,
 			},
 			{
-				path: "src/lib/relay/session-lifecycle-wiring.ts",
+				path: "src/lib/provider/opencode/session-lifecycle-wiring.ts",
 				pattern:
 					/\b(?:wireSessionLifecycle|SessionLifecycleWiringDeps|SessionManagerLike|sessionMgr\.on)\b/,
 				reason:
@@ -2324,19 +2324,19 @@ describe("Effect runtime boundary grep", () => {
 					"SessionManagerTag should stay deleted after session state moves behind SessionManagerService",
 			},
 			{
-				path: "src/lib/relay/sse-wiring.ts",
+				path: "src/lib/provider/opencode/sse-wiring.ts",
 				pattern: /\b(?:SessionManagerLike|sessionMgr)\b/,
 				reason:
 					"SSE wiring should use a SessionManagerService-shaped port, not the legacy manager shape",
 			},
 			{
-				path: "src/lib/relay/monitoring-wiring.ts",
+				path: "src/lib/provider/opencode/monitoring-wiring.ts",
 				pattern: /\b(?:SessionManagerLike|sessionMgr)\b/,
 				reason:
 					"monitoring wiring should read session lists and parent maps through the service port",
 			},
 			{
-				path: "src/lib/relay/poller-wiring.ts",
+				path: "src/lib/provider/opencode/poller-wiring.ts",
 				pattern: /\b(?:SessionManagerLike|sessionMgr)\b/,
 				reason:
 					"poller wiring should read parent maps through the service port",
@@ -2773,7 +2773,7 @@ describe("Effect runtime boundary grep", () => {
 					"pendingQuestionCounts is retired (ni8.23): the badge is derived onto the session row",
 			},
 			{
-				path: "src/lib/relay/sse-wiring.ts",
+				path: "src/lib/provider/opencode/sse-wiring.ts",
 				pattern: /\bpendingQuestionCounts\b/,
 				reason:
 					"pendingQuestionCounts is retired (ni8.23): no notification side-channel beside the sessions",
@@ -2802,13 +2802,13 @@ describe("Effect runtime boundary grep", () => {
 				reason: "SSE wiring should use the pending interaction service surface",
 			},
 			{
-				path: "src/lib/relay/sse-wiring.ts",
+				path: "src/lib/provider/opencode/sse-wiring.ts",
 				pattern: /\bPendingPermissionsLike\b/,
 				reason:
 					"SSE wiring should name pending interactions after the owned service",
 			},
 			{
-				path: "src/lib/relay/sse-wiring.ts",
+				path: "src/lib/provider/opencode/sse-wiring.ts",
 				pattern: /\bdeps\.pendingPermissions\b/,
 				reason:
 					"SSE wiring should use deps.pendingInteractions for pending state",

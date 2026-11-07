@@ -67,36 +67,8 @@ const constructions = (text: string) =>
 	names(text).filter((name) => relayConstruction.has(name));
 
 describe("the per-project relay stays deleted (82tn.16)", () => {
-	// Until the rename commit, src/lib/relay holds only the shared files that
-	// move to their owners' folders; nothing new lands here.
-	it("keeps only the shared files in src/lib/relay", () => {
-		expect(
-			existsSync("src/lib/relay") && readdirSync("src/lib/relay").sort(),
-		).toEqual([
-			"effect-executor.ts",
-			"event-pipeline.ts",
-			"event-translator.ts",
-			"markdown-renderer.ts",
-			"message-poller-impl.ts",
-			"message-poller.ts",
-			"monitoring-reducer.ts",
-			"monitoring-types.ts",
-			"monitoring-wiring.ts",
-			"notification-policy.ts",
-			"opencode-events.ts",
-			"poller-pre-filter.ts",
-			"poller-wiring.ts",
-			"project-relay-publisher.ts",
-			"pty-manager.ts",
-			"pty-upstream.ts",
-			"relay-settings.ts",
-			"session-lifecycle-wiring.ts",
-			"session-sse-tracker.ts",
-			"sse-backoff.ts",
-			"sse-stream.ts",
-			"sse-wiring.ts",
-			"turn-ended-alert.ts",
-		]);
+	it("has no src/lib/relay directory", () => {
+		expect(existsSync("src/lib/relay")).toBe(false);
 	});
 
 	it("builds no relay, in src or the tests", () => {

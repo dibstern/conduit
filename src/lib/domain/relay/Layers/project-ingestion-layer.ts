@@ -7,8 +7,8 @@ import { EventStoreError } from "../../../persistence/effect/event-store-effect.
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { ClaudeProviderInstance } from "../../../provider/claude/claude-provider-instance.js";
 import { OpenCodeProviderInstance } from "../../../provider/opencode-provider-instance.js";
+import { publishProviderRelayMessage } from "../../../provider/project-relay-publisher.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
-import { publishProviderRelayMessage } from "../../../relay/project-relay-publisher.js";
 import type { PushNotificationSender } from "../../../server/push.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { ProviderAdapters } from "../../daemon/Services/provider-adapters.js";

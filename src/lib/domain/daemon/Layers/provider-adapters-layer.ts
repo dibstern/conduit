@@ -16,6 +16,7 @@ import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { GoalActionSchema } from "../../../contracts/stored-event.js";
+import { loadRelaySettings } from "../../../daemon/relay-settings.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type ClaudeEventPersistEffect,
@@ -50,7 +51,6 @@ import {
 	type RunnerRecoveryDependencies,
 } from "../../../provider/runner/runner-provider-instance.js";
 import { discoverRunners } from "../../../provider/runner/runner-registry.js";
-import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { ProjectRelayConfig } from "../../../types.js";
 import { PortWatcher } from "../../persistence/Services/port-watcher.js";
 import { InputDraftsTag } from "../../relay/Services/input-drafts.js";

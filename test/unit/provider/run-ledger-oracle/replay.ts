@@ -63,9 +63,9 @@ import { makeClaudeSessionRunner } from "../../../../src/lib/provider/claude/cla
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { SDKMessage } from "../../../../src/lib/provider/claude/types.js";
 import { ClaudeBoundaryError } from "../../../../src/lib/provider/event-sink-errors.js";
+import type { SSEEvent } from "../../../../src/lib/provider/opencode/opencode-events.js";
 import { inputIdFromOpenCodeMessageId } from "../../../../src/lib/provider/opencode/opencode-input-message-id.js";
 import { getOrchestrationLayer } from "../../../../src/lib/provider/orchestration-wiring.js";
-import type { SSEEvent } from "../../../../src/lib/relay/opencode-events.js";
 import { WsRpcServerLayer } from "../../../../src/lib/server/ws-rpc.js";
 import {
 	MOCK_OPENCODE_GPT4_CATALOG,

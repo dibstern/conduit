@@ -14,7 +14,7 @@ import type {
 } from "../../../persistence/effect/live.js";
 import type { SessionStateProjectionNotifierTag } from "../../../persistence/effect/session-state-projection-notifier.js";
 import { daemonStorePath } from "../../../persistence/project-storage.js";
-import type { PollerGatingConfig } from "../../../relay/monitoring-types.js";
+import type { PollerGatingConfig } from "../../../provider/opencode/monitoring-types.js";
 import type { RpcSubscriptionScopeTag } from "../../../server/ws-rpc.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
 import type { AgentServiceTag } from "../../relay/Services/agent-service.js";

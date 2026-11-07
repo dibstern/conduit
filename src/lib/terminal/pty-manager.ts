@@ -5,10 +5,7 @@
 import type { PtyEvent } from "../contracts/ws-rpc.js";
 import { createSilentLogger, type Logger } from "../logger.js";
 import type { PtyInfo, PtyStatus } from "../shared-types.js";
-import {
-	PTY_SCROLLBACK_BYTES,
-	PtyScrollback,
-} from "../terminal/pty-host-protocol.js";
+import { PTY_SCROLLBACK_BYTES, PtyScrollback } from "./pty-host-protocol.js";
 
 const WS_OPEN = 1;
 

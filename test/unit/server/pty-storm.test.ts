@@ -17,8 +17,8 @@ import type {
 	LocalPtyService,
 	LocalPtySession,
 } from "../../../src/lib/domain/relay/Services/terminal-service.js";
-import { PtyManager } from "../../../src/lib/relay/pty-manager.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import { PtyManager } from "../../../src/lib/terminal/pty-manager.js";
 import { makeFakeSocketServer } from "../../helpers/fake-socket-server.js";
 import {
 	makeMockConfig,

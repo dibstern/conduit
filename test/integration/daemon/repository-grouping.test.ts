@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../src/lib/relay/relay-settings.js";
+} from "../../../src/lib/daemon/relay-settings.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,

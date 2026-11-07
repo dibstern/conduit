@@ -168,14 +168,14 @@ import {
 	configuredClaudeConfigDir,
 	sdkDefaultClaudeConfigDir,
 } from "../../src/lib/provider/claude/claude-sdk-env.js";
+import type { SSEWiringDeps } from "../../src/lib/provider/opencode/sse-wiring.js";
 import { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../src/lib/provider/provider-registry.js";
-import type { PtyManager } from "../../src/lib/relay/pty-manager.js";
-import type { SSEWiringDeps } from "../../src/lib/relay/sse-wiring.js";
 import { RpcSubscriptionScopeLive } from "../../src/lib/server/ws-rpc.js";
+import type { PtyManager } from "../../src/lib/terminal/pty-manager.js";
 import type { ProjectRelayConfig } from "../../src/lib/types.js";
 import { withDispatchEffect } from "./orchestration-engine-test-double.js";
 import { partialFake } from "./partial-fake.js";

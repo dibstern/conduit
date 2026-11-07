@@ -22,7 +22,7 @@ import {
 	isSessionErrorEvent,
 	isSessionStatusEvent,
 	isTodoUpdatedEvent,
-} from "../../../src/lib/relay/opencode-events.js";
+} from "../../../src/lib/provider/opencode/opencode-events.js";
 
 describe("isPartDeltaEvent", () => {
 	it("returns true for valid part delta", () => {

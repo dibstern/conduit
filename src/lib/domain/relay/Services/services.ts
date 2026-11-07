@@ -18,11 +18,11 @@ import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { fixupConfigFile } from "../../../instance/opencode-config-fixup.js";
 import type { Message, SessionDetail } from "../../../instance/sdk-types.js";
 import type { Logger } from "../../../logger.js";
+import type { Translator } from "../../../provider/opencode/event-translator.js";
 import { discoverOpenCodeCatalog } from "../../../provider/opencode-discovery.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
-import type { Translator } from "../../../relay/event-translator.js";
-import type { PtyManager } from "../../../relay/pty-manager.js";
 import type { HistoryMessage } from "../../../shared-types.js";
+import type { PtyManager } from "../../../terminal/pty-manager.js";
 import type {
 	ProjectRelayConfig,
 	RelayMessage,

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
+import type { SSEEvent } from "../../../src/lib/provider/opencode/opencode-events.js";
 import { OpenCodeRuntimeEventTranslator } from "../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
 import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
 } from "../../../src/lib/provider/provider-runtime-event-to-domain.js";
-import type { SSEEvent } from "../../../src/lib/relay/opencode-events.js";
 import { makeSSEEvent } from "../../helpers/sse-factories.js";
 
 function runtimeToDomain(

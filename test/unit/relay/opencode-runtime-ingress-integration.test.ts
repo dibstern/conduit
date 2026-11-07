@@ -11,7 +11,7 @@ import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/s
 import {
 	handleSSEEventEffect,
 	type SSEWiringDeps,
-} from "../../../src/lib/relay/sse-wiring.js";
+} from "../../../src/lib/provider/opencode/sse-wiring.js";
 import type { RelayMessage } from "../../../src/lib/types.js";
 import {
 	createMockSSEWiringDeps,

@@ -13,7 +13,7 @@ import { SSEStreamTag } from "../../../src/lib/domain/relay/Services/sse-stream-
 import {
 	isPtyEvent,
 	type PtyEvent,
-} from "../../../src/lib/relay/opencode-events.js";
+} from "../../../src/lib/provider/opencode/opencode-events.js";
 import type { PtyInfo } from "../../../src/lib/shared-types.js";
 import {
 	createDaemonProject,

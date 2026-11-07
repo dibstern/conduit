@@ -2,21 +2,21 @@
 // Subscribes to DaemonEventBus session lifecycle events.
 
 import { Data, Effect, FiberMap, Layer, Option, Ref, Stream } from "effect";
-import { DaemonEventBusTag } from "../domain/daemon/Services/daemon-pubsub.js";
-import type { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import { DaemonEventBusTag } from "../../domain/daemon/Services/daemon-pubsub.js";
+import type { OpenCodeInstancesTag } from "../../domain/daemon/Services/opencode-instances-service.js";
 import {
 	LoggerTag,
 	PollerManagerTag,
 	type StatusPollerShape,
 	StatusPollerTag,
-} from "../domain/relay/Services/services.js";
+} from "../../domain/relay/Services/services.js";
 import {
 	makeSessionOpenCodeClient,
 	type SessionWorkspaceTag,
-} from "../domain/relay/Services/session-workspace.js";
-import type { Message } from "../instance/sdk-types.js";
-import type { Logger } from "../logger.js";
-import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+} from "../../domain/relay/Services/session-workspace.js";
+import type { Message } from "../../instance/sdk-types.js";
+import type { Logger } from "../../logger.js";
+import type { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import {
 	type createTranslator,
 	rebuildTranslatorFromHistoryOrThrow,

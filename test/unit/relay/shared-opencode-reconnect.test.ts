@@ -25,7 +25,7 @@ import {
 	SSEStreamTag,
 } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import { wireSSEConsumerEffect } from "../../../src/lib/relay/sse-wiring.js";
+import { wireSSEConsumerEffect } from "../../../src/lib/provider/opencode/sse-wiring.js";
 import {
 	createMockSSEWiringDeps,
 	makeMockConfig,

@@ -3,8 +3,8 @@
 // poller paths rely on for consistent notification behavior.
 
 import { describe, expect, it } from "vitest";
-import type { RouteDecision } from "../../../src/lib/relay/event-pipeline.js";
-import { resolveNotifications } from "../../../src/lib/relay/notification-policy.js";
+import type { RouteDecision } from "../../../src/lib/provider/event-pipeline.js";
+import { resolveNotifications } from "../../../src/lib/provider/notification-policy.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 const routeSend = (sessionId: string): RouteDecision => ({

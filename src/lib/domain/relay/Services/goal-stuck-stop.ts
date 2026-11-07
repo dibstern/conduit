@@ -2,7 +2,7 @@ import { Effect, Layer, Option, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import type { StoredEvent } from "../../../contracts/stored-event.js";
 import { createLogger } from "../../../logger.js";
-import { sendPushForEventEffect } from "../../../relay/sse-wiring.js";
+import { sendPushForEventEffect } from "../../../provider/opencode/sse-wiring.js";
 import { DaemonTurns } from "../../daemon/Services/daemon-turns.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AlertLedgerTag, makeAlertLedger } from "./alert-ledger.js";

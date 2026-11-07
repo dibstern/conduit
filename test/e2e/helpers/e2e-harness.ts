@@ -19,13 +19,13 @@ import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
-import { createSdkClient } from "../../../src/lib/instance/sdk-factory.js";
-import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../src/lib/relay/relay-settings.js";
+} from "../../../src/lib/daemon/relay-settings.js";
+import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { createSdkClient } from "../../../src/lib/instance/sdk-factory.js";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { stopPtyHost } from "../../../src/lib/terminal/pty-host-client.js";
 import {
 	createDaemonProject,

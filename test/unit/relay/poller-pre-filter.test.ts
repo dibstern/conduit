@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyPollerBatch } from "../../../src/lib/relay/poller-pre-filter.js";
+import { classifyPollerBatch } from "../../../src/lib/provider/opencode/poller-pre-filter.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 describe("classifyPollerBatch", () => {

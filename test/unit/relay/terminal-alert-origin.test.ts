@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { EventId } from "../../../src/lib/contracts/stored-event.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { createTranslator } from "../../../src/lib/relay/event-translator.js";
-import { turnEndedAlert } from "../../../src/lib/relay/turn-ended-alert.js";
+import { createTranslator } from "../../../src/lib/provider/opencode/event-translator.js";
+import { turnEndedAlert } from "../../../src/lib/provider/turn-ended-alert.js";
 
 describe("terminal alert origins", () => {
 	it("gives raw legacy failures an observation identity instead of suppressing them", () => {

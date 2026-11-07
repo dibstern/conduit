@@ -26,7 +26,7 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
 	PtyManager,
 	type PtyUpstream,
-} from "../../../src/lib/relay/pty-manager.js";
+} from "../../../src/lib/terminal/pty-manager.js";
 import {
 	makeMockConfig,
 	makeMockLogger,

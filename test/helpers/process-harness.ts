@@ -54,6 +54,7 @@ import {
 	loadDaemonConfigResult,
 } from "../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../src/lib/daemon/daemon-rpc-client.js";
+import type { RelaySettings } from "../../src/lib/daemon/relay-settings.js";
 import { decodeSessionDetail } from "../../src/lib/frontend/transport/session-detail-wire.js";
 import {
 	inspectManagedOpenCodeProcess,
@@ -70,7 +71,6 @@ import type {
 	ModelInfo,
 	ProviderAgentInfo,
 } from "../../src/lib/provider/types.js";
-import type { RelaySettings } from "../../src/lib/relay/relay-settings.js";
 import {
 	type PtyInfo,
 	type SessionPermissionMode,

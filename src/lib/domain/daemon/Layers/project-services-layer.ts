@@ -28,8 +28,8 @@ import {
 } from "../../../persistence/project-storage.js";
 import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-module.js";
 import { defaultClaudeSessionForkSdk } from "../../../provider/claude/claude-session-fork.js";
+import { createTranslator } from "../../../provider/opencode/event-translator.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
-import { createTranslator } from "../../../relay/event-translator.js";
 import { RpcSubscriptionScopeTag } from "../../../server/ws-rpc.js";
 import type { ClaudeSdkSeam } from "../../../types.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";

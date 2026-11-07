@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CLAUDE_TRUST_TIERED_SETTINGS_KEYS } from "../../../../src/lib/contracts/claude-settings.js";
-import { buildClaudeFlagSettings } from "../../../../src/lib/provider/claude/claude-sdk-settings.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../../src/lib/relay/relay-settings.js";
+} from "../../../../src/lib/daemon/relay-settings.js";
+import { buildClaudeFlagSettings } from "../../../../src/lib/provider/claude/claude-sdk-settings.js";
 
 describe("buildClaudeFlagSettings", () => {
 	it("returns the default flag-layer settings without overrides", () => {

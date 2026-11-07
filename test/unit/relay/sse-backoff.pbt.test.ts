@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
 	type BackoffConfig,
 	calculateBackoffDelay,
-} from "../../../src/lib/relay/sse-backoff.js";
+} from "../../../src/lib/provider/opencode/sse-backoff.js";
 
 const SEED = 42;
 const NUM_RUNS = 300;

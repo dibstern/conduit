@@ -31,7 +31,7 @@ import {
 } from "../../../src/lib/persistence/effect/live.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { sendPushForEventEffect } from "../../../src/lib/relay/sse-wiring.js";
+import { sendPushForEventEffect } from "../../../src/lib/provider/opencode/sse-wiring.js";
 import type {
 	PushDeliveryReport,
 	PushSubscriptionData,

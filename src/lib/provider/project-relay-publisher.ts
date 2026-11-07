@@ -5,7 +5,7 @@ import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
 import type { RelayMessage, SessionActivityView } from "../shared-types.js";
 import { resolveNotifications } from "./notification-policy.js";
-import { sendPushForEventEffect } from "./sse-wiring.js";
+import { sendPushForEventEffect } from "./opencode/sse-wiring.js";
 
 export const publishProviderRelayMessage = (
 	msg: Extract<RelayMessage, { type: "done" }>,

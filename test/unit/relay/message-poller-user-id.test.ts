@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { expect, it } from "vitest";
-import { translateMessageCreated } from "../../../src/lib/relay/event-translator.js";
-import { diffAndSynthesize } from "../../../src/lib/relay/message-poller.js";
+import { translateMessageCreated } from "../../../src/lib/provider/opencode/event-translator.js";
+import { diffAndSynthesize } from "../../../src/lib/provider/opencode/message-poller.js";
 import { RelayMessageSchema } from "../../../src/lib/shared-types.js";
 
 it("preserves user provider ids through the event schema", () => {

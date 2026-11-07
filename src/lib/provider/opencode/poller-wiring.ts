@@ -7,31 +7,31 @@ import { Effect } from "effect";
 import {
 	type AlertsTag,
 	publishAlert,
-} from "../domain/relay/Services/alerts.js";
+} from "../../domain/relay/Services/alerts.js";
 import {
 	type ConfigTag,
 	StatusPollerTag,
-} from "../domain/relay/Services/services.js";
+} from "../../domain/relay/Services/services.js";
 import {
 	projectSessionManager,
 	type SessionManagerServiceTag,
-} from "../domain/relay/Services/session-manager-service.js";
-import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
+} from "../../domain/relay/Services/session-manager-service.js";
+import type { OverridesStateTag } from "../../domain/relay/Services/session-overrides-state.js";
 import {
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
-} from "../domain/relay/Services/session-overrides-state.js";
-import * as Failure from "../effect/failure-classification.js";
-import type { Logger } from "../logger.js";
-import type { PushNotificationSender } from "../server/push.js";
-import type { RelayMessage } from "../shared-types.js";
+} from "../../domain/relay/Services/session-overrides-state.js";
+import * as Failure from "../../effect/failure-classification.js";
+import type { Logger } from "../../logger.js";
+import type { PushNotificationSender } from "../../server/push.js";
+import type { RelayMessage } from "../../shared-types.js";
 import {
 	applyPipelineResult,
 	applyPipelineResultEffect,
 	type PipelineDeps,
 	processEvent,
-} from "./event-pipeline.js";
-import { resolveNotifications } from "./notification-policy.js";
+} from "../event-pipeline.js";
+import { resolveNotifications } from "../notification-policy.js";
 import type { SSEEvent } from "./opencode-events.js";
 import { classifyPollerBatch } from "./poller-pre-filter.js";
 import type { createSessionSSETracker } from "./session-sse-tracker.js";

@@ -3,8 +3,8 @@ import { Deferred, Effect, Exit, Layer, Option } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
-import { PtyManager } from "../../../relay/pty-manager.js";
-import { connectPtyUpstream } from "../../../relay/pty-upstream.js";
+import { PtyManager } from "../../../terminal/pty-manager.js";
+import { connectPtyUpstream } from "../../../terminal/pty-upstream.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import {
 	ConfigTag,

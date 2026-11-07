@@ -16,13 +16,13 @@ import {
 	type ProjectSetting,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { syncGlobalSetting } from "../../../src/lib/domain/relay/Services/project-settings.js";
-import { discoverCapabilitiesEffect } from "../../../src/lib/provider/claude/claude-runtime-discovery.js";
-import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../src/lib/relay/relay-settings.js";
+} from "../../../src/lib/daemon/relay-settings.js";
+import { syncGlobalSetting } from "../../../src/lib/domain/relay/Services/project-settings.js";
+import { discoverCapabilitiesEffect } from "../../../src/lib/provider/claude/claude-runtime-discovery.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,

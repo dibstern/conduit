@@ -7,6 +7,7 @@ import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { AUTO_TITLE_SOURCE } from "../../../src/lib/contracts/session-title.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -46,7 +47,6 @@ import {
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
-import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,

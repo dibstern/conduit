@@ -15,7 +15,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { publishProviderRelayMessage } from "../../../src/lib/relay/project-relay-publisher.js";
+import { publishProviderRelayMessage } from "../../../src/lib/provider/project-relay-publisher.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 const idleActivity = {

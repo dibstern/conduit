@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import { sendPushForEvent } from "../../../src/lib/relay/sse-wiring.js";
+import { sendPushForEvent } from "../../../src/lib/provider/opencode/sse-wiring.js";
 
 function createMockPushManager() {
 	return {

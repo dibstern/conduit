@@ -12,7 +12,7 @@ import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	wirePollers,
 	wirePollersEffect,
-} from "../../../src/lib/relay/poller-wiring.js";
+} from "../../../src/lib/provider/opencode/poller-wiring.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 import {
 	makeMockConfig,

@@ -24,7 +24,7 @@ import type {
 import * as Failure from "../../../effect/failure-classification.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
-import { mapToolName } from "../../../relay/event-translator.js";
+import { mapToolName } from "../../../provider/opencode/event-translator.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { numberTurnMessages } from "../../../turn-message-numbers.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";

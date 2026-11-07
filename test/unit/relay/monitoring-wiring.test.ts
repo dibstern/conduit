@@ -43,9 +43,9 @@ import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/clau
 import {
 	wireMonitoring,
 	wireMonitoringEffect,
-} from "../../../src/lib/relay/monitoring-wiring.js";
-import { sendPushForEventEffect } from "../../../src/lib/relay/sse-wiring.js";
-import { turnEndedAlert } from "../../../src/lib/relay/turn-ended-alert.js";
+} from "../../../src/lib/provider/opencode/monitoring-wiring.js";
+import { sendPushForEventEffect } from "../../../src/lib/provider/opencode/sse-wiring.js";
+import { turnEndedAlert } from "../../../src/lib/provider/turn-ended-alert.js";
 import type { PushNotificationSender } from "../../../src/lib/server/push.js";
 import {
 	makeMockConfig,

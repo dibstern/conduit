@@ -10,6 +10,7 @@ import {
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
 import { WsRpcError } from "../contracts/ws-rpc.js";
+import { saveRelaySettings } from "../daemon/relay-settings.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import {
@@ -45,7 +46,6 @@ import {
 import { StaleCommandRejected } from "../provider/errors.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { RunnerProviderInstance } from "../provider/runner/runner-provider-instance.js";
-import { saveRelaySettings } from "../relay/relay-settings.js";
 import {
 	type PermissionId,
 	type ProviderPermissionUpdateDestination,

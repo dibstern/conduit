@@ -6,7 +6,7 @@ import {
 	loadRelaySettings,
 	parseDefaultModel,
 	saveRelaySettings,
-} from "../../../src/lib/relay/relay-settings.js";
+} from "../../../src/lib/daemon/relay-settings.js";
 
 describe("relay-settings", () => {
 	let tempDir: string;

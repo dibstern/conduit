@@ -21,7 +21,7 @@ const allowed = {
 	"src/lib/domain/relay/Services/provider-runtime-ingestion-service.ts":
 		"event",
 	"src/lib/session/session-retries.ts": "event",
-	"src/lib/relay/sse-wiring.ts": "event",
+	"src/lib/provider/opencode/sse-wiring.ts": "event",
 	"src/lib/persistence/effect/inherit-fork-history.ts": "event",
 	"src/lib/domain/daemon/Layers/opencode-instances-reconcile.ts": "event",
 	// A busy status from the stream marks a synced session's history for a reread (82tn.12).
@@ -29,7 +29,7 @@ const allowed = {
 	// View readers: the status poller publishes each session's status from SessionActivity (busy
 	// while the ledger holds its active Run), so these read the view's status, not a row's.
 	"src/lib/session-busy.ts": "view",
-	"src/lib/relay/monitoring-reducer.ts": "view",
+	"src/lib/provider/opencode/monitoring-reducer.ts": "view",
 	"src/lib/session/session-info-list.ts": "view",
 	// Row writers (32.13) read the row only to correct it. The poller's stale-busy pass does so only
 	// when the ledger says nothing may act (8.3).

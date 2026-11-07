@@ -1,4 +1,4 @@
-import type { RelayMessage } from "../shared-types.js";
+import type { RelayMessage } from "../../shared-types.js";
 
 /**
  * Classifies a batch of poller events.

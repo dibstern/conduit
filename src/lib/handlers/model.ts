@@ -54,6 +54,11 @@ import { storedSessionPick } from "../domain/relay/Services/session-pick.js";
 
 export { loadModelCatalog } from "../domain/relay/Services/model-catalog.js";
 
+import {
+	loadRelaySettings,
+	parseDefaultModel,
+	saveRelaySettings,
+} from "../daemon/relay-settings.js";
 import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
@@ -73,11 +78,6 @@ import {
 	resolveTurnSettings,
 } from "../provider/turn-settings.js";
 import type { ContextWindowOption, ModelInfo } from "../provider/types.js";
-import {
-	loadRelaySettings,
-	parseDefaultModel,
-	saveRelaySettings,
-} from "../relay/relay-settings.js";
 import type { ProviderInfo } from "../shared-types.js";
 
 const DISCOVERY_DRIVERS = KnownProviderDriverKindSchema.literals.filter(

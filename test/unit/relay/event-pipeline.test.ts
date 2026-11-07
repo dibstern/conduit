@@ -8,7 +8,7 @@ import {
 	resolveRoute,
 	resolveTimeout,
 	shouldCache,
-} from "../../../src/lib/relay/event-pipeline.js";
+} from "../../../src/lib/provider/event-pipeline.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 describe("resolveRoute", () => {

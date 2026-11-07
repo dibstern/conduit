@@ -1,8 +1,13 @@
 // Translates OpenCode SSE events → relay WebSocket messages.
 // Stateful: tracks seen parts for lifecycle detection.
 
-import type { UntaggedRelayMessage } from "../shared-types.js";
-import type { PartType, RelayMessage, ToolName, ToolStatus } from "../types.js";
+import type { UntaggedRelayMessage } from "../../shared-types.js";
+import type {
+	PartType,
+	RelayMessage,
+	ToolName,
+	ToolStatus,
+} from "../../types.js";
 import type { KnownOpenCodeEventType, SSEEvent } from "./opencode-events.js";
 import {
 	isMessageCreatedEvent,

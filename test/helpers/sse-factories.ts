@@ -1,4 +1,4 @@
-import type { SSEEvent } from "../../src/lib/relay/opencode-events.js";
+import type { SSEEvent } from "../../src/lib/provider/opencode/opencode-events.js";
 
 /** Create a typed SSE event for testing. */
 export function makeSSEEvent(

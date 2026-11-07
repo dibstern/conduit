@@ -18,11 +18,11 @@ import { run } from "../../../src/bin/cli-core.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { makeDaemonRpcSocketLayer } from "../../../src/lib/daemon/daemon-rpc-server.js";
+import { loadRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { subscribeProjectSettings } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import { getDefaultModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeRoutedWsRpcServerLayer,
 	RpcSubscriptionScopeLive,

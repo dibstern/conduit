@@ -30,6 +30,7 @@ import {
 	WsRpcError,
 } from "../../contracts/ws-rpc.js";
 import { autoSettleIdleWindowMs } from "../../daemon/config-persistence.js";
+import { saveRelaySettings } from "../../daemon/relay-settings.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
 import { FolderTimeline } from "../../domain/daemon/Services/folder-timeline.js";
@@ -116,7 +117,6 @@ import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { readHead } from "../../persistence/effect/history-graph.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { isPickRejection, PickRequired } from "../../provider/turn-settings.js";
-import { saveRelaySettings } from "../../relay/relay-settings.js";
 import { getAutoSettleOutlook } from "../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../session/auto-settle-reader.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";

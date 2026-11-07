@@ -48,8 +48,8 @@ import {
 	type RunSettlementOwner,
 	settleSessionRuns,
 } from "../../../provider/session-run-settlement.js";
+import { turnEndedAlert } from "../../../provider/turn-ended-alert.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
-import { turnEndedAlert } from "../../../relay/turn-ended-alert.js";
 import type { makeSessionCompactions } from "../../../session/session-compactions.js";
 import type { makeSessionGoals } from "../../../session/session-goals.js";
 import type { makeSessionRetries } from "../../../session/session-retries.js";

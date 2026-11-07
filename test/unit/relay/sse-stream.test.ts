@@ -6,11 +6,11 @@ import { Effect, ManagedRuntime, Option } from "effect";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { makeTracingLive } from "../../../src/lib/domain/daemon/Layers/tracing.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import { calculateBackoffDelay } from "../../../src/lib/relay/sse-backoff.js";
+import { calculateBackoffDelay } from "../../../src/lib/provider/opencode/sse-backoff.js";
 import {
 	SSEStream,
 	type SSEStreamOptions,
-} from "../../../src/lib/relay/sse-stream.js";
+} from "../../../src/lib/provider/opencode/sse-stream.js";
 import type { ConnectionHealth } from "../../../src/lib/types.js";
 
 function makeStubApi(events: Array<{ type: string; properties?: unknown }>) {

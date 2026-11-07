@@ -5,7 +5,7 @@ import {
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
 import type { ModelInfo as WireModelInfo } from "../contracts/ws-rpc.js";
-import type { RelaySettings } from "../relay/relay-settings.js";
+import type { RelaySettings } from "../daemon/relay-settings.js";
 import {
 	claudeApiModelId,
 	isSameModelIdentity,

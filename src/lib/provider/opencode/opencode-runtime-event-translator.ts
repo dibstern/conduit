@@ -6,11 +6,11 @@ import {
 	createEventId,
 	type SessionStatusValue,
 } from "../../persistence/events.js";
-import {
-	formatRetryMessage,
-	mapToolName,
-} from "../../relay/event-translator.js";
-import type { SSEEvent } from "../../relay/opencode-events.js";
+import { isRecord } from "../../utils.js";
+import { MonotoneText } from "../monotone-text.js";
+import { formatRetryMessage, mapToolName } from "./event-translator.js";
+import { normalizeToolInput } from "./normalize-tool-input.js";
+import type { SSEEvent } from "./opencode-events.js";
 import {
 	isMessageCreatedEvent,
 	isMessageRemovedEvent,
@@ -24,10 +24,7 @@ import {
 	isSessionErrorEvent,
 	isSessionStatusEvent,
 	sessionErrorText,
-} from "../../relay/opencode-events.js";
-import { isRecord } from "../../utils.js";
-import { MonotoneText } from "../monotone-text.js";
-import { normalizeToolInput } from "./normalize-tool-input.js";
+} from "./opencode-events.js";
 import {
 	completedCompactionEvent,
 	type FileReadEcho,

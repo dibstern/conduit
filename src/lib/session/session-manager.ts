@@ -172,9 +172,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 		const page = await this.loadHistory(sessionId);
 		// Dynamic import avoids pulling jsdom/dompurify/marked into every
 		// module that imports session-manager (saves ~300-500ms at load time).
-		const { preRenderHistoryMessages } = await import(
-			"../relay/markdown-renderer.js"
-		);
+		const { preRenderHistoryMessages } = await import("./markdown-renderer.js");
 		preRenderHistoryMessages(page.messages);
 		return page;
 	}

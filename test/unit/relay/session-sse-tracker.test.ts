@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	createSessionSSETracker,
 	deriveSSECoverage,
-} from "../../../src/lib/relay/session-sse-tracker.js";
+} from "../../../src/lib/provider/opencode/session-sse-tracker.js";
 
 describe("deriveSSECoverage", () => {
 	const THRESHOLD = 5_000;

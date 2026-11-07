@@ -3,7 +3,7 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
 	preRenderHistoryMessages,
 	renderMarkdownServer,
-} from "../../../src/lib/relay/markdown-renderer.js";
+} from "../../../src/lib/session/markdown-renderer.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 

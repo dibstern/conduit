@@ -7,6 +7,7 @@ import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { loadRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { restoreSessionSettings } from "../../../src/lib/domain/relay/Services/session-model-settings.js";
 import {
@@ -17,7 +18,6 @@ import {
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
-import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {

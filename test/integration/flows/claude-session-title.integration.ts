@@ -6,6 +6,7 @@ import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
@@ -24,7 +25,6 @@ import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-que
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeClaudeTextGenerationLayer,
 	replayClaudeText,

@@ -18,11 +18,11 @@
 
 import fc from "fast-check";
 import { assert, describe, expect, it } from "vitest";
-import type { TranslateResult } from "../../../src/lib/relay/event-translator.js";
+import type { TranslateResult } from "../../../src/lib/provider/opencode/event-translator.js";
 import {
 	createTranslator,
 	mapToolName,
-} from "../../../src/lib/relay/event-translator.js";
+} from "../../../src/lib/provider/opencode/event-translator.js";
 import type { OpenCodeEvent } from "../../../src/lib/types.js";
 
 const SEED = 42;

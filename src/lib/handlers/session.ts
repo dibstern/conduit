@@ -7,6 +7,7 @@ import type { AccountId } from "../contracts/provider-instance.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../contracts/session-workspace.js";
 import { DeleteNeedsConfirm } from "../contracts/ws-rpc.js";
+import { saveRelaySettings } from "../daemon/relay-settings.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	DaemonEvent,
@@ -49,7 +50,6 @@ import {
 	PickRequired,
 	resolveTurnSettings,
 } from "../provider/turn-settings.js";
-import { saveRelaySettings } from "../relay/relay-settings.js";
 import { CurrentEventDelivery } from "../server/event-delivery.js";
 import type { SessionPermissionMode } from "../shared-types.js";
 import { RelaySettingsSaveError } from "./model.js";

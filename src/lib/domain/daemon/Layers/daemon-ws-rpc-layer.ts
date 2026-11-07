@@ -35,6 +35,10 @@ import {
 	syncRecentProjects,
 } from "../../../daemon/config-persistence.js";
 import { getRecent } from "../../../daemon/recent-projects.js";
+import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../../../daemon/relay-settings.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
@@ -45,10 +49,6 @@ import {
 import { CodexAccountResources } from "../../../provider/codex/codex-account-resources.js";
 import { discoverCodex } from "../../../provider/codex/codex-discovery.js";
 import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
-import {
-	loadRelaySettings,
-	saveRelaySettings,
-} from "../../../relay/relay-settings.js";
 import {
 	getRestartAvailable,
 	isServerSupervised,

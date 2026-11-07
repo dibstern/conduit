@@ -40,14 +40,14 @@ import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
-import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
-import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
-import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
+import type { MonitoringState } from "../../../src/lib/provider/opencode/monitoring-types.js";
 import {
 	handleSessionCreated,
 	makeSessionLifecycleWiringLive,
 	SessionLifecycleHistoryRebuildError,
-} from "../../../src/lib/relay/session-lifecycle-wiring.js";
+} from "../../../src/lib/provider/opencode/session-lifecycle-wiring.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,

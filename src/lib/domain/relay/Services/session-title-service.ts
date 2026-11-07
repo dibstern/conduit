@@ -9,6 +9,7 @@ import {
 	BUILTIN_TITLE_GENERATION,
 	type TitleGenerationSelection,
 } from "../../../contracts/title-generation.js";
+import { loadRelaySettings } from "../../../daemon/relay-settings.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -19,7 +20,6 @@ import {
 	resolveTitleGenerationAccount,
 } from "../../../provider/title-generation.js";
 import { catalogFromProviderList } from "../../../provider/turn-settings.js";
-import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { ProjectSettingsTag } from "./project-settings.js";

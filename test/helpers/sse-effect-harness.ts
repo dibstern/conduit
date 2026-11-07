@@ -23,7 +23,7 @@ import {
 	handleSSEEventEffect,
 	type SSEWiringDeps,
 	wireSSEConsumerEffect,
-} from "../../src/lib/relay/sse-wiring.js";
+} from "../../src/lib/provider/opencode/sse-wiring.js";
 import {
 	makeMockConfig,
 	makeMockSessionManagerService,

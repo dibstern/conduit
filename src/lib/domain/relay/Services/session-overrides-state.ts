@@ -20,11 +20,11 @@ import {
 	MutableRef,
 	Ref,
 } from "effect";
-import { guardCurrentWrite } from "../../../persistence/effect/commit-and-signal.js";
 import {
 	parseDefaultModel,
 	type RelaySettings,
-} from "../../../relay/relay-settings.js";
+} from "../../../daemon/relay-settings.js";
+import { guardCurrentWrite } from "../../../persistence/effect/commit-and-signal.js";
 import type { SessionPermissionMode } from "../../../shared-types.js";
 import { ConfigTag } from "./services.js";
 

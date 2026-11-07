@@ -6,13 +6,13 @@
 // MessagePoller: single-session poller with SSE suppression, held by viewers.
 // MessagePollerManager: manages multiple concurrent MessagePoller instances.
 
-import { isOpenCodeNotRunningError } from "../domain/daemon/Services/opencode-instances-service.js";
-import { ENV } from "../env.js";
-import type { OpenCodeAPI } from "../instance/opencode-api.js";
-import type { Message } from "../instance/sdk-types.js";
-import { createSilentLogger, type Logger } from "../logger.js";
-import { tagWithSessionId } from "../shared-types.js";
-import type { RelayMessage } from "../types.js";
+import { isOpenCodeNotRunningError } from "../../domain/daemon/Services/opencode-instances-service.js";
+import { ENV } from "../../env.js";
+import type { OpenCodeAPI } from "../../instance/opencode-api.js";
+import type { Message } from "../../instance/sdk-types.js";
+import { createSilentLogger, type Logger } from "../../logger.js";
+import { tagWithSessionId } from "../../shared-types.js";
+import type { RelayMessage } from "../../types.js";
 import {
 	buildSeedSnapshot,
 	diffAndSynthesize,

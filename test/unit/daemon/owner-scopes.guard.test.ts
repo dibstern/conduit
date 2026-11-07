@@ -229,7 +229,10 @@ describe("daemon-owned sessions and turns (82tn.10.9)", () => {
 	it("the relay names no daemon owner's constructor and builds no engine", () => {
 		expect(
 			tally(
-				sources("src/lib/relay"),
+				[
+					...sources("src/lib/provider/opencode"),
+					...sources("src/lib/terminal"),
+				],
 				(hit) =>
 					ownerConstructors.has(hit) || hit === "new OrchestrationEngine",
 			),
@@ -261,7 +264,12 @@ describe("daemon-owned sessions and turns (82tn.10.9)", () => {
 	it("only Owner Scopes opens project and session scopes; no new runtimes", () => {
 		expect(
 			tally(
-				[...sources(root), ...sources("src/lib/relay"), ...ownerModules],
+				[
+					...sources(root),
+					...sources("src/lib/provider/opencode"),
+					...sources("src/lib/terminal"),
+					...ownerModules,
+				],
 				(hit) => scopeOpeners.has(hit),
 			),
 		).toEqual(scopeOpenerSites);
@@ -316,7 +324,7 @@ describe("one alert feed and pollers held by tabs (82tn.12)", () => {
 	});
 
 	it("only tabs viewing a session hold its message poller", () => {
-		const poller = read("src/lib/relay/message-poller-impl.ts");
+		const poller = read("src/lib/provider/opencode/message-poller-impl.ts");
 		expect(poller).toContain("VIEWER_GRACE_MS");
 		expect(poller).not.toMatch(/lastContentAt|IDLE_TIMEOUT_MS/);
 	});
@@ -329,7 +337,7 @@ describe("one alert feed and pollers held by tabs (82tn.12)", () => {
 			"subscribeEveryProjectApprovals(",
 		);
 		// No second ding: the relay pushes no asks and the tab's approvals store dings nothing.
-		expect(read("src/lib/relay/sse-wiring.ts")).not.toMatch(
+		expect(read("src/lib/provider/opencode/sse-wiring.ts")).not.toMatch(
 			/AskedPush|permission\.asked[^\n]*sendPush/,
 		);
 		expect(read("src/lib/frontend/stores/approvals.ts")).not.toContain(

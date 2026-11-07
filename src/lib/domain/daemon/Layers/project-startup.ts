@@ -9,15 +9,15 @@ import {
 	GOAL_READ_TEXT,
 	goalCommandText,
 } from "../../../provider/goal-tracker.js";
-import { getOrchestrationLayer } from "../../../provider/orchestration-wiring.js";
-import { runningRunnerCommands } from "../../../provider/runner/runner-recovery.js";
 import {
 	createMonitoringWiringState,
 	wireMonitoringEffect,
-} from "../../../relay/monitoring-wiring.js";
-import { wirePollersEffect } from "../../../relay/poller-wiring.js";
-import { makeSessionLifecycleWiringLive } from "../../../relay/session-lifecycle-wiring.js";
-import { wireSSEConsumerEffect } from "../../../relay/sse-wiring.js";
+} from "../../../provider/opencode/monitoring-wiring.js";
+import { wirePollersEffect } from "../../../provider/opencode/poller-wiring.js";
+import { makeSessionLifecycleWiringLive } from "../../../provider/opencode/session-lifecycle-wiring.js";
+import { wireSSEConsumerEffect } from "../../../provider/opencode/sse-wiring.js";
+import { getOrchestrationLayer } from "../../../provider/orchestration-wiring.js";
+import { runningRunnerCommands } from "../../../provider/runner/runner-recovery.js";
 import type { PushNotificationSender } from "../../../server/push.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";

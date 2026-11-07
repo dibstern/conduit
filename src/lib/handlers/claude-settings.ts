@@ -6,6 +6,10 @@ import {
 	ClaudeSettingsTrustBoundaryError,
 } from "../contracts/claude-settings.js";
 import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
+import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../daemon/relay-settings.js";
 import { ProjectShellEnvTag } from "../domain/daemon/Layers/project-shell-env-layer.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
@@ -16,10 +20,6 @@ import {
 	type ClaudeSettingsChildRunner,
 	resolveClaudeSettingsFromDisk,
 } from "../provider/claude/claude-settings-resolver.js";
-import {
-	loadRelaySettings,
-	saveRelaySettings,
-} from "../relay/relay-settings.js";
 
 class RelaySettingsSaveError extends Data.TaggedError(
 	"RelaySettingsSaveError",

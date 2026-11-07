@@ -8,8 +8,8 @@ import type {
 import type { MessageSnapshotPayload } from "../../contracts/stored-event.js";
 import type { Message } from "../../instance/sdk-types.js";
 import type { AttachmentStore } from "../../persistence/attachment-store.js";
-import { mapToolName } from "../../relay/event-translator.js";
 import { isRecord } from "../../utils.js";
+import { mapToolName } from "./event-translator.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 import { openCodeToolFileChanges } from "./opencode-tool-file-changes.js";
 

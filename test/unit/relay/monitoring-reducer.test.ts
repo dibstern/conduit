@@ -7,13 +7,13 @@ import {
 	evaluateSession,
 	initialMonitoringState,
 	selectMonitoringCandidates,
-} from "../../../src/lib/relay/monitoring-reducer.js";
+} from "../../../src/lib/provider/opencode/monitoring-reducer.js";
 import type {
 	PollerGatingConfig,
 	SessionEvalContext,
 	SessionMonitorPhase,
-} from "../../../src/lib/relay/monitoring-types.js";
-import type { SessionSSETracker } from "../../../src/lib/relay/session-sse-tracker.js";
+} from "../../../src/lib/provider/opencode/monitoring-types.js";
+import type { SessionSSETracker } from "../../../src/lib/provider/opencode/session-sse-tracker.js";
 import { busySessionIds } from "../../../src/lib/session-busy.js";
 
 // Minimal SSE tracker stub for tests

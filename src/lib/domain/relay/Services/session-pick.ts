@@ -2,6 +2,7 @@ import { Effect, Result } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
+import { loadRelaySettings } from "../../../daemon/relay-settings.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -20,7 +21,6 @@ import {
 	type TurnSettings,
 } from "../../../provider/turn-settings.js";
 import type { ModelInfo } from "../../../provider/types.js";
-import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { loadModelCatalog } from "./model-catalog.js";
 import { ConfigTag, OpenCodeModelServiceTag } from "./services.js";

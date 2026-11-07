@@ -14,7 +14,7 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { sendPushForEventEffect } from "../../../src/lib/relay/sse-wiring.js";
+import { sendPushForEventEffect } from "../../../src/lib/provider/opencode/sse-wiring.js";
 import { PushNotificationManager } from "../../../src/lib/server/push.js";
 
 it("releases a claim after the endpoint closes without response or error", async () => {

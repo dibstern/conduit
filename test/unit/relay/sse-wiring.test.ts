@@ -10,7 +10,7 @@ import {
 	handleSSEEventEffect,
 	type SSEWiringDeps,
 	wireSSEConsumerEffect,
-} from "../../../src/lib/relay/sse-wiring.js";
+} from "../../../src/lib/provider/opencode/sse-wiring.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";

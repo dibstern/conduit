@@ -7,7 +7,7 @@ const REPO_ROOT = process.cwd();
 describe("SSE stream Effect boundary", () => {
 	it("does not bridge fiber interruption through Effect.runPromise", () => {
 		const source = readFileSync(
-			join(REPO_ROOT, "src/lib/relay/sse-stream.ts"),
+			join(REPO_ROOT, "src/lib/provider/opencode/sse-stream.ts"),
 			"utf8",
 		);
 

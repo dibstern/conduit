@@ -14,12 +14,12 @@
  *    it. The call step carries the token's first outcome; the outcome's own step only marks it.
  */
 import type { SDKMessage } from "../../../../src/lib/provider/claude/types.js";
+import type { SSEEvent } from "../../../../src/lib/provider/opencode/opencode-events.js";
 import type {
 	Evidence,
 	LedgerCommand,
 	MainRunEvent,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
-import type { SSEEvent } from "../../../../src/lib/relay/opencode-events.js";
 import {
 	makeErrorResult,
 	makeSuccessResult,

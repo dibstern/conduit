@@ -5,7 +5,7 @@
 import { Schema } from "effect";
 import fc from "fast-check";
 import { WsRpcRequest } from "../../src/lib/contracts/ws-rpc.js";
-import type { SSEEvent } from "../../src/lib/relay/opencode-events.js";
+import type { SSEEvent } from "../../src/lib/provider/opencode/opencode-events.js";
 import type {
 	FrontendDecision,
 	OpenCodeDecision,

@@ -21,7 +21,7 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
-import { sendPushForEventEffect } from "../../../relay/sse-wiring.js";
+import { sendPushForEventEffect } from "../../../provider/opencode/sse-wiring.js";
 import type { Approval } from "../../../shared-types.js";
 import {
 	AlertLedgerTag,

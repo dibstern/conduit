@@ -43,7 +43,7 @@ export const loadPreRenderedHistory = (
 	Effect.gen(function* () {
 		const page = yield* loadHistory(sessionId, options);
 		const renderer = yield* Effect.tryPromise(
-			() => import("../../../relay/markdown-renderer.js"),
+			() => import("../../../session/markdown-renderer.js"),
 		).pipe(
 			Effect.mapError(
 				(cause) =>

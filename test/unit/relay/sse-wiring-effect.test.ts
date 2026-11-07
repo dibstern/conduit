@@ -19,7 +19,7 @@ import {
 import {
 	handleSSEEventEffect,
 	type SSEWiringDeps,
-} from "../../../src/lib/relay/sse-wiring.js";
+} from "../../../src/lib/provider/opencode/sse-wiring.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
 import {
 	createMockSSEWiringDeps,

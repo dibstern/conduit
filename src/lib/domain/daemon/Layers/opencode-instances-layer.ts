@@ -27,8 +27,8 @@ import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
 import { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { createSdkClient } from "../../../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../../../logger.js";
+import { SSEStream } from "../../../provider/opencode/sse-stream.js";
 import { openCodePromptProcessId } from "../../../provider/opencode-process-identity.js";
-import { SSEStream } from "../../../relay/sse-stream.js";
 import type { ConnectionHealth, InstanceStatus } from "../../../types.js";
 import { subscribeToDaemonEvents } from "../Services/daemon-pubsub.js";
 import {

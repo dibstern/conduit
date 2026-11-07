@@ -13,8 +13,8 @@ import {
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { publishProviderRelayMessage } from "../../../src/lib/relay/project-relay-publisher.js";
-import { turnEndedAlert } from "../../../src/lib/relay/turn-ended-alert.js";
+import { publishProviderRelayMessage } from "../../../src/lib/provider/project-relay-publisher.js";
+import { turnEndedAlert } from "../../../src/lib/provider/turn-ended-alert.js";
 
 const idleActivity = {
 	foreground: "idle",

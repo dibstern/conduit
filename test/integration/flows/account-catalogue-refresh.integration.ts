@@ -18,11 +18,11 @@ import {
 	type ProjectSetting,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
-import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeRoutedWsRpcServerLayer,
 	WsRpcServerLayer,

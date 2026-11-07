@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
 	type EffectDeps,
 	executeEffects,
-} from "../../../src/lib/relay/effect-executor.js";
-import type { MonitoringEffect } from "../../../src/lib/relay/monitoring-types.js";
+} from "../../../src/lib/provider/opencode/effect-executor.js";
+import type { MonitoringEffect } from "../../../src/lib/provider/opencode/monitoring-types.js";
 
 function createMockDeps(): EffectDeps & {
 	calls: Record<string, unknown[][]>;

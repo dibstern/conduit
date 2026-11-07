@@ -25,15 +25,15 @@ import {
 	createEventId,
 } from "../../../../src/lib/persistence/events.js";
 import { inboxRunStatusQuery } from "../../../../src/lib/persistence/inbox-run-status-query.js";
+import {
+	applyPipelineResultEffect,
+	processEvent,
+} from "../../../../src/lib/provider/event-pipeline.js";
 import { openCodeInputMessageId } from "../../../../src/lib/provider/opencode/opencode-input-message-id.js";
 import { OpenCodeRuntimeEventTranslator } from "../../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
 import { OpenCodeProviderInstance } from "../../../../src/lib/provider/opencode-provider-instance.js";
 import { ProviderSideEffectReactor } from "../../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
-import {
-	applyPipelineResultEffect,
-	processEvent,
-} from "../../../../src/lib/relay/event-pipeline.js";
 import { makeMockOpenCodeAPI } from "../../../helpers/mock-factories.js";
 import { makeBaseSendTurnInput } from "../../../helpers/mock-sdk.js";
 import { makeSSEEvent } from "../../../helpers/sse-factories.js";

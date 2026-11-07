@@ -3,8 +3,8 @@
 // instead of the old RelayMessage | RelayMessage[] | null.
 
 import { describe, expect, it } from "vitest";
-import type { TranslateResult } from "../../../src/lib/relay/event-translator.js";
-import { createTranslator } from "../../../src/lib/relay/event-translator.js";
+import type { TranslateResult } from "../../../src/lib/provider/opencode/event-translator.js";
+import { createTranslator } from "../../../src/lib/provider/opencode/event-translator.js";
 
 describe("translator returns TranslateResult", () => {
 	const translator = createTranslator();

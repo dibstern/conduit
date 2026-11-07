@@ -6,6 +6,10 @@ import { describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import * as configPersistence from "../../../../src/lib/daemon/config-persistence.js";
 import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../../../../src/lib/daemon/relay-settings.js";
+import {
 	makeClaudeProviderRuntime,
 	makeClaudeSessionRunner,
 } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
@@ -15,10 +19,6 @@ import type {
 	SDKMessage,
 	Options as SDKOptions,
 } from "../../../../src/lib/provider/claude/types.js";
-import {
-	loadRelaySettings,
-	saveRelaySettings,
-} from "../../../../src/lib/relay/relay-settings.js";
 import { makeTestClaudeProviderInstance } from "../../../helpers/claude-provider-instance.js";
 import { getClaudeRuntimeSessionCountForTest } from "../../../helpers/claude-runtime-state.js";
 import {

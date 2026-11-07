@@ -19,6 +19,11 @@ import { runTerminalStatus } from "../../../persistence/effect/projectors-effect
 import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
 import { canonicalEvent, createEventId } from "../../../persistence/events.js";
 import {
+	isPartUpdatedEvent,
+	isSessionStatusEvent,
+	type SSEEvent,
+} from "../../../provider/opencode/opencode-events.js";
+import {
 	completedCompactionEvent,
 	isSettled,
 	openCodeAttachmentSource,
@@ -34,15 +39,10 @@ import {
 	OpenCodeRuntimeEventTranslator,
 	opencodeSessionCreatedRuntimeEvent,
 } from "../../../provider/opencode/opencode-runtime-event-translator.js";
+import type { OpenCodeEventContext } from "../../../provider/opencode/sse-stream.js";
 import type { runningRunnerCommands } from "../../../provider/runner/runner-recovery.js";
 import { settleSessionRuns } from "../../../provider/session-run-settlement.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
-import {
-	isPartUpdatedEvent,
-	isSessionStatusEvent,
-	type SSEEvent,
-} from "../../../relay/opencode-events.js";
-import type { OpenCodeEventContext } from "../../../relay/sse-stream.js";
 import { isRecord } from "../../../utils.js";
 import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import {

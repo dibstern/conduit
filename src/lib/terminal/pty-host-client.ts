@@ -7,7 +7,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Schema } from "effect";
 import { BUILD_ID } from "../build-id.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
-import type { PtyUpstream } from "../relay/pty-manager.js";
 import type { PtyInfo } from "../shared-types.js";
 import { isRecord } from "../utils.js";
 import {
@@ -24,6 +23,7 @@ import {
 	readPtyFrames,
 	writePtyFrame,
 } from "./pty-host-protocol.js";
+import type { PtyUpstream } from "./pty-manager.js";
 
 type RequestBody<T> = T extends { requestId: number }
 	? Omit<T, "requestId">

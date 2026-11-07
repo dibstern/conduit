@@ -21,6 +21,10 @@ import { expect, vi } from "vitest";
 import { NO_OPENCODE_HEALTH } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../../../src/lib/daemon/relay-settings.js";
+import {
 	AccountDirectory,
 	AccountDirectoryFromConfigLive,
 } from "../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -66,10 +70,6 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
-import {
-	loadRelaySettings,
-	saveRelaySettings,
-} from "../../../src/lib/relay/relay-settings.js";
 import { RpcSubscriptionScopeLive } from "../../../src/lib/server/ws-rpc.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {

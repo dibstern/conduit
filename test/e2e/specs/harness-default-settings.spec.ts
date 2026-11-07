@@ -6,9 +6,9 @@ import {
 	ProjectSettingSchema,
 	WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import type { RelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import type { Harness } from "../../../src/lib/provider/turn-settings.js";
 import type { ModelInfo } from "../../../src/lib/provider/types.js";
-import type { RelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import type {
 	ProcessBrowser,
 	ProcessHarness,

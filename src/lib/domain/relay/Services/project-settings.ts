@@ -33,6 +33,11 @@ import type {
 	ProjectSettingsEnvelope,
 } from "../../../contracts/ws-rpc.js";
 import {
+	loadRelaySettings,
+	parseDefaultModel,
+	type RelaySettings,
+} from "../../../daemon/relay-settings.js";
+import {
 	resolveTitleGeneration,
 	resolveTitleGenerationAccount,
 } from "../../../provider/title-generation.js";
@@ -43,11 +48,6 @@ import {
 	harnessForModelProvider,
 	resolveTurnSettings,
 } from "../../../provider/turn-settings.js";
-import {
-	loadRelaySettings,
-	parseDefaultModel,
-	type RelaySettings,
-} from "../../../relay/relay-settings.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { ConfigTag, OpenCodeModelServiceTag } from "./services.js";
 import {

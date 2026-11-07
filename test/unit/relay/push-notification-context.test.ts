@@ -6,8 +6,8 @@
 
 import { assert, describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import { resolveNotifications } from "../../../src/lib/relay/notification-policy.js";
-import { sendPushForEvent } from "../../../src/lib/relay/sse-wiring.js";
+import { resolveNotifications } from "../../../src/lib/provider/notification-policy.js";
+import { sendPushForEvent } from "../../../src/lib/provider/opencode/sse-wiring.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
 
 function createMockPushManager() {

@@ -38,7 +38,7 @@ import {
 	translateReasoningPartUpdated,
 	translateSessionStatus,
 	translateToolPartUpdated,
-} from "../../../src/lib/relay/event-translator.js";
+} from "../../../src/lib/provider/opencode/event-translator.js";
 import type {
 	OpenCodeEvent,
 	PartType,

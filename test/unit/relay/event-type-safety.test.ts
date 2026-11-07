@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createTranslator } from "../../../src/lib/relay/event-translator.js";
-import type { KnownOpenCodeEventType } from "../../../src/lib/relay/opencode-events.js";
+import { createTranslator } from "../../../src/lib/provider/opencode/event-translator.js";
+import type { KnownOpenCodeEventType } from "../../../src/lib/provider/opencode/opencode-events.js";
 
 const KNOWN_EVENT_TYPES: KnownOpenCodeEventType[] = [
 	"message.part.delta",

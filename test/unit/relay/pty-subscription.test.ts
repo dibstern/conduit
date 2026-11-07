@@ -12,8 +12,8 @@ import {
 	type OpenCodeTerminalService,
 	OpenCodeTerminalServiceTag,
 } from "../../../src/lib/domain/relay/Services/terminal-service.js";
-import { PtyManager } from "../../../src/lib/relay/pty-manager.js";
 import type { PtyInfo } from "../../../src/lib/shared-types.js";
+import { PtyManager } from "../../../src/lib/terminal/pty-manager.js";
 
 const pty = (id: string, status: PtyInfo["status"] = "running"): PtyInfo => ({
 	id,

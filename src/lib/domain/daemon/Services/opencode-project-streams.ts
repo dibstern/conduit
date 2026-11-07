@@ -11,8 +11,8 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
-import type { SSEEvent } from "../../../relay/opencode-events.js";
-import { extractSessionId } from "../../../relay/sse-wiring.js";
+import type { SSEEvent } from "../../../provider/opencode/opencode-events.js";
+import { extractSessionId } from "../../../provider/opencode/sse-wiring.js";
 import { audienceOf, delivers } from "../../../server/event-audiences.js";
 import {
 	type OpenCodeInstanceEvent,

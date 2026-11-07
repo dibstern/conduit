@@ -3,7 +3,7 @@ import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type { Message } from "../../../instance/sdk-types.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
-import { MessagePollerManager } from "../../../relay/message-poller-impl.js";
+import { MessagePollerManager } from "../../../provider/opencode/message-poller-impl.js";
 import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import {

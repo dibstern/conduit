@@ -5,8 +5,8 @@
 //
 // Used by the message poller implementation and tested independently.
 
-import type { Message } from "../instance/sdk-types.js";
-import type { UntaggedRelayMessage } from "../shared-types.js";
+import type { Message } from "../../instance/sdk-types.js";
+import type { UntaggedRelayMessage } from "../../shared-types.js";
 import {
 	endsOpenCodeTurn,
 	mapToolName,

@@ -15,7 +15,7 @@
 import {
 	PERSISTED_EVENT_TYPES,
 	type PersistedEventType,
-} from "../../src/lib/relay/event-pipeline.js";
+} from "../../src/lib/provider/event-pipeline.js";
 import type { RelayMessage } from "../../src/lib/shared-types.js";
 
 const persistedSet: ReadonlySet<string> = new Set(PERSISTED_EVENT_TYPES);

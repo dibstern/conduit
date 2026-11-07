@@ -33,6 +33,7 @@ import {
 	startOnboardingServer,
 } from "../../../daemon/daemon-lifecycle.js";
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
+import { loadRelaySettings } from "../../../daemon/relay-settings.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV, resolveTraceConfig } from "../../../env.js";
 import { startContentionMetrics } from "../../../persistence/contention-metrics.js";
@@ -50,7 +51,6 @@ import { CodexAccountResourcesLive } from "../../../provider/codex/codex-account
 import { readCodexSessionIdentity } from "../../../provider/codex/codex-session-store.js";
 import { CursorAccountResourcesLive } from "../../../provider/cursor/cursor-account-resources.js";
 import type { ProjectShellEnvResolver } from "../../../provider/project-shell-env.js";
-import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import {
 	ServerBuildUpdateLive,
 	serverExitCode,

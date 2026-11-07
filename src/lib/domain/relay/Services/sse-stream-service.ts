@@ -5,7 +5,7 @@ import { makeRetireReplacedProcessPrompts } from "../../../persistence/effect/re
 import type {
 	SSEStreamCallbacks,
 	SSEStreamPort,
-} from "../../../relay/sse-stream.js";
+} from "../../../provider/opencode/sse-stream.js";
 import type { ConnectionHealth } from "../../../types.js";
 import type { OpenCodeInstanceEvent } from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeProjectStreams } from "../../daemon/Services/opencode-project-streams.js";

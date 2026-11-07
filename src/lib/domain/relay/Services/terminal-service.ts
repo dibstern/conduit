@@ -17,16 +17,16 @@ import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { makeClaudeTerminalEnv } from "../../../provider/claude/claude-sdk-env.js";
 import { prepareCodexAccount } from "../../../provider/codex/codex-home.js";
-import {
-	type PtyUpstream,
-	trackedPtyInfo,
-} from "../../../relay/pty-manager.js";
 import type { PtyInfo, PtyStatus } from "../../../shared-types.js";
 import {
 	isPtyHostUnavailable,
 	PtyHostClient,
 } from "../../../terminal/pty-host-client.js";
 import { PtyHostError } from "../../../terminal/pty-host-protocol.js";
+import {
+	type PtyUpstream,
+	trackedPtyInfo,
+} from "../../../terminal/pty-manager.js";
 import { isRecord } from "../../../utils.js";
 import {
 	type OpenCodeClient,

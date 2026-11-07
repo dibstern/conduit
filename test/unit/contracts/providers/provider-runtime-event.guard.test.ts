@@ -55,7 +55,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 	it("keeps provider adapters from constructing durable domain events directly", () => {
 		const files = [
 			...tsFiles(join(REPO_ROOT, "src/lib/provider")),
-			...tsFiles(join(REPO_ROOT, "src/lib/relay")),
+			...tsFiles(join(REPO_ROOT, "src/lib/terminal")),
 		];
 		const allowed = new Set([
 			"src/lib/provider/provider-runtime-event-to-domain.ts",

@@ -8,8 +8,8 @@ import {
 	type LocalPtySession,
 	TerminalServiceError,
 } from "../../../src/lib/domain/relay/Services/terminal-service.js";
-import { PtyManager } from "../../../src/lib/relay/pty-manager.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import { PtyManager } from "../../../src/lib/terminal/pty-manager.js";
 import {
 	MOCK_PROJECT_DIR,
 	makeMockLogger,

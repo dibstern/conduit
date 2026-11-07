@@ -50,6 +50,7 @@ import {
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
 import { readProjectFile } from "../../../daemon/project-file.js";
+import { loadRelaySettings } from "../../../daemon/relay-settings.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { readRepositoryIdentity } from "../../../git/repository-identity.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
@@ -79,7 +80,6 @@ import {
 } from "../../../project-folders.js";
 import type { ProjectGate } from "../../../provider/orchestration-side-effect-reactor.js";
 import { stopRegisteredRunners } from "../../../provider/runner/runner-retirement.js";
-import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
 import { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";

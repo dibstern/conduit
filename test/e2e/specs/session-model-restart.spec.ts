@@ -4,7 +4,7 @@
 
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";

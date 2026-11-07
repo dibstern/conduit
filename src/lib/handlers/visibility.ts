@@ -1,12 +1,12 @@
 // Global hide-lists for the agent/model dropdowns. Persisted in relay settings.
 
 import { Data, Effect } from "effect";
-import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
-import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../relay/relay-settings.js";
+} from "../daemon/relay-settings.js";
+import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
+import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
 
 export interface HiddenEntries {
 	readonly hiddenModels: string[];

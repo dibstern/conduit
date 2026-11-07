@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveNotifications } from "../../../src/lib/relay/notification-policy.js";
+import { resolveNotifications } from "../../../src/lib/provider/notification-policy.js";
 
 describe("resolveNotifications", () => {
 	it("does not alert from anonymous status hints", () => {

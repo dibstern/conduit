@@ -1,5 +1,5 @@
-import type { SessionStatus } from "../instance/sdk-types.js";
-import { busySessionIds } from "../session-busy.js";
+import type { SessionStatus } from "../../instance/sdk-types.js";
+import { busySessionIds } from "../../session-busy.js";
 import type {
 	MonitoringEffect,
 	MonitoringState,

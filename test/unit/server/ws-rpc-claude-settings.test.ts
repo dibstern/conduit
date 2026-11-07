@@ -10,7 +10,7 @@ import {
 	type ProjectSettingsEnvelope,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
+import { loadRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,

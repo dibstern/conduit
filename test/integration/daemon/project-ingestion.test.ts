@@ -103,7 +103,7 @@ import { OpenCodeTerminalServiceTag } from "../../../src/lib/domain/relay/Servic
 import { ToolContentServiceTag } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
 import { ProjectRpcContextsTag } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { MessagePollerManager } from "../../../src/lib/relay/message-poller-impl.js";
+import { MessagePollerManager } from "../../../src/lib/provider/opencode/message-poller-impl.js";
 import {
 	makeRoutedWsRpcServerLayer,
 	WsRpcGroup,

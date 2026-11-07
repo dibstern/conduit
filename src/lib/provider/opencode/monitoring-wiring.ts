@@ -6,43 +6,45 @@
 
 import { Deferred, Effect, Option, type Scope } from "effect";
 import { SqlClient } from "effect/sql";
-import type { Account, AccountRef } from "../contracts/account.js";
-import { getProviderDriver } from "../contracts/provider-instance.js";
-import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
-import { isOpenCodeNotRunningError } from "../domain/daemon/Services/opencode-instances-service.js";
+import type { Account, AccountRef } from "../../contracts/account.js";
+import { getProviderDriver } from "../../contracts/provider-instance.js";
+import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
+import { isOpenCodeNotRunningError } from "../../domain/daemon/Services/opencode-instances-service.js";
 import {
 	type AlertsTag,
 	publishAlert,
-} from "../domain/relay/Services/alerts.js";
+} from "../../domain/relay/Services/alerts.js";
 import {
 	type ConfigTag,
 	StatusPollerTag,
-} from "../domain/relay/Services/services.js";
+} from "../../domain/relay/Services/services.js";
 import {
 	projectSessionManager,
 	type SessionManagerServiceTag,
-} from "../domain/relay/Services/session-manager-service.js";
+} from "../../domain/relay/Services/session-manager-service.js";
 import {
 	clearProcessingTimeout,
 	type OverridesStateTag,
-} from "../domain/relay/Services/session-overrides-state.js";
-import * as Failure from "../effect/failure-classification.js";
-import type { Message } from "../instance/sdk-types.js";
-import type { Logger } from "../logger.js";
+} from "../../domain/relay/Services/session-overrides-state.js";
+import * as Failure from "../../effect/failure-classification.js";
+import type { Message } from "../../instance/sdk-types.js";
+import type { Logger } from "../../logger.js";
 import {
 	decodeStoredEventRow,
 	type StoredEventRow,
-} from "../persistence/effect/stored-event-row.js";
-import type { PushNotificationSender } from "../server/push.js";
-import { isRecord } from "../utils.js";
-import { type EffectDeps, executeEffects } from "./effect-executor.js";
+} from "../../persistence/effect/stored-event-row.js";
+import type { PushNotificationSender } from "../../server/push.js";
+import { isRecord } from "../../utils.js";
 import {
 	applyPipelineResult,
 	applyPipelineResultEffect,
 	type PipelineDeps,
 	type ProcessingTimeoutsPort,
 	processEvent,
-} from "./event-pipeline.js";
+} from "../event-pipeline.js";
+import { resolveNotifications } from "../notification-policy.js";
+import { turnEndedAlert } from "../turn-ended-alert.js";
+import { type EffectDeps, executeEffects } from "./effect-executor.js";
 import {
 	assembleContext,
 	evaluateAll,
@@ -56,10 +58,8 @@ import type {
 	SessionEvalContext,
 } from "./monitoring-types.js";
 import { DEFAULT_POLLER_GATING_CONFIG } from "./monitoring-types.js";
-import { resolveNotifications } from "./notification-policy.js";
 import { createSessionSSETracker } from "./session-sse-tracker.js";
 import { sendPushForEvent, sendPushForEventEffect } from "./sse-wiring.js";
-import { turnEndedAlert } from "./turn-ended-alert.js";
 
 /** Structural interface for the message poller manager's capabilities needed by monitoring wiring. */
 interface PollerManagerLike {
@@ -91,7 +91,7 @@ interface LegacyStatusPollerPort {
 		callback: (
 			statuses: Record<
 				string,
-				import("../instance/sdk-types.js").SessionStatus
+				import("../../instance/sdk-types.js").SessionStatus
 			>,
 			statusesChanged: boolean,
 		) => void | Promise<void>,
@@ -101,7 +101,7 @@ interface LegacyStatusPollerPort {
 	drain?(): Promise<void>;
 	getCurrentStatuses?(): Record<
 		string,
-		import("../instance/sdk-types.js").SessionStatus
+		import("../../instance/sdk-types.js").SessionStatus
 	>;
 	getSessionProviders?(): ReadonlyMap<string, string>;
 	isProcessing?(sessionId: string): boolean;

@@ -9,7 +9,7 @@ import {
 	canonicalEvent,
 	EventId,
 } from "../../../src/lib/persistence/events.js";
-import { turnEndedAlert } from "../../../src/lib/relay/turn-ended-alert.js";
+import { turnEndedAlert } from "../../../src/lib/provider/turn-ended-alert.js";
 
 describe("turn-ended alert", () => {
 	it.each([

@@ -2,9 +2,9 @@
 import { existsSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { BUILD_ID } from "../../../src/lib/build-id.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
-import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { stopDaemonAndAssertNoSurvivors } from "./daemon-survivors.js";
 
 const [root, staticDir, opencodeUrl, port] = process.argv.slice(2);

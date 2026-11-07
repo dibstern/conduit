@@ -1,4 +1,4 @@
-import type { Logger } from "../logger.js";
+import type { Logger } from "../../logger.js";
 import type { MonitoringEffect } from "./monitoring-types.js";
 
 export interface EffectDeps {

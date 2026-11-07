@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ConfigTag,
@@ -25,7 +26,6 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
-import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,

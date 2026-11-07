@@ -15,7 +15,7 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
-import { MessagePollerManager } from "../../../src/lib/relay/message-poller-impl.js";
+import { MessagePollerManager } from "../../../src/lib/provider/opencode/message-poller-impl.js";
 import {
 	makeMockConfig,
 	makeMockLogger,

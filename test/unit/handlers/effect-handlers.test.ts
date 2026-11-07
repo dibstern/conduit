@@ -32,7 +32,7 @@ import { describe, it, layer } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
-
+import { loadRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import {
@@ -142,7 +142,6 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
-import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import { modelsHandlers } from "../../../src/lib/server/ws-rpc/models.js";
 import { projectsHandlers } from "../../../src/lib/server/ws-rpc/projects.js";
 import { RpcSubscriptionScopeLive } from "../../../src/lib/server/ws-rpc.js";

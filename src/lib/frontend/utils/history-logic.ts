@@ -6,7 +6,7 @@ import {
 	endsOpenCodeTurn,
 	mapToolName,
 	openCodeTurnTotals,
-} from "../../relay/event-translator.js";
+} from "../../provider/opencode/event-translator.js";
 import type {
 	AssistantMessage,
 	ChatMessage,

@@ -11,7 +11,7 @@
 // - Type guards remain for all event types because the SSE parser emits raw
 //   `{ type, properties }` objects (Tasks 13-14 will replace the SSE parser).
 
-import type { PartType, ToolStatus } from "../shared-types.js";
+import type { PartType, ToolStatus } from "../../shared-types.js";
 
 // Matches the shape of every SSE event (same as SDK Event members).
 // Used only as a structural constraint for gap event interfaces.

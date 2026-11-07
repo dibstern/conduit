@@ -12,6 +12,7 @@ import {
 	type OpenCodeAccount,
 } from "../../../src/lib/contracts/account.js";
 import { isPlaceholderTitle } from "../../../src/lib/contracts/session-title.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
@@ -47,7 +48,6 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
-import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeClaudeTextGenerationLayer,
 	replayClaudeText,

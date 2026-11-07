@@ -5,6 +5,10 @@ import { describe, it } from "@effect/vitest";
 import { Cause, Effect, Exit, Layer, Option, PubSub } from "effect";
 import { expect } from "vitest";
 import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../../../src/lib/daemon/relay-settings.js";
+import {
 	ProjectSettingsLive,
 	ProjectSettingsTag,
 } from "../../../src/lib/domain/relay/Services/project-settings.js";
@@ -18,10 +22,6 @@ import {
 	setHiddenEntriesForRelay,
 } from "../../../src/lib/handlers/visibility.js";
 import type { Logger } from "../../../src/lib/logger.js";
-import {
-	loadRelaySettings,
-	saveRelaySettings,
-} from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
