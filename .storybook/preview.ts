@@ -2,6 +2,7 @@ import type { Preview } from "@storybook/svelte-vite";
 import { expect, waitFor } from "storybook/test";
 import "../src/lib/frontend/style.css";
 import { avatarState } from "../src/lib/frontend/stores/avatar.svelte.js";
+import { watchViewportPose } from "../src/lib/frontend/stores/session-view.svelte.js";
 import { setThemeMode } from "../src/lib/frontend/stores/theme.svelte.js";
 import { seedStoryAvatar } from "../src/lib/frontend/stories/sockets.js";
 
@@ -30,6 +31,10 @@ const preview: Preview = {
 			expect(getComputedStyle(document.body).pointerEvents).not.toBe("none"),
 		);
 		setThemeMode(context.globals["theme"] === "light" ? "light" : "dark");
+		// The pose was measured when the module loaded, at the runner's viewport,
+		// not this story's. Measure it once for this story and stop listening, so
+		// a story that seeds its own pose keeps it (68a6a8a0 dropped the listener).
+		watchViewportPose()();
 		const avatar = {
 			choice: { kind: "initial" as const },
 			name: "David",
