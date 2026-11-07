@@ -34,15 +34,13 @@ export const rewindTo = (
 	);
 
 /** What a rewind with files to before a message would do (82tn.53): the paths that change,
- *  each folder's prefixed when there are several, or why the files cannot go back, and whether
- *  they can go into a new worktree instead (82tn.54): only files still kept there can. */
+ *  each folder's prefixed when there are several, or why the files cannot go back, and the
+ *  message a branch into a new worktree would start from instead (82tn.54): only files still
+ *  kept there can go. */
 export const planRewindFiles = (
 	sessionId: string,
 	messageId: string,
-): Promise<
-	| { paths: string[] }
-	| { refused: string; branchable: boolean; before?: string }
-> =>
+): Promise<{ paths: string[] } | { refused: string; branchFrom?: string }> =>
 	rpc("PreviewHeadMove", {
 		sessionId,
 		intent: { _tag: "rewind", messageId, withFiles: true },
@@ -63,19 +61,17 @@ export const planRewindFiles = (
 				!(error instanceof FilesRefused) ||
 				(error.reason !== "other_session" && error.reason !== "changed")
 			)
-				return { refused, branchable: false };
-			// A branch starts where the rewind would land: before the first message of the picked
-			// message's Run, which only the planner knows. The conversation-only preview names it.
-			const before = await rpc("PreviewHeadMove", {
+				return { refused };
+			// A branch starts where the rewind would land, which only the planner knows. The
+			// conversation-only preview names it.
+			const branchFrom = await rpc("PreviewHeadMove", {
 				sessionId,
 				intent: { _tag: "rewind", messageId },
 			}).then(
-				(preview) => preview.before,
+				(preview) => preview.branchFrom,
 				() => undefined,
 			);
-			return before === undefined
-				? { refused, branchable: false }
-				: { refused, branchable: true, before };
+			return branchFrom === undefined ? { refused } : { refused, branchFrom };
 		},
 	);
 

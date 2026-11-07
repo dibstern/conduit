@@ -496,20 +496,21 @@ describe("a head move lands once, with its resend, across devices and crashes", 
 		const whole = await ids();
 		const log = async () =>
 			(await Effect.runPromise(browser.rpc.GetHeadLog({ sessionId }))).entries;
-		// Picking the reply goes back before its turn: the preview names the turn's first message,
-		// which is where a branch into a worktree starts too (sol S4).
-		const { before } = await Effect.runPromise(
+		// Picking the reply goes back before its turn: the preview names the last message the
+		// rewind keeps, which is where a branch into a worktree starts (sol S4).
+		const { branchFrom } = await Effect.runPromise(
 			browser.rpc.PreviewHeadMove({
 				sessionId,
 				intent: { _tag: "rewind", messageId: whole[3] ?? "" },
 			}),
 		);
-		expect(before).toBe(target.id);
 		const rewind = await move(browser, sessionId, {
 			_tag: "rewind",
 			messageId: target.id,
 		});
 		const rewound = await ids();
+		expect(branchFrom).toBeDefined();
+		expect(branchFrom).toBe(rewound.at(-1));
 		const undo = await move(browser, sessionId, {
 			_tag: "undo",
 			moveId: rewind.moveId,

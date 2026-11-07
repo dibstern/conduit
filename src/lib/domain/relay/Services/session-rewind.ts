@@ -237,10 +237,23 @@ export const previewHeadMove = (sessionId: string, intent: MoveIntent) =>
 		// target inside it would read as history no longer kept.
 		yield* admitOrRefuse(sessionId, { kind: "head_move" });
 		const plan = yield* planHeadMove(sessionId, intent);
+		const sql = yield* SqlClient.SqlClient;
+		// 82tn.54: a branch from a rewind keeps what the rewind keeps, up to the last message on
+		// the target's path.
+		const path =
+			plan.target.kind === "rewind"
+				? yield* pathToRoot(sessionId, plan.target.to)
+				: [];
+		const [branchFrom] =
+			path.length === 0
+				? []
+				: yield* sql<{ id: string }>`
+					SELECT id FROM messages WHERE session_id = ${sessionId} AND history_node_id IN ${sql.in(path)}
+					ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT 1`;
 		return {
 			moveId: plan.moveId,
 			files: plan.files,
-			...("messageId" in plan.target ? { before: plan.target.messageId } : {}),
+			...(branchFrom ? { branchFrom: branchFrom.id } : {}),
 			...(plan.folders
 				? {
 						restore: {

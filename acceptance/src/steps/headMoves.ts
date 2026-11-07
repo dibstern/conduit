@@ -187,13 +187,15 @@ export const headMovesHandlers: StepHandler[] = [
 								running: false,
 							},
 						});
+					// The planner's landing: a rewind keeps up to the reply before its turn.
+					const turn =
+						intent._tag === "rewind"
+							? Number(intent.messageId.replace(/^hm-\w+-/, ""))
+							: 0;
 					return {
 						moveId: `preview-${JSON.stringify(intent)}`,
 						files: state.pruned ? "pruned" : "available",
-						// The planner's cut: a rewind goes back before the first message of its turn.
-						...(intent._tag === "rewind"
-							? { before: intent.messageId.replace("hm-reply-", "hm-user-") }
-							: {}),
+						...(turn > 1 ? { branchFrom: `hm-reply-${turn - 1}` } : {}),
 						...(intent.withFiles
 							? {
 									restore: {
