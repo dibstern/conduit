@@ -29,10 +29,14 @@
 		const message = chatState.messages.find((message) => message.uuid === uiState.rewindSelectedUuid);
 		return message && "messageId" in message ? message.messageId : undefined;
 	});
-	// 82tn.54: a branch keeps the conversation up to the last message before the selected one, so
-	// it starts where the rewind would land.
+	// 82tn.54: a branch keeps the conversation up to the last message before the one the rewind
+	// goes back before (the first message of the picked message's Run), so it starts where the
+	// rewind would land.
 	const branchFromId = $derived.by(() => {
-		const index = chatState.messages.findIndex((message) => message.uuid === uiState.rewindSelectedUuid);
+		const before = files && "before" in files ? files.before : undefined;
+		const index = chatState.messages.findIndex(
+			(message) => "messageId" in message && message.messageId === before,
+		);
 		return chatState.messages
 			.slice(0, Math.max(index, 0))
 			.flatMap((message) => ("messageId" in message && message.messageId ? [message.messageId] : []))
@@ -41,7 +45,9 @@
 	// 82tn.53: the rewind with files, previewed on open: its Restore Plan (the paths that change),
 	// or why the files cannot go back. The conversation-only rewind stays open either way.
 	let files = $state<
-		{ paths: string[] } | { refused: string; branchable: boolean } | undefined
+		| { paths: string[] }
+		| { refused: string; branchable: boolean; before?: string }
+		| undefined
 	>();
 	$effect(() => {
 		const sessionId = sessionState.currentId;

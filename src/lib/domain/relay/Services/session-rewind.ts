@@ -125,11 +125,17 @@ const planHeadMove = (sessionId: string, intent: MoveIntent) =>
 					const [entry] = yield* sql<{ data: string }>`SELECT data FROM events
 						WHERE session_id = ${sessionId} AND type = 'head.move_started'
 						AND json_extract(data, '$.moveId') = ${intent.moveId}`;
-					const undone = entry
-						? (JSON.parse(entry.data) as { from?: string | null })
-						: {};
+					const undone: { from?: string | null; files?: readonly string[] } =
+						entry ? JSON.parse(entry.data) : {};
 					if (undone.from === undefined) return yield* noTarget(sessionId);
-					return { kind: "undo" as const, to: undone.from, inputs: [] };
+					return {
+						kind: "undo" as const,
+						to: undone.from,
+						inputs: [],
+						// ADR-0015: undo puts the files back as the move found them, so undoing a move
+						// that restored files restores them unless the intent says conversation only.
+						withFiles: intent.withFiles ?? (undone.files ?? []).length > 0,
+					};
 				}
 				case "switch":
 					return { kind: "switch" as const, to: intent.nodeId, inputs: [] };
@@ -171,9 +177,11 @@ const planHeadMove = (sessionId: string, intent: MoveIntent) =>
 				? ("available" as const)
 				: yield* headMoveFiles(sessionId, filesAt);
 		// 82tn.53: a move with files needs them kept at the target, and plans each folder it restores.
-		if (intent.withFiles && files !== "available")
+		const withFiles =
+			"withFiles" in target ? target.withFiles : intent.withFiles;
+		if (withFiles && files !== "available")
 			return yield* new FilesRefused({ sessionId, reason: files });
-		const folders = intent.withFiles
+		const folders = withFiles
 			? yield* planFiles(
 					sessionId,
 					head,
@@ -232,6 +240,7 @@ export const previewHeadMove = (sessionId: string, intent: MoveIntent) =>
 		return {
 			moveId: plan.moveId,
 			files: plan.files,
+			...("messageId" in plan.target ? { before: plan.target.messageId } : {}),
 			...(plan.folders
 				? {
 						restore: {

@@ -140,14 +140,16 @@ const check = (
 				reason: "pruned",
 				directory,
 			});
+		/** Another session's runs captured in the folder or its moves restored it. */
+		const touched = sql`e.session_id != ${sessionId}
+			AND ((e.type = 'run.changes_captured' AND EXISTS (SELECT 1 FROM json_each(e.data, '$.folders') f
+					WHERE json_extract(f.value, '$.directory') = ${directory}))
+				OR (e.type = 'head.move_started' AND EXISTS (SELECT 1 FROM json_each(e.data, '$.files') f
+					WHERE f.value = ${directory})))`;
 		const [after] = yield* sql<{ id: string; title: string | null }>`
 			SELECT e.session_id AS id, s.title AS title FROM events e
 			LEFT JOIN sessions s ON s.id = e.session_id
-			WHERE e.sequence > ${sequence} AND e.session_id != ${sessionId}
-				AND ((e.type = 'run.changes_captured' AND EXISTS (SELECT 1 FROM json_each(e.data, '$.folders') f
-						WHERE json_extract(f.value, '$.directory') = ${directory}))
-					OR (e.type = 'head.move_started' AND EXISTS (SELECT 1 FROM json_each(e.data, '$.files') f
-						WHERE f.value = ${directory})))
+			WHERE e.sequence > ${sequence} AND ${touched}
 			ORDER BY e.sequence LIMIT 1`;
 		if (after)
 			return yield* new FilesRefused({
@@ -160,23 +162,29 @@ const check = (
 					running: false,
 				},
 			});
-		for (const run of yield* timeline.runsIn(directory)) {
-			if (run.sessionId === sessionId) continue;
+		// The sessions that ran in the folder: a run open now, or one ended at any time, whose
+		// background task may still act here after the run's capture left the timeline. A deleted
+		// session's events wait for retention, but it acts no more.
+		const ran = yield* sql<{ id: string }>`
+			SELECT DISTINCT e.session_id AS id FROM events e
+			JOIN sessions s ON s.id = e.session_id WHERE ${touched}`;
+		const others = new Set([
+			...(yield* timeline.runsIn(directory)).map((run) => run.sessionId),
+			...ran.map(({ id }) => id),
+		]);
+		others.delete(sessionId);
+		for (const other of others) {
 			// CONTRACT.md 2849-2851: every liveness reader asks the Run Ledger's anythingMayAct; the
-			// timeline only says which folders the run names.
-			const view = yield* loadLedgerView(run.sessionId);
+			// timeline and the events only say which sessions ran in the folder.
+			const view = yield* loadLedgerView(other);
 			if (!(view?.anythingMayAct ?? true)) continue;
 			const [row] = yield* sql<{ title: string }>`
-				SELECT title FROM sessions WHERE id = ${run.sessionId}`;
+				SELECT title FROM sessions WHERE id = ${other}`;
 			return yield* new FilesRefused({
 				sessionId,
 				reason: "other_session",
 				directory,
-				other: {
-					sessionId: run.sessionId,
-					title: row?.title ?? "",
-					running: true,
-				},
+				other: { sessionId: other, title: row?.title ?? "", running: true },
 			});
 		}
 	});

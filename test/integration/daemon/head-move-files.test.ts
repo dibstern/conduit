@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { MoveIntent } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
+import type { ClaudeTraceName } from "../../e2e/helpers/claude-trace-replayer.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 // Failure modes (audit.md, lane 82tn.53). Through the built daemon, a head move
@@ -31,7 +32,11 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 // folder blocks the move (9); two devices confirming one move apply it twice or
 // refuse one (10); a daemon killed after the move is journalled loses its files
 // or its undo (11); an eviction between preview and commit restores from
-// pruned history, or sends the resend anyway (12).
+// pruned history, or sends the resend anyway (12). 82tn.32.2.9: a session whose
+// run ended before the target but whose background task still runs in the
+// folder is missed (13), or named as not running (14). An undo that names no
+// files, as the Head Log's Undo (15) and the newest-entry undo (16) send, puts
+// the conversation back but leaves a file rewind's files rewound.
 const GIT_KEYS = [
 	"GIT_DIR",
 	"GIT_INDEX_FILE",
@@ -86,12 +91,18 @@ describe("Head moves with files through the built daemon", () => {
 			CONDUIT_TEST_RESTORE_PAUSE_AT?: string;
 			CONDUIT_TEST_HEAD_MOVE_DELAY_MS?: string;
 		} = {},
-		{ repository = true } = {},
+		{
+			repository = true,
+			turns = Array.from(
+				{ length: 8 },
+				(): ClaudeTraceName => "pong-thinking-text-turn",
+			),
+		}: { repository?: boolean; turns?: readonly ClaudeTraceName[] } = {},
 	) => {
 		for (const key of GIT_KEYS) vi.stubEnv(key, undefined);
 		harness = ProcessHarness.create({
 			claudeReplay: {
-				turns: Array.from({ length: 8 }, () => "pong-thinking-text-turn"),
+				turns,
 				delayMs: 0,
 				holdBeforeResult: true,
 			},
@@ -274,6 +285,39 @@ describe("Head moves with files through the built daemon", () => {
 		expect(evidence["journal"]).toEqual(['["<repo>"]', '["<repo>"]']);
 	});
 
+	it("puts the files back when an undo naming no files undoes a rewind with files, from the Head Log or the newest entry", async () => {
+		evidence["name"] = "undo-derives-files";
+		const { repo, browser, turn, move, visible } = await start();
+		const session = await browser.createSession("Undo with files");
+		await turn(session, "first", () =>
+			writeFileSync(join(repo, "first.txt"), "first\n"),
+		);
+		const second = await turn(session, "second", () =>
+			writeFileSync(join(repo, "tracked.txt"), "changed\n"),
+		);
+		const afterSecond = listing(repo);
+		const rewind = {
+			_tag: "rewind",
+			messageId: second,
+			withFiles: true,
+		} as const;
+
+		const { moveId } = await move(session, rewind);
+		expect(listing(repo)).not.toEqual(afterSecond);
+		// The Head Log's Undo sends only the entry's id.
+		await move(session, { _tag: "undo", moveId });
+		evidence["headLogUndo"] = listing(repo);
+		expect(listing(repo)).toEqual(afterSecond);
+		expect(await visible(session)).toContain(second);
+
+		await move(session, rewind);
+		expect(listing(repo)).not.toEqual(afterSecond);
+		await Effect.runPromise(browser.rpc.UndoRewind({ sessionId: session }));
+		evidence["newestUndo"] = listing(repo);
+		expect(listing(repo)).toEqual(afterSecond);
+		expect(await visible(session)).toContain(second);
+	});
+
 	it("refuses a rewind with files naming the other session in the folder, open or done, and the conversation-only rewind still goes", async () => {
 		evidence["name"] = "two-sessions";
 		const { repo, browser, query, turn, openTurn, refusal, move, visible } =
@@ -311,6 +355,56 @@ describe("Head moves with files through the built daemon", () => {
 			_tag: "FilesRefused",
 			reason: "other_session",
 			other: { sessionId: theirs, title: title(theirs), running: false },
+		});
+		const before = listing(repo);
+		await move(mine, { _tag: "rewind", messageId: first });
+		expect(await visible(mine)).not.toContain(first);
+		expect(listing(repo)).toEqual(before);
+	});
+
+	it("refuses a rewind with files naming a session whose run ended before the target while its background task still runs", async () => {
+		evidence["name"] = "background-task";
+		// Each session's runner plays the plan from its own first turn, so only theirs reaches turn 2.
+		const { fixture, repo, browser, query, turn, refusal, move, visible } =
+			await start(
+				{},
+				{ turns: ["pong-thinking-text-turn", "background-shell-turn"] },
+			);
+		const theirs = await browser.createSession("Theirs");
+		const mine = await browser.createSession("Mine");
+		await turn(theirs, "theirs first", () => {});
+		// Holds their shell's completion (trace line 85, after the first result), so the task stays live.
+		const hold = join(fixture.root, "claude-replay-hold");
+		writeFileSync(hold, JSON.stringify({ turn: 2, message: 85, id: 1 }));
+		await turn(theirs, "Run sleep 8 in the background", () =>
+			writeFileSync(join(repo, "theirs.txt"), "theirs\n"),
+		);
+		// test-waits-allow polling: the held replay line reports only through this file.
+		await vi.waitFor(() => expect(existsSync(`${hold}.reached`)).toBe(true), {
+			timeout: 10_000,
+		});
+		const first = await turn(mine, "mine first", () =>
+			writeFileSync(join(repo, "mine.txt"), "mine\n"),
+		);
+		const intent = {
+			_tag: "rewind",
+			messageId: first,
+			withFiles: true,
+		} as const;
+		const refused = await refusal(mine, intent);
+		evidence["refused"] = refused;
+		expect(refused).toMatchObject({
+			_tag: "FilesRefused",
+			reason: "other_session",
+			directory: repo,
+			other: {
+				sessionId: theirs,
+				title: query<{ title: string }>(
+					"SELECT title FROM sessions WHERE id = ?",
+					theirs,
+				)[0]?.title,
+				running: true,
+			},
 		});
 		const before = listing(repo);
 		await move(mine, { _tag: "rewind", messageId: first });
@@ -422,7 +516,7 @@ describe("Head moves with files through the built daemon", () => {
 			},
 		});
 		const before = listing(repo);
-		await move(mine, { _tag: "undo", moveId });
+		await move(mine, { _tag: "undo", moveId, withFiles: false });
 		expect(await visible(mine)).toContain(second);
 		expect(listing(repo)).toEqual(before);
 	});

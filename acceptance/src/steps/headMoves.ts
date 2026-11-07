@@ -190,6 +190,10 @@ export const headMovesHandlers: StepHandler[] = [
 					return {
 						moveId: `preview-${JSON.stringify(intent)}`,
 						files: state.pruned ? "pruned" : "available",
+						// The planner's cut: a rewind goes back before the first message of its turn.
+						...(intent._tag === "rewind"
+							? { before: intent.messageId.replace("hm-reply-", "hm-user-") }
+							: {}),
 						...(intent.withFiles
 							? {
 									restore: {
@@ -331,6 +335,18 @@ export const headMovesHandlers: StepHandler[] = [
 				.locator("#messages .msg-user")
 				.filter({ hasText: match[1] ?? "" })
 				// The message text: its header holds the branch switcher.
+				.getByText(match[1] ?? "", { exact: true })
+				.click();
+			await expect(rewindDialog(world.page)).toBeVisible();
+		},
+	},
+	{
+		name: "pick the reply to rewind to",
+		match: /^I pick the reply (.+) to rewind to$/,
+		run: async ({ world, match }) => {
+			await expect(headLog(world.page)).toBeHidden();
+			await world.page
+				.locator("#messages .msg-assistant")
 				.getByText(match[1] ?? "", { exact: true })
 				.click();
 			await expect(rewindDialog(world.page)).toBeVisible();
