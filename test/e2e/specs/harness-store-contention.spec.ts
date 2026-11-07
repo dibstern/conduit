@@ -51,6 +51,33 @@ import { expect, test } from "../helpers/process-harness-fixture.js";
 // delta count: 52 deltas in 87 frames, without steering or a second input.
 const fixture = "background-shell-ends-between-turns";
 const prompt = "Run the recorded streaming turn.";
+// The trace's background task finishes after its result and wakes the session
+// into a run of its own, so the idle row between the two can be coalesced away
+// under load. The input's own turn end, which the woken row still carries, is
+// the end both tests wait for.
+const inputEnded = async (
+	browser: ProcessBrowser,
+	sessionId: string,
+	inputId: string,
+	cursor: number,
+	timeoutMs: number,
+) => {
+	const done = await browser.waitFor(
+		(message) =>
+			message["type"] === "session_row" &&
+			message["id"] === sessionId &&
+			message["lastTurnEndInputId"] === inputId &&
+			(message["status"] !== "busy" || message["wakeRun"] !== undefined),
+		cursor,
+		timeoutMs,
+	);
+	expect(done).toMatchObject(
+		done["wakeRun"] === undefined
+			? { status: "idle" }
+			: { status: "busy", wakeRun: { task: "sleep 8" } },
+	);
+	return done;
+};
 // Each test starts its own daemon. Generous startup bounds keep a loaded
 // machine from failing startup or ending a turn with "Runner startup timed out".
 test.use({
@@ -98,17 +125,22 @@ test("measures writes across three projects during six streaming turns", async (
 	const latencies = await Promise.all(
 		turns.map(async ({ browser, sessionId }) => {
 			const cursor = browser.frames.length;
-			const completion = browser
-				.waitForTurnEnd(sessionId, cursor, 60_000)
-				.then((done) => ({ done, completedAt: performance.now() }));
+			const inputId = randomUUID();
+			const completion = inputEnded(
+				browser,
+				sessionId,
+				inputId,
+				cursor,
+				60_000,
+			).then(() => performance.now());
 			const started = performance.now();
 			// Use the send RPC directly so history reads in browser.send are not timed.
-			const [submitted, { done, completedAt }] = await Promise.all([
+			const [submitted, completedAt] = await Promise.all([
 				Effect.runPromise(
 					browser.rpc["input.submit"]({
 						sessionId,
 						originId: browser.originId,
-						inputId: randomUUID(),
+						inputId,
 						delivery: "queue",
 						text: prompt,
 					}).pipe(Effect.timeout(60_000)),
@@ -116,7 +148,6 @@ test("measures writes across three projects during six streaming turns", async (
 				completion,
 			]);
 			if (!submitted.ok) throw new Error(`Submit refused: ${submitted.reason}`);
-			expect(done["status"]).toBe("idle");
 			return completedAt - started;
 		}),
 	);
@@ -355,21 +386,21 @@ test.describe("write contention", () => {
 		};
 		const runTurn = async (browser: ProcessBrowser, sessionId: string) => {
 			const cursor = browser.frames.length;
+			const inputId = randomUUID();
 			const started = performance.now();
-			const [submitted, done] = await Promise.all([
+			const [submitted] = await Promise.all([
 				Effect.runPromise(
 					browser.rpc["input.submit"]({
 						sessionId,
 						originId: browser.originId,
-						inputId: randomUUID(),
+						inputId,
 						delivery: "queue",
 						text: submittedText,
 					}).pipe(Effect.timeout(90_000)),
 				),
-				browser.waitForTurnEnd(sessionId, cursor, 90_000),
+				inputEnded(browser, sessionId, inputId, cursor, 90_000),
 			]);
 			if (!submitted.ok) throw new Error(`Submit refused: ${submitted.reason}`);
-			expect(done["status"]).toBe("idle");
 			return performance.now() - started;
 		};
 
