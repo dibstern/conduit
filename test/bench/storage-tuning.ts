@@ -125,7 +125,6 @@ const profile = await runtime.runPromise(
 );
 const openMs = performance.now() - started;
 const afterDb = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
-afterDb.exec("PRAGMA mmap_size = 1073741824");
 const after = measure(afterDb);
 afterDb.close();
 await runtime.dispose();

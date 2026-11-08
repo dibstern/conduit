@@ -157,10 +157,10 @@ export function makePersistenceStoreLayer(
 			yield* sql`PRAGMA foreign_keys = ON`;
 			yield* sql`PRAGMA journal_mode = WAL`;
 			yield* sql`PRAGMA busy_timeout = 5000`;
-			// SQLite maps at most the file's size; this is an address-space ceiling.
 			// WAL's NORMAL sync, explicit rather than better-sqlite3's build default.
 			yield* sql`PRAGMA synchronous = NORMAL`;
-			yield* sql`PRAGMA mmap_size = 1073741824`;
+			// No mmap_size: on macOS a fresh map's first-touch faults stalled the
+			// boot's first deep read 12.7 s (0.3 s unmapped) to save ~18 ms warm.
 			// Every INSERT ... RETURNING buffers its rows in a temp b-tree. On the
 			// default file temp store that opens a temp file per statement, which
 			// made event appends ~5x slower than the insert itself.

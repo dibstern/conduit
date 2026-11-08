@@ -45,9 +45,6 @@ it.effect(
 			yield* Effect.scoped(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
-					expect(yield* sql`PRAGMA mmap_size`).toEqual([
-						{ mmap_size: 1073741824 },
-					]);
 					expect(yield* sql`PRAGMA analysis_limit`).toEqual([
 						{ analysis_limit: 400 },
 					]);
