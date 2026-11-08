@@ -68,13 +68,14 @@ const commands = {
 			"opencode-recording": "value",
 			"codex-turn": "value",
 			"cursor-trace": "value",
+			live: "value",
 			"no-seed-accounts": "flag",
 			phone: "flag",
 			headed: "flag",
 			video: "flag",
 		},
 		details:
-			"--claude-turns a,b selects Claude replay turns; --claude-delay-ms n waits n ms between replayed Claude messages, so in-progress states stay visible; --opencode-recording name, --codex-turn name and --cursor-trace name select recordings. --no-seed-accounts skips the seeded Cursor account. --phone uses 393x852 with mobile/touch; --headed shows Chromium. Otherwise VIEWPORT and HEADED are respected. --video (VIDEO=1) records every page of the run at the viewport size into runDir/videos. Recording costs CPU and produces larger evidence; keep video runs short and focused on the flow being proved. down finalizes the videos. Waits up to 120 seconds for READY.",
+			"--claude-turns a,b selects Claude replay turns; --claude-delay-ms n waits n ms between replayed Claude messages, so in-progress states stay visible; --opencode-recording name, --codex-turn name and --cursor-trace name select recordings. --live cursor runs Cursor against the real SDK and network with CURSOR_API_KEY from this shell, spending real usage; the server stays isolated. --no-seed-accounts skips the seeded Cursor account. --phone uses 393x852 with mobile/touch; --headed shows Chromium. Otherwise VIEWPORT and HEADED are respected. --video (VIDEO=1) records every page of the run at the viewport size into runDir/videos. Recording costs CPU and produces larger evidence; keep video runs short and focused on the flow being proved. down finalizes the videos. Waits up to 120 seconds for READY.",
 		example: "up --run demo --phone --claude-turns pong-thinking-text-turn",
 		output: "{baseUrl, runDir, controlSocket, cdpUrl, alreadyRunning?:true}",
 	},
@@ -812,7 +813,11 @@ async function up(context, options) {
 	mkdirSync(context.runDir, { recursive: true });
 	if (existsSync(context.instanceFile)) unlinkSync(context.instanceFile);
 	const env = { ...process.env };
+	const live = options.live ?? env.LIVE;
+	if (live && live !== "cursor")
+		throw usageError(`--live supports only cursor, got ${live}`, "up");
 	for (const [flag, name] of [
+		["live", "LIVE"],
 		["claude-turns", "CLAUDE_TURNS"],
 		["claude-delay-ms", "CLAUDE_DELAY_MS"],
 		["opencode-recording", "OPENCODE_RECORDING"],

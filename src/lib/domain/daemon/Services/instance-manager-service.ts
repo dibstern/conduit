@@ -28,6 +28,7 @@ import {
 	type AccountsState,
 	accountsStateFromInstances,
 	assignAccountColorSlots,
+	HIDDEN_CURSOR_ENV_KEYS,
 	materializeDefault,
 } from "../../../account-directory.js";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
@@ -633,15 +634,15 @@ function instanceInfo(instance: OpenCodeInstance): OpenCodeInstance {
 	const traits = getProviderDriver(driver);
 	return {
 		...instance,
-		...(instance.env?.["CURSOR_AUTH_TOKEN"] !== undefined
-			? {
+		...(instance.env === undefined
+			? {}
+			: {
 					env: Object.fromEntries(
 						Object.entries(instance.env).filter(
-							([key]) => key !== "CURSOR_AUTH_TOKEN",
+							([key]) => !HIDDEN_CURSOR_ENV_KEYS.has(key),
 						),
 					),
-				}
-			: {}),
+				}),
 		capabilities: traits?.sessionCapabilities ?? {
 			supportsMultiFolder: false,
 			supportsWorktree: false,

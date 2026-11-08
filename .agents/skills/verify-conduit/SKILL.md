@@ -30,7 +30,7 @@ $V up
 
 Chromium is headless at 1440x900 by default. Use `$V up --headed` or `$V up --phone` for a visible browser or the 393x852 mobile viewport with touch enabled. Use `$V up --video` to record every page at the viewport size into `videos/`. Recording costs CPU and produces larger evidence, so keep video runs short and focused on the flow being proved. These are startup choices; relaunch to change them. `info` reports `video:true|false`.
 
-Every harness replays committed recordings, so no real provider, key or network is used:
+By default every harness replays committed recordings, so no real provider, key or network is used (see [Live Cursor](#live-cursor) for the exception):
 
 - **Claude** (account `claude`) replays `test/fixtures/claude-sdk-traces/`. Models `haiku`, `opus`, `sonnet`. A trace's `<name>.subagent-reads.json`, if present, feeds the subagent's own transcript into its child session.
 - **OpenCode** (account `opencode`) is a mock server replaying `test/e2e/fixtures/recorded/<name>`. It brings one seeded session titled `New session - 2026-03-27T04:02:14.925Z`.
@@ -47,12 +47,17 @@ Pick recordings with `up` options or the existing env vars, for example `$V up -
 | `--opencode-recording x` | `OPENCODE_RECORDING` | `chat-simple` | OpenCode recording name |
 | `--codex-turn x` | `CODEX_TURN` | `two-turns` | trace each Codex session replays from the top; a trace with `thread/fork` is split into a parent slice and one slice per fork (see [fork](features/fork.md)) |
 | `--cursor-trace x` | `CURSOR_TRACE` | `basic` | trace whose last turn answers every Cursor prompt |
+| `--live cursor` | `LIVE=cursor` | off | real Cursor SDK instead of a recording; see [Live Cursor](#live-cursor) |
 | `--no-seed-accounts` | `SEED_ACCOUNTS=0` | seeded | skips adding the Cursor account for the add-account flow |
 | `--phone` | `VIEWPORT=phone` | desktop | mobile viewport and input capabilities |
 | `--headed` | `HEADED=1` | headless | visible Chromium |
 | `--video` | `VIDEO=1` | off | record every page; `down` finalizes and lists the videos |
 
 The launcher also writes `codex-wire.jsonl`, `codex-trace-report.jsonl` (consumed rows and mismatches) and `cursor-capture.jsonl` to the run dir. Codex wire capture appends across all processes and transports, including discovery and delayed usage polls. Each transport adds a header with its scenario and recordedAt. Concurrent transports can interleave rows. The isolated server and its children load `scripts/codex-capture.mjs` through `NODE_OPTIONS` to make only this capture file append. Read these files when a replay misbehaves.
+
+### Live Cursor
+
+Use `$V up --live cursor` only when replay cannot answer the question: a real login, a real model reply, or a mismatch between the SDK and the provider's servers. It needs `CURSOR_API_KEY` in the launching shell and stops with an error if the key is missing. Each send spends real Cursor usage. The server keeps its own port and throwaway root, the key goes only into that root's account `cursor-live` (named `Cursor live`), and your `:2633` server is not involved. The other providers still replay. Models come from your real Cursor catalog, so pick one that exists there, for example `$V send "Say hello" --harness cursor --provider cursor --model composer-2.5`.
 
 ## Doctor
 
@@ -160,7 +165,7 @@ Proof standards:
 - Drive the real UI path a user takes. `store`, `logs --level` and `eval` are for observing and debugging. They are not the user path and must not be used to reach an end state. Do not call RPCs or set store rows to reach that state.
 - Capture the action and the resulting state, plus a second view of the stored result: the store rows, or a reload, or a second browser context.
 - The replayed providers stand in for external model APIs and CLIs, which is the existing production boundary. Everything from the browser to SQLite is real code from `dist/`.
-- Replay leaves real logins, real model output, and real provider CLIs and binaries unverified.
+- Replay leaves real logins, real model output, and real provider CLIs and binaries unverified. `--live cursor` covers those for Cursor only.
 - The `CONDUIT_TEST_*`, `CONDUIT_CODEX_*` and `CONDUIT_CURSOR_*` env vars only pick fixtures. They are not a user path; do not cite them as proof.
 
 ## Cleanup

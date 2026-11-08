@@ -200,6 +200,14 @@ async function start() {
 			createdAtMs: 0,
 		},
 	} as CursorRow);
+	const liveCursorKey =
+		process.env["LIVE"] === "cursor"
+			? process.env["CURSOR_API_KEY"]?.trim()
+			: undefined;
+	if (process.env["LIVE"] === "cursor" && !liveCursorKey)
+		throw new Error(
+			"--live cursor needs CURSOR_API_KEY in the launching shell",
+		);
 	const cursorTrace = join(harness.root, "cursor-replay.jsonl");
 	writeFileSync(
 		cursorTrace,
@@ -286,7 +294,7 @@ async function start() {
 			// The production capture opens with "w". This isolated preload changes only
 			// that capture path to append, including discovery and usage transports.
 			NODE_OPTIONS: `--import=${new URL("./codex-capture.mjs", import.meta.url).href}`,
-			CONDUIT_CURSOR_SDK_TRACE: cursorTrace,
+			...(liveCursorKey ? {} : { CONDUIT_CURSOR_SDK_TRACE: cursorTrace }),
 			CONDUIT_CURSOR_SDK_CAPTURE: join(runDir, "cursor-capture.jsonl"),
 			CONDUIT_TEST_CODEX_TRACE_MAP: codexTraceMap,
 			// The turn runner's env lacks NODE_ENV=test, so it skips the map and reads this.
@@ -304,8 +312,10 @@ async function start() {
 	if (seedAccounts) {
 		const added = await harness.requestRpc({
 			_tag: "AddInstance",
-			name: "Cursor replay",
+			name: liveCursorKey ? "Cursor live" : "Cursor replay",
 			driver: "cursor",
+			// A launch-environment key reaches only a legacy default account.
+			...(liveCursorKey ? { env: { CURSOR_API_KEY: liveCursorKey } } : {}),
 		});
 		if (!added.addedInstanceId) throw new Error("no Cursor account allocated");
 	}

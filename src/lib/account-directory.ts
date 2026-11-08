@@ -25,6 +25,12 @@ import type { InstanceStatus } from "./shared-types.js";
 import { assertNever } from "./utils.js";
 
 export { MANAGED_OPENCODE_ACCOUNT_ID };
+/** Saved secrets on a Cursor account; the browser must never receive them. */
+export const HIDDEN_CURSOR_ENV_KEYS: ReadonlySet<string> = new Set([
+	"CURSOR_API_KEY",
+	"CURSOR_AUTH_TOKEN",
+]);
+
 export const NO_OPENCODE_HEALTH: ReadonlyMap<string, InstanceStatus> =
 	new Map();
 export type { AccountChange } from "./contracts/account.js";
@@ -428,12 +434,15 @@ export function apply(
 	const env =
 		updates.env === undefined
 			? current.env
-			: current.driver === "cursor" &&
-					!Object.hasOwn(updates.env, "CURSOR_AUTH_TOKEN") &&
-					current.env?.["CURSOR_AUTH_TOKEN"] !== undefined
+			: current.driver === "cursor"
 				? {
+						// The browser never sees these, so its edits can't carry them.
+						...Object.fromEntries(
+							Object.entries(current.env ?? {}).filter(([key]) =>
+								HIDDEN_CURSOR_ENV_KEYS.has(key),
+							),
+						),
 						...updates.env,
-						CURSOR_AUTH_TOKEN: current.env["CURSOR_AUTH_TOKEN"],
 					}
 				: updates.env;
 	if (driver === "cursor" && env?.["CURSOR_BACKEND_URL"] !== undefined)

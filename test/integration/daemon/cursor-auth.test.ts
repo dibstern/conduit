@@ -482,6 +482,30 @@ RunnerSocket.prototype.write = function(message) {
 		).rejects.toThrow(/CURSOR_BACKEND_URL.*daemon/i);
 	}, 240_000);
 
+	it("hides a saved API key from the browser and keeps it across an edit", async () => {
+		const fixture = await start("hidden-account-key");
+		const apiKey = "hidden-account-key-value";
+		const { addedInstanceId: instanceId } = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor hidden key",
+			driver: "cursor",
+			env: { CURSOR_API_KEY: apiKey },
+		});
+		if (!instanceId) throw new Error("Missing Cursor account");
+		await fixture.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId,
+			env: { VISIBLE: "yes" },
+		});
+		const { instances } = await fixture.requestRpc({ _tag: "GetInstances" });
+		expect(instances.find(({ id }) => id === instanceId)?.env).toEqual({
+			VISIBLE: "yes",
+		});
+		expect(
+			readFileSync(join(fixture.configDir, "daemon.json"), "utf8"),
+		).toContain(apiKey);
+	});
+
 	it("C1: retires a detached runner when the daemon changes backend", async () => {
 		const fixture = await start("runner-backend-upgrade", {
 			environmentKey: true,
