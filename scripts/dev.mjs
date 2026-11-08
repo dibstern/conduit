@@ -86,10 +86,14 @@ async function stopChild() {
 	await closed;
 }
 
-async function waitForServer(previousSocket) {
+/**
+ * A spawned server is awaited until it exits, since startup recovery on a
+ * large store can run well past 10s; the service gets the fixed window.
+ */
+async function waitForServer(previousSocket, server) {
 	const deadline = Date.now() + 10_000;
 	let disconnected = previousSocket === undefined;
-	while (!stopping && Date.now() < deadline) {
+	while (!stopping && (server ? child === server : Date.now() < deadline)) {
 		const running = await rpc.isDaemonRunning(rpc.DEFAULT_SOCKET_PATH);
 		if (!running) disconnected = true;
 		const inode = statSync(rpc.DEFAULT_SOCKET_PATH, {
@@ -225,8 +229,8 @@ async function restart() {
 			if (!child) runRestart();
 		});
 	});
-	if (!(await waitForServer()) && !stopping) {
-		throw new Error("server did not become ready within 10s");
+	if (!(await waitForServer(undefined, server)) && !stopping) {
+		throw new Error("server exited before it became ready");
 	}
 }
 
