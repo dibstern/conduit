@@ -129,7 +129,12 @@ const config = defineConfig({
 			"/api": relayProxy,
 			// Regex key: Vite treats keys starting with ^ as RegExp.
 			"^/p/[^/]+/api/": relayProxy,
-			"/auth": relayProxy,
+			// Only the PIN POST goes to the server; its GET page is the built SPA,
+			// whose hashed /assets the dev server cannot serve.
+			"/auth": {
+				...relayProxy,
+				bypass: (req) => (req.method === "GET" ? "/index.html" : undefined),
+			},
 			"/health": relayProxy,
 		},
 	},
