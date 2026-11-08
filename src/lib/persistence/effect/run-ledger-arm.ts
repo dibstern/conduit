@@ -240,6 +240,15 @@ interface Ledger {
 	readonly row: LedgerRow | undefined;
 }
 
+/**
+ * Each session's last fold, so a load replays only the entries stored since. Every evolve clones
+ * the whole book, so a full replay is quadratic: ~1000 entries cost seconds per load.
+ */
+const folds = new WeakMap<
+	SqlClient.SqlClient,
+	Map<string, Omit<Ledger, "row">>
+>();
+
 /** Rebuild one session's ledger from its entries (3.12, LI4); undefined with no session row. */
 export const loadLedger = (
 	sessionId: string,
@@ -266,25 +275,46 @@ export const loadLedger = (
 			: session.model_provider
 				? harnessForModelProvider(session.model_provider)
 				: "claude";
-		const entries = yield* sql<{
-			entry_seq: number;
-			event_sequence: number;
-			stamp: string;
-			entry_json: string;
-		}>`SELECT entry_seq, event_sequence, stamp, entry_json FROM run_ledger_entries
-			WHERE session_id = ${sessionId} ORDER BY entry_seq`;
+		const entriesFrom = (entrySeq: number) =>
+			sql<{
+				entry_seq: number;
+				event_sequence: number;
+				stamp: string;
+				entry_json: string;
+			}>`SELECT entry_seq, event_sequence, stamp, entry_json FROM run_ledger_entries
+				WHERE session_id = ${sessionId} AND entry_seq >= ${entrySeq} ORDER BY entry_seq`;
+		let sessions = folds.get(sql);
+		if (!sessions) folds.set(sql, (sessions = new Map()));
+		const cached = sessions.get(sessionId);
+		const tail =
+			cached?.provider === provider ? yield* entriesFrom(cached.entrySeq) : [];
+		// The fold extends only while its last entry is still stored: a rolled-back write drops it.
+		const base =
+			cached?.provider === provider &&
+			(cached.stamp === null ||
+				(tail[0]?.entry_seq === cached.entrySeq &&
+					tail[0].stamp === cached.stamp))
+				? cached
+				: undefined;
+		const entries = base
+			? tail.filter((entry) => entry.entry_seq > base.entrySeq)
+			: yield* entriesFrom(0);
 		const last = entries.at(-1);
-		return {
+		const fold = {
 			provider,
 			// Entries are the decider's own plain-JSON facts; the boundary casts them back.
 			state: entries.reduce(
 				(state, entry) =>
 					evolve(state, JSON.parse(entry.entry_json) as LedgerEvent),
-				initialSessionLedgerState(sessionId, provider),
+				base?.state ?? initialSessionLedgerState(sessionId, provider),
 			),
-			entrySeq: last?.entry_seq ?? 0,
-			stamp: last?.stamp ?? null,
-			eventSequence: last?.event_sequence ?? 0,
+			entrySeq: last?.entry_seq ?? base?.entrySeq ?? 0,
+			stamp: last?.stamp ?? base?.stamp ?? null,
+			eventSequence: last?.event_sequence ?? base?.eventSequence ?? 0,
+		};
+		sessions.set(sessionId, fold);
+		return {
+			...fold,
 			row: row ? { state: row.state, alarmAt: row.alarm_at } : undefined,
 		};
 	});
