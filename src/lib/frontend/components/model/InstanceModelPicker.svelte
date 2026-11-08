@@ -201,9 +201,11 @@
 		: selectedContext !== null && !selectedContext.isDefault)));
 	const contextPercent = $derived(currentChat().contextPercent);
 	const contextWarning = $derived(isContextWarning(contextPercent, composerPreferences.contextWarning));
+	// A primitive derived: currentChat() is rebuilt on every streamed event, so
+	// reading it in the effect would refetch per event, not per turn.
+	const endedGeneration = $derived(currentChat().endedGeneration);
 	$effect(() => {
 		// Refetch once each turn ends.
-		const endedGeneration = currentChat().endedGeneration;
 		const projectSlug = appSelection.scope?.project;
 		const sessionId = sessionState.currentId;
 		if (endedGeneration < 0 || !projectSlug || !sessionId) return;

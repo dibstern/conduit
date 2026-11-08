@@ -66,6 +66,18 @@ const placement = new SvelteMap<
 	string,
 	{ project: string } | "missing" | "deleted"
 >();
+/** Only the live row's project: the row changes on every status tick, and
+ *  reading it in `shown` would rebuild `scope` and rerun all its readers. */
+const liveProject = $derived.by(() => {
+	const route = getCurrentRoute();
+	if (route.page !== "chat" || route.draft || !route.sessionId)
+		return undefined;
+	const sessionId = route.sessionId;
+	return (
+		sessionState.liveSessions.get(sessionId) ??
+		sessionState.familySessions.find((row) => row.id === sessionId)
+	)?.projectSlug;
+});
 const shown: Shown = $derived.by(() => {
 	const route = getCurrentRoute();
 	if (route.page !== "chat") return { kind: "none" };
@@ -80,10 +92,7 @@ const shown: Shown = $derived.by(() => {
 	const placed = placement.get(sessionId);
 	if (placed === "deleted" || placed === "missing")
 		return { kind: placed, sessionId };
-	const live =
-		sessionState.liveSessions.get(sessionId) ??
-		sessionState.familySessions.find((row) => row.id === sessionId);
-	const project = live?.projectSlug ?? placed?.project;
+	const project = liveProject ?? placed?.project;
 	if (project) return { kind: "placed", sessionId, project };
 	return {
 		kind: savedDraw.sessionId === sessionId ? "drawn" : "placing",
