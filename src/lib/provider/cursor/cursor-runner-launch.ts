@@ -1,14 +1,15 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import type {
 	RunnerLaunch,
 	RunnerLaunchCallbacks,
 } from "../runner/runner-host.js";
 import {
-	CursorBackendUrl,
 	type CursorCredentialEnvelope,
+	cursorBackendUrl,
+	DEFAULT_CURSOR_BACKEND_URL,
 } from "./cursor-credential.js";
 import { makeCursorSessionRunner } from "./cursor-runner-payload.js";
 import { cursorRunnerWire } from "./cursor-runner-wire.js";
@@ -22,8 +23,8 @@ export const makeCursorRunnerLaunch = (
 	return Effect.succeed({
 		wire: cursorRunnerWire,
 		capabilities: {
-			cursorBackendUrl: Schema.decodeUnknownSync(CursorBackendUrl)(
-				process.env["CURSOR_BACKEND_URL"],
+			cursorBackendUrl: cursorBackendUrl(
+				process.env["CURSOR_BACKEND_URL"] ?? DEFAULT_CURSOR_BACKEND_URL,
 			),
 		},
 		shouldExitAfterCommand: (_command, result) =>

@@ -9,6 +9,9 @@ export const CursorBackendUrl = Schema.String.pipe(
 export type CursorBackendUrl = typeof CursorBackendUrl.Type;
 export const cursorBackendUrl = (url: string): CursorBackendUrl =>
 	CursorBackendUrl.make(url.replace(/\/+$/, ""));
+export const DEFAULT_CURSOR_BACKEND_URL = cursorBackendUrl(
+	"https://api2.cursor.sh",
+);
 
 export const CursorCredentialFingerprint = Schema.String.pipe(
 	Schema.brand("CursorCredentialFingerprint"),

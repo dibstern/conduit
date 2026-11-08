@@ -67,7 +67,13 @@ export function makeCursorProviderRuntime(
 							),
 						),
 					coldUpgrade: true,
-					spawnEnvironment: { CURSOR_BACKEND_URL: resources.backendUrl },
+					// Only forward an override: the SDK also reads this variable for its
+					// public API client, so setting the default sends GET /v1/models to
+					// api2 and every send fails with a 404.
+					spawnEnvironment:
+						process.env["CURSOR_BACKEND_URL"] === undefined
+							? {}
+							: { CURSOR_BACKEND_URL: resources.backendUrl },
 					connect: (options) =>
 						connectRunner({
 							...options,

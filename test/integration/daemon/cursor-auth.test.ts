@@ -2,6 +2,7 @@
 // deadline displayed as key expiry, environment precedence, stale discovery,
 // stale credentials in existing runners, recorded credentials authenticating
 // an unconfigured login slot, and secrets escaping into RPC/captures.
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -72,7 +73,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			environmentKey?: boolean;
 			initialCredential?: boolean;
 			traceAuthOnly?: boolean;
-			backendUrl?: string;
+			backendUrl?: string | null;
 			storedBackendUrl?: string;
 			recordCommands?: boolean;
 			compatibilityAccount?: boolean;
@@ -157,7 +158,12 @@ RunnerSocket.prototype.write = function(message) {
 			startupTimeoutMs: TIMEOUT,
 			runnerStartupTimeoutMs: TIMEOUT,
 			serviceEnvironment: {
-				CURSOR_BACKEND_URL: options.backendUrl ?? "https://api2.cursor.sh",
+				...(options.backendUrl === null
+					? {}
+					: {
+							CURSOR_BACKEND_URL:
+								options.backendUrl ?? "https://api2.cursor.sh",
+						}),
 				...(options.recordCommands
 					? { NODE_OPTIONS: `--import=${pathToFileURL(commandRecorder).href}` }
 					: {}),
@@ -384,6 +390,38 @@ RunnerSocket.prototype.write = function(message) {
 		});
 		invariants = { otherBackendNotLoggedIn: true };
 	}, 240_000);
+
+	it("leaves CURSOR_BACKEND_URL unset on a runner when the daemon has no override", async () => {
+		// The SDK also uses this variable for its public API client, so setting it to
+		// the default backend sends GET /v1/models to api2 and every send fails with a 404.
+		const fixture = await start("default-backend", {
+			initialCredential: true,
+			backendUrl: null,
+		});
+		const { addedInstanceId: accountId } = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor default backend",
+			driver: "cursor",
+		});
+		if (!accountId) throw new Error("Missing Cursor account");
+		const browser = await fixture.connect();
+		const id = await browser.createSession(
+			"Default backend",
+			accountId,
+			"cursor",
+			{ modelId: "composer-2.5", contextWindow: "" },
+		);
+		expect((await browser.send(id, "Hello", TIMEOUT)).chunks.join("")).toBe(
+			BASIC_TEXT,
+		);
+		const [runnerPid] = fixture.remainingRunnerPids();
+		expect(
+			execFileSync("ps", ["eww", "-o", "command=", "-p", String(runnerPid)], {
+				encoding: "utf8",
+			}),
+		).not.toContain("CURSOR_BACKEND_URL=");
+		invariants = { defaultBackendLeftToSdk: true };
+	});
 
 	it("C1: reports an expired stored login consistently in auth status and turns", async () => {
 		const fixture = await start("expired-credential", {

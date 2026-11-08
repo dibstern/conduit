@@ -13,6 +13,7 @@ import {
 	type CursorCredentialLookup,
 	type CursorCredentialOwner,
 	cursorBackendUrl,
+	DEFAULT_CURSOR_BACKEND_URL,
 	resolveCursorCredential,
 } from "./cursor-credential.js";
 import {
@@ -52,7 +53,7 @@ export const CursorAccountResourcesLive = (
 			const bus = yield* DaemonEventBusTag;
 			const legacyDefault = yield* directory.defaultFor("cursor");
 			const backendUrl = cursorBackendUrl(
-				process.env["CURSOR_BACKEND_URL"] ?? "https://api2.cursor.sh",
+				process.env["CURSOR_BACKEND_URL"] ?? DEFAULT_CURSOR_BACKEND_URL,
 			);
 			const loginSlot = { _tag: "LoginSlot" } as const;
 			const compatibilityStorePath = yield* Effect.tryPromise({
