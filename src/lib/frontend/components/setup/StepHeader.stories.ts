@@ -10,7 +10,7 @@ const meta = {
 		totalSteps: 4,
 		currentIdx: 1,
 		title: "Install certificate",
-		description: "Encrypt traffic between this device and the Conduit relay.",
+		description: "Encrypt traffic between this device and Conduit.",
 	},
 } satisfies Meta<typeof StepHeader>;
 

@@ -508,7 +508,7 @@ describe("shutdown", () => {
 
 		const text = io.text();
 		expect(text).toContain("Shut down?");
-		expect(text).toContain("Stop the relay and exit");
+		expect(text).toContain("Stop Conduit and exit");
 
 		// Confirm shutdown (press 'y' then Enter)
 		await sendKeys(io.stdin, ["y", "\r"]);

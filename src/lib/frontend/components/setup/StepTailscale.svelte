@@ -112,7 +112,7 @@
 			3
 		</div>
 		<div class="text-sm leading-relaxed">
-			Once both devices are on Tailscale, open the relay using the
+			Once both devices are on Tailscale, open Conduit using the
 			server's Tailscale IP.
 			{#if tailscaleUrlHint}
 				<div class="text-xs text-text-muted mt-1">

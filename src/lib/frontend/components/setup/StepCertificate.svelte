@@ -32,7 +32,7 @@
 		{totalSteps}
 		{currentIdx}
 		title="Install certificate"
-		description="Encrypt all traffic between this device and the relay. The certificate is generated locally and does not grant any additional access."
+		description="Encrypt all traffic between this device and Conduit. The certificate is generated locally and does not grant any additional access."
 	/>
 
 	<!-- Instruction 1: Download -->

@@ -258,7 +258,7 @@ export async function runSetup(opts: SetupOptions): Promise<SetupResult> {
 	const keepAwake = await new Promise<boolean>((resolve) => {
 		promptToggle(
 			"Keep awake?",
-			"Prevent the system from sleeping while the relay is running",
+			"Prevent the system from sleeping while Conduit is running",
 			false,
 			resolve,
 			promptOpts,

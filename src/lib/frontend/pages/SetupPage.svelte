@@ -69,8 +69,8 @@
 	let currentDisplayIdx = $derived(currentStepIdx + stepOffset);
 
 	let tailscaleUrlHint = $derived.by(() => {
-		if (httpsUrl.includes("100.")) return `Your relay: ${httpsUrl}`;
-		if (httpUrl.includes("100.")) return `Your relay: ${httpUrl}`;
+		if (httpsUrl.includes("100.")) return `Conduit URL: ${httpsUrl}`;
+		if (httpUrl.includes("100.")) return `Conduit URL: ${httpUrl}`;
 		return "";
 	});
 
@@ -130,7 +130,7 @@
 		} else {
 			tsStatus = "warn";
 			tsMessage =
-				"You are not on a Tailscale network. Install Tailscale and access the relay via your 100.x.x.x IP.";
+				"You are not on a Tailscale network. Install Tailscale and access Conduit via your 100.x.x.x IP.";
 		}
 
 		// Certificate status

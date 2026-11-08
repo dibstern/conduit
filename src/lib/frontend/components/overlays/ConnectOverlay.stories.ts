@@ -62,7 +62,7 @@ export const RelayError: Story = {
 };
 
 /**
- * Relay registering — shows "Starting relay..." status text.
+ * Relay registering — shows "Starting project..." status text.
  */
 export const RelayRegistering: Story = {
 	beforeEach: () => {

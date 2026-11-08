@@ -225,7 +225,7 @@ export async function showMainMenu(opts: MenuOptions): Promise<void> {
 						const shutdownPromise = new Promise<void>((shutdownResolve) => {
 							promptToggle(
 								"Shut down?",
-								"Stop the relay and exit",
+								"Stop Conduit and exit",
 								false,
 								async (confirmed) => {
 									if (confirmed) {

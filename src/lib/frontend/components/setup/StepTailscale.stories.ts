@@ -38,7 +38,7 @@ export const AndroidDownload: Story = {
 
 export const Connected: Story = {
 	args: {
-		tailscaleUrlHint: "Your relay: https://100.64.0.1:7080",
+		tailscaleUrlHint: "Conduit URL: https://100.64.0.1:7080",
 		tsStatus: "ok",
 		tsMessage: "Connected via Tailscale (100.64.0.1)",
 	},
@@ -48,7 +48,7 @@ export const NotConnected: Story = {
 	args: {
 		tsStatus: "warn",
 		tsMessage:
-			"You are not on a Tailscale network. Install Tailscale and access the relay via your 100.x.x.x IP.",
+			"You are not on a Tailscale network. Install Tailscale and access Conduit via your 100.x.x.x IP.",
 	},
 };
 
