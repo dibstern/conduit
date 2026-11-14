@@ -132,13 +132,16 @@ export const FolderTimelineEvictionLive = Layer.effect(
 			});
 
 		// Sessions with a capture newer than their last eviction: what holds bytes.
+		// Starting from the rare capture events keeps this off a per-session walk
+		// of the events index, which costs hundreds of ms on a cold boot.
 		const candidates = sql<{
 			id: string;
 			project_id: string;
 			title: string | null;
 			settled_at: number | null;
 		}>`SELECT s.id, s.project_id, s.title, s.settled_at FROM sessions s
-			WHERE EXISTS (SELECT 1 FROM events c
+			WHERE s.id IN (SELECT session_id FROM events WHERE type = 'run.changes_captured')
+				AND EXISTS (SELECT 1 FROM events c
 				WHERE c.session_id = s.id AND c.type = 'run.changes_captured'
 					AND c.sequence > COALESCE((SELECT MAX(e.sequence) FROM events e
 						WHERE e.session_id = s.id AND e.type = 'folder_timeline.evicted'), 0))`.pipe(
@@ -224,7 +227,8 @@ export const FolderTimelineEvictionLive = Layer.effect(
 		// after the eviction made a new store, which stays.
 		const unfinished = yield* sql<{ id: string }>`
 			SELECT s.id FROM sessions s
-			WHERE (SELECT MAX(e.sequence) FROM events e
+			WHERE s.id IN (SELECT session_id FROM events WHERE type = 'folder_timeline.evicted')
+				AND (SELECT MAX(e.sequence) FROM events e
 				WHERE e.session_id = s.id AND e.type = 'folder_timeline.evicted')
 				> COALESCE((SELECT MAX(c.sequence) FROM events c
 					WHERE c.session_id = s.id AND c.type = 'run.changes_captured'), 0)`.pipe(

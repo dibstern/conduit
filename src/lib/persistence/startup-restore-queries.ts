@@ -24,8 +24,10 @@ export const pendingClaudeQuestionToolsQuery = `
 		AND mp.status IN ('started', 'running', 'pending')
 		-- A later user message means the conversation moved on (e.g. after a
 		-- crash), so the question is abandoned rather than still pending.
+		-- This index carries created_at, so earlier messages are skipped
+		-- without reading their rows: a cold boot paid ~250ms for that.
 		AND NOT EXISTS (
-			SELECT 1 FROM messages later
+			SELECT 1 FROM messages later INDEXED BY idx_messages_session_order
 			WHERE later.session_id = m.session_id
 				AND later.role = 'user'
 				AND later.created_at > m.created_at
