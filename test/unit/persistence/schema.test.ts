@@ -61,6 +61,7 @@ describe("Schema Migration", () => {
 					[95, "sessions_diff_base"],
 					[96, "pending_rewind_to_head_move"],
 					[97, "provider_run_legacy_claim"],
+					[98, "messages_user_created"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -142,6 +143,7 @@ describe("Schema Migration", () => {
 					[95, "sessions_diff_base"],
 					[96, "pending_rewind_to_head_move"],
 					[97, "provider_run_legacy_claim"],
+					[98, "messages_user_created"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -410,6 +412,11 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{ name: "idx_messages_turn", table: "messages", unique: false },
+				{
+					name: "idx_messages_user_created",
+					table: "messages",
+					unique: false,
+				},
 				{ name: "idx_messages_version", table: "messages", unique: false },
 				{
 					name: "idx_pending_approvals_pending",

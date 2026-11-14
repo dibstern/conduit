@@ -1990,6 +1990,11 @@ export const effectMigrationEntries = {
 				AND type = 'run.dispatched' AND json_extract(data, '$.runId') = provider_runs.id)
 		`);
 	}),
+	// Auto-settle reads each session's latest user message at boot and every
+	// minute. Without this it reads every message row: ~700ms on a cold boot.
+	"0098_messages_user_created": executeSqlStatements(
+		"CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages (session_id, created_at) WHERE role = 'user'",
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
