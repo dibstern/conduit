@@ -8,6 +8,7 @@ import {
 } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import { Deferred, Effect, Layer, Option, Queue, Ref } from "effect";
 import { RpcSerialization, RpcServer } from "effect/rpc";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -19,6 +20,7 @@ import {
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	DaemonRpcSocketTag,
+	failWritesAfterClose,
 	makeDaemonRpcSocketLayer,
 	withRpcShutdownResponse,
 } from "../../../src/lib/daemon/daemon-rpc-server.js";
@@ -193,6 +195,42 @@ describe("daemon Unix RPC transport", () => {
 			sendRpcRequest(path, { _tag: "Shutdown" }, { requestTimeoutMs: 50 }),
 		).rejects.toThrow("RPC Shutdown timed out");
 		expect(requests, received).toBe(1);
+	});
+
+	// A reply written after the client's socket closed waited for a 'drain' that
+	// Node never emits on a closed socket. The reply runs uninterruptibly, so the
+	// RPC server and daemon shutdown hung on it for good.
+	it("fails a reply written after the client's socket closed instead of hanging", async () => {
+		const path = join(directory, "closed.sock");
+		server = createServer();
+		await new Promise<void>((resolve) => server?.listen(path, resolve));
+		const accepted = new Promise<Socket>((resolve) =>
+			server?.once("connection", resolve),
+		);
+		const client = createConnection(path);
+		sockets.add(client);
+		const conn = await accepted;
+		sockets.add(conn);
+		const closed = new Promise((resolve) => conn.once("close", resolve));
+		const error = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const socket = failWritesAfterClose(
+						yield* NodeSocket.fromDuplex(Effect.succeed(conn)),
+						conn,
+					);
+					// The RPC server's read loop holds the reader open while it replies.
+					yield* socket.reader;
+					const writer = yield* socket.writer;
+					client.destroy();
+					yield* Effect.promise(() => closed);
+					return yield* Effect.flip(
+						writer.write("late reply").pipe(Effect.timeout("2 seconds")),
+					);
+				}),
+			),
+		);
+		expect(error).toMatchObject({ reason: { _tag: "SocketWriteError" } });
 	});
 
 	it("serves the shared RPC group, preserves typed errors, and removes its 0600 socket", async () => {

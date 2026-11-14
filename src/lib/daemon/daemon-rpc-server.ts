@@ -5,7 +5,7 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { Context, Effect, Layer, Option } from "effect";
 import { RpcSerialization, RpcServer } from "effect/rpc";
-import { SocketServer } from "effect/socket";
+import { Socket, SocketServer } from "effect/socket";
 import { WsRpcGroup } from "../contracts/ws-rpc.js";
 import { withReadRequestContext } from "../domain/daemon/Services/read-request.js";
 import { SERVER_BUILD_ID } from "../server/build-update.js";
@@ -58,6 +58,36 @@ export const withRpcShutdownResponse = (
 				),
 			),
 	};
+};
+
+/**
+ * A write to a destroyed net.Socket returns false and never emits 'drain',
+ * 'error' or 'close' again, so NodeSocket's writer waits on it for good.
+ * RpcServer writes replies uninterruptibly, so one reply to a client that had
+ * already gone hung daemon shutdown.
+ */
+export const failWritesAfterClose = (
+	socket: Socket.Socket,
+	conn: NetSocket,
+): Socket.Socket => {
+	const open = Effect.suspend(() =>
+		conn.destroyed
+			? Effect.fail(
+					new Socket.SocketError({
+						reason: new Socket.SocketWriteError({
+							cause: new Error("socket closed"),
+						}),
+					}),
+				)
+			: Effect.void,
+	);
+	return Socket.make({
+		reader: socket.reader,
+		writer: Effect.map(socket.writer, (writer) => ({
+			write: (chunk) => Effect.andThen(open, writer.write(chunk)),
+			writeAll: (chunks) => Effect.andThen(open, writer.writeAll(chunks)),
+		})),
+	});
 };
 
 export interface DaemonRpcSocket {
@@ -169,7 +199,11 @@ export const makeDaemonRpcSocketLayer = <R>(
 										}),
 									);
 								}
-								return yield* handle(socket);
+								return yield* handle(
+									Option.isSome(client)
+										? failWritesAfterClose(socket, client.value)
+										: socket,
+								);
 							}),
 						),
 					),
