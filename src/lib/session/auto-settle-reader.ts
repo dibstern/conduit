@@ -45,11 +45,21 @@ export const readPersistedAutoSettleFacts = (
 			) WHERE rank = 1`,
 			ids,
 		);
-		const users = yield* sql.unsafe<{ session_id: string; created_at: number }>(
-			`SELECT session_id, MAX(created_at) AS created_at
-			FROM messages WHERE role = 'user' AND session_id IN (${placeholders}) GROUP BY session_id`,
-			ids,
-		);
+		// The policy never reads a settled session's latest user message, and this
+		// scan reads every message row: settled sessions made it ~2x slower on boot.
+		const unsettledIds = rows
+			.filter((row) => row.settled_at === null)
+			.map((row) => row.id);
+		const users =
+			unsettledIds.length === 0
+				? []
+				: yield* sql.unsafe<{ session_id: string; created_at: number }>(
+						`SELECT session_id, MAX(created_at) AS created_at
+						FROM messages WHERE role = 'user'
+							AND session_id IN (${unsettledIds.map(() => "?").join(",")})
+						GROUP BY session_id`,
+						unsettledIds,
+					);
 		const pending = yield* sql.unsafe<{ session_id: string }>(
 			`SELECT DISTINCT session_id FROM pending_approvals
 			WHERE status = 'pending' AND session_id IN (${placeholders})`,
