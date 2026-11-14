@@ -527,6 +527,63 @@ describe("ClaudeCapabilitiesService", () => {
 	);
 
 	it.effect(
+		"serves a persisted value after a restart from another terminal",
+		() =>
+			Effect.gen(function* () {
+				const cacheDir = yield* tempDir();
+				const probe = vi.fn().mockResolvedValue(capabilities("old"));
+				__setProbeOverrideForTesting(probe);
+				const call: ProviderCall = {
+					projectId: "project-one",
+					sessionId: "session-one",
+					account: {
+						driver: "claude",
+						id: AccountIdSchema.make("account-one"),
+						name: "Account one",
+						folder: configuredClaudeConfigDir("/tmp/claude-account"),
+						usageEligible: false,
+					},
+					workspaceRoot: "/tmp/workspace",
+					extraFolders: [],
+					shellEnv: Object.freeze({ PATH: "/bin", STARSHIP_SESSION_KEY: "a" }),
+				};
+				const first = yield* makeClaudeCapabilitiesService({
+					launchConfig,
+					cacheDir,
+				});
+				yield* first.get(call.workspaceRoot, { call });
+				probe.mockClear().mockResolvedValue(capabilities("new"));
+				const restarted = yield* makeClaudeCapabilitiesService({
+					launchConfig,
+					cacheDir,
+				});
+				// Each shell sets its own STARSHIP_SESSION_KEY, so the daemon inherits a new one.
+				const served = yield* restarted.get(call.workspaceRoot, {
+					call: {
+						...call,
+						shellEnv: Object.freeze({
+							PATH: "/bin",
+							STARSHIP_SESSION_KEY: "b",
+						}),
+					},
+				});
+				expect(served).toEqual(capabilities("old"));
+				// The refresh rewrites that file rather than adding one per terminal.
+				yield* waitUntil(
+					Effect.tryPromise(async () => {
+						const files = await readdir(cacheDir);
+						return (
+							files.length === 1 &&
+							(await readFile(join(cacheDir, files[0] ?? ""), "utf8")).includes(
+								'"id":"new"',
+							)
+						);
+					}),
+				);
+			}),
+	);
+
+	it.effect(
 		"dedupes concurrent cold gets while reading a missing disk entry",
 		() =>
 			Effect.gen(function* () {

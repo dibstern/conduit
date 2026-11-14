@@ -182,7 +182,7 @@ const makeClaudeCapabilitiesServiceWithCache = (
 							}),
 					});
 					const configPath = resolve(workspaceRoot, launch.configDir.path);
-					const key = [
+					const identity = [
 						launch.configDir._tag,
 						configPath,
 						workspaceRoot,
@@ -191,19 +191,24 @@ const makeClaudeCapabilitiesServiceWithCache = (
 									JSON.stringify([
 										call.projectId,
 										call.account.id,
-										Object.entries(call.shellEnv).sort(),
 										Object.entries(call.account.env ?? {}).sort(),
 										call.extraFolders,
 									]),
 								]
 							: []),
 					].join("\0");
+					const key = call
+						? `${identity}\0${JSON.stringify(Object.entries(call.shellEnv).sort())}`
+						: identity;
+					// The file only seeds a restart, which refreshes it under its own env. Every
+					// shell sets values like STARSHIP_SESSION_KEY, so naming it by the env missed
+					// on each new dev:all and held the first catalog reads on a cold probe.
 					const file =
 						cacheDir === undefined
 							? undefined
 							: join(
 									cacheDir,
-									`${createHash("sha256").update(key).digest("hex")}.json`,
+									`${createHash("sha256").update(identity).digest("hex")}.json`,
 								);
 
 					const lookup = yield* lock.withPermits(1)(
