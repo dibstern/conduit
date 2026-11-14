@@ -189,19 +189,34 @@ export const makeEventRetention = Effect.gen(function* () {
 					)`;
 			pointerKept += pointers?.count ?? 0;
 		}
-		const orphans = yield* sql<{ session_id: string }>`
-			WITH created AS MATERIALIZED (
-				SELECT DISTINCT session_id FROM events INDEXED BY idx_events_type
-				WHERE type = 'session.created' AND project_id = ${projectId}
-			)
-			SELECT created.session_id FROM created
-			WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE id = created.session_id)
-				AND NOT EXISTS (
-					SELECT 1 FROM events marker
-					WHERE marker.project_id = ${projectId} AND marker.session_id = created.session_id
-						AND marker.type = 'session.deleted'
-						AND json_extract(marker.data, '$.sessionId') = marker.session_id
-				) ORDER BY created.session_id`;
+		// Cold, every session.created row is a scattered page read: ~350ms in one
+		// statement on a 4.8GB store. Page by sequence and yield between pages.
+		const orphans = new Set<string>();
+		let after = 0;
+		while (true) {
+			const page = yield* sql<{
+				sequence: number;
+				session_id: string;
+				orphan: number | null;
+			}>`
+				SELECT created.sequence, created.session_id,
+					created.project_id = ${projectId}
+					AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = created.session_id)
+					AND NOT EXISTS (
+						SELECT 1 FROM events marker
+						WHERE marker.project_id = ${projectId} AND marker.session_id = created.session_id
+							AND marker.type = 'session.deleted'
+							AND json_extract(marker.data, '$.sessionId') = marker.session_id
+					) AS orphan
+				FROM events created INDEXED BY idx_events_type
+				WHERE created.type = 'session.created' AND created.sequence > ${after}
+				ORDER BY created.sequence LIMIT 128`;
+			for (const row of page) if (row.orphan) orphans.add(row.session_id);
+			const last = page.at(-1);
+			if (last === undefined) break;
+			after = last.sequence;
+			yield* Effect.yieldNow;
+		}
 		const [freed] = yield* sql<{ count: number }>`
 			SELECT COUNT(*) AS count FROM json_each(${JSON.stringify([...freedSessions])}) touched
 			WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE id = touched.value)
@@ -223,7 +238,7 @@ export const makeEventRetention = Effect.gen(function* () {
 			eventsFreed,
 			bytesFreed,
 			held,
-			orphans: orphans.map((row) => row.session_id),
+			orphans: [...orphans].sort(),
 			pointerKept,
 		};
 	});

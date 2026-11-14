@@ -19,6 +19,10 @@ export const readPersistedAutoArchiveFacts = (
 		// Archiving hides the whole family, so any descendant's activity, running
 		// work, open approval or queued input keeps the root visible. Running work is
 		// the ledger's answer (8.3 line 2849: anything may act while its row is Open, 3.12).
+		// A sweep reads messages only for unarchived families (~230ms cold for all).
+		// Elsewhere last_message_at and turn times miss only out-of-turn notices, which
+		// can only make a family look idler, and setSessionArchived rechecks that one
+		// family with its messages before archiving it.
 		const rows = yield* sql<
 			SessionRow & { last_activity_at: number; pending_work: number }
 		>`
@@ -27,7 +31,8 @@ export const readPersistedAutoArchiveFacts = (
 					COALESCE((SELECT MAX(COALESCE(f.last_message_at, f.created_at)) FROM sessions f WHERE f.root_id = s.id), 0),
 					COALESCE((SELECT MAX(MAX(COALESCE(t.requested_at, 0), COALESCE(t.started_at, 0), COALESCE(t.completed_at, 0)))
 						FROM turns t JOIN sessions f ON f.id = t.session_id WHERE f.root_id = s.id), 0),
-					COALESCE((SELECT MAX(m.created_at) FROM messages m JOIN sessions f ON f.id = m.session_id WHERE f.root_id = s.id), 0),
+					COALESCE(CASE WHEN ${sessionId === undefined ? 0 : 1} OR s.unarchived_at IS NOT NULL
+						THEN (SELECT MAX(m.created_at) FROM messages m JOIN sessions f ON f.id = m.session_id WHERE f.root_id = s.id) END, 0),
 					COALESCE((SELECT MAX(i.admitted_at) FROM pending_inputs i JOIN sessions f ON f.id = i.session_id WHERE f.root_id = s.id), 0)) AS last_activity_at,
 				(EXISTS(SELECT 1 FROM run_ledger_sessions l JOIN sessions f ON f.id = l.session_id WHERE f.root_id = s.id AND l.state = 'Open')
 					OR EXISTS(SELECT 1 FROM turns t JOIN sessions f ON f.id = t.session_id WHERE f.root_id = s.id AND t.state IN ('pending', 'running'))

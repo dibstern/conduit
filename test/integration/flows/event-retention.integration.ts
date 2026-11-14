@@ -901,7 +901,11 @@ describe("EventRetention through the relay", () => {
 		});
 		for (const [name, queryText, indexes] of [
 			["candidate", "SELECT DISTINCT marker.session_id", ["idx_events_type"]],
-			["orphan", "WITH created AS MATERIALIZED", ["idx_events_type"]],
+			[
+				"orphan",
+				"FROM events created INDEXED BY idx_events_type",
+				["idx_events_type"],
+			],
 			[
 				"batch",
 				"DELETE FROM events",

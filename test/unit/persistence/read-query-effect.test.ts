@@ -36,6 +36,10 @@ import type { SessionRow } from "../../../src/lib/persistence/read-model-types.j
 import { sessionFamilyWindowQuery } from "../../../src/lib/persistence/session-family-query.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import { pendingClaudeQuestionToolsQuery } from "../../../src/lib/persistence/startup-restore-queries.js";
+import {
+	type AutoArchiveFacts,
+	shouldArchiveIdleSession,
+} from "../../../src/lib/session/auto-archive-policy.js";
 import { readPersistedAutoArchiveFacts } from "../../../src/lib/session/auto-archive-sweep.js";
 import { activityFrom } from "../../helpers/ledger-tasks.js";
 
@@ -1606,6 +1610,44 @@ describe("auto-archive facts", () => {
 						[...facts].map(([id, fact]) => [id, fact.hasPendingWork]),
 					),
 				).toEqual({ "open-root": true, "stale-root": false });
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
+
+	it.effect(
+		"a notice no clock records still counts where it decides the archive",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				const sql = yield* SqlClient.SqlClient;
+				// Ledger notices land outside any turn and leave last_message_at behind.
+				for (const [root, noticeAt] of [
+					["fresh", 90],
+					["unarchived", 50],
+				] as const) {
+					yield* seedSession(root);
+					yield* sql`UPDATE sessions SET root_id = id, settled_at = 1 WHERE id = ${root}`;
+					yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
+						VALUES (${`notice-${root}`}, ${root}, 'assistant', '', ${noticeAt}, ${noticeAt})`;
+				}
+				yield* sql`UPDATE sessions SET unarchived_at = 40 WHERE id = 'unarchived'`;
+				const archives = (facts: Map<string, AutoArchiveFacts>, id: string) => {
+					const fact = facts.get(id);
+					return fact !== undefined && shouldArchiveIdleSession(fact, 100, 20);
+				};
+				// setSessionArchived's recheck before archiving.
+				expect(
+					archives(
+						yield* readPersistedAutoArchiveFacts("test-project", 100, "fresh"),
+						"fresh",
+					),
+				).toBe(false);
+				// The sweep compares an unarchived family's activity to its unarchive time.
+				expect(
+					archives(
+						yield* readPersistedAutoArchiveFacts("test-project", 100),
+						"unarchived",
+					),
+				).toBe(true);
 			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });
