@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync, statSync, watch } from "node:fs";
+import { openSync, readFileSync, statSync, watch } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 const args = process.argv.slice(2);
@@ -173,6 +175,35 @@ async function freePort(port) {
 	return false;
 }
 
+/**
+ * Takes this port's dev:all lock and stops the run that held it: the same port
+ * is the same service. Stopping only its server would get that respawned (and
+ * ours killed in turn), so stop its supervisor, which stops its own server.
+ * The lock is an open file, so it never outlives the run holding it.
+ */
+async function replaceOldRun(port) {
+	const lock = join(tmpdir(), `conduit-dev-all-${port}.lock`);
+	openSync(lock, "a");
+	const { stdout } = spawnSync("lsof", ["-t", lock], { encoding: "utf8" });
+	for (const pid of (stdout ?? "").split("\n").filter(Boolean).map(Number)) {
+		if (pid === process.pid) continue;
+		log(`stopping old dev:all PID ${pid} on port ${port}`);
+		try {
+			process.kill(pid, "SIGTERM");
+		} catch {}
+		// freePort stops a server that outlasts this wait.
+		const deadline = Date.now() + 15_000;
+		while (!stopping && Date.now() < deadline) {
+			try {
+				process.kill(pid, 0);
+			} catch {
+				break;
+			}
+			await delay(200);
+		}
+	}
+}
+
 async function restart() {
 	log("restarting");
 	if (mode === "child") {
@@ -298,16 +329,28 @@ async function rebuild() {
 				const loaded = loadDaemonConfigResult(DEFAULT_CONFIG_DIR);
 				if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound")
 					throw loaded.failure;
-				rpc = {
-					port: parsed.portExplicit
-						? parsed.port
-						: loaded._tag === "Success"
-							? loaded.success.port
-							: DEFAULT_PORT,
-					DEFAULT_SOCKET_PATH,
-					isDaemonRunning,
-					sendRpcRequest,
-				};
+				const port = parsed.portExplicit
+					? parsed.port
+					: loaded._tag === "Success"
+						? loaded.success.port
+						: DEFAULT_PORT;
+				// A config dir holds one server, so it cannot serve another port too.
+				if (await isDaemonRunning(DEFAULT_SOCKET_PATH)) {
+					const status = await sendRpcRequest(DEFAULT_SOCKET_PATH, {
+						_tag: "GetStatus",
+					});
+					if (status.port !== port) {
+						fail(
+							new Error(
+								`conduit for ${DEFAULT_CONFIG_DIR} already serves port ${status.port}; set CONDUIT_CONFIG_DIR to run another on port ${port}`,
+							),
+						);
+						return;
+					}
+				}
+				await replaceOldRun(port);
+				// Set last: a check that throws above is retried on the next build.
+				rpc = { port, DEFAULT_SOCKET_PATH, isDaemonRunning, sendRpcRequest };
 			}
 			if (stopping) return;
 			lastBuildId = readBuildId();
