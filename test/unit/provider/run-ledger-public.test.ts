@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import {
 	decide,
 	evolve,
 	initialSessionLedgerState,
+	type LedgerEvent,
+	replay,
 	viewLedger,
 } from "../../../src/lib/provider/run-ledger/run-ledger-decider.js";
 import type {
@@ -201,5 +203,45 @@ describe("Run Ledger public model", () => {
 			missingCodex,
 			pendingEntry,
 		]).toHaveLength(10);
+	});
+
+	it("replays a stored log as evolve folds it, skipping an entry it no longer records", () => {
+		let minted = 0;
+		const policy = { settleMs: 7_000, probeMs: 10, nativeCommandMs: 30 };
+		const initial = initialSessionLedgerState("session", "opencode");
+		const admitted = decide(
+			initial,
+			{
+				verb: "admit",
+				inputId: "A",
+				delivery: "queue",
+				request: { text: "hello" },
+			},
+			{ now: 100, newId: () => `id-${++minted}`, policy },
+		);
+		assert(admitted.tag === "Accepted");
+		const folded = admitted.events.reduce(evolve, initial);
+		// A stored fact this decider now rejects, as after an upgrade, changes nothing,
+		// though rejecting it starts by counting it (8.1: OpenCode has no task snapshot).
+		const stale = {
+			kind: "fact",
+			command: {
+				verb: "observe",
+				observation: {
+					tag: "Unsolicited",
+					label: "host:7",
+					eventId: "snapshot",
+					kind: "tasks_snapshot",
+					tasks: [],
+				},
+			},
+			now: 100,
+			policy,
+			ids: [],
+		} as unknown as LedgerEvent;
+		expect(evolve(folded, stale)).toBe(folded);
+		const log = [...admitted.events, stale, ...admitted.events];
+		expect(replay(initial, log)).toEqual(log.reduce(evolve, initial));
+		expect(replay(folded, [])).toBe(folded);
 	});
 });

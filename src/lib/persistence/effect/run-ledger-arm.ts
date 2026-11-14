@@ -21,10 +21,10 @@ import { inputIdFromOpenCodeMessageId } from "../../provider/opencode/opencode-i
 import {
 	decide,
 	endSessionStep,
-	evolve,
 	fenceHolds,
 	initialSessionLedgerState,
 	type LedgerEvent,
+	replay,
 	type SessionLedgerState,
 	viewLedger,
 } from "../../provider/run-ledger/run-ledger-decider.js";
@@ -241,8 +241,7 @@ interface Ledger {
 }
 
 /**
- * Each session's last fold, so a load replays only the entries stored since. Every evolve clones
- * the whole book, so a full replay is quadratic: ~1000 entries cost seconds per load.
+ * Each session's last fold, so a load replays only the entries stored since.
  */
 const folds = new WeakMap<
 	SqlClient.SqlClient,
@@ -303,10 +302,9 @@ export const loadLedger = (
 		const fold = {
 			provider,
 			// Entries are the decider's own plain-JSON facts; the boundary casts them back.
-			state: entries.reduce(
-				(state, entry) =>
-					evolve(state, JSON.parse(entry.entry_json) as LedgerEvent),
+			state: replay(
 				base?.state ?? initialSessionLedgerState(sessionId, provider),
+				entries.map((entry) => JSON.parse(entry.entry_json) as LedgerEvent),
 			),
 			entrySeq: last?.entry_seq ?? base?.entrySeq ?? 0,
 			stamp: last?.stamp ?? base?.stamp ?? null,
@@ -1005,7 +1003,7 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 						(session_id, entry_seq, event_sequence, stamp, entry_json)
 						VALUES (${event.sessionId}, ${ledger.entrySeq + index + 1}, ${event.sequence},
 							${stamp}, ${JSON.stringify(entry)})`;
-				const state = decision.events.reduce(evolve, ledger.state);
+				const state = replay(ledger.state, decision.events);
 				const row = ledgerRow(viewLedger(state), decision.alarmAt);
 				// A15: the row is written only when its value changes.
 				if (

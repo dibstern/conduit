@@ -30,6 +30,8 @@ export interface LedgerImplementation<State, Entry> {
 		ctx: DecideContext,
 	): Decision<Entry>;
 	evolve(state: State, entry: Entry): State;
+	/** A stored log at once; implementations without one fold it with evolve. */
+	replay?(state: State, entries: readonly Entry[]): State;
 	viewLedger(state: State): LedgerView;
 }
 
@@ -105,11 +107,16 @@ export function driver<State, Entry>(
 	let alarmAt: number | undefined;
 	let lastEventCount = 0;
 	const view = () => implementation.viewLedger(state);
-	const refold = () =>
-		entries.reduce(
-			implementation.evolve,
-			implementation.initialSessionLedgerState("trace-session", provider),
+	const refold = () => {
+		const initial = implementation.initialSessionLedgerState(
+			"trace-session",
+			provider,
 		);
+		return (
+			implementation.replay?.(initial, entries) ??
+			entries.reduce(implementation.evolve, initial)
+		);
+	};
 	const replay = () => implementation.viewLedger(refold());
 	return {
 		step(command, now) {

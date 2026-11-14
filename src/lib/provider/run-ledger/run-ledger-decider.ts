@@ -3151,8 +3151,7 @@ type Recorded =
 
 /**
  * A deep copy of the book's plain data that keeps shared references shared, as
- * structuredClone does but nearly twice as fast. Replaying a ledger copies the
- * book once per entry, and boot replays every Open session's ledger.
+ * structuredClone does but nearly twice as fast.
  */
 function copyBook<T>(value: T, seen = new Map<object, unknown>()): T {
 	if (typeof value !== "object" || value === null) return value;
@@ -3319,6 +3318,28 @@ export function evolve(
 		effects: [],
 	});
 	return recorded.tag === "Recorded" ? stateOf(recorded.book) : state;
+}
+
+/**
+ * evolve over a stored log with one copy of the book. A copy per entry made replay quadratic, and
+ * boot replays every Open session's log in one block.
+ */
+export function replay(
+	state: SessionLedgerState,
+	events: readonly LedgerEvent[],
+): SessionLedgerState {
+	if (events.length === 0) return state;
+	const draft = copyBook(bookOf(state));
+	for (const event of events) {
+		const entry = event as unknown as Entry;
+		const ids = entry.kind === "fact" ? [...entry.ids] : [];
+		const step: Step = { newId: () => ids.shift() ?? "", effects: [] };
+		// Every stored entry was recorded. One this decider no longer records may have half-applied
+		// the draft, so fold entry by entry, where evolve skips it whole.
+		if (apply(draft, entry, step).tag !== "Changed")
+			return events.reduce(evolve, state);
+	}
+	return stateOf(draft);
 }
 
 function inputState(book: Book, run: Run, inputId: string): InputState {
