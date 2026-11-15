@@ -523,8 +523,9 @@ async function cursorCatalog(s, flags) {
 			scope.import("effect", driverUrl),
 		]);
 	// Discovery only reads `sdk` and `credential` from the account resource, so
-	// the daemon's account layers are not needed for a catalog read.
-	const sdk = sdkModule.createCursorSdkPort({ id: { _tag: "LoginSlot" } });
+	// the daemon's account layers are not needed for a catalog read. No account
+	// means the SDK's own default login store.
+	const sdk = sdkModule.createCursorSdkPort();
 	const backendUrl = credentials.cursorBackendUrl(
 		process.env.CURSOR_BACKEND_URL ?? credentials.DEFAULT_CURSOR_BACKEND_URL,
 	);
