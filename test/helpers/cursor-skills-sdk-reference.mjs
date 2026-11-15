@@ -41,12 +41,15 @@ const hooks = registerHooks({
 			source += `;globalThis[Symbol.for("conduit.cursor.skills.acquire")] = ${platform}.prototype.acquireLocalExecutor;`;
 		}
 		if (source.includes("createLocalExecutor:()=>")) {
-			const anchor = ";let R,T;return(0,RI.ou)(";
+			const anchor = ";let D,O;return(0,nF.ou)(";
 			if (source.split(anchor).length !== 2)
 				throw new Error("Cursor SDK skill reference anchor changed");
+			// The workspace runtime is minified to `$`; a function replacement keeps
+			// it literal instead of a String.replace pattern.
 			source = source.replace(
 				anchor,
-				`;let R,T;globalThis[Symbol.for("conduit.cursor.skills.reference")] = () => P.services.getAgentSkills(a);return(0,RI.ou)(`,
+				() =>
+					`;let D,O;globalThis[Symbol.for("conduit.cursor.skills.reference")] = () => $.services.getAgentSkills(a);return(0,nF.ou)(`,
 			);
 		}
 		return { ...loaded, source };

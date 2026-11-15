@@ -291,7 +291,10 @@ export function sdkResultToTurnResult(
 }
 
 export function buildUserMessage(input: ResolvedSendTurnInput): SDKUserMessage {
-	const content: Exclude<SDKUserMessage["message"]["content"], string> = [];
+	const content: Exclude<
+		Extract<SDKUserMessage["message"], { role: "user" }>["content"],
+		string
+	> = [];
 	for (const { dataUrl } of input.images ?? []) {
 		const { mime, data, name } = parseAttachmentDataUrl(dataUrl);
 		if (mime === "text/plain" || mime === "application/pdf") {

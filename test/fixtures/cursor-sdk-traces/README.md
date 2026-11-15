@@ -2,6 +2,7 @@
 
 - SDK 1.0.37 live capture: `basic.jsonl`.
 - SDK 1.0.40 live capture: unavailable because the corpus predates this SDK upgrade and C4 excludes live recapture; follow-up ie7l.
+- SDK 1.3.1 live capture: unavailable because the corpus predates this SDK upgrade and imsso bumps without a live recapture; follow-up ie7l.
 
 `title-generation.jsonl` is a real SDK 1.0.37 capture for conduit-test-9mbo.7.
 It uses the machine's environment credential, Composer 2.5 with `fast:false`,

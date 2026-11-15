@@ -59,11 +59,11 @@ For Cursor, `pin` moves the SDK and its five helpers (`optionalDependencies`) to
 
 ## 4. Check the model catalogs
 
-`node $U catalog` compares the Claude catalog before and after the bump, using your real login, and checks the OpenCode contract model on an isolated, logged-out home. It exits 1 when that model is missing.
+`node $U catalog` compares the Claude catalog before and after the bump, using your real login, and checks the free OpenCode models named in `test/e2e/helpers`, `test/e2e/live-probes` and `test/integration`, which start a real server, on an isolated, logged-out home. It exits 1 when one is missing.
 
 - **Added or removed Claude ids:** model ids come from the providers, never from a conduit list. Test models must be ids the catalog lists: `haiku` is listed, bare `claude-haiku-4-5` never was.
 - **`GAP <id>`:** no context-window row in `src/lib/provider/claude/claude-api-model-id.ts`. Add one when the id is a real model with a known window; aliases and gateway ids can stay gaps. Note which in the bead.
-- **OpenCode `MISSING`:** pick a free model from the listed catalog for `test/contract/helpers/session-helpers.ts`.
+- **OpenCode `MISSING`:** pick a free model from the listed catalog and replace the missing id in the tests that name it. The contract suite runs on a local fake provider and needs none.
 - **Cursor `MISSING`:** the catalog runs conduit's own discovery with `CURSOR_API_KEY`, else the SDK login. It checks the model ids in `test/integration/daemon/cursor-discovery.test.ts` (`composer-2.5`, also in the trace fixtures); pick a listed replacement if one retires.
 
 ## 5. Run the gates
@@ -76,13 +76,14 @@ Credential rows compare only backend match and expiry, observing Authorization a
 `CURSOR_BACKEND_URL` in child processes with a temporary HOME. Conduit passes its resolved key
 explicitly; SDK key precedence is outside this contract. The empty-key row pins Conduit's
 deliberate fall-through where the SDK throws. The paid skill-activation smoke stays opt-in.
+"Cursor SDK skill reference anchor changed" means the minifier renamed the executor factory's locals: find the old anchor in `/tmp/sdk-upgrade/pack/cursor-<old>/` and map its variables onto the new build in `test/helpers/cursor-skills-sdk-reference.mjs`.
 The gates require the installed `@cursor/sdk` optional dependency even with `--dry-run`;
 a missing SDK is a failure. Run these rows on every Cursor upgrade, without `--live`.
 
 - The contract suite needs the exact npm `opencode` build matching `.opencode-version` first on PATH, not the brew one; the script installs and checks it.
 - An auth failure ("OAuth session expired") is the login, not the bump. Confirm by running one turn directly against the new SDK outside the harness, then ask the user to log in. Leave credentials and keychains alone.
 - For any other failure, run the same gate on an untouched worktree at the base commit (`node $U gates --root <that worktree>`). Fixing what fails there too is a separate bead.
-- Cursor's gates replay the trace fixtures (`test/fixtures/cursor-sdk-traces/README.md`) through the port, so they need no credential. The fixtures, the capture stamp in `sdk-trace.ts`, the player and `scripts/check-cursor-sdk-traces.mjs` all say SDK `1.0.37`; before capturing on a new version, move all four together.
+- Cursor's gates replay the trace fixtures (`test/fixtures/cursor-sdk-traces/README.md`) through the port, so they need no credential. The fixtures, the capture stamp in `sdk-trace.ts`, the player and `scripts/check-cursor-sdk-traces.mjs` all say SDK `1.0.37`; before capturing on a new version, move all four together. Without a recapture, the README still needs a `- SDK <v> live capture: unavailable because …; follow-up <bead>.` line for the new version (`sdk-trace-version.guard.test.ts`).
 - Cursor `--live` also lists models against the real service, and needs `CURSOR_API_KEY`. "Cursor has no credential" is a missing key or an expired login, not the bump. "Cursor model list failed" is auth, network or SDK drift: if replay passes and live fails on the base too, it is the credential. Ask the user to renew it; leave the login store alone.
 
 Done when every gate is green, or each red one is shown to fail on the base too and has a bead.

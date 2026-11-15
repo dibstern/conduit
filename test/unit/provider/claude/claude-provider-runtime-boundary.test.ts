@@ -233,7 +233,7 @@ describe("Claude provider runtime boundary", () => {
 			},
 			claudeSettingsOverrides: () => ({
 				permissions: { allow: ["Bash(*)"] },
-				autoMode: true,
+				autoMode: { allow: ["Bash(*)"] },
 			}),
 		});
 

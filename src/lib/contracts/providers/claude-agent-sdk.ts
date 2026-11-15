@@ -32,6 +32,7 @@ import type {
 	SDKResultMessage,
 	SDKResultSuccess,
 	SDKSessionStateChangedMessage,
+	SDKSessionWritesLostMessage,
 	SDKStatusMessage,
 	SDKSystemMessage,
 	SDKTaskNotificationMessage,
@@ -281,6 +282,7 @@ export const ClaudeSDKSystemSubtypeSchema = Schema.Literals([
 	"permission_denied",
 	"session_state_changed",
 	"session_title_changed",
+	"session_writes_lost",
 	"status",
 	"task_notification",
 	"task_progress",
@@ -319,6 +321,7 @@ export const CLAUDE_SDK_MESSAGE_VARIANTS = [
 	"system_thinking_tokens",
 	"system_session_state_changed",
 	"system_session_title_changed",
+	"system_session_writes_lost",
 	"system_worker_shutting_down",
 	"system_commands_changed",
 	"system_notification",
@@ -679,6 +682,16 @@ export const ClaudeSDKSessionTitleChangedMessageSchema = Schema.Struct({
 	title: Schema.String,
 });
 
+// Conduit's event store keeps the conversation, so a lost CLI transcript needs
+// no handling. The SDK says more error codes may be added: keep them open.
+export const ClaudeSDKSessionWritesLostMessageSchema = Schema.Struct({
+	...ClaudeSystemFields,
+	subtype: Schema.Literal("session_writes_lost"),
+	error_code: Schema.String,
+	lost: Schema.Array(Schema.String),
+	transcript_session_ids: Schema.optional(Schema.Array(Schema.String)),
+});
+
 export const ClaudeSDKBackgroundTasksChangedMessageSchema = Schema.Struct({
 	...ClaudeSystemFields,
 	subtype: Schema.Literal("background_tasks_changed"),
@@ -850,6 +863,7 @@ export const ClaudeSDKSystemLikeMessageSchema = Schema.Union([
 	ClaudeSDKPermissionDeniedMessageSchema,
 	ClaudeSDKSessionStateChangedMessageSchema,
 	ClaudeSDKSessionTitleChangedMessageSchema,
+	ClaudeSDKSessionWritesLostMessageSchema,
 	ClaudeSDKStatusMessageSchema,
 	ClaudeSDKSystemMessageSchema,
 	ClaudeSDKTaskNotificationMessageSchema,
@@ -1027,6 +1041,10 @@ type _ClaudeSdkPluginInstallFitsSchema = AssertExtends<
 type _ClaudeSdkSessionStateChangedFitsSchema = AssertExtends<
 	SDKSessionStateChangedMessage,
 	Schema.Schema.Type<typeof ClaudeSDKSessionStateChangedMessageSchema>
+>;
+type _ClaudeSdkSessionWritesLostFitsSchema = AssertExtends<
+	SDKSessionWritesLostMessage,
+	Schema.Schema.Type<typeof ClaudeSDKSessionWritesLostMessageSchema>
 >;
 type _ClaudeSdkBackgroundTasksChangedFitsSchema = AssertExtends<
 	SDKBackgroundTasksChangedMessage,

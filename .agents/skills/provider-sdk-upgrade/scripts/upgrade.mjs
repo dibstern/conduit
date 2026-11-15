@@ -436,19 +436,45 @@ function opencodeCatalog({ target: v }) {
 		env,
 		timeout: 120_000,
 	});
-	const helper = read(file("test/contract/helpers/session-helpers.ts"));
-	const matches = [...helper.matchAll(/\bmodelID:\s*"([^"]+)"/g)];
-	if (matches.length !== 1)
-		throw new Error("session-helpers.ts: expected exactly one literal modelID");
-	const modelID = matches[0][1];
+	// The contract suite runs on a local fake provider. The E2E harness, live
+	// probes and integration flows start a real server on a free model.
+	const required = [
+		...new Set(
+			exec(
+				[
+					"git",
+					"grep",
+					"-h",
+					"-o",
+					"-E",
+					'"opencode/[A-Za-z0-9._-]+"',
+					"--",
+					"test/e2e/helpers",
+					"test/e2e/live-probes",
+					"test/integration",
+				],
+				{ cwd: root },
+			)
+				.split("\n")
+				.map((literal) => literal.slice(1, -1)),
+		),
+	];
 	const models = stripVTControlCharacters(output)
 		.split(/\r?\n/)
 		.map((line) => line.trim())
 		.filter((line) => line.startsWith("opencode/"));
-	const listed = models.includes(`opencode/${modelID}`);
+	const missing = required.filter((id) => !models.includes(id));
 	print(`OpenCode ${v} catalog:\n${models.join("\n")}`);
-	print(`${listed ? "LISTED" : "MISSING"} contract model ${modelID}`);
-	return { version: v, modelID, listed, models, home };
+	for (const id of required)
+		print(`${missing.includes(id) ? "MISSING" : "LISTED"} test model ${id}`);
+	return {
+		version: v,
+		required,
+		missing,
+		listed: !missing.length,
+		models,
+		home,
+	};
 }
 
 async function cursorCatalog(s, flags) {
@@ -477,15 +503,48 @@ async function cursorCatalog(s, flags) {
 		return { version: installedVersion, required, dryRun: true };
 	}
 	const require = createRequire(file("package.json"));
-	const { tsImport } = await import(
+	const { register } = await import(
 		pathToFileURL(require.resolve("tsx/esm/api")).href
 	);
-	const { discoverCursorEffect } = await tsImport(
-		pathToFileURL(file("src/lib/provider/cursor/cursor-runner-driver.ts")).href,
-		import.meta.url,
+	// One namespace, so every module shares one Effect: a credential wrapped
+	// as Redacted by one Effect copy cannot be read by another.
+	const scope = register({ namespace: "sdk-upgrade-cursor" });
+	const load = (name) =>
+		scope.import(pathToFileURL(file(name)).href, import.meta.url);
+	const driverUrl = pathToFileURL(
+		file("src/lib/provider/cursor/cursor-runner-driver.ts"),
+	).href;
+	const [driver, resources, credentials, sdkModule, { Effect }] =
+		await Promise.all([
+			load("src/lib/provider/cursor/cursor-runner-driver.ts"),
+			load("src/lib/provider/cursor/cursor-account-resources.ts"),
+			load("src/lib/provider/cursor/cursor-credential.ts"),
+			load("src/lib/provider/cursor/cursor-sdk.ts"),
+			scope.import("effect", driverUrl),
+		]);
+	// Discovery only reads `sdk` and `credential` from the account resource, so
+	// the daemon's account layers are not needed for a catalog read.
+	const sdk = sdkModule.createCursorSdkPort({ id: { _tag: "LoginSlot" } });
+	const backendUrl = credentials.cursorBackendUrl(
+		process.env.CURSOR_BACKEND_URL ?? credentials.DEFAULT_CURSOR_BACKEND_URL,
 	);
-	const { Effect } = require("effect");
-	const { models } = await Effect.runPromise(discoverCursorEffect());
+	const envKey = process.env.CURSOR_API_KEY;
+	const credential = Effect.tryPromise(async () =>
+		credentials.resolveCursorCredential(
+			envKey,
+			envKey?.trim() ? undefined : await sdk.storedCredential(),
+			backendUrl,
+			Date.now(),
+		),
+	);
+	const { models } = await Effect.runPromise(
+		driver.discoverCursorEffect({ id: "", driver: "cursor" }).pipe(
+			Effect.provideService(resources.CursorAccountResources, {
+				backendUrl,
+				use: (_id, work) => work({ sdk, credential }),
+			}),
+		),
+	);
 	const ids = models.map((model) => model.id);
 	const missing = required.filter((id) => !ids.includes(id));
 	const replay = Boolean(process.env.CONDUIT_CURSOR_SDK_TRACE);

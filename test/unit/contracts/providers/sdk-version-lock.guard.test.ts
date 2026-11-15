@@ -47,7 +47,7 @@ describe("provider SDK version locks", () => {
 		// first whose catalog resolves Opus to `claude-opus-5-5[1m]`, and it
 		// advertises the alias as `opus[1m]` rather than bare `opus`. Below this
 		// floor conduit's Opus rows describe the previous model.
-		expect(pinnedVersion).toBe("0.3.301");
+		expect(pinnedVersion).toBe("0.3.325");
 	});
 
 	it("locks the installed OpenCode SDK to the pinned dependency version", () => {
@@ -58,7 +58,7 @@ describe("provider SDK version locks", () => {
 		).version;
 
 		expect(installedVersion).toBe(pinnedVersion);
-		expect(pinnedVersion).toBe("1.19.1");
+		expect(pinnedVersion).toBe("1.19.5");
 	});
 
 	it("pins the OpenCode server tests run to the OpenCode SDK version", () => {
@@ -79,7 +79,7 @@ describe("provider SDK version locks", () => {
 		).version;
 
 		expect(installedVersion).toBe(pinnedVersion);
-		expect(pinnedVersion).toBe("1.0.40");
+		expect(pinnedVersion).toBe("1.3.1");
 	});
 
 	// conduit-test-o6r: @anthropic-ai/sdk is a transitive dep (via the Claude
@@ -103,7 +103,7 @@ describe("provider SDK version locks", () => {
 		).version;
 
 		expect(peerRange).toBe(">=0.93.0");
-		expect(installedSdkVersion).toBe("0.135.0");
+		expect(installedSdkVersion).toBe("1.8.0");
 		expect(satisfiesMinFloor(installedSdkVersion ?? "", peerRange ?? "")).toBe(
 			true,
 		);

@@ -36,7 +36,7 @@ describe("buildClaudeFlagSettings", () => {
 	it("removes trust-tiered settings", () => {
 		const settings = buildClaudeFlagSettings({
 			permissions: { allow: ["Bash(*)"] },
-			autoMode: true,
+			autoMode: { allow: ["Bash(*)"] },
 		});
 
 		for (const key of CLAUDE_TRUST_TIERED_SETTINGS_KEYS) {

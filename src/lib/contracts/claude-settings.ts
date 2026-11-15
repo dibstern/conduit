@@ -7,12 +7,11 @@ import { Schema } from "effect";
  * one through would launder a repo-derived value past a deliberate check.
  * See ADR-0003.
  *
- * Verified against @anthropic-ai/claude-agent-sdk 0.3.258. Note that the SDK's
+ * Verified against @anthropic-ai/claude-agent-sdk 0.3.325. Note that the SDK's
  * `Settings` type carries a `[k: string]: unknown` index signature, so
  * `satisfies readonly (keyof Settings)[]` accepts any string whatsoever and
- * would assert nothing here. `autoMode` in particular is absent from the
- * published types and exists only in the CLI bundle. The list is pinned by
- * test instead — see test/unit/provider/claude/claude-sdk-settings.guard.test.ts.
+ * would assert nothing here. The list is pinned by test instead — see
+ * test/unit/provider/claude/claude-sdk-settings.guard.test.ts.
  */
 export const CLAUDE_TRUST_TIERED_SETTINGS_KEYS: readonly string[] = [
 	"permissions",

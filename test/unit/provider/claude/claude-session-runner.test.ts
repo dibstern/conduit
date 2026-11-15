@@ -263,8 +263,7 @@ describe("in-process Claude session runner", () => {
 						typeof content === "string"
 							? content
 							: content
-									.filter((part) => part.type === "text")
-									.map((part) => part.text)
+									.flatMap((part) => (part.type === "text" ? [part.text] : []))
 									.join(""),
 					);
 					yield makeSuccessResult();
@@ -351,8 +350,7 @@ describe("in-process Claude session runner", () => {
 						typeof content === "string"
 							? content
 							: content
-									.filter((part) => part.type === "text")
-									.map((part) => part.text)
+									.flatMap((part) => (part.type === "text" ? [part.text] : []))
 									.join(""),
 					);
 					yield makeSuccessResult();
@@ -582,8 +580,9 @@ describe("in-process Claude session runner", () => {
 							typeof content === "string"
 								? content
 								: content
-										.filter((part) => part.type === "text")
-										.map((part) => part.text)
+										.flatMap((part) =>
+											part.type === "text" ? [part.text] : [],
+										)
 										.join(""),
 						);
 						if (prompts.length === 1) {

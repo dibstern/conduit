@@ -49,6 +49,7 @@ describe("decodeClaudeSDKMessage", () => {
 			"system_thinking_tokens",
 			"system_session_state_changed",
 			"system_session_title_changed",
+			"system_session_writes_lost",
 			"system_worker_shutting_down",
 			"system_commands_changed",
 			"system_notification",
@@ -159,6 +160,13 @@ describe("decodeClaudeSDKMessage", () => {
 				...systemEnvelope,
 				subtype: "session_title_changed",
 				title: "What word did I ask you to remember?",
+			},
+			{
+				...systemEnvelope,
+				subtype: "session_writes_lost",
+				error_code: "ENOSPC",
+				lost: ["transcript"],
+				transcript_session_ids: [systemEnvelope.session_id],
 			},
 		];
 

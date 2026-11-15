@@ -1051,8 +1051,7 @@ function query(params: {
 				typeof content === "string"
 					? content
 					: content
-							.filter((block) => block.type === "text")
-							.map((block) => block.text)
+							.flatMap((block) => (block.type === "text" ? [block.text] : []))
 							.join("");
 			const request = currentRequest(prompt);
 			interruptibleTurn =
