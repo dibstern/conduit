@@ -130,6 +130,14 @@ interface ActiveTurn {
 	readonly sink: EventSink;
 	/** The runs whose sends this turn carries: its start's and its steers'. */
 	readonly runIds: Set<string>;
+	/**
+	 * Steers sent into this turn that Codex has not echoed, by input id, with their turn/steer
+	 * reply's turnId once read. The echo is the join (J2, J3 AMENDMENT-2026-11-16).
+	 */
+	readonly steers: Map<
+		string,
+		{ readonly input: SessionTurn; turnId?: string }
+	>;
 	readonly interactions: CodexInteractions;
 	readonly started: Deferred.Deferred<string | undefined>;
 	readonly cancelled: Deferred.Deferred<void>;
@@ -439,6 +447,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 					tokenUsageBaseline: current.tokenUsageTotal,
 				}),
 				runIds: new Set(input.runId ? [input.runId] : []),
+				steers: new Map(),
 				started: yield* Deferred.make<string | undefined>(),
 				cancelled: yield* Deferred.make<void>(),
 				cancelRequested: false,
@@ -993,6 +1002,50 @@ export class CodexRunnerPayload implements RunnerPayload {
 										!active.state.acceptedTurnId))
 							)
 								yield* acceptInput();
+							// J2, J3 (AMENDMENT-2026-11-16): Codex's echo of a steer joins it to this open
+							// turn's run. An echo without clientId joins the steer whose turn/steer reply
+							// named its turn. Once the turn settles nothing reads its steers, so a later
+							// reply or echo joins nothing (failure modes 90, 91).
+							if (
+								(decoded.method === "item/started" ||
+									decoded.method === "item/completed") &&
+								decoded.params.item.type === "userMessage" &&
+								!("raw" in decoded.params.item)
+							) {
+								const { clientId } = decoded.params.item;
+								const { turnId } = decoded.params;
+								const steer =
+									clientId == null
+										? [...active.steers.values()].find(
+												(pending) => pending.turnId === turnId,
+											)
+										: active.steers.get(clientId);
+								if (steer) {
+									const { input: steered } = steer;
+									active.steers.delete(steered.inputId);
+									if (steered.runId && active.state.items.runId)
+										yield* push("run.started", {
+											inputId: steered.inputId,
+											requestedRunId: steered.runId,
+											...(steered.continuation
+												? {
+														userMessageId: steered.continuation.cutOffMessageId,
+													}
+												: {}),
+										});
+									yield* push(
+										"message.created",
+										{
+											sessionId: steered.sessionId,
+											messageId:
+												steered.continuation?.cutOffMessageId ??
+												steered.inputId,
+											role: "user",
+										},
+										{ source: "codex.native-turn" },
+									);
+								}
+							}
 							const result = yield* apply(
 								handleCodexTurnNotification(active.state, decoded, update.at),
 							);
@@ -1250,63 +1303,6 @@ export class CodexRunnerPayload implements RunnerPayload {
 				};
 				const active = session.active;
 				const sinkId = this.sinks.sinkId(sink);
-				const acceptSteer = () =>
-					Effect.gen({ self: this }, function* () {
-						if (!active || !sinkId) return declined;
-						if (!input.continuation)
-							yield* this.emit({
-								type: "place-user-message",
-								sinkId,
-								input: {
-									sessionId: input.sessionId,
-									inputId: input.inputId,
-									...(input.runId ? { runId: input.runId } : {}),
-									text: input.text ?? input.prompt,
-									...(input.images?.length
-										? { images: input.images.map(({ ref }) => ref) }
-										: {}),
-								},
-							});
-						if (input.runId && active.state.items.runId) {
-							const [items, event] = codexRuntimeEvent(
-								{ ...active.state.items, now: Date.now() },
-								"run.started",
-								{
-									inputId: input.inputId,
-									requestedRunId: input.runId,
-									...(input.continuation
-										? { userMessageId: input.continuation.cutOffMessageId }
-										: {}),
-								},
-							);
-							active.state = { ...active.state, items };
-							yield* sink.push(event);
-						}
-						const [items, event] = codexRuntimeEvent(
-							{ ...active.state.items, now: Date.now() },
-							"message.created",
-							{
-								sessionId: input.sessionId,
-								messageId: input.continuation?.cutOffMessageId ?? input.inputId,
-								role: "user",
-							},
-						);
-						active.state = { ...active.state, items };
-						yield* sink.push({
-							...event,
-							metadata: { source: "codex.native-turn" },
-						});
-						if (active.state.settled) {
-							const [items, event] = codexRuntimeEvent(
-								{ ...active.state.items, now: Date.now() },
-								"session.status",
-								{ sessionId: input.sessionId, status: "idle" },
-							);
-							active.state = { ...active.state, items };
-							yield* sink.push(event);
-						}
-						return { ...declined, status: "accepted" as const };
-					});
 				if (
 					input.prompt.trim() === "/compact" ||
 					active?.state.manualCompaction
@@ -1327,7 +1323,9 @@ export class CodexRunnerPayload implements RunnerPayload {
 					return declined;
 				if (!claim()) return { ...declined, status: "cancelled" as const };
 				if (input.runId) active.runIds.add(input.runId);
-				const delivered = yield* session.child.client
+				// Registered before the request: Codex may echo the steer before its reply is read.
+				active.steers.set(input.inputId, { input });
+				const reply = yield* session.child.client
 					.request(
 						"turn/steer",
 						{
@@ -1344,11 +1342,30 @@ export class CodexRunnerPayload implements RunnerPayload {
 						},
 						TurnSteerResponseSchema,
 					)
-					.pipe(
-						Effect.as(true),
-						Effect.orElseSucceed(() => false),
-					);
-				return delivered ? yield* acceptSteer() : declined;
+					.pipe(Effect.option);
+				if (Option.isNone(reply)) {
+					active.steers.delete(input.inputId);
+					return declined;
+				}
+				// The reply only places the steer and names its turn for an echo without clientId; the
+				// echo joins it to the run (J2).
+				const pending = active.steers.get(input.inputId);
+				if (pending) pending.turnId = reply.value.turnId;
+				if (!input.continuation)
+					yield* this.emit({
+						type: "place-user-message",
+						sinkId,
+						input: {
+							sessionId: input.sessionId,
+							inputId: input.inputId,
+							...(input.runId ? { runId: input.runId } : {}),
+							text: input.text ?? input.prompt,
+							...(input.images?.length
+								? { images: input.images.map(({ ref }) => ref) }
+								: {}),
+						},
+					});
+				return { ...declined, status: "accepted" as const };
 			}),
 		).pipe(
 			Effect.mapError(

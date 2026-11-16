@@ -3,6 +3,11 @@
 // successor that arrived inside its window is dropped when read after it; an
 // app-server exit inside the successor window fails a turn that completed; a
 // successor that arrived after its window is lost when its loop reads it.
+// A steer (J2, J3 AMENDMENT-2026-11-16): it joins the open run at its
+// turn/steer reply rather than at Codex's echo; an echo without clientId never
+// joins; an accepted steer Codex never echoes before turn/completed joins the
+// closed run (90); a reply read after the turn settled joins or writes to the
+// closed run (91).
 import {
 	existsSync,
 	mkdtempSync,
@@ -14,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
@@ -651,4 +656,209 @@ describe("Codex runner preparation", () => {
 			).not.toContain('"method":"turn/start"');
 		}),
 	);
+
+	// J2, J3 (AMENDMENT-2026-11-16): Codex's userMessage echo is a steer's join; the turn/steer
+	// reply only places it. An echo without clientId joins on the reply's turnId while the turn is
+	// open. Nothing joins or reaches the closed run after its turn settled (90, 91).
+	for (const variant of [
+		{ name: "joins at the echo", joins: true },
+		{ name: "joins an echo without clientId on its reply's turn", joins: true },
+		{
+			name: "stays pending when no echo precedes turn/completed",
+			joins: false,
+		},
+		{
+			name: "joins nothing from a reply read after the turn settled",
+			joins: false,
+		},
+	] as const)
+		it.live(`a steer ${variant.name}`, () =>
+			Effect.gen(function* () {
+				const root = yield* Effect.acquireRelease(
+					Effect.sync(() => mkdtempSync(join(tmpdir(), "codex-runner-steer-"))),
+					(path) =>
+						Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+				);
+				const rows: {
+					at: number;
+					message?: {
+						id?: number;
+						method?: string;
+						params?: { item?: Record<string, unknown> };
+					};
+				}[] = readFileSync(
+					fileURLToPath(
+						new URL(
+							"../../../fixtures/codex-app-server-traces/steer.jsonl",
+							import.meta.url,
+						),
+					),
+					"utf8",
+				)
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line));
+				const echoed = (row: (typeof rows)[number]) =>
+					row.message?.params?.item?.["type"] === "userMessage" &&
+					row.message.params.item["clientId"] === "fixture-steer";
+				const reply = rows.findIndex(
+					({ message }) => message?.id === 4 && message.method === undefined,
+				);
+				const completed = rows.findIndex(
+					({ message }) => message?.method === "turn/completed",
+				);
+				const settledAt = rows[completed]?.at ?? 0;
+				const kept =
+					variant.name === "joins at the echo"
+						? rows
+						: variant.name ===
+								"joins an echo without clientId on its reply's turn"
+							? rows.map((row) => {
+									if (!echoed(row) || !row.message?.params?.item) return row;
+									const { clientId: _clientId, ...item } =
+										row.message.params.item;
+									return {
+										...row,
+										message: {
+											...row.message,
+											params: { ...row.message.params, item },
+										},
+									};
+								})
+							: variant.name ===
+									"stays pending when no echo precedes turn/completed"
+								? rows.filter((row) => !echoed(row))
+								: rows.flatMap((row, index) =>
+										echoed(row) || index === reply
+											? []
+											: index === completed
+												? [row, { ...rows[reply], at: settledAt + 1 }]
+												: [row],
+									);
+				const trace = join(root, "steer.jsonl");
+				writeFileSync(
+					trace,
+					`${kept.map((row) => JSON.stringify(row)).join("\n")}\n`,
+				);
+				// A joining steer's echo waits behind the gate until its reply has been read; the
+				// late reply passes it only once the turn's terminal has been read.
+				const gate = join(root, "gate");
+				writeFileSync(
+					gate,
+					String(variant.joins ? (rows[reply]?.at ?? 0) : settledAt),
+				);
+				yield* Effect.acquireRelease(
+					Effect.sync(() => {
+						process.env["CONDUIT_CODEX_APP_SERVER_TRACE_GATE"] = gate;
+					}),
+					() =>
+						Effect.sync(() => {
+							delete process.env["CONDUIT_CODEX_APP_SERVER_TRACE_GATE"];
+						}),
+				);
+				const events: ProviderRuntimeEvent[] = [];
+				const started = yield* Deferred.make<void>();
+				const ended = yield* Deferred.make<void>();
+				const runner = yield* makeCodexSessionRunner(
+					{
+						workspaceRoot: root,
+						daemonConfigDir: root,
+						environment: () => ({
+							CODEX_HOME: root,
+							NODE_ENV: "test",
+							CONDUIT_CODEX_APP_SERVER_TRACE: trace,
+						}),
+					},
+					(output) =>
+						Effect.gen(function* () {
+							if (output.type !== "event") return {};
+							events.push(output.event);
+							if (output.event.type === "run.started")
+								yield* Deferred.succeed(started, undefined);
+							if (output.event.type === "turn.completed")
+								yield* Deferred.succeed(ended, undefined);
+							return {};
+						}),
+				);
+				const admission = yield* makeRunnerAdmission(runner, "codex");
+				const send = (inputId: string, runId: string, prompt: string) =>
+					admitRunnerCommand(admission, runner, {
+						type: "send-turn",
+						sinkId: inputId,
+						aborted: false,
+						input: {
+							sessionId: "session",
+							inputId,
+							runId,
+							prompt,
+							history: [],
+							providerState: {},
+							workspaceRoot: root,
+							extraFolders: [],
+							configDir: configuredClaudeConfigDir(root),
+							folderSource: "account",
+							model: { providerId: "codex", modelId: "gpt-5.4" },
+							facts: {
+								_tag: "Codex",
+								skill: { _tag: "None" },
+								truncate: { _tag: "None" },
+							},
+						},
+					});
+				const turn = yield* send("input", "run", "Say hello").pipe(
+					Effect.forkScoped,
+				);
+				yield* Deferred.await(started);
+				const steering = yield* send(
+					"steer",
+					"run-steer",
+					"Use the steered instruction",
+				).pipe(Effect.forkScoped);
+				const joins = () =>
+					events.filter(
+						({ type, data }) =>
+							type === "run.started" &&
+							typeof data === "object" &&
+							data !== null &&
+							"requestedRunId" in data &&
+							data.requestedRunId === "run-steer",
+					);
+				if (variant.joins) {
+					expect(yield* Fiber.join(steering)).toMatchObject({
+						status: "accepted",
+					});
+					// The reply only places the steer: no join before its echo.
+					expect(joins()).toEqual([]);
+				} else yield* Deferred.await(ended);
+				writeFileSync(gate, String(Number.MAX_SAFE_INTEGER));
+				expect(yield* Fiber.join(steering)).toMatchObject({
+					status: "accepted",
+				});
+				yield* Fiber.join(turn);
+				yield* Deferred.await(ended);
+				expect(joins()).toEqual(
+					variant.joins
+						? [
+								expect.objectContaining({
+									runId: "run",
+									data: expect.objectContaining({
+										inputId: "steer",
+										requestedRunId: "run-steer",
+									}),
+								}),
+							]
+						: [],
+				);
+				// The closed run takes nothing after its terminal but the turn's own idle status.
+				expect(
+					events
+						.slice(
+							events.findIndex(({ type }) => type === "turn.completed") + 1,
+						)
+						.filter(
+							({ runId, type }) => runId === "run" && type !== "session.status",
+						),
+				).toEqual([]);
+			}),
+		);
 });

@@ -319,31 +319,34 @@ describe("Codex control through the daemon and detached runner", () => {
 				{ timeout: TIMEOUT },
 			);
 			await submit(browser, id, STEER, "steer");
+			const joinOf = (events: ReturnType<typeof snapshot>["events"]) => {
+				const requested = events.find(
+					({ type, data }) =>
+						type === "run.requested" && data["inputId"] === "fixture-steer",
+				);
+				const initial = events.find(({ type }) => type === "run.started");
+				return {
+					requested,
+					initial,
+					joined: events.filter(
+						({ type, data }) =>
+							type === "run.started" &&
+							data["inputId"] === "fixture-steer" &&
+							data["requestedRunId"] === requested?.data["runId"],
+					),
+				};
+			};
+			// AMENDMENT-2026-11-16 J3: the turn/steer reply is no join; the held echo is.
 			await vi.waitFor(
 				() => {
-					const { events } = snapshot(fixture, id);
-					const requested = events.find(
-						({ type, data }) =>
-							type === "run.requested" && data["inputId"] === "fixture-steer",
-					);
-					const initial = events.find(({ type }) => type === "run.started");
-					expect(requested).toBeDefined();
-					expect(initial?.metadata["runId"]).toBeTypeOf("string");
-					expect(events).toContainEqual(
-						expect.objectContaining({
-							type: "run.started",
-							metadata: expect.objectContaining({
-								runId: initial?.metadata["runId"],
-							}),
-							data: expect.objectContaining({
-								inputId: "fixture-steer",
-								requestedRunId: requested?.data["runId"],
-							}),
-						}),
-					);
+					expect(
+						requests().some((row) => row.message?.method === "turn/steer"),
+					).toBe(true);
+					expect(joinOf(snapshot(fixture, id).events).requested).toBeDefined();
 				},
 				{ timeout: TIMEOUT },
 			);
+			expect(joinOf(snapshot(fixture, id).events).joined).toEqual([]);
 			expect(
 				captured().filter(
 					(row) =>
@@ -354,6 +357,10 @@ describe("Codex control through the daemon and detached runner", () => {
 			).toEqual([]);
 			writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 			await states(fixture, id, ["completed", "completed"]);
+			const { initial, joined } = joinOf(snapshot(fixture, id).events);
+			expect(initial?.metadata["runId"]).toBeTypeOf("string");
+			expect(joined).toHaveLength(1);
+			expect(joined[0]?.metadata["runId"]).toBe(initial?.metadata["runId"]);
 			const starts = requests().filter(
 				(row) => row.message?.method === "turn/start",
 			);
