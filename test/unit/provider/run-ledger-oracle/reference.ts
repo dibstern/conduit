@@ -1493,6 +1493,12 @@ function unsolicited(
 	}
 }
 
+/** AMENDMENT-2026-11-16 E4: one native_session probe at a time covers every mainEnded start or steer. */
+const nativeSessionProbing = (world: World): boolean =>
+	world.sends.some(
+		(send) => send.probe?.target.tag === "native_session" && !send.probe.done,
+	);
+
 /**
  * OpenCode's query end ends its label's starts and steers (9). An abort or cancel_request acts on
  * the native session, not the query, so a query end never covers them (CONTRACT.md 334-338, 3101-3106).
@@ -1511,13 +1517,7 @@ function queryEnded(world: World, step: Step, label: Label): boolean {
 						endWork(tx, "evidence");
 						moved = true;
 					}
-	if (
-		fenced === undefined ||
-		world.sends.some(
-			(send) => send.probe?.target.tag === "native_session" && !send.probe.done,
-		)
-	)
-		return moved;
+	if (fenced === undefined || nativeSessionProbing(world)) return moved;
 	probe(world, step, fenced.runId, { tag: "native_session" });
 	return true;
 }
@@ -2360,7 +2360,8 @@ function mainEvent(
 						tx.mainEnded = true;
 					else endWork(tx, "main");
 				}
-			if (fenced) probe(world, step, run.runId, { tag: "native_session" });
+			if (fenced && !nativeSessionProbing(world))
+				probe(world, step, run.runId, { tag: "native_session" });
 			run.exec.fold.push({
 				seq: world.seq,
 				outcome: observation.outcome,

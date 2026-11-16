@@ -1285,6 +1285,12 @@ function probe(
 	reprobe(book, fact, step, send, send.probe);
 }
 
+/** AMENDMENT-2026-11-16 E4: one native_session probe at a time covers every mainEnded start or steer. */
+const nativeSessionProbing = (book: Book): boolean =>
+	book.sends.some(
+		(send) => send.probe?.target.tag === "native_session" && !send.probe.done,
+	);
+
 /**
  * 9: OpenCode's query end ends its label's starts and steers, never an abort or cancel_request, which
  * act on the native session (CONTRACT.md 334-338, 3101-3106). AMENDMENT-2026-11-16 E3, E4: nor a start
@@ -1303,13 +1309,7 @@ function queryEnded(book: Book, fact: Fact, step: Step, label: Label): boolean {
 						tx.ended = "evidence";
 						moved = true;
 					}
-	if (
-		fenced === undefined ||
-		book.sends.some(
-			(send) => send.probe?.target.tag === "native_session" && !send.probe.done,
-		)
-	)
-		return moved;
+	if (fenced === undefined || nativeSessionProbing(book)) return moved;
 	probe(book, fact, step, fenced.runId, { tag: "native_session" });
 	return true;
 }
@@ -2450,7 +2450,7 @@ function observe(
 							)
 								tx.mainEnded = true;
 							else tx.ended ??= "main";
-					if (fenced)
+					if (fenced && !nativeSessionProbing(book))
 						probe(book, fact, step, run.runId, { tag: "native_session" });
 					run.exec.fold.push({
 						seq: book.seq,

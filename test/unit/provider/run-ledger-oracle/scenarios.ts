@@ -2215,6 +2215,49 @@ export const scenarios: readonly OracleScenario[] = [
 		},
 	},
 	{
+		id: "VK-97-probing",
+		title:
+			"[E4] OpenCode terminal while the recovery chain's native_session probe is outstanding: no second probe",
+		provider: "opencode",
+		run(d) {
+			const a = begin(d);
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+			});
+			fire(d);
+			observe(d, tokenOf(d.latest("probe")), {
+				kind: "probe_result",
+				finding: { tag: "input_absent" },
+			});
+			const chained = d.latest("probe");
+			expect(chained.effect).toMatchObject({
+				target: { tag: "native_session" },
+			});
+			observe(d, tokenOf(chained), {
+				kind: "probe_result",
+				finding: { tag: "native_busy" },
+			});
+			const ended = main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			expect(ended.issued).toEqual([]);
+			expect(d.view().anythingMayAct).toBe(true);
+			fire(d);
+			observe(d, tokenOf(d.latest("probe")), {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().anythingMayAct).toBe(false);
+			expect(
+				d.issued.filter(({ effect }) => effect.kind === "probe"),
+			).toHaveLength(3);
+		},
+	},
+	{
 		id: "VK-98",
 		title:
 			"[E3, E5] OpenCode terminal first, then process loss: coverage ends the start's work; a late result changes nothing",
