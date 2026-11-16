@@ -34,13 +34,16 @@ const decodeInitializationResult = Schema.decodeUnknownResult(
 	ClaudeSDKInitializationResultSubsetSchema,
 );
 
-const OUTPUT_LIMIT_BY_FAMILY: ReadonlyArray<[pattern: RegExp, output: number]> =
-	[
-		[/^(?:claude-)?fable/i, 128_000],
-		[/^(?:claude-)?opus/i, 32_000],
-		[/^(?:claude-)?sonnet/i, 64_000],
-		[/^(?:claude-)?haiku/i, 8_192],
-	];
+// `fixedContext` is a family that runs one window whatever the id says: Claude
+// Code drops `[1m]` from a Fable id and still runs it at 1M.
+const LIMITS_BY_FAMILY: ReadonlyArray<
+	[pattern: RegExp, output: number, fixedContext?: number]
+> = [
+	[/^(?:claude-)?fable/i, 128_000, 1_000_000],
+	[/^(?:claude-)?opus/i, 32_000],
+	[/^(?:claude-)?sonnet/i, 64_000],
+	[/^(?:claude-)?haiku/i, 8_192],
+];
 
 interface SDKModelInfoSubset {
 	readonly value: string;
@@ -119,17 +122,17 @@ function inferLimits(
 	modelId: string,
 	resolvedModel: string | undefined,
 ): { context: number; output: number } | undefined {
-	for (const [pattern, output] of OUTPUT_LIMIT_BY_FAMILY) {
+	for (const [pattern, output, fixedContext] of LIMITS_BY_FAMILY) {
 		if (!pattern.test(modelId)) continue;
 		// A trailing [1m] on what the SDK RESOLVED is the SDK's own report that
-		// the 1M window is in effect: the CLI drops the suffix for models that
-		// do not take it (claude-fable-5[1m] resolves to claude-fable-5) and
-		// keeps it for those that do (opus[1m] -> claude-opus-5[1m]). Prefer
-		// that over the requested id, which is only what we asked for. Falling
-		// back to a flat 200_000 for every family is how this read wrong before.
+		// the 1M window is in effect: the CLI keeps it for models that take it
+		// (opus[1m] -> claude-opus-5[1m]). Prefer that over the requested id,
+		// which is only what we asked for. Falling back to a flat 200_000 for
+		// every family is how this read wrong before.
 		const effectiveId = resolvedModel ?? modelId;
 		return {
-			context: /\[1m\]$/i.test(effectiveId) ? 1_000_000 : 200_000,
+			context:
+				fixedContext ?? (/\[1m\]$/i.test(effectiveId) ? 1_000_000 : 200_000),
 			output,
 		};
 	}

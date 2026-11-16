@@ -15,14 +15,19 @@ const OPTIONS_200K_DEFAULT: readonly ContextWindowOption[] = [
 	{ value: "1m", label: "1M" },
 ];
 
+const OPTIONS_1M_ONLY: readonly ContextWindowOption[] = [
+	{ value: "1m", label: "1M", isDefault: true },
+];
+
 const CONTEXT_WINDOW_OPTIONS_BY_MODEL: Readonly<
 	Record<string, readonly ContextWindowOption[] | undefined>
 > = {
-	"claude-fable-5-2": OPTIONS_1M_DEFAULT,
-	"claude-fable-5-1": OPTIONS_1M_DEFAULT,
-	"claude-fable-5": OPTIONS_1M_DEFAULT,
-	// The 0.3.301 catalog advertises `opus[1m]` and the bare `fable` alias.
-	// Fable is natively 1M, with no context-window suffix or selector.
+	// Fable is natively 1M: Claude Code 2.1.325 runs every Fable id at 1M with
+	// or without `[1m]`, so a 200k option would change nothing. The one 1M
+	// option keeps sessions saved with "1m" valid; the CLI drops the suffix.
+	"claude-fable-5-2": OPTIONS_1M_ONLY,
+	"claude-fable-5-1": OPTIONS_1M_ONLY,
+	"claude-fable-5": OPTIONS_1M_ONLY,
 	"claude-opus-5-5": OPTIONS_1M_DEFAULT,
 	"claude-opus-5": OPTIONS_1M_DEFAULT,
 	"claude-opus-4-8": undefined,

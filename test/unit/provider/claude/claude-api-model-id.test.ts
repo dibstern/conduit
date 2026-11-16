@@ -90,6 +90,17 @@ describe("Claude context-window model capabilities", () => {
 		expect(claudeApiModelId("fable", "1m")).toBe("fable");
 	});
 
+	it.each([
+		"claude-fable-5-2",
+		"claude-fable-5-1",
+		"claude-fable-5",
+	])("offers native 1M %s only its 1M window", (modelId) => {
+		expect(contextWindowOptionsForModel(modelId)).toEqual([
+			{ value: "1m", label: "1M", isDefault: true },
+		]);
+		expect(claudeApiModelId(modelId, "1m")).toBe(`${modelId}[1m]`);
+	});
+
 	const options1mDefault = [
 		{ value: "200k", label: "200k" },
 		{ value: "1m", label: "1M", isDefault: true },
@@ -100,8 +111,6 @@ describe("Claude context-window model capabilities", () => {
 	];
 
 	it.each([
-		"claude-fable-5-1",
-		"claude-fable-5",
 		"claude-opus-5",
 		"claude-opus-4-6",
 		"claude-sonnet-5",
@@ -110,10 +119,7 @@ describe("Claude context-window model capabilities", () => {
 		expect(contextWindowOptionsForModel(modelId)).toContainEqual({
 			value: "1m",
 			label: "1M",
-			...(modelId.startsWith("claude-opus") ||
-			modelId.startsWith("claude-fable")
-				? { isDefault: true }
-				: {}),
+			...(modelId.startsWith("claude-opus") ? { isDefault: true } : {}),
 		});
 		expect(modelHasSelectable1m(modelId)).toBe(true);
 		expect(claudeApiModelId(modelId, "1m")).toBe(`${modelId}[1m]`);
@@ -145,7 +151,11 @@ describe("Claude context-window model capabilities", () => {
 		["default", undefined, false],
 		["haiku", undefined, false],
 		["opus[1m]", options1mDefault, true],
-		["claude-fable-5-1[1m]", options1mDefault, true],
+		[
+			"claude-fable-5-1[1m]",
+			[{ value: "1m", label: "1M", isDefault: true }],
+			true,
+		],
 		["claude-haiku-4-5-20251001", undefined, false],
 		["claude-haiku-4-5-20251001[1m]", undefined, false],
 		["claude-sonnet-5-20260101", options200kDefault, true],

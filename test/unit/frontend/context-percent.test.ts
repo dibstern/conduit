@@ -189,7 +189,7 @@ describe("claude capability probe — fable family limits", () => {
 			}),
 		);
 		const fable = result.models.find((m) => m.id === "claude-fable-5");
-		expect(fable?.limit?.context).toBe(200_000);
+		expect(fable?.limit?.context).toBe(1_000_000);
 		expect(fable?.contextWindowOptions?.some((o) => o.value === "1m")).toBe(
 			true,
 		);

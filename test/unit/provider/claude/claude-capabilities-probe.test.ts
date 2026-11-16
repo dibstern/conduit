@@ -415,8 +415,9 @@ describe("probeClaudeCapabilities", () => {
 			{ value: "1m", label: "1M" },
 		];
 
-		expect(optionsFor("claude-fable-5-1")).toEqual(default1mOptions);
-		expect(optionsFor("claude-fable-5")).toEqual(default1mOptions);
+		const fable1mOnly = [{ value: "1m", label: "1M", isDefault: true }];
+		expect(optionsFor("claude-fable-5-1")).toEqual(fable1mOnly);
+		expect(optionsFor("claude-fable-5")).toEqual(fable1mOnly);
 		expect(optionsFor("claude-opus-5")).toEqual(default1mOptions);
 		expect(optionsFor("claude-opus-4-6")).toEqual(default1mOptions);
 		expect(optionsFor("claude-sonnet-5")).toEqual(default200kOptions);
@@ -510,8 +511,8 @@ describe("probeClaudeCapabilities", () => {
 						resolvedModel: "claude-opus-5[1m]",
 					},
 					{
-						// The CLI drops the suffix for models that do not take it,
-						// so this entry is NOT running a 1M window despite asking.
+						// The CLI drops the suffix from a Fable id, which runs 1M
+						// either way.
 						value: "claude-fable-5-1[1m]",
 						displayName: "Fable",
 						resolvedModel: "claude-fable-5-1",
@@ -530,7 +531,7 @@ describe("probeClaudeCapabilities", () => {
 			configDir,
 		});
 		expect(result.models[0]?.limit?.context).toBe(1_000_000);
-		expect(result.models[1]?.limit?.context).toBe(200_000);
+		expect(result.models[1]?.limit?.context).toBe(1_000_000);
 		expect(result.models[2]?.limit?.context).toBe(200_000);
 	});
 
