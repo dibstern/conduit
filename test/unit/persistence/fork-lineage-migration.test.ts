@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Effect, Result as Either, Layer } from "effect";
+import { Effect, Result as Either, Layer, Logger } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
@@ -550,6 +550,35 @@ it("retires unmatched lineage to a startup archive instead of keeping the active
 				readFileSync(join(dir, "fork-metadata-unresolved.json"), "utf8"),
 			),
 		).toEqual(contents);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+it("warns about unresolved lineage when archiving it, not on every retry that resolves nothing", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "fork-migration-quiet-retry-"));
+	const warnings: unknown[] = [];
+	const migrate = migrateWithConfig(dir).pipe(
+		Effect.provide(
+			Logger.layer([
+				Logger.make(({ logLevel, message }) => {
+					if (logLevel === "Warn") warnings.push(message);
+				}),
+			]),
+		),
+	);
+	try {
+		writeFileSync(
+			join(dir, "fork-metadata.json"),
+			JSON.stringify({
+				gone: { parentID: "parent", forkMessageId: "message" },
+			}),
+		);
+		await Effect.runPromise(migrate);
+		expect(warnings).toHaveLength(1);
+		await Effect.runPromise(migrate);
+		expect(warnings).toHaveLength(1);
+		expect(existsSync(join(dir, "fork-metadata-unresolved.json"))).toBe(true);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

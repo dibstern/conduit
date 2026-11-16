@@ -337,7 +337,10 @@ export const migrateForkLineage = (
 				}
 				// All databases have committed and closed before removing the global source.
 				if (hasSidecar) unlinkSync(path);
-				return remaining.size > 0
+				// A retry that resolved nothing has nothing new to say; repeating the
+				// archive warning every startup only buries real ones.
+				return remaining.size > 0 &&
+					(hasSidecar || remaining.size < entries.size)
 					? `Fork lineage import imported known sessions; ${remaining.size} unresolved session(s) retained for retry at next startup in ${archive}. The archive is not a request-path data source.`
 					: undefined;
 			},
