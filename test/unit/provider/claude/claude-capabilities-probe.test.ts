@@ -140,7 +140,7 @@ describe("probeClaudeCapabilities", () => {
 			providerId: "claude",
 		});
 		expect(result.models[0]?.limit).toEqual({
-			context: 200_000,
+			context: 1_000_000,
 			output: 32_000,
 		});
 		expect(result.models[1]?.limit).toEqual({
@@ -518,9 +518,9 @@ describe("probeClaudeCapabilities", () => {
 						resolvedModel: "claude-fable-5-1",
 					},
 					{
-						value: "sonnet",
-						displayName: "Sonnet",
-						resolvedModel: "claude-sonnet-5",
+						value: "claude-sonnet-4-6",
+						displayName: "Sonnet 4.6",
+						resolvedModel: "claude-sonnet-4-6",
 					},
 				],
 			},
@@ -533,6 +533,38 @@ describe("probeClaudeCapabilities", () => {
 		expect(result.models[0]?.limit?.context).toBe(1_000_000);
 		expect(result.models[1]?.limit?.context).toBe(1_000_000);
 		expect(result.models[2]?.limit?.context).toBe(200_000);
+	});
+
+	// Claude Code 2.1.325 runs these at 1M without [1m] (getContextUsage
+	// reports rawMaxTokens 1000000); the older ones run 200K.
+	it.each([
+		["opus", "claude-opus-5-5", 1_000_000],
+		["opus", undefined, 1_000_000],
+		["claude-opus-4-7", undefined, 1_000_000],
+		["claude-opus-4-6", undefined, 200_000],
+		["sonnet", "claude-sonnet-5-5", 1_000_000],
+		["claude-sonnet-5-20260101", undefined, 1_000_000],
+		["claude-sonnet-4-6", undefined, 200_000],
+		["haiku", "claude-haiku-5-5", 1_000_000],
+		["haiku", "claude-haiku-4-5-20251001", 200_000],
+	] as const)("reads %s (resolved %s) as natively %i", async (value, resolvedModel, context) => {
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [
+					{
+						value,
+						displayName: value,
+						...(resolvedModel ? { resolvedModel } : {}),
+					},
+				],
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+			configDir,
+		});
+		expect(result.models[0]?.limit?.context).toBe(context);
 	});
 
 	it("falls back to the requested id for the context limit when resolvedModel is absent", async () => {

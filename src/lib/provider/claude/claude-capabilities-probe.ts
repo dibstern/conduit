@@ -34,15 +34,16 @@ const decodeInitializationResult = Schema.decodeUnknownResult(
 	ClaudeSDKInitializationResultSubsetSchema,
 );
 
-// `fixedContext` is a family that runs one window whatever the id says: Claude
-// Code drops `[1m]` from a Fable id and still runs it at 1M.
+// `native1mFrom` is the first version (major * 100 + minor) that Claude Code
+// runs at 1M whatever the id says, per its model table (`native_1m`): bare
+// claude-opus-4-7 runs 1M, bare claude-opus-4-6 runs 200K.
 const LIMITS_BY_FAMILY: ReadonlyArray<
-	[pattern: RegExp, output: number, fixedContext?: number]
+	[pattern: RegExp, output: number, native1mFrom: number]
 > = [
-	[/^(?:claude-)?fable/i, 128_000, 1_000_000],
-	[/^(?:claude-)?opus/i, 32_000],
-	[/^(?:claude-)?sonnet/i, 64_000],
-	[/^(?:claude-)?haiku/i, 8_192],
+	[/^(?:claude-)?fable/i, 128_000, 0],
+	[/^(?:claude-)?opus/i, 32_000, 407],
+	[/^(?:claude-)?sonnet/i, 64_000, 500],
+	[/^(?:claude-)?haiku/i, 8_192, 500],
 ];
 
 interface SDKModelInfoSubset {
@@ -122,7 +123,7 @@ function inferLimits(
 	modelId: string,
 	resolvedModel: string | undefined,
 ): { context: number; output: number } | undefined {
-	for (const [pattern, output, fixedContext] of LIMITS_BY_FAMILY) {
+	for (const [pattern, output, native1mFrom] of LIMITS_BY_FAMILY) {
 		if (!pattern.test(modelId)) continue;
 		// A trailing [1m] on what the SDK RESOLVED is the SDK's own report that
 		// the 1M window is in effect: the CLI keeps it for models that take it
@@ -130,9 +131,19 @@ function inferLimits(
 		// which is only what we asked for. Falling back to a flat 200_000 for
 		// every family is how this read wrong before.
 		const effectiveId = resolvedModel ?? modelId;
+		// The minor is one or two digits, so a date suffix is not read as one.
+		// An unresolved alias names its family's newest model.
+		const match = /^(?:claude-)?[a-z]+-(\d+)(?:-(\d{1,2})(?!\d))?/i.exec(
+			effectiveId,
+		);
+		const version = match
+			? Number(match[1]) * 100 + Number(match[2] ?? 0)
+			: Number.POSITIVE_INFINITY;
 		return {
 			context:
-				fixedContext ?? (/\[1m\]$/i.test(effectiveId) ? 1_000_000 : 200_000),
+				version >= native1mFrom || /\[1m\]$/i.test(effectiveId)
+					? 1_000_000
+					: 200_000,
 			output,
 		};
 	}
