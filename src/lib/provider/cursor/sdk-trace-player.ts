@@ -421,6 +421,24 @@ export function createTraceCursorSdkPort(
 				const steerWaiters = new Map<number, () => void>();
 				let steerCallIndex = 0;
 				let steerAckIndex = 0;
+				const answerSteer = (row: TraceRow) => {
+					if (row.kind === "steer.ack" && object(row.data)) {
+						const outcome = row.data["outcome"];
+						if (
+							outcome === "complete_delivered" ||
+							outcome === "revert_to_followup"
+						)
+							steers[steerAckIndex++]?.resolve(outcome);
+					}
+					if (row.kind === "steer.error")
+						steers[steerAckIndex++]?.reject(
+							cursorSdkFailure("run.steer", row.data),
+						);
+				};
+				// Steer answers after stream.end settle once the run has ended, as
+				// steer.jsonl's steer.after_terminal row did (J7, AMENDMENT-2026-11-16).
+				const streamEnd = turn.findIndex((row) => row.kind === "stream.end");
+				const lateAnswers = streamEnd < 0 ? [] : turn.slice(streamEnd + 1);
 				const terminal = turn.find((row) => row.kind === "wait.result")?.data;
 				const captured = turn.find(
 					(row) => row.kind === "store.run.after_crash",
@@ -514,18 +532,7 @@ export function createTraceCursorSdkPort(
 											cancelled,
 										]);
 								}
-								if (row.kind === "steer.ack" && object(row.data)) {
-									const outcome = row.data["outcome"];
-									if (
-										outcome === "complete_delivered" ||
-										outcome === "revert_to_followup"
-									)
-										steers[steerAckIndex++]?.resolve(outcome);
-								}
-								if (row.kind === "steer.error")
-									steers[steerAckIndex++]?.reject(
-										cursorSdkFailure("run.steer", row.data),
-									);
+								answerSteer(row);
 								if (
 									needsCancel &&
 									(row.kind === "wait.result" ||
@@ -596,6 +603,9 @@ export function createTraceCursorSdkPort(
 									...latest,
 									activeRun: { ...activeRun, status },
 								});
+							void setTimeout(0).then(() => {
+								for (const row of lateAnswers.splice(0)) answerSteer(row);
+							});
 						}
 					},
 					async cancel() {

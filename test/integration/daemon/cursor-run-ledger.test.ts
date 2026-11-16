@@ -428,8 +428,13 @@ describe("Cursor on the Run Ledger", () => {
 		proveToolRowsOnLedger("cursor", fixture);
 	});
 
-	it("ends a delivered steer's Run once, in the one native send", async () => {
-		const { fixture, browser, sessionId } = await start("steer", "steer");
+	// 92 (AMENDMENT-2026-11-16): each capture's complete_delivered answer, not
+	// its user-message delta, joins the steer to the running turn's Run.
+	it.each([
+		"steer",
+		"steer-shell",
+	] as const)("ends a delivered steer's Run once, in the one native send (%s)", async (source) => {
+		const { fixture, browser, sessionId } = await start(source, source);
 		await submit(browser, sessionId, "Replay the captured running turn.");
 		await vi.waitFor(
 			() =>
@@ -447,7 +452,7 @@ describe("Cursor on the Run Ledger", () => {
 		oneRunnerStartedFirst(ledger);
 		expect(captured("steer.call")).toHaveLength(1);
 		expect(captured("send.options")).toHaveLength(1);
-		prove("steer", ledger);
+		prove(source, ledger);
 	});
 
 	it("ends a Stopped Run interrupted once, not forced and not marked abandoned", async () => {

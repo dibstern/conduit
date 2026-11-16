@@ -489,10 +489,13 @@ observations:
 - Declined: `steer.jsonl`, changing the acknowledgement outcome to the
   captured post-terminal `revert_to_followup` value and removing the captured
   steered `user-message-appended` delta and duplicate user stream message.
-- Pending at terminal: the same source, removing its steer acknowledgement
-  and both steered user-message rows. The captured terminal ends the pending
-  promise. The landed-before-terminal race removes only the acknowledgement,
-  retaining both captured user-message channels.
+- Pending at terminal: the same source, removing both steered user-message
+  rows and moving its acknowledgement after `stream.end` with the captured
+  post-terminal `revert_to_followup` outcome. The turn ends with the answer
+  outstanding; the late answer declines the steer (J7). The
+  landed-before-terminal race keeps both captured user-message channels and
+  moves the original `complete_delivered` acknowledgement after `stream.end`,
+  so the steer joins only at that late answer.
 - Delivered error: `steer.jsonl`, changing only `wait.result.status` to the
   public `error` value and adding declared RunError `message` and
   `code: connection_stalled`. The delivered input owns the error message;
@@ -500,9 +503,10 @@ observations:
   no requeue or second SDK send.
 - Identical text: `steer.jsonl`, copying its steer.call immediately after
   itself while retaining only the original acknowledgement and user-message
-  channels. The replay gates both operations before delivering the original
-  receipt. It must consume only the first input, with the second declined at
-  terminal and run once by the inbox.
+  channels, and adding a post-terminal `revert_to_followup` acknowledgement
+  after `stream.end` for the second call. The replay gates both operations
+  before delivering the original receipt. It must consume only the first
+  input, with the second declined by its late answer and run once by the inbox.
 - Images and missing method: the declined variant without `steer.call` or
   `steer.ack` operation wrappers. Missing method also removes `run.handle.steer`.
   The image is an explicit one-pixel PNG input to Conduit, never an invented
@@ -511,9 +515,9 @@ observations:
 - Pending interrupt: the pending variant changes only `wait.result.status`
   to its public `cancelled` value and moves the original delivered
   acknowledgement after that wait row. Replay gates cancelled waits on the
-  caller's cancel operation. The late acknowledgement races the settled
-  decline and must not deliver the input again. Stop keeps the inbox paused;
-  the test explicitly resumes its queued input and verifies one retry send.
+  caller's cancel operation. Stop does not decline the pending steer, so the
+  late delivered acknowledgement joins it to the stopped run once, with no
+  requeue and no second send (J7).
 - Pending runner crash: the interrupt variant without the acknowledgement.
   Its cancelled wait stays pending until cancellation, so the test kills only
   its verified owned runner PID while the steer remains pending. Before
@@ -536,7 +540,8 @@ delivery `steer` after the missing-method run has completed, proving an idle
 session starts a normal turn without calling native steer. Playback gates the
 captured `steer.call` until Conduit invokes the operation. Missing acknowledgements
 leave its promise pending while the captured stream continues; they add no SDK
-wire fields. The suite writes durable input/turn/message state, actual port
+wire fields. Acknowledgements after `stream.end` settle once the run's wait has
+returned, as the captured `steer.after_terminal` row did. The suite writes durable input/turn/message state, actual port
 operations, capture provenance and owned-process cleanup to
 `test-results/conduit-test-xqsg.12.json`.
 The existing projector splits one native run at a delivered user's message.

@@ -94,13 +94,6 @@ interface CursorSession {
 }
 
 const decodeTurnFacts = Schema.decodeUnknownOption(TurnFacts);
-const decodeSteeredMessage = Schema.decodeUnknownResult(
-	Schema.Struct({
-		type: Schema.Literal("user-message-appended"),
-		userMessage: Schema.Struct({ text: Schema.String }),
-	}),
-);
-
 const decodeRunning = Schema.decodeUnknownResult(
 	Schema.Struct({
 		type: Schema.Literal("status"),
@@ -161,7 +154,10 @@ type Update =
 	| {
 			readonly channel: "steer-result";
 			readonly inputId: string;
-			readonly delivered: boolean;
+			readonly answer: Result.Result<
+				"complete_delivered" | "revert_to_followup",
+				SessionFailure
+			>;
 	  }
 	| {
 			readonly channel: "wait";
@@ -317,7 +313,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 					? yield* session.steer(input, sink, claim)
 					: this.result(session, "steer-declined", 0);
 			session.busy = true;
-			session.runIds = new Set(input.runId ? [input.runId] : []);
+			// This turn's runs; a steer that joins after the turn ends must not
+			// reach the next turn's set.
+			const runIds = new Set(input.runId ? [input.runId] : []);
+			session.runIds = runIds;
 			this.onTurnStateChanged?.(true);
 			session.cancelRequested = false;
 			const questionAbort = new AbortController();
@@ -357,11 +356,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 				string,
 				{
 					input: SessionTurn;
+					sink: EventSink;
 					sinkId: string;
 					shellCalls: readonly string[];
 					finished: Deferred.Deferred<TurnResult, SessionFailure>;
-					landed: boolean;
-					outcome?: boolean;
 				}
 			>();
 			let accepted = false;
@@ -387,43 +385,61 @@ export class CursorRunnerPayload implements RunnerPayload {
 					yield* Deferred.succeed(intake, this.result(session, "accepted", 0));
 				});
 			let acceptingSteers = true;
-			// All receipts, turn end and cancellation use this one settle point.
-			// Retain settled receipts until turn end so an ack plus its user delta
-			// cannot consume a second steer with identical text.
-			const settleSteer = (inputId: string, delivered: boolean) =>
+			// J7 (AMENDMENT-2026-11-16): the steer settlement. The steer call's own
+			// answer is the only thing that settles a sent steer: complete_delivered
+			// joins the open Run (J3), revert_to_followup declines, and a failed call
+			// fails the send, final. Any other answer leaves it pending. No delta,
+			// turn end or cancel settles it; an answer read after the turn ends
+			// settles it then, and its join names the ended Run (J2, J4).
+			const settleSteer = (
+				inputId: string,
+				answer: Extract<Update, { channel: "steer-result" }>["answer"],
+			) =>
 				Effect.suspend(() => {
 					const pending = steers.get(inputId);
-					if (!pending || pending.outcome !== undefined) return Effect.void;
-					pending.outcome = delivered;
+					if (
+						!pending ||
+						(Result.isSuccess(answer) &&
+							answer.success !== "complete_delivered" &&
+							answer.success !== "revert_to_followup")
+					)
+						return Effect.void;
+					steers.delete(inputId);
 					return Effect.gen({ self: this }, function* () {
-						if (delivered) {
-							yield* events.steerDelivered(pending.shellCalls);
-							yield* this.emit({
-								type: "place-user-message",
-								sinkId: pending.sinkId,
-								input: {
-									sessionId: input.sessionId,
-									inputId,
-									...(pending.input.runId
-										? { runId: pending.input.runId }
-										: {}),
-									text: pending.input.text ?? pending.input.prompt,
-								},
-							});
-							currentInputId = inputId;
-							if (pending.input.runId) session.runIds?.add(pending.input.runId);
-							events.currentUserMessageId = inputId;
-							if (events.runId && pending.input.runId)
-								yield* events.push("run.started", {
-									inputId,
-									requestedRunId: pending.input.runId,
-								});
-						}
-						return this.result(
-							session,
-							delivered ? "accepted" : "steer-declined",
-							0,
-						);
+						if (Result.isFailure(answer))
+							return this.result(
+								session,
+								"error",
+								0,
+								cursorTurnError(answer.failure).code,
+								answer.failure.message,
+							);
+						if (answer.success === "revert_to_followup")
+							return this.result(session, "steer-declined", 0);
+						yield* events.steerDelivered(pending.shellCalls);
+						yield* this.emit({
+							type: "place-user-message",
+							sinkId: pending.sinkId,
+							input: {
+								sessionId: input.sessionId,
+								inputId,
+								...(pending.input.runId ? { runId: pending.input.runId } : {}),
+								text: pending.input.text ?? pending.input.prompt,
+							},
+						});
+						currentInputId = inputId;
+						if (pending.input.runId) runIds.add(pending.input.runId);
+						events.currentUserMessageId = inputId;
+						// The steer's own sink outlives the initial send's, so a join
+						// read after the turn ends still reaches main.
+						if (events.runId && pending.input.runId)
+							yield* events.push(
+								"run.started",
+								{ inputId, requestedRunId: pending.input.runId },
+								undefined,
+								pending.sink,
+							);
+						return this.result(session, "accepted", 0);
 					}).pipe(
 						Effect.mapError(
 							(): SessionFailure => ({
@@ -435,12 +451,6 @@ export class CursorRunnerPayload implements RunnerPayload {
 						Effect.flatMap((exit) => Deferred.done(pending.finished, exit)),
 						Effect.asVoid,
 					);
-				});
-			const declinePending = () =>
-				Effect.gen(function* () {
-					acceptingSteers = false;
-					for (const inputId of steers.keys())
-						yield* settleSteer(inputId, false);
 				});
 			const applyUpdate = (
 				update: Update,
@@ -473,26 +483,8 @@ export class CursorRunnerPayload implements RunnerPayload {
 						return;
 					}
 					if (update.channel === "steer-result") {
-						yield* settleSteer(update.inputId, update.delivered);
+						yield* settleSteer(update.inputId, update.answer);
 					} else if (update.channel === "delta") {
-						const message = decodeSteeredMessage(update.value);
-						if (Result.isSuccess(message)) {
-							const matching = [...steers.values()].filter(
-								(steer) =>
-									steer.input.prompt === message.success.userMessage.text,
-							);
-							// Appended-user deltas have no command id. Repeated text,
-							// including the initial prompt, must wait for its exact ack.
-							const pending =
-								matching.length === 1 &&
-								input.prompt !== message.success.userMessage.text
-									? matching[0]
-									: undefined;
-							if (pending && !pending.landed && pending.outcome !== false) {
-								pending.landed = true;
-								yield* settleSteer(pending.input.inputId, true);
-							}
-						}
 						yield* events.delta(update.value);
 					} else if (update.channel === "stream") {
 						yield* events.stream(update.value);
@@ -520,6 +512,20 @@ export class CursorRunnerPayload implements RunnerPayload {
 			return yield* Effect.scoped(
 				Effect.gen({ self: this }, function* () {
 					const queue = yield* Queue.unbounded<Update>();
+					// J7 (AMENDMENT-2026-11-16): the turn's end closes steering and
+					// settles answers it left unread; later answers settle directly.
+					yield* Effect.addFinalizer(() =>
+						Effect.gen(function* () {
+							acceptingUpdates = false;
+							acceptingSteers = false;
+							for (const update of [
+								...beforeIntake.splice(0),
+								...(yield* Queue.clear(queue)),
+							])
+								if (update.channel === "steer-result")
+									yield* settleSteer(update.inputId, update.answer);
+						}),
+					);
 					const customTools = {
 						ask_user: cursorAskUserTool(
 							sink,
@@ -798,6 +804,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 									TurnResult,
 									SessionFailure
 								>();
+								// J7 (AMENDMENT-2026-11-16): a steer refused here was never
+								// sent, so it is not reached. steer-declined is main's
+								// not-reached return: it requeues the input at the inbox front
+								// (D53), and it runs once as its own turn.
 								if (
 									!acceptingSteers ||
 									session.cancelRequested ||
@@ -812,20 +822,21 @@ export class CursorRunnerPayload implements RunnerPayload {
 									sinkId,
 									shellCalls: events.activeShellCalls(),
 									finished,
-									landed: false,
+									sink: steerSink,
 								});
 								yield* Effect.forkScoped(
 									sdkCall("steer", () => steer(steeredInput.prompt)).pipe(
-										Effect.match({
-											onFailure: () => false,
-											onSuccess: (outcome) => outcome === "complete_delivered",
-										}),
-										Effect.flatMap((delivered) =>
-											Queue.offer(queue, {
-												channel: "steer-result",
-												inputId: steeredInput.inputId,
-												delivered,
-											}),
+										Effect.result,
+										Effect.flatMap((answer) =>
+											Effect.suspend(() =>
+												acceptingUpdates
+													? Queue.offer(queue, {
+															channel: "steer-result",
+															inputId: steeredInput.inputId,
+															answer,
+														})
+													: settleSteer(steeredInput.inputId, answer),
+											),
 										),
 									),
 								);
@@ -883,7 +894,8 @@ export class CursorRunnerPayload implements RunnerPayload {
 					while (true) {
 						const update = yield* Queue.take(queue);
 						if (update.channel === "cancel") {
-							yield* declinePending();
+							// J7: cancel closes steering; Cursor's answer settles any sent steer.
+							acceptingSteers = false;
 							if (!cancelling) {
 								cancelling = true;
 								// Start the deadline when cancel is invoked, even if cancel itself hangs.
@@ -939,7 +951,6 @@ export class CursorRunnerPayload implements RunnerPayload {
 						for (const pending of pendingUpdates) {
 							yield* applyUpdate(pending, true);
 						}
-						yield* declinePending();
 						acceptingUpdates = false;
 						if (Result.isFailure(update.result))
 							return yield* finish(
@@ -1067,19 +1078,15 @@ export class CursorRunnerPayload implements RunnerPayload {
 				),
 			).pipe(
 				Effect.ensuring(
-					declinePending().pipe(
-						Effect.andThen(
-							Effect.sync(() => {
-								acceptingUpdates = false;
-								session.busy = false;
-								session.runIds = undefined;
-								session.run = undefined;
-								session.questionAbort = undefined;
-								session.onCancel = undefined;
-								session.steer = undefined;
-							}),
-						),
-					),
+					Effect.sync(() => {
+						acceptingUpdates = false;
+						session.busy = false;
+						session.runIds = undefined;
+						session.run = undefined;
+						session.questionAbort = undefined;
+						session.onCancel = undefined;
+						session.steer = undefined;
+					}),
 				),
 				Effect.flatMap((result) =>
 					Effect.gen({ self: this }, function* () {

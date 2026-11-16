@@ -722,7 +722,7 @@
 		"timeout-override": 2
 	},
 	"test/integration/daemon/cursor-steer.test.ts": {
-		"polling": 8,
+		"polling": 7,
 		"timeout-override": 7
 	},
 	"test/integration/daemon/cursor-subagents.test.ts": {

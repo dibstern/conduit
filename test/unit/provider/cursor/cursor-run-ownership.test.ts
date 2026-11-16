@@ -39,6 +39,10 @@ describe("Cursor accepted run ownership", () => {
 		"unprepared",
 		// Signed in, but the send lacks prepare's facts.
 		"unprepared-facts",
+		// J7 (AMENDMENT-2026-11-16): the steer's answer arrives after the turn ends.
+		"late-delivered",
+		"late-reverted",
+		"steer-failure",
 	] as const)("keeps intake and terminal ownership with %s evidence", async (evidence) => {
 		const root = mkdtempSync(join(tmpdir(), "cursor-run-ownership-"));
 		const events: ProviderRuntimeEvent[] = [];
@@ -57,7 +61,9 @@ describe("Cursor accepted run ownership", () => {
 						let sends = 0;
 						let delta: ((value: unknown) => void) | undefined;
 						const steer = vi.fn(() =>
-							Effect.runPromise(Deferred.await(delivered)),
+							evidence === "steer-failure"
+								? Promise.reject(new Error("steer transport failed"))
+								: Effect.runPromise(Deferred.await(delivered)),
 						);
 						const cancel = vi.fn(async () => {});
 						const port: CursorSdkPort = {
@@ -311,13 +317,65 @@ describe("Cursor accepted run ownership", () => {
 							vi.waitFor(() => expect(steer).toHaveBeenCalledOnce()),
 						);
 						expect(accepted()).toHaveLength(1);
-						if (evidence === "ack" || evidence === "terminal-error")
-							yield* Deferred.succeed(delivered, "complete_delivered");
-						else
+						if (evidence === "steer-failure") {
+							// 107: a failed steer call fails the send, final; it is not declined.
+							expect(yield* Fiber.join(second)).toMatchObject({
+								status: "error",
+								error: {
+									retryable: false,
+									message: expect.stringContaining("steer transport failed"),
+								},
+							});
+							yield* Deferred.succeed(finish, undefined);
+							expect((yield* Fiber.join(first)).status).toBe("accepted");
+							expect(accepted()).toHaveLength(1);
+							return;
+						}
+						if (evidence === "late-delivered" || evidence === "late-reverted") {
+							// 105: the turn ends with the answer outstanding; the steer
+							// stays pending, and its later answer settles it.
+							yield* Deferred.succeed(finish, undefined);
+							expect((yield* Fiber.join(first)).status).toBe("accepted");
+							expect(second.pollUnsafe()).toBeUndefined();
+							yield* Deferred.succeed(
+								delivered,
+								evidence === "late-delivered"
+									? "complete_delivered"
+									: "revert_to_followup",
+							);
+							expect((yield* Fiber.join(second)).status).toBe(
+								evidence === "late-delivered" ? "accepted" : "steer-declined",
+							);
+							expect(
+								accepted().map(({ runId, data }) => ({ runId, data })),
+							).toEqual([
+								{
+									runId: "run-a",
+									data: { inputId: "input-a", requestedRunId: "run-a" },
+								},
+								...(evidence === "late-delivered"
+									? [
+											{
+												runId: "run-a",
+												data: { inputId: "input-b", requestedRunId: "run-b" },
+											},
+										]
+									: []),
+							]);
+							return;
+						}
+						if (evidence === "user-echo") {
+							// 92: an appended-user delta matching the steer's text is not
+							// its join; only the SDK's complete_delivered answer is.
 							delta?.({
 								type: "user-message-appended",
 								userMessage: { text: "input-b" },
 							});
+							yield* Effect.sleep("50 millis");
+							expect(second.pollUnsafe()).toBeUndefined();
+							expect(accepted()).toHaveLength(1);
+						}
+						yield* Deferred.succeed(delivered, "complete_delivered");
 						expect((yield* Fiber.join(second)).status).toBe("accepted");
 						expect(
 							accepted().map(({ runId, data }) => ({ runId, data })),

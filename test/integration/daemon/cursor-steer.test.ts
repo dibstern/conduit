@@ -207,6 +207,19 @@ function replay(kind: Replay): TraceRow[] {
 		)
 	)
 		trace = trace.filter((row) => row.kind !== "steer.ack");
+	// J7 (AMENDMENT-2026-11-16): an answer outstanding at the turn's end
+	// arrives after it, as steer.jsonl's steer.after_terminal row did.
+	const late =
+		kind === "landed-pending-terminal"
+			? [ack]
+			: kind === "pending-terminal" || kind === "identical-text"
+				? [{ ...ack, data: { ...ack.data, outcome: "revert_to_followup" } }]
+				: [];
+	trace.splice(
+		trace.findIndex((row) => row.kind === "stream.end") + 1,
+		0,
+		...late,
+	);
 	if (kind === "pending-interrupt" || kind === "pending-crash") {
 		const terminal = trace.find((row) => row.kind === "wait.result");
 		if (!terminal?.data) throw new Error("Missing captured terminal");
@@ -499,13 +512,15 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 			(row) => row.input_id === inputId,
 		);
 		expect(steeredMessage?.steered).toBe(1);
+		// J7 (AMENDMENT-2026-11-16): the landed steer joins only at its answer,
+		// after the turn's last content, so no assistant message follows it.
 		expect(
 			state.assistantMessages.some(
 				(message) =>
 					message.parent_id === steeredMessage?.id &&
 					message.turn_id === steeredMessage?.id,
 			),
-		).toBe(true);
+		).toBe(kind !== "landed-pending-terminal");
 		expect(
 			rows(capturePath).filter((row) => row.kind === "steer.call"),
 		).toHaveLength(1);
@@ -758,7 +773,9 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		observations["acceptedInputsShareOneTerminalError"] = true;
 	}, 240_000);
 
-	it("interrupts a pending steer before a late delivered acknowledgement without duplicating it", async () => {
+	// J7 (AMENDMENT-2026-11-16): Stop does not decline a pending steer. Cursor's
+	// later complete_delivered joins it to the stopped Run, once, with no requeue.
+	it("joins a pending steer on its delivered answer after Stop, once", async () => {
 		const { fixture, browser, id } = await start("pending-interrupt");
 		const inputId = randomUUID();
 		expect(
@@ -782,25 +799,17 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		await Effect.runPromise(
 			browser.rpc.CancelSession({ sessionId: id, commandId: randomUUID() }),
 		);
-		await turns(fixture, id, ["interrupted"]);
-		await vi.waitFor(
-			() =>
-				expect(snapshot(fixture, id).inputs).toContainEqual({
-					input_id: inputId,
-					state: "queued",
-				}),
-			{ timeout: TIMEOUT },
-		);
-		const stopped = snapshot(fixture, id);
+		await turns(fixture, id, ["interrupted", "interrupted"]);
+		const stopped = oneMessage(fixture, id, inputId);
 		expect(
-			stopped.messages.filter((message) => message.input_id === inputId),
-		).toHaveLength(0);
+			stopped.messages.find((message) => message.input_id === inputId)?.steered,
+		).toBe(1);
 		expect(
 			stopped.events.filter(
 				(event) =>
 					event.type === "input.requeued" && event.data["inputId"] === inputId,
 			),
-		).toHaveLength(1);
+		).toHaveLength(0);
 		expect(
 			rows(capturePath).filter((row) => row.kind === "steer.ack"),
 		).toHaveLength(1);
@@ -810,17 +819,11 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		expect(
 			rows(capturePath).filter((row) => row.kind === "send.options"),
 		).toHaveLength(1);
-		// Stop pauses the inbox. Resuming the queued input is explicit, and
-		// the late SDK receipt must not have consumed it while paused.
-		await browser.sendNow(id, inputId);
-		await turns(fixture, id, ["interrupted", "completed"]);
-		oneMessage(fixture, id, inputId);
-		expect(
-			rows(capturePath).filter((row) => row.kind === "send.options"),
-		).toHaveLength(2);
-		observations["lateAcknowledgementDidNotDeliverTwice"] = true;
+		observations["lateAcknowledgementJoinedOnce"] = true;
 	}, 240_000);
 
+	// J7 (AMENDMENT-2026-11-16): the second steer's answer, revert_to_followup,
+	// arrives after the turn ends and declines it; nothing local declines it.
 	it("uses one delivered acknowledgement and its duplicate user channel for only the first identical-text steer", async () => {
 		const { fixture, browser, id } = await start("identical-text");
 		const firstSteerId = randomUUID();
@@ -867,8 +870,10 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 			rows(capturePath).filter((row) => row.kind === "steer.call"),
 		).toHaveLength(2);
 		expect(
-			rows(capturePath).filter((row) => row.kind === "steer.ack"),
-		).toHaveLength(1);
+			rows(capturePath)
+				.filter((row) => row.kind === "steer.ack")
+				.map((row) => row.data?.["outcome"]),
+		).toEqual(["complete_delivered", "revert_to_followup"]);
 		expect(
 			rows(capturePath).filter((row) => row.kind === "send.options"),
 		).toHaveLength(2);

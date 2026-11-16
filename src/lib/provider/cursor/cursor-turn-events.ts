@@ -286,8 +286,9 @@ export class CursorTurnEvents {
 		type: K,
 		data: ProviderRuntimeEventPayloadMap[K],
 		refs?: ProviderRuntimeProviderRefs,
+		sink = this.sink,
 	) {
-		return this.sink.push({
+		return sink.push({
 			eventId: createEventId(),
 			type,
 			providerId: "cursor",
