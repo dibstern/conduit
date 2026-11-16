@@ -2424,41 +2424,36 @@ class ClaudeRunnerPayload implements RunnerPayload {
 								: (ctx.acceptedOutputOwner?.inputId ?? ctx.currentTurnId)),
 					];
 					// J6 (AMENDMENT-2026-11-16): the open run's result settles every steer
-					// placed inside it. A named steer joins it before its terminal; a run
-					// Stop closed may already be retired, so a steer it names ends on its
-					// own run with this result. An omitted steer starts its own run below.
+					// placed inside it. A named steer joins it before its terminal, a run
+					// Stop asked to end included (J6.3): a retired run's session is disposed,
+					// so no result of it arrives. An omitted steer starts its own run below.
 					const openRunId = ctx.currentRunId;
-					const stoppedSteerRunIds: string[] = [];
 					for (const [inputId, steer] of ctx.placedSteers ?? []) {
 						if (!openRunId || !steer.runId || !inputIds.includes(inputId))
 							continue;
 						ctx.placedSteers?.delete(inputId);
-						if (ctx.closedRunIds?.has(openRunId))
-							stoppedSteerRunIds.push(steer.runId);
-						else {
-							(ctx.messageRunIds ??= new Map()).set(inputId, openRunId);
-							yield* steer.eventSink
-								.push(
-									claudeRuntimeEvent(
-										"run.started",
-										ctx.sessionId,
-										{
-											inputId,
-											requestedRunId: steer.runId,
-											...(steer.continuation
-												? { userMessageId: steer.continuation.cutOffMessageId }
-												: {}),
-										},
-										openRunId,
-									),
-								)
-								.pipe(
-									Effect.mapError(
-										(cause) =>
-											new ClaudeBoundaryError({ operation: "joinRun", cause }),
-									),
-								);
-						}
+						(ctx.messageRunIds ??= new Map()).set(inputId, openRunId);
+						yield* steer.eventSink
+							.push(
+								claudeRuntimeEvent(
+									"run.started",
+									ctx.sessionId,
+									{
+										inputId,
+										requestedRunId: steer.runId,
+										...(steer.continuation
+											? { userMessageId: steer.continuation.cutOffMessageId }
+											: {}),
+									},
+									openRunId,
+								),
+							)
+							.pipe(
+								Effect.mapError(
+									(cause) =>
+										new ClaudeBoundaryError({ operation: "joinRun", cause }),
+								),
+							);
 						yield* this.sinks.releaseSinkEffect(steer.eventSink);
 					}
 					const acceptedOwner = inputIds.flatMap((inputId) => {
@@ -2471,7 +2466,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 								input.runId ? [input.runId] : [],
 							),
 							...acceptedOwner.map(({ runId }) => runId),
-							...stoppedSteerRunIds,
 						]),
 					];
 					endsCurrentRun =

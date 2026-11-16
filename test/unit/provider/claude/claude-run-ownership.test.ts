@@ -1607,6 +1607,104 @@ describe("Claude accepted run ownership", () => {
 		}
 	});
 
+	// J6.3: Stop asks A to end; it has not ended. A steer placed inside A that A's interrupted
+	// result names joins A before A's terminal and ends with it, with no terminal of its own.
+	it("joins a placed steer into the stopped run its interrupted result names", async () => {
+		const ids: [string, string] = [
+			"66666666-6666-4666-8666-666666666666",
+			"77777777-7777-4777-8777-777777777777",
+		];
+		const interrupted = Effect.runSync(Deferred.make<void>());
+		const steerPlaced = Effect.runSync(Deferred.make<void>());
+		const terminal = Effect.runSync(Deferred.make<void>());
+		const events: ProviderRuntimeEvent[] = [];
+		const sink = createMockEventSink();
+		sink.push = (event) =>
+			Effect.sync(() => {
+				events.push(event);
+				if (event.type.startsWith("turn."))
+					Effect.runSync(Deferred.succeed(terminal, undefined));
+			});
+		const lifecycle = (command_uuid: string) => ({
+			type: "command_lifecycle" as const,
+			command_uuid,
+			state: "started" as const,
+			session_id: "stop-join-sdk",
+			uuid: crypto.randomUUID(),
+		});
+		const instance = makeTestClaudeProviderInstance({
+			queryFactory: ({ prompt }) => {
+				if (typeof prompt === "string")
+					throw new Error("Expected streaming input");
+				const inputs = prompt[Symbol.asyncIterator]();
+				return Object.assign(createMockQuery([]), {
+					interrupt: vi.fn(async () => {
+						Effect.runSync(Deferred.succeed(interrupted, undefined));
+						return { still_queued: [] };
+					}),
+					[Symbol.asyncIterator]: () =>
+						(async function* () {
+							await inputs.next();
+							yield lifecycle(ids[0]);
+							await inputs.next();
+							yield lifecycle(ids[1]);
+							Effect.runSync(Deferred.succeed(steerPlaced, undefined));
+							await Effect.runPromise(Deferred.await(interrupted));
+							yield makeErrorResult({
+								session_id: "stop-join-sdk",
+								uuid: crypto.randomUUID(),
+								user_message_uuids: ids,
+							});
+						})(),
+				});
+			},
+		});
+		const send = (inputId: string, runId: string) =>
+			Effect.runPromise(
+				instance.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "stop-join-session",
+						inputId,
+						runId,
+						eventSink: sink,
+						model: { providerId: "claude", modelId: "claude-fable-5" },
+					}),
+				),
+			);
+		const sends = [send(ids[0], "run-a")];
+		try {
+			await sends[0];
+			sends.push(send(ids[1], "run-b"));
+			await Effect.runPromise(Deferred.await(steerPlaced));
+			await sends[1];
+			await Effect.runPromise(
+				instance.interruptTurnEffect("stop-join-session", ["run-a"]),
+			);
+			await Effect.runPromise(Deferred.await(terminal));
+			expect(
+				events.flatMap((event) =>
+					event.type === "run.started"
+						? [
+								`run.started ${event.runId} ${Reflect.get(event.data as object, "requestedRunId")}`,
+							]
+						: event.type === "turn.completed" ||
+								event.type === "turn.interrupted" ||
+								event.type === "turn.error"
+							? [`${event.type} ${event.runId}`]
+							: [],
+				),
+			).toEqual([
+				"run.started run-a run-a",
+				"run.started run-a run-b",
+				"turn.interrupted run-a",
+			]);
+		} finally {
+			Effect.runSync(Deferred.succeed(interrupted, undefined));
+			await Effect.runPromise(instance.shutdownEffect().pipe(Effect.ignore));
+			await Promise.allSettled(sends);
+		}
+	});
+
 	// 86: the interrupted result lists the queued steer, and the receipt says it will still run.
 	it("keeps a steer the interrupt receipt lists in still_queued pending, not failed", async () => {
 		const ids: [string, string] = [
