@@ -469,8 +469,8 @@ export class ProviderSideEffectReactor {
 					Effect.flatMap((rows) =>
 						Effect.forEach(
 							rows,
-							(row) =>
-								this.runLedgerEffect(row).pipe(
+							(row) => {
+								const run = this.runLedgerEffect(row).pipe(
 									// A returned abort releases the probes held behind it.
 									Effect.tap(() =>
 										row.effect_type === "cancel_request"
@@ -482,7 +482,18 @@ export class ProviderSideEffectReactor {
 												})
 											: Effect.void,
 									),
-								),
+								);
+								// Only a probe has a deadline. An abort or task stop that never returns runs on
+								// its own fiber, so it holds no later wake: another session's probe still runs.
+								return row.effect_type === "probe"
+									? run
+									: run.pipe(
+											Effect.catch((cause) =>
+												Effect.logError("Run Ledger effect failed", cause),
+											),
+											Effect.forkIn(wakeScope),
+										);
+							},
 							{ concurrency: "unbounded", discard: true },
 						),
 					),
