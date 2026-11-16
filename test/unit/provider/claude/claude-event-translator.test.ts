@@ -1044,7 +1044,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(data["partId"]).toBeDefined();
 	});
 
-	describe("hidden thinking keepalives", () => {
+	describe("liveness", () => {
 		beforeEach(async () => {
 			vi.useFakeTimers();
 			vi.setSystemTime(0);
@@ -1053,7 +1053,7 @@ describe("ClaudeEventTranslator", () => {
 				ctx,
 				makeStreamEvent({
 					type: "message_start",
-					message: { id: "msg-hidden-thinking" },
+					message: { id: "msg-liveness" },
 				}),
 			);
 		});
@@ -1062,129 +1062,77 @@ describe("ClaudeEventTranslator", () => {
 			vi.useRealTimers();
 		});
 
-		it("keeps a 200s hidden-thinking block alive exactly once every 30s", async () => {
-			await runTranslate(
-				translator,
-				ctx,
-				makeStreamEvent({
-					type: "content_block_start",
-					index: 0,
-					content_block: { type: "thinking", thinking: "" },
-				}),
-			);
-			const start = sink.events.find(
-				(event) => event.type === "thinking.start",
-			);
-			expect(start).toBeDefined();
+		const aliveTimes = () =>
+			sink.events
+				.filter((event) => event.type === "provider.alive")
+				.map((event) => event.createdAt);
 
-			for (let elapsed = 1_000; elapsed <= 200_000; elapsed += 1_000) {
-				vi.setSystemTime(elapsed);
-				await runTranslate(
-					translator,
-					ctx,
-					makeStreamEvent({
-						type: "content_block_delta",
-						index: 0,
-						delta: { type: "thinking_delta", thinking: "" },
-					}),
-				);
-			}
-			await runTranslate(
-				translator,
-				ctx,
-				makeStreamEvent({ type: "content_block_stop", index: 0 }),
-			);
-
-			const keepalives = sink.events.filter(
-				(event) => event.type === "thinking.delta",
-			);
-			expect(keepalives.map((event) => event.createdAt)).toEqual([
-				30_000, 60_000, 90_000, 120_000, 150_000, 180_000,
-			]);
-			for (const keepalive of keepalives) {
-				expect(keepalive).toMatchObject({
-					sessionId: "sess-1",
-					data: {
-						messageId: "msg-hidden-thinking",
-						partId: dataOf(start)["partId"],
-						text: "",
-					},
-				});
-			}
-		});
-
-		it("waits 30s from each block's start, including a new tool round at the same index", async () => {
-			for (const [startedAt, apiMessageId] of [
-				[120_000, "msg-hidden-thinking"],
-				[180_000, "msg-next-round"],
-			] as const) {
-				vi.setSystemTime(startedAt);
-				await runTranslate(
-					translator,
-					ctx,
-					makeStreamEvent({
-						type: "message_start",
-						message: { id: apiMessageId },
-					}),
-				);
+		// Each stream is SDK traffic the translator shows nothing for while it
+		// arrives. Session ses_b99041d6 streamed a Write input for 2m19s.
+		it.each([
+			{
+				name: "a long tool input",
+				block: {
+					type: "tool_use",
+					id: "toolu_write",
+					name: "Write",
+					input: {},
+				},
+				delta: { type: "input_json_delta", partial_json: "<p>" },
+			},
+			{
+				name: "hidden thinking",
+				block: { type: "thinking", thinking: "" },
+				delta: { type: "thinking_delta", thinking: "" },
+			},
+			{ name: "API pings", block: undefined, delta: undefined },
+		])("keeps $name alive every 30s without showing anything", async ({
+			block,
+			delta,
+		}) => {
+			if (block)
 				await runTranslate(
 					translator,
 					ctx,
 					makeStreamEvent({
 						type: "content_block_start",
 						index: 0,
-						content_block: { type: "thinking", thinking: "" },
+						content_block: block,
 					}),
 				);
-				const countBefore = sink.events.length;
-				for (const elapsed of [0, 1_000, 29_999, 30_000, 30_000]) {
-					vi.setSystemTime(startedAt + elapsed);
-					await runTranslate(
-						translator,
-						ctx,
-						makeStreamEvent({
-							type: "content_block_delta",
-							index: 0,
-							delta: { type: "thinking_delta", thinking: "" },
-						}),
-					);
-					if (elapsed < 30_000) {
-						expect(sink.events).toHaveLength(countBefore);
-					}
-				}
+			const shown = sink.events.length;
+			for (let elapsed = 1_000; elapsed <= 140_000; elapsed += 1_000) {
+				vi.setSystemTime(elapsed);
 				await runTranslate(
 					translator,
 					ctx,
-					makeStreamEvent({ type: "content_block_stop", index: 0 }),
+					makeStreamEvent(
+						delta
+							? { type: "content_block_delta", index: 0, delta }
+							: { type: "ping" },
+					),
 				);
 			}
 
-			const starts = sink.events.filter(
-				(event) => event.type === "thinking.start",
-			);
-			const keepalives = sink.events.filter(
-				(event) => event.type === "thinking.delta",
-			);
-			expect(keepalives.map((event) => event.createdAt)).toEqual([
-				150_000, 210_000,
-			]);
-			expect(keepalives.map((event) => dataOf(event)["partId"])).toEqual(
-				starts.map((event) => dataOf(event)["partId"]),
-			);
-			expect(dataOf(starts[0])["partId"]).not.toBe(dataOf(starts[1])["partId"]);
+			expect(aliveTimes()).toEqual([30_000, 60_000, 90_000, 120_000]);
+			expect(
+				sink.events
+					.slice(shown)
+					.every((event) => event.type === "provider.alive"),
+			).toBe(true);
 		});
 
-		it("preserves the exact visible-thinking event sequence across long gaps", async () => {
+		it("needs no heartbeat while visible output flows, however far apart", async () => {
 			await runTranslate(
 				translator,
 				ctx,
 				makeStreamEvent({
 					type: "content_block_start",
 					index: 0,
-					content_block: { type: "thinking", thinking: "First " },
+					content_block: { type: "text", text: "First " },
 				}),
 			);
-			for (const [time, thinking] of [
+			for (const [time, text] of [
 				[60_000, "then "],
 				[150_000, "finally."],
 			] as const) {
@@ -1195,165 +1143,72 @@ describe("ClaudeEventTranslator", () => {
 					makeStreamEvent({
 						type: "content_block_delta",
 						index: 0,
-						delta: { type: "thinking_delta", thinking },
+						delta: { type: "text_delta", text },
 					}),
 				);
 			}
-			await runTranslate(
-				translator,
-				ctx,
-				makeStreamEvent({ type: "content_block_stop", index: 0 }),
-			);
 
-			expect(sink.events.map((event) => event.type)).toEqual([
-				"message.created",
-				"session.status",
-				"thinking.start",
-				"thinking.delta",
-				"thinking.delta",
-				"thinking.delta",
-				"thinking.end",
-			]);
-			const start = sink.events.find(
-				(event) => event.type === "thinking.start",
-			);
-			expect(
-				sink.events
-					.filter((event) => event.type === "thinking.delta")
-					.map((event) => event.data),
-			).toEqual(
-				["First ", "then ", "finally."].map((text) => ({
-					messageId: "msg-hidden-thinking",
-					partId: dataOf(start)["partId"],
-					text,
-				})),
-			);
+			expect(aliveTimes()).toEqual([]);
 		});
 
-		it.each([
-			"text",
-			"thinking",
-		] as const)("drops empty text_delta for an open %s block after 120s", async (type) => {
-			await runTranslate(
-				translator,
-				ctx,
-				makeStreamEvent({
-					type: "content_block_start",
-					index: 0,
-					content_block:
-						type === "thinking" ? { type, thinking: "" } : { type, text: "" },
-				}),
-			);
-			const countBefore = sink.events.length;
-			vi.setSystemTime(120_000);
-			await runTranslate(
-				translator,
-				ctx,
-				makeStreamEvent({
-					type: "content_block_delta",
-					index: 0,
-					delta: { type: "text_delta", text: "" },
-				}),
-			);
-			expect(sink.events).toHaveLength(countBefore);
-		});
-
-		it.each([
-			"missing",
-			"stopped",
-			"text",
-		] as const)("drops empty thinking_delta when the block is %s", async (state) => {
-			if (state !== "missing") {
-				await runTranslate(
-					translator,
-					ctx,
-					makeStreamEvent({
+		it("restarts the 30s at any output, a heartbeat included", async () => {
+			for (const [time, message] of [
+				[29_999, { type: "ping" }],
+				[30_000, { type: "ping" }],
+				[
+					45_000,
+					{
 						type: "content_block_start",
 						index: 0,
-						content_block:
-							state === "stopped"
-								? { type: "thinking", thinking: "" }
-								: { type: "text", text: "" },
-					}),
-				);
+						content_block: { type: "text", text: "Hi" },
+					},
+				],
+				[74_999, { type: "ping" }],
+				[75_000, { type: "ping" }],
+				[104_999, { type: "ping" }],
+				[105_000, { type: "ping" }],
+			] as const) {
+				vi.setSystemTime(time);
+				await runTranslate(translator, ctx, makeStreamEvent(message));
 			}
-			if (state === "stopped") {
-				await runTranslate(
-					translator,
-					ctx,
-					makeStreamEvent({ type: "content_block_stop", index: 0 }),
-				);
-			}
-			const countBefore = sink.events.length;
-			vi.setSystemTime(120_000);
-			await runTranslate(
-				translator,
-				ctx,
-				makeStreamEvent({
-					type: "content_block_delta",
-					index: 0,
-					delta: { type: "thinking_delta", thinking: "" },
-				}),
-			);
-			expect(sink.events).toHaveLength(countBefore);
+
+			expect(aliveTimes()).toEqual([30_000, 75_000, 105_000]);
 		});
 
-		it("keeps two session contexts' hidden-thinking clocks independent", async () => {
+		it("keeps two sessions' clocks independent", async () => {
 			const otherCtx = makeCtx({ sessionId: "sess-2" });
-			for (const [session, index, time] of [
-				[ctx, 0, 0],
-				[otherCtx, 1, 10_000],
+			vi.setSystemTime(10_000);
+			await runTranslate(
+				translator,
+				otherCtx,
+				makeStreamEvent({
+					type: "message_start",
+					message: { id: "msg-other" },
+				}),
+			);
+			for (const [session, time] of [
+				[ctx, 30_000],
+				[otherCtx, 39_999],
+				[otherCtx, 40_000],
+				[ctx, 60_000],
 			] as const) {
 				vi.setSystemTime(time);
 				await runTranslate(
 					translator,
 					session,
-					makeStreamEvent({
-						type: "content_block_start",
-						index,
-						content_block: { type: "thinking", thinking: "" },
-					}),
-				);
-			}
-			for (const [session, index, time] of [
-				[ctx, 0, 30_000],
-				[otherCtx, 1, 39_999],
-				[otherCtx, 1, 40_000],
-				[ctx, 0, 60_000],
-				[otherCtx, 1, 70_000],
-			] as const) {
-				vi.setSystemTime(time);
-				await runTranslate(
-					translator,
-					session,
-					makeStreamEvent({
-						type: "content_block_delta",
-						index,
-						delta: { type: "thinking_delta", thinking: "" },
-					}),
+					makeStreamEvent({ type: "ping" }),
 				);
 			}
 
-			const starts = sink.events.filter(
-				(event) => event.type === "thinking.start",
-			);
-			const keepalives = sink.events.filter(
-				(event) => event.type === "thinking.delta",
-			);
 			expect(
-				keepalives.map((event) => [event.sessionId, event.createdAt]),
+				sink.events
+					.filter((event) => event.type === "provider.alive")
+					.map((event) => [event.sessionId, event.createdAt]),
 			).toEqual([
 				["sess-1", 30_000],
 				["sess-2", 40_000],
 				["sess-1", 60_000],
-				["sess-2", 70_000],
 			]);
-			for (const keepalive of keepalives) {
-				const start = starts.find(
-					(event) => event.sessionId === keepalive.sessionId,
-				);
-				expect(keepalive.data).toEqual({ ...dataOf(start), text: "" });
-			}
 		});
 	});
 

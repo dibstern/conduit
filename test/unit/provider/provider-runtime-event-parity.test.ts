@@ -394,6 +394,14 @@ describe("translateProviderRuntimeEventToDomain", () => {
 		);
 	});
 
+	it("never stores a liveness heartbeat", () => {
+		expect(
+			translateProviderRuntimeEventToDomain(
+				runtimeEvent({ eventId: "alive-1", type: "provider.alive", data: {} }),
+			).events,
+		).toEqual([]);
+	});
+
 	it("maps assistant text deltas to durable text.delta", () => {
 		const { events } = translateProviderRuntimeEventToDomain(
 			runtimeEvent({

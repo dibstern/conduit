@@ -64,6 +64,9 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"evidence.tasks_snapshot",
 	// A native command's receipts (CONTRACT 8.5, D61); the daemon stamps their label.
 	"evidence.command_receipt",
+	// The provider sent output that no other event shows. Never stored: it only
+	// tells the silence notice the model is still working.
+	"provider.alive",
 ] as const;
 
 export const ProviderRuntimeEventTypeSchema = Schema.Literals([
@@ -195,9 +198,10 @@ export type ProviderWorkspaceChangedData = Schema.Schema.Type<
 
 export type ProviderRuntimeEventPayloadMap = Pick<
 	EventPayloadMap,
-	Exclude<ProviderRuntimeEventType, "workspace.changed">
+	Exclude<ProviderRuntimeEventType, "workspace.changed" | "provider.alive">
 > & {
 	"workspace.changed": ProviderWorkspaceChangedData;
+	"provider.alive": Record<string, never>;
 };
 
 const ProviderRuntimeEventEnvelopeSchema = Schema.Union([

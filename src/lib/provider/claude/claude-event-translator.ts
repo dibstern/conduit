@@ -64,8 +64,8 @@ import type {
 
 const PROVIDER = "claude" as const;
 const defaultLog = createLogger("claude-event-translator");
-// Keep hidden-thinking keepalives well inside the 2-minute processing timeout.
-const THINKING_KEEPALIVE_INTERVAL_MS = 30_000;
+// Well inside the daemon's 2-minute silence notice.
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 // Events are provider ingress envelopes. The EventSink owns conversion to
 // durable domain events before append/projection.
@@ -427,10 +427,8 @@ export class ClaudeEventTranslator {
 	// Who each block of assistant text is, and what of it has already been
 	// sent. Identity is positional, so no rewrite of the text can change it.
 	private readonly ledger = new AssistantTextLedger();
-	private readonly thinkingKeepaliveTimes = new WeakMap<
-		ClaudeSessionContext,
-		Map<number, number>
-	>();
+	// When each session last pushed anything, for the liveness heartbeat.
+	private readonly lastOutputAt = new WeakMap<ClaudeSessionContext, number>();
 	private bufferedWrites: Effect.Effect<void, EventSinkError>[] | undefined;
 	private announcedMessageIds = new Set<string>();
 	// The SDK's last live set. firstSeenAt: the runner outlives server
@@ -679,7 +677,29 @@ export class ClaudeEventTranslator {
 		terminalRunIds: readonly string[] = [],
 	): Effect.Effect<void, EventSinkError> {
 		return this.collectWrites(() =>
-			this.translateMessage(ctx, message, receivedAt, terminalRunIds),
+			this.translateMessage(ctx, message, receivedAt, terminalRunIds).pipe(
+				Effect.andThen(Effect.suspend(() => this.heartbeat(ctx))),
+			),
+		);
+	}
+
+	/**
+	 * Any SDK message proves the model is working, even one that shows nothing
+	 * yet: a tool input still streaming, hidden thinking, an API ping. The
+	 * daemon's silence notice only hears pushed events, so speak up once a
+	 * session has pushed nothing for a while.
+	 */
+	private heartbeat(
+		ctx: ClaudeSessionContext,
+	): Effect.Effect<void, EventSinkError> {
+		const now = Date.now();
+		const last = this.lastOutputAt.get(ctx);
+		if (last === undefined) this.lastOutputAt.set(ctx, now);
+		if (last === undefined || now - last < HEARTBEAT_INTERVAL_MS)
+			return Effect.void;
+		return this.push(
+			ctx,
+			makeProviderRuntimeEvent("provider.alive", ctx.sessionId, {}),
 		);
 	}
 
@@ -1446,7 +1466,6 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen({ self: this }, function* () {
 			const index = event.index;
-			this.thinkingKeepaliveTimes.get(ctx)?.delete(index);
 			const tool = ctx.inFlightTools.get(index);
 			if (!tool) return;
 
@@ -1536,12 +1555,6 @@ export class ClaudeEventTranslator {
 						partialInputJson: "",
 					};
 					ctx.inFlightTools.set(index, tool);
-					if (block.type === "thinking") {
-						const times =
-							this.thinkingKeepaliveTimes.get(ctx) ?? new Map<number, number>();
-						times.set(index, Date.now());
-						this.thinkingKeepaliveTimes.set(ctx, times);
-					}
 					const initial =
 						block.type === "thinking" ? block.thinking : block.text;
 					yield* this.emitLedger(ctx, messageId, [
@@ -1601,35 +1614,7 @@ export class ClaudeEventTranslator {
 				case "thinking_delta": {
 					const text =
 						delta.type === "text_delta" ? delta.text : delta.thinking;
-					if (text.length === 0) {
-						if (
-							delta.type !== "thinking_delta" ||
-							tool?.toolName !== "__thinking"
-						) {
-							return;
-						}
-						const partId = this.ledger.openThinkingPartId(index);
-						const times = this.thinkingKeepaliveTimes.get(ctx);
-						const lastKeepaliveAt = times?.get(index);
-						const now = Date.now();
-						if (
-							partId === undefined ||
-							lastKeepaliveAt === undefined ||
-							now - lastKeepaliveAt < THINKING_KEEPALIVE_INTERVAL_MS
-						) {
-							return;
-						}
-						times?.set(index, now);
-						yield* this.push(
-							ctx,
-							makeProviderRuntimeEvent("thinking.delta", ctx.sessionId, {
-								messageId: this.currentAssistantMessageId || tool.itemId,
-								partId,
-								text: "",
-							}),
-						);
-						return;
-					}
+					if (text.length === 0) return;
 
 					const type = delta.type === "text_delta" ? "text" : "thinking";
 					const partId = tool ? tool.itemId : this.nextPartId();
@@ -2190,6 +2175,7 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		const sink = this.deps.getSink(ctx);
 		if (!sink) return Effect.void;
+		this.lastOutputAt.set(ctx, Date.now());
 		const messageId = isRecord(event.data)
 			? event.data["messageId"]
 			: undefined;

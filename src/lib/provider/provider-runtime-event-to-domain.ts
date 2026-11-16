@@ -675,6 +675,9 @@ export function translateProviderRuntimeEventToDomain(
 			);
 		}
 
+		case "provider.alive":
+			return { events: [], state };
+
 		default: {
 			const _exhaustive: never = event;
 			return { events: [], state };
