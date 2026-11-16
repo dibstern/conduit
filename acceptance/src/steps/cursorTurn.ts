@@ -72,6 +72,15 @@ export const cursorTurnHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert Cursor approval notice is absent",
+		match: /^the Cursor notice is absent$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("composer-provider-notice"),
+			).toHaveCount(0);
+		},
+	},
+	{
 		name: "start sent Cursor turn",
 		match: /^the Cursor relay starts the sent turn$/,
 		run: async ({ world }) => {

@@ -41,10 +41,9 @@ export const PROVIDER_PRESENTATION = {
 		// Cursor has no per-call approval hook (spike conduit-test-xqsg.3), so each
 		// mode says what cursor-session-config.ts actually enforces instead.
 		composerNotice: {
-			ask: "Cursor can't ask per call. Its auto-review decides in the sandbox and can let calls through.",
+			ask: "Cursor can't ask per call.",
 			acceptEdits:
 				"Cursor applies edits without asking. Commands run in its sandbox.",
-			auto: "Cursor's auto-review decides in the sandbox and can let calls through.",
 			plan: "Cursor plans without per-call approval, inside its sandbox.",
 			full: "Cursor runs every call with no approval and no sandbox.",
 		},
