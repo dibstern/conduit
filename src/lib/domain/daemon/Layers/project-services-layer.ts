@@ -593,9 +593,9 @@ export const makeProjectServicesLive = (options: {
 				}
 			>();
 			const started = new WeakSet<Scope.Scope>();
-			// Generations that have started once; `close` leaves them here, so a
-			// held send never reopens a project its owner closed (H4).
-			const startedOnce = new WeakSet<Scope.Scope>();
+			// Generations their owner closed (a save's replace, a detach): a send the
+			// gate holds never reopens one (H4); the owner's next open clears it.
+			const closed = new WeakSet<Scope.Scope>();
 			const startContext = Context.mergeAll(ingestionShared, turnShared).pipe(
 				Context.add(SessionManagerServiceTag, sessionManagers),
 				Context.add(
@@ -603,7 +603,11 @@ export const makeProjectServicesLive = (options: {
 					Context.get(ingestionShared, ProviderAdapters).registry,
 				),
 			);
-			const open: ProjectServices["Service"]["open"] = (projectId) =>
+			/** `held`: for a send the gate holds, which opens only a generation not closed. */
+			const open = (
+				projectId: string,
+				held = false,
+			): ReturnType<ProjectServices["Service"]["open"]> =>
 				Effect.gen(function* () {
 					const project = yield* registered(projectId);
 					const parts = generations.get(projectId);
@@ -637,15 +641,19 @@ export const makeProjectServicesLive = (options: {
 					});
 					const context = yield* forProject(projectId);
 					const scope = Context.get(context, RpcSubscriptionScopeTag);
+					// From here to `starts.set` runs in one step, so `close` lands wholly
+					// before or after the decision to start.
 					const existing = starts.get(scope);
 					if (existing) {
 						yield* Deferred.await(existing.done);
 						return context;
 					}
+					if (held && closed.has(scope)) return context;
+					closed.delete(scope);
 					const start = Deferred.makeUnsafe<void, ProjectServicesError>();
 					// Its own scope under the generation's: a failed start or `close`
 					// ends only what it wired, and removal closes both.
-					const startScope = yield* Scope.fork(scope);
+					const startScope = Scope.forkUnsafe(scope);
 					starts.set(scope, { done: start, scope: startScope });
 					const pushManager = Option.getOrUndefined(
 						yield* push.getLegacyManager,
@@ -656,7 +664,6 @@ export const makeProjectServicesLive = (options: {
 							Effect.andThen(
 								Effect.sync(() => {
 									started.add(scope);
-									startedOnce.add(scope);
 									// Child-process tests wait for the project to run their fake SDK.
 									if (testSdk && !options.claudeSdk && process.connected)
 										process.send?.({
@@ -716,26 +723,24 @@ export const makeProjectServicesLive = (options: {
 					if (starts.get(scope) !== current) return;
 					starts.delete(scope);
 					started.delete(scope);
+					closed.add(scope);
 					yield* Scope.close(current.scope, Exit.void);
 				});
 			// A project holding OpenCode events with no tab open, or a send the gate
-			// holds (H4) for a generation that never started, starts in its
+			// holds (H4) for a generation its owner has not closed, starts in its
 			// generation, as t3code starts its reactors in the server scope
 			// (apps/server/src/server.ts:540-627).
 			yield* Stream.merge(
-				Stream.fromQueue(Context.get(turnShared, OpenCodeProjectStreams).wakes),
-				Stream.fromQueue(unserved).pipe(
-					Stream.filter((slug) => {
-						const parts = generations.get(slug);
-						return !(
-							parts &&
-							startedOnce.has(Context.get(parts, RpcSubscriptionScopeTag))
-						);
-					}),
+				Stream.fromQueue(
+					Context.get(turnShared, OpenCodeProjectStreams).wakes,
+				).pipe(Stream.map((slug) => ({ slug, held: false }))),
+				Stream.fromEffectRepeat(unserved).pipe(
+					Stream.flattenIterable,
+					Stream.map((slug) => ({ slug, held: true })),
 				),
 			).pipe(
-				Stream.runForEach((slug) =>
-					open(slug).pipe(
+				Stream.runForEach(({ slug, held }) =>
+					open(slug, held).pipe(
 						Effect.catchCause((cause) =>
 							Effect.logError(`Failed to start project "${slug}"`, cause),
 						),

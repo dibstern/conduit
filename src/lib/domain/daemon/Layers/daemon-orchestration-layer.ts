@@ -86,10 +86,16 @@ export const DaemonOrchestrationLive = Layer.effect(
 		const accounts = yield* AccountDirectory;
 		const configRef = yield* DaemonConfigRefTag;
 		const sessionWorkspace = yield* SessionWorkspaceTag;
-		const unserved = yield* Queue.sliding<string>(64);
+		// Each project the gate finds unserved is held once until taken, however many
+		// of its rows the gate reads, so one project cannot crowd out another's wake.
+		const unserved = new Set<string>();
+		const unservedKick = yield* Queue.sliding<void>(1);
 		const projectGate = yield* makeProjectGate(
 			(projectId) => Option.isSome(adapters.projectContext(projectId)),
-			unserved,
+			(projectId) => {
+				unserved.add(projectId);
+				Queue.offerUnsafe(unservedKick, undefined);
+			},
 		);
 		const projectOfSession = (sessionId: string) =>
 			directory.projectOf(sessionId).pipe(
@@ -398,7 +404,13 @@ export const DaemonOrchestrationLive = Layer.effect(
 		return {
 			engine,
 			drafts,
-			unserved,
+			unserved: Queue.take(unservedKick).pipe(
+				Effect.map(() => {
+					const projects = [...unserved];
+					unserved.clear();
+					return projects;
+				}),
+			),
 			start: Effect.gen(function* () {
 				yield* adapters.recover;
 				if (started) return;

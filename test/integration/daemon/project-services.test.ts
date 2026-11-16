@@ -26,11 +26,19 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodePath } from "@effect/platform-node";
-import { Context, Effect, Layer, ManagedRuntime, Option } from "effect";
+import {
+	Context,
+	Deferred,
+	Effect,
+	Layer,
+	ManagedRuntime,
+	Option,
+} from "effect";
 import { SqlClient } from "effect/sql";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonOrchestration } from "../../../src/lib/domain/daemon/Services/daemon-orchestration.js";
 import { DaemonStoreAvailability } from "../../../src/lib/domain/daemon/Services/daemon-store-availability.js";
 import {
 	addWithoutOpening,
@@ -43,6 +51,7 @@ import {
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import { SSEStreamTag } from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
+import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -321,5 +330,111 @@ describe("82tn.16: the daemon builds each project's context", () => {
 		const observed = { alpha: await second.listed("alpha") };
 		evidence.observed = observed;
 		expect(observed).toEqual({ alpha: [{ id: "s1", title: "s1" }] });
+	});
+});
+
+describe("h0x3p: a send the gate holds brings its project back once", () => {
+	type Daemon = ReturnType<ReturnType<typeof start>["boot"]>;
+	const services = <A, E>(
+		daemon: Daemon,
+		use: (projects: ProjectServices["Service"]) => Effect.Effect<A, E>,
+	) => daemon.daemon.runPromise(Effect.flatMap(ProjectServices, use));
+	const opened = (daemon: Daemon, slug: string) =>
+		services(daemon, (projects) => projects.opened(slug)).then(Option.isSome);
+	/** One outbox row per slug, in order: a retry an hour off, which only the gate reads. */
+	const waitingSends = (daemon: Daemon, slugs: ReadonlyArray<string>) =>
+		daemon.daemon.runPromise(
+			Effect.flatMap(SqlClient.SqlClient, (sql) =>
+				Effect.forEach(
+					slugs,
+					(slug, index) => sql`INSERT INTO provider_command_outbox
+						(request_sequence, command_id, project_key, session_id, provider_id, effect_type,
+							payload_json, status, next_attempt_at, requested_at, updated_at)
+						VALUES (${index + 1}, ${`waiting-${index}`}, ${slug}, ${`session-${slug}`}, 'claude',
+							'interrupt_turn', '{}', 'retryable_failed', ${Date.now() + 3_600_000}, 1, 1)`,
+					{ discard: true },
+				),
+			),
+		);
+	const drain = (daemon: Daemon) =>
+		daemon.daemon.runPromise(
+			Effect.flatMap(DaemonOrchestration, ({ engine }) =>
+				engine.drainSideEffects(),
+			),
+		);
+
+	it("opens a returned project however many sends wait on a closed one", async () => {
+		// S1: the gate reads every waiting row, so a closed project's sends must not
+		// crowd out the one wake of a project whose folder came back.
+		const daemon = start("held-wakes-coalesce").boot();
+		await daemon.register("returned");
+		await daemon.register("closed");
+		await services(daemon, (projects) =>
+			projects.open("closed").pipe(Effect.andThen(projects.close("closed"))),
+		);
+		await waitingSends(daemon, [
+			"returned",
+			...Array.from({ length: 100 }, () => "closed"),
+		]);
+		for (let sweep = 0; sweep < 3; sweep++) await drain(daemon);
+		// test-waits-allow polling: the wake reader opens in its own fiber, with no event to await.
+		await vi.waitFor(
+			async () => expect(await opened(daemon, "returned")).toBe(true),
+			{ timeout: 10_000 },
+		);
+		const observed = {
+			returned: await opened(daemon, "returned"),
+			closed: await opened(daemon, "closed"),
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({ returned: true, closed: false });
+	});
+
+	it("leaves closed a project its owner opened and closed while its wake waited", async () => {
+		// S2: the wake reader is held in another project's open while the owner opens
+		// and closes this one; the wake it already holds must not reopen it.
+		const daemon = start("held-wake-closed").boot();
+		for (const slug of ["busy", "closed", "after"]) await daemon.register(slug);
+		const [entered, release] = await daemon.daemon.runPromise(
+			Effect.all([Deferred.make<void>(), Deferred.make<void>()]),
+		);
+		// The next open waits here, after it has recorded its start.
+		await daemon.daemon.runPromise(
+			Effect.flatMap(PushManagerTag, (push) =>
+				Effect.sync(() => {
+					const legacy = push.getLegacyManager;
+					let held = false;
+					Object.assign(push, {
+						getLegacyManager: Effect.suspend(() => {
+							if (held) return legacy;
+							held = true;
+							return Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Deferred.await(release)),
+								Effect.andThen(legacy),
+							);
+						}),
+					});
+				}),
+			),
+		);
+		await waitingSends(daemon, ["busy", "closed", "after"]);
+		await drain(daemon);
+		await daemon.daemon.runPromise(Deferred.await(entered));
+		await services(daemon, (projects) =>
+			projects.open("closed").pipe(Effect.andThen(projects.close("closed"))),
+		);
+		await daemon.daemon.runPromise(Deferred.succeed(release, undefined));
+		// test-waits-allow polling: the wake reader opens in its own fiber, with no event to await.
+		await vi.waitFor(
+			async () => expect(await opened(daemon, "after")).toBe(true),
+			{ timeout: 10_000 },
+		);
+		const observed = {
+			busy: await opened(daemon, "busy"),
+			closed: await opened(daemon, "closed"),
+			after: await opened(daemon, "after"),
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({ busy: true, closed: false, after: true });
 	});
 });

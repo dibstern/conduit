@@ -30,7 +30,6 @@ import {
 	Layer,
 	Option,
 	PubSub,
-	Queue,
 	Ref,
 	Result,
 	Semaphore,
@@ -311,7 +310,7 @@ export class ProjectSaveLockTag extends Context.Service<
  */
 export const makeProjectGate = (
 	hasServices: (projectId: string) => boolean,
-	unserved: Queue.Enqueue<string>,
+	unserved: (projectId: string) => void,
 ) =>
 	Effect.gen(function* () {
 		const projects = yield* ProjectRegistryTag;
@@ -324,8 +323,7 @@ export const makeProjectGate = (
 					if (entry.value._tag === "Error" || unavailable.has(projectId))
 						return "not_served";
 					if (hasServices(projectId)) return "served";
-					if (existsSync(entry.value.project.folders[0]))
-						yield* Queue.offer(unserved, projectId);
+					if (existsSync(entry.value.project.folders[0])) unserved(projectId);
 					return "not_served";
 				}
 				const settled = yield* lock.withPermitsIfAvailable(1)(

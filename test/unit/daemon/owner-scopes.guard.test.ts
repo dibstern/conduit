@@ -162,6 +162,7 @@ const scopeOpeners = new Set([
 	"Scope.make",
 	"Scope.makeUnsafe",
 	"Scope.fork",
+	"Scope.forkUnsafe",
 	"ManagedRuntime.make",
 ]);
 const ownerModules = [
@@ -182,8 +183,9 @@ const scopeOpenerSites = new Map([
 	[`${root}/Layers/account-resource-scopes-layer.ts:Scope.make`, 1],
 	[`${root}/Layers/keep-awake-layer.ts:Scope.fork`, 1],
 	// A project's start, a child of the generation Owner Scopes opened, so a
-	// failed start closes alone (lane 16q).
-	[`${root}/Layers/project-services-layer.ts:Scope.fork`, 1],
+	// failed start closes alone (lane 16q). Unsafe, so the decision to start and
+	// its record are one step that `close` cannot split (h0x3p).
+	[`${root}/Layers/project-services-layer.ts:Scope.forkUnsafe`, 1],
 	// The daemon's own runtime.
 	[`${root}/Layers/daemon-foreground.ts:ManagedRuntime.make`, 1],
 ]);
