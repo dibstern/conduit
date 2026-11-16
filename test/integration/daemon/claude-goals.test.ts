@@ -272,6 +272,24 @@ describe("Claude goals as native commands", () => {
 		});
 	});
 
+	// Opening a session pre-warms a runner with no Claude session in it yet; a clear then takes the
+	// session live and completes, with no message sent (CONTRACT.md 8.5: the feeder spawns for it).
+	it("takes a pre-warmed session live for a clear and completes it at once", async () => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession("Claude goal warm clear");
+		await browser.preWarmSession(sessionId);
+		const commandId = randomUUID();
+		await fixture.requestRpc({ _tag: "ClearGoal", sessionId, commandId });
+		// test-waits-allow polling: the clear's result reaches the store with no browser frame.
+		await vi.waitFor(
+			() =>
+				expect(read(fixture, sessionId).nativeCommands).toEqual([
+					{ commandId, tag: "Completed" },
+				]),
+			10_000,
+		);
+	});
+
 	// 82tn.32.44 (lane-3244 audit.md 1-5): a pending Clear survives a daemon restart.
 	it("rebuilds a pending clear after a daemon restart: Clearing, then one completed clear", async () => {
 		const { fixture } = await start();
