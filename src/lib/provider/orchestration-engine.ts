@@ -47,6 +47,7 @@ import {
 	makeEventStoreEffect,
 } from "../persistence/effect/event-store-effect.js";
 import { readOwedRealignment } from "../persistence/effect/head-realignment.js";
+import { endedRowOutcome } from "../persistence/effect/run-ledger-arm.js";
 import { type CanonicalEvent, canonicalEvent } from "../persistence/events.js";
 import type { ClaudeSessionForkSdk } from "./claude/claude-session-fork.js";
 import {
@@ -811,13 +812,29 @@ export class OrchestrationEngine {
 									run_id: string;
 									provider_id: string;
 									status: string;
+									attempt_count: number;
 									sent_sequence: number | null;
-								}>`SELECT command.command_id, command.run_id, command.provider_id, command.status,
+								}>`SELECT command.command_id, command.run_id, command.provider_id, command.status, command.attempt_count,
 					(SELECT MAX(sequence) FROM events WHERE session_id = command.session_id AND type = 'input.sent' AND json_extract(data, '$.inputId') = command.command_id) AS sent_sequence
 					FROM provider_command_outbox command WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn' AND command.status IN ('pending', 'retryable_failed')`;
+								const stoppedAt = yield* Clock.currentTimeMillis;
 								const events = pending.flatMap((row) => [
 									...(row.status === "pending"
 										? [
+												// 3.4 (CONTRACT.md 449-477): the write that ends a row writes its outcome; a
+												// direct start's names its runId. Without it AMENDMENT-2026-11-16 E2 would keep
+												// a start the provider never took a fence member.
+												endedRowOutcome({
+													command_id: row.command_id,
+													session_id: input.sessionId,
+													provider_id: row.provider_id,
+													attempt_count: row.attempt_count,
+													status: "failed",
+													error_code: "interrupted",
+													next_attempt_at: null,
+													updated_at: stoppedAt,
+													token: row.run_id,
+												}),
 												canonicalEvent(
 													"turn.interrupted",
 													input.sessionId,
