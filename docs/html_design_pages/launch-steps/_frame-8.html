@@ -1,0 +1,260 @@
+<!doctype html><html><head><meta charset="utf-8"><script>(()=>{let t;try{t=parent!==window&&parent.document.documentElement.dataset.designTheme}catch(e){}t=t||localStorage.getItem('tsp-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');const h=document.documentElement;h.dataset.theme=t;h.style.setProperty('color-scheme',t,'important')})()</script><style>body{margin:0}html:not([data-theme=dark]) [data-theme-only=dark],html[data-theme=dark] [data-theme-only=light]{display:none!important}</style><meta name="viewport" content="width=760">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:light-dark(#ffffff,#111113);
+  --surface:light-dark(#ffffff,#1a1a1d);
+  --alt:light-dark(#f1f1f3,#232327);
+  --text:light-dark(#0b0b0d,#ededf0);
+  --text2:light-dark(#5d5d66,#a1a1aa);
+  --muted:light-dark(#8a8a93,#71717a);
+  --accent:light-dark(#4352d2,#8e9bff);
+  --code:light-dark(#fafafa,#141416);
+  --border:light-dark(#e3e3e7,#2b2b31);
+  --ok:light-dark(#127136,#3ecf8e);
+  --err:light-dark(#bc1f1f,#ff6369);
+  --accent-soft:color-mix(in srgb,var(--accent) 16%,transparent);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:14px/1.5 Geist,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+code,.mono,pre{font-family:"Geist Mono",ui-monospace,monospace}
+code{font-size:12px;background:var(--alt);padding:1px 5px;border-radius:4px}
+svg{flex:none}
+.app{height:100vh;display:grid;grid-template-rows:1fr auto}
+.scroll{overflow:auto}
+.col{max-width:820px;margin:0 auto;padding:52px 28px 24px}
+.msg{display:grid;grid-template-columns:28px minmax(0,1fr);gap:0 14px;margin-bottom:22px}
+.av{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:600}
+.av.u{background:var(--alt);color:var(--text2)}
+.av.a{background:var(--accent);color:var(--bg);border-radius:8px}
+.who{font-weight:600;font-size:13.5px;min-height:28px;display:flex;align-items:center;gap:8px}
+.who .ts{font-weight:400;color:var(--muted);font-size:12px}
+.ind{margin:0 0 22px 42px}
+.muted{color:var(--muted)}
+.t{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ok{color:var(--ok)}.err{color:var(--err)}.acc{color:var(--accent)}
+.card{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:12px 14px}
+.spin{display:inline-block;width:13px;height:13px;border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 25%,transparent);border-top-color:var(--accent);animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.shim{background:linear-gradient(90deg,var(--text2) 0 35%,var(--text) 50%,var(--text2) 65% 100%);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shim 1.8s linear infinite}
+@keyframes shim{from{background-position:100% 0}to{background-position:0 0}}
+.tail{margin:6px 0 4px;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--code);color:var(--text2);font-size:11.5px;line-height:1.55;white-space:pre;overflow:hidden;text-overflow:ellipsis}
+.tail.fail{border-color:color-mix(in srgb,var(--err) 35%,transparent);background:color-mix(in srgb,var(--err) 7%,var(--code));color:var(--err)}
+.acts{display:flex;flex-wrap:wrap;gap:2px;margin-top:4px}
+.btn{display:inline-flex;align-items:center;gap:5px;border:0;background:none;color:var(--text2);font:inherit;font-size:12px;padding:3px 7px;border-radius:6px;cursor:pointer}
+.btn:hover{background:var(--alt);color:var(--text)}
+.btn svg{width:13px;height:13px}
+.ic{display:inline-grid;place-items:center;width:16px;flex:none}
+.ic svg{width:15px;height:15px}
+.caret{display:inline-block;width:7px;height:14px;background:var(--accent);vertical-align:-2px;margin-left:2px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+dl.dd{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:6px 0 2px;font-size:12px;color:var(--muted)}
+dl.dd dt{color:var(--text2)}dl.dd dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.comp{padding:10px 28px 18px;background:var(--bg)}
+.cbox{max-width:764px;margin:0 auto;border:1px solid var(--border);border-radius:14px;background:var(--surface);padding:10px 12px 8px}
+.ph{color:var(--muted);font-size:14px;min-height:22px}
+.crow{display:flex;gap:6px;align-items:center;margin-top:6px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);background:var(--alt);border-radius:999px;padding:2px 9px;white-space:nowrap}
+.chip svg{width:12px;height:12px}
+.send{margin-left:auto;width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--bg);display:grid;place-items:center}
+.send svg{width:15px;height:15px}
+.simbar{position:fixed;top:10px;right:12px;display:flex;gap:2px;padding:3px;border-radius:9px;background:var(--alt);border:1px solid var(--border);z-index:9;font-size:11.5px}
+.simbar button{border:0;background:none;color:var(--text2);font:inherit;padding:3px 9px;border-radius:6px;cursor:pointer}
+.simbar button.on{background:var(--surface);color:var(--text);box-shadow:0 1px 2px rgb(0 0 0/.15)}
+</style>
+<script>
+(() => {
+  // One fake launch, shared by every design so they stay comparable.
+  const STAGES = [
+    { id: "branch", label: "Create branch", short: "Branch", dur: 700 },
+    { id: "checkout", label: "Check out files", short: "Files", dur: 3400 },
+    { id: "setup", label: "Run setup script", short: "Setup", dur: 4400 },
+    { id: "agent", label: "Start Claude", short: "Claude", dur: 1500 },
+  ];
+  const TOTAL = STAGES.reduce((a, s) => a + s.dur, 0);
+  const HOLD = 7000;
+  const FAIL_AT = 700 + 3400 + 4400 * 0.62;
+  const W = {
+    branch: "conduit/fix-flaky-auth-test", base: "main", sha: "3f9c2e1",
+    path: "~/.config/conduit/worktrees/conduit/ses_84b6/conduit", short: "…/ses_84b6/conduit",
+    script: "pnpm install", model: "Opus", FILES: 2742,
+  };
+  const TAIL = [
+    [0.04, "Lockfile is up to date, resolution step is skipped"],
+    [0.12, "Progress: resolved 1243, reused 0, downloaded 0, added 0"],
+    [0.3, "Progress: resolved 1243, reused 1189, downloaded 31, added 590"],
+    [0.5, "Progress: resolved 1243, reused 1189, downloaded 54, added 1243, done"],
+    [0.62, "Packages: +1243"],
+    [0.72, "node_modules/esbuild postinstall$ node install.js"],
+    [0.84, "node_modules/esbuild postinstall: Done"],
+    [0.95, "Done in 4.2s"],
+  ];
+  const FAIL_TAIL = [
+    "Lockfile is up to date, resolution step is skipped",
+    "Progress: resolved 1243, reused 1189, downloaded 12, added 410",
+    " ERR_PNPM_FETCH_404  GET https://registry.npmjs.org/@acme%2Fauth-mocks: Not Found - 404",
+    "This error happened while installing a direct dependency of …/conduit",
+  ];
+  const REPLY = "Let me start with session-store.test.ts. The flake looks like a race: the refresh timer fires before the fake clock advances, so about one run in ten asserts against a stale token. I'll pin the clock and await the refresh explicitly.";
+  let mode = "live", t0 = performance.now();
+  const subs = [];
+  const ui = {};
+  const ease = (p) => 1 - Math.pow(1 - p, 1.6);
+
+  function state() {
+    let t, phase;
+    if (mode === "live") { t = (performance.now() - t0) % (TOTAL + HOLD); phase = t >= TOTAL ? "done" : "running"; }
+    else if (mode === "done") { t = TOTAL + 60000; phase = "done"; }
+    else { t = FAIL_AT; phase = "failed"; }
+    let acc = 0, cur = -1;
+    const stages = STAGES.map((st, i) => {
+      const start = acc; acc += st.dur;
+      const local = Math.min(st.dur, Math.max(0, t - start));
+      let status = t >= start + st.dur ? "done" : t >= start ? "running" : "pending";
+      if (phase === "failed" && st.id === "setup") status = "failed";
+      if (status === "running") cur = i;
+      return { ...st, i, start, status, p: status === "done" ? 1 : local / st.dur, elapsed: status === "pending" ? null : local };
+    });
+    const pct = Math.floor(ease(stages[1].p) * 100);
+    const tail = phase === "failed" ? FAIL_TAIL : TAIL.filter(([at]) => at <= stages[2].p).map(([, l]) => l);
+    const sinceDone = phase === "done" ? t - TOTAL : 0;
+    return {
+      ...W, mode, phase, t, sinceDone, stages, cur, current: stages[cur] || stages[0], pct,
+      files: Math.round(W.FILES * pct / 100), tail, total: Math.min(t, TOTAL), TOTAL,
+      replyChars: Math.floor(sinceDone / 1000 * 120),
+    };
+  }
+
+  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const fmt = (ms) => ms == null ? "" : ms < 10000 ? (ms / 1000).toFixed(1) + "s" : Math.round(ms / 1000) + "s";
+  // Re-rendering restarts CSS animations; a negative delay keyed to the clock keeps them continuous.
+  const A = (ms) => `animation-delay:-${Math.round(performance.now() % ms)}ms`;
+  const shim = (text) => `<span class="shim" style="${A(1800)}">${text}</span>`;
+  const spin = () => `<span class="spin" style="${A(800)}"></span>`;
+  const svg = (d) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const I = {
+    check: svg('<path d="M20 6 9 17l-5-5"/>'),
+    x: svg('<path d="M18 6 6 18M6 6l12 12"/>'),
+    circle: svg('<circle cx="12" cy="12" r="8"/>'),
+    branch: svg('<line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>'),
+    commit: svg('<circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6"/>'),
+    folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+    term: svg('<path d="m4 17 6-6-6-6M12 19h8"/>'),
+    chevR: svg('<path d="m9 18 6-6-6-6"/>'),
+    chevD: svg('<path d="m6 9 6 6 6-6"/>'),
+    laptop: svg('<rect x="4" y="5" width="16" height="11" rx="2"/><path d="M2 20h20"/>'),
+    alert: svg('<circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/>'),
+    retry: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'),
+    play: svg('<path d="m7 4 13 8-13 8z"/>'),
+    copy: svg('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
+    up: svg('<path d="M12 19V5M5 12l7-7 7 7"/>'),
+    mark: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2 22 12 12 22 2 12z"/></svg>',
+  };
+  const ic = (st) => `<span class="ic ${st.status === "done" ? "" : st.status === "failed" ? "err" : "muted"}">${
+    st.status === "running" ? spin() : st.status === "done" ? I.check : st.status === "failed" ? I.x : I.circle}</span>`;
+  const detail = (st, s) => ({
+    branch: st.status === "running" ? `from ${s.base} @ ${s.sha}` : st.status === "pending" ? "" : s.branch,
+    checkout: st.status === "running" ? `${s.pct}% · ${s.files.toLocaleString()} / ${s.FILES.toLocaleString()} files` : st.status === "done" ? `${s.FILES.toLocaleString()} files` : "",
+    setup: st.status === "failed" ? "exited with 1" : st.status === "pending" ? "" : s.script,
+    agent: st.status === "pending" ? "" : s.model,
+  })[st.id];
+  const tailBox = (s, n = 4) => {
+    const setup = s.stages[2];
+    const show = setup.status === "failed" || (setup.status === "running" && s.tail.length);
+    return show ? `<pre class="tail ${setup.status === "failed" ? "fail" : ""}">${s.tail.slice(-n).map(esc).join("\n")}</pre>` : "";
+  };
+  const btn = (icon, label, toggle) => `<button class="btn" ${toggle ? `data-toggle="${toggle}"` : ""}>${icon}${label}</button>`;
+  const acts = (s, key) => s.phase === "failed"
+    ? `<div class="acts">${btn(I.retry, "Retry setup")}${btn(I.play, "Start without setup")}${btn(I.term, "Open terminal")}</div>`
+    : s.phase === "running"
+      ? `<div class="acts">${key ? btn(ui[key] ? I.chevD : I.chevR, "Details", key) : ""}${s.stages[2].status !== "pending" ? btn(I.term, "Open terminal") : ""}${btn(I.laptop, "Use main checkout")}${btn(I.x, "Cancel")}</div>`
+      : "";
+  const detailsDl = (s) => `<dl class="dd"><dt>Branch</dt><dd class="mono">${s.branch}</dd><dt>Base</dt><dd class="mono">${s.base} @ ${s.sha}</dd><dt>Path</dt><dd class="mono">${s.path}</dd><dt>Setup</dt><dd class="mono">${s.script}</dd></dl>`;
+  const replyText = (s) => esc(REPLY.slice(0, s.replyChars)) + (s.replyChars < REPLY.length ? '<span class="caret"></span>' : "");
+  const reply = (s) => s.phase !== "done" ? "" :
+    `<div class="msg"><div class="av a">${I.mark}</div><div><div class="who">Claude <span class="ts">Opus</span></div><div>${replyText(s)}</div></div></div>`;
+  const USER = `<div class="msg"><div class="av u">D</div><div><div class="who">You <span class="ts">now</span></div><div>Fix the flaky auth test in <code>session-store.test.ts</code>. It fails about one run in ten on CI.</div></div></div>`;
+  const composer = (s) => `<div class="cbox"><div class="ph">${s.phase === "running" ? "Queue a follow-up…" : "Reply to Claude…"}</div><div class="crow"><span class="chip">${I.branch}${s.stages[0].status === "done" ? s.branch : "new worktree"}</span><span class="chip">Opus</span><span class="send">${I.up}</span></div></div>`;
+
+  function mountChat(render) {
+    const app = document.createElement("div");
+    app.className = "app";
+    app.innerHTML = '<div class="scroll"><div class="col"></div></div><div class="comp"></div>';
+    document.body.prepend(app);
+    const sc = app.querySelector(".scroll"), col = app.querySelector(".col"), comp = app.querySelector(".comp");
+    subs.push((s) => {
+      const stick = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 60;
+      col.innerHTML = USER + render(s);
+      comp.innerHTML = composer(s);
+      if (stick) sc.scrollTop = sc.scrollHeight;
+    });
+  }
+
+  function paint() {
+    const s = state();
+    subs.forEach((f) => f(s));
+    document.querySelectorAll(".simbar button").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
+  }
+
+  // pointerdown, not click: the 10fps re-render can swap the node between press and release.
+  document.addEventListener("pointerdown", (e) => {
+    const b = e.target.closest("[data-toggle]");
+    if (b) { ui[b.dataset.toggle] = !ui[b.dataset.toggle]; paint(); }
+  });
+  addEventListener("DOMContentLoaded", () => {
+    const bar = document.createElement("div");
+    bar.className = "simbar";
+    bar.innerHTML = ["live", "done", "failed"].map((m) => `<button data-mode="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join("");
+    bar.addEventListener("pointerdown", (e) => {
+      const m = e.target.closest("button")?.dataset.mode;
+      if (m) { mode = m; t0 = performance.now(); paint(); }
+    });
+    document.body.appendChild(bar);
+    paint();
+    setInterval(paint, 100);
+  });
+
+  Object.assign(window, { mountChat, ui, esc, fmt, A, shim, spin, I, ic, detail, tailBox, btn, acts, detailsDl, reply, replyText });
+})();
+</script>
+</head><body>
+<style>
+.d8 .hd{display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:6px}
+.d8 .hd .t{margin-left:auto}
+.d8 table{width:100%;border-collapse:collapse;font-size:12.5px}
+.d8 th{text-align:left;font-weight:500;font-size:11.5px;color:var(--muted);padding:4px 8px;border-bottom:1px solid var(--border)}
+.d8 td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:middle;white-space:nowrap}
+.d8 tr:last-child td{border-bottom:0}
+.d8 td > *{vertical-align:middle}
+.d8 .fi{color:var(--muted);margin-right:6px}.d8 .fi svg{width:14px;height:14px;vertical-align:-2px}
+.d8 .mb{display:inline-block;width:110px;height:5px;border-radius:3px;background:var(--alt);overflow:hidden;margin-right:8px}
+.d8 .mb i{display:block;height:100%;background:var(--accent)}
+.d8 tr.sp td:first-child{color:var(--text2)}
+.d8 tr.sp .t{margin-left:6px}
+.d8s{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--text2)}
+.d8s + table{margin-top:6px}
+</style>
+<script>
+const F = [{ n: "conduit", files: 2742, dur: 2200 }, { n: "conduit-site", files: 318, dur: 400 }, { n: "agent-skills", files: 911, dur: 800 }];
+mountChat((s) => {
+  const [b, co, se, ag] = s.stages;
+  const co_t = co.status === "pending" ? -1 : co.status === "done" ? Infinity : co.elapsed;
+  let offset = 0;
+  const rows = F.map((f) => {
+    const local = co_t - offset; offset += f.dur;
+    const st = local < 0 ? "pending" : local >= f.dur ? "done" : "running";
+    const pct = st === "running" ? Math.floor((1 - Math.pow(1 - local / f.dur, 1.6)) * 100) : 0;
+    const cell = st === "pending" ? '<span class="muted">waiting</span>' : st === "done" ? `<span class="ok ic">${I.check}</span> ${f.files.toLocaleString()} files` : `<span class="mb"><i style="width:${pct}%"></i></span><span class="t">${pct}%</span>`;
+    return `<tr><td><span class="fi">${I.folder}</span><code>${f.n}</code></td><td>${ic(b)}</td><td>${cell}</td></tr>`;
+  }).join("");
+  const sp = (label, x, text) => `<tr class="sp"><td>${label}</td><td colspan="2">${ic(x)} ${text}<span class="t">${x.status === "failed" ? "exit 1" : fmt(x.elapsed)}</span></td></tr>`;
+  const table = `<table><thead><tr><th>Folder</th><th>Branch</th><th>Files</th></tr></thead><tbody>${rows}${sp("Setup script", se, `<code>${s.script}</code> <span class="muted">in conduit</span>`)}${sp("Agent", ag, "Start Claude")}</tbody></table>`;
+  if (s.phase === "done")
+    return `<div class="ind"><div class="d8s"><span class="ok ic">${I.check}</span>3 worktrees ready on <code>${s.branch}</code><span class="t">${fmt(s.total)}</span>${btn(ui.d8 ? I.chevD : I.chevR, ui.d8 ? "Hide" : "Show", "d8")}</div><div class="d8">${ui.d8 ? table : ""}</div></div>${reply(s)}`;
+  const head = s.phase === "running" ? shim("Setting up 3 worktrees…") : '<span class="err">Setup script failed</span>';
+  return `<div class="ind card d8"><div class="hd">${head}<code>${s.branch}</code><span class="t">${fmt(s.total)}</span></div>${table}${tailBox(s)}${acts(s)}</div>`;
+});
+</script>
+</body></html>
