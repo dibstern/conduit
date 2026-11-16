@@ -1340,5 +1340,7 @@
 	"src/lib/frontend/components/layout/SessionBar.svelte :: mt-[2px],text-status-goal": "conduit-test-82tn.32.26 deletes the Checking goal label and history row: nothing observes a goal check, so no phase can show them.",
 	"src/lib/frontend/components/overlays/RewindBanner.svelte :: border-border-subtle,border-t,rewind-pending": "conduit-test-82tn.51 deletes the pending rewind notice: a rewind is a head move that lands at once, so nothing is left owed to show.",
 	"src/lib/frontend/components/chat/UserMessage.svelte :: text-[12px],text-text-dimmer": "conduit-test-82tn.51 deletes the edit box's note that attachments are not resent: an edit now resends the message's images with its text.",
-	"src/lib/frontend/components/chat/TurnActivity.svelte :: summaryEnabled)": "Not a class: the turn head's padding condition gains `|| onsummarize`, so the phone Summary row's own block (conduit-test-o8pak) no longer doubles the head's bottom padding."
+	"src/lib/frontend/components/chat/TurnActivity.svelte :: summaryEnabled)": "Not a class: the turn head's padding condition gains `|| onsummarize`, so the phone Summary row's own block (conduit-test-o8pak) no longer doubles the head's bottom padding.",
+	"src/lib/frontend/components/input/InputArea.svelte :: pb-[calc(env(safe-area-inset-bottom,0px)+22px)]": "Wide layouts no longer add the safe-area inset to the composer's 22px bottom gap: it lifted the composer 56px on the unfolded Duo. Plain pb-[22px] replaces it; phones keep the inset through the max-md classes.",
+	"src/lib/frontend/components/input/InputArea.svelte :: has-[textarea:focus]:pb-[22px]": "Dropped the safe-area inset on focus; wide layouts no longer add the inset, so there is nothing to drop."
 }

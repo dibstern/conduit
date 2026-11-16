@@ -37,3 +37,18 @@ Scenario: The pose follows folding and rotation but not the keyboard
   Then the layout pose is duo-unfolded-landscape
   When the viewport is a duo unfolded portrait
   Then the layout pose is duo-unfolded-portrait
+
+# A wide layout has no home-indicator dock: the session list runs to the bottom
+# edge like desktop. iOS still reports a 34pt bottom inset on the unfolded Duo,
+# and adding it to the composer's 22px lifted the composer 56px off the edge.
+# Focus drops the inset, so the composer must be blurred, as on the device.
+Scenario Outline: A wide pose's composer keeps the desktop gap to the bottom edge
+  When the viewport is <viewport>
+  And I close the keyboard
+  Then the layout is wide
+  And the composer ends 22 pixels above the bottom of the screen
+
+Examples:
+  | viewport                                            |
+  | a duo unfolded landscape                            |
+  | an installed landscape iPhone with 59pt side insets |

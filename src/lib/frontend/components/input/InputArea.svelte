@@ -1240,12 +1240,15 @@
      keeps env(safe-area-inset-bottom) at full size, leaving a dead gap above the
      keyboard. Drop the inset then. Restore it only once the keyboard has slid away:
      tapping a composer button blurs the textarea on mousedown, and restoring the
-     inset at once lifts the button out from under the finger before the click. -->
+     inset at once lifts the button out from under the finger before the click.
+     Only the phone layout clears the inset. Wide layouts keep desktop's 22px, as
+     the session list does: on the unfolded Duo, 34px of inset lifted the composer
+     56px off the bottom edge. -->
 <div
 	id="input-area"
 	bind:this={inputAreaEl}
 	data-compact={sessionViewState.compact}
-	class="shrink-0 px-[32px] pt-[8px] transition-[padding-bottom] duration-0 delay-250 has-[textarea:focus]:delay-0 pb-[calc(env(safe-area-inset-bottom,0px)+22px)] has-[textarea:focus]:pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
+	class="shrink-0 px-[32px] pt-[8px] transition-[padding-bottom] duration-0 delay-250 has-[textarea:focus]:delay-0 pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
 	<div id="input-wrapper" bind:this={composerWrapperEl} bind:clientWidth={sessionViewState.composerWidth} class="max-w-[760px] mx-auto relative">
 		<!-- The compact command panel stays within the composer's phone gutters. -->

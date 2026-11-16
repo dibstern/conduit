@@ -95,4 +95,20 @@ export const duoPoseHandlers: StepHandler[] = [
 			else await expect(layout).not.toHaveClass(/\blayout-compact\b/);
 		},
 	},
+	{
+		name: "assert the composer's gap above the bottom edge",
+		match: /^the composer ends (\d+) pixels above the bottom of the screen$/,
+		run: async ({ world, match }) => {
+			// The bottom padding changes 250ms after a blur, so a first reading can
+			// predate it: measure once the composer's transitions have finished.
+			const gap = await world.page.evaluate(async () => {
+				const area = document.getElementById("input-area");
+				const wrapper = document.getElementById("input-wrapper");
+				if (!area || !wrapper) return null;
+				await Promise.all(area.getAnimations().map((a) => a.finished));
+				return Math.round(innerHeight - wrapper.getBoundingClientRect().bottom);
+			});
+			expect(gap).toBe(Number(match[1]));
+		},
+	},
 ];
