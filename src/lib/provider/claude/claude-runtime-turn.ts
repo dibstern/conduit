@@ -140,7 +140,10 @@ function currentInputId(
 	return [];
 }
 
-/** Called only after placement and run.started have been persisted. */
+/**
+ * Called only after placement has been persisted, and run.started when the
+ * input starts its own run (a steer placed inside the open run joins at its result).
+ */
 export function acceptIntakeEffect(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	sessionId: string,
@@ -170,14 +173,17 @@ export function cancelIntakeEffect(
 	});
 }
 
-/** A result settles only inputs that never reached provider intake. */
+/**
+ * A result settles only inputs that never reached provider intake, and never
+ * one the interrupt receipt says will still run (J6, AMENDMENT-2026-11-16).
+ */
 export function unacceptedResultInputIds(
 	ctx: ClaudeSessionContext,
 	result: SDKResultMessage,
 	waiters: PendingIntakes,
 ): string[] {
 	const covered =
-		result.user_message_uuids ??
+		result.user_message_uuids?.filter((id) => !ctx.stillQueued?.has(id)) ??
 		(result.user_message_uuid
 			? [result.user_message_uuid]
 			: !ctx.currentRunId && ctx.acceptedOutputOwner

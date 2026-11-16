@@ -895,6 +895,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				ctx,
 			);
 			yield* this.sinks.releaseSinkEffect(ctx?.eventSink);
+			for (const steer of ctx?.placedSteers?.values() ?? [])
+				yield* this.sinks.releaseSinkEffect(steer.eventSink);
 		});
 	}
 
@@ -2421,6 +2423,44 @@ class ClaudeRunnerPayload implements RunnerPayload {
 								? ctx.currentTurnId
 								: (ctx.acceptedOutputOwner?.inputId ?? ctx.currentTurnId)),
 					];
+					// J6 (AMENDMENT-2026-11-16): the open run's result settles every steer
+					// placed inside it. A named steer joins it before its terminal; a run
+					// Stop closed may already be retired, so a steer it names ends on its
+					// own run with this result. An omitted steer starts its own run below.
+					const openRunId = ctx.currentRunId;
+					const stoppedSteerRunIds: string[] = [];
+					for (const [inputId, steer] of ctx.placedSteers ?? []) {
+						if (!openRunId || !steer.runId || !inputIds.includes(inputId))
+							continue;
+						ctx.placedSteers?.delete(inputId);
+						if (ctx.closedRunIds?.has(openRunId))
+							stoppedSteerRunIds.push(steer.runId);
+						else {
+							(ctx.messageRunIds ??= new Map()).set(inputId, openRunId);
+							yield* steer.eventSink
+								.push(
+									claudeRuntimeEvent(
+										"run.started",
+										ctx.sessionId,
+										{
+											inputId,
+											requestedRunId: steer.runId,
+											...(steer.continuation
+												? { userMessageId: steer.continuation.cutOffMessageId }
+												: {}),
+										},
+										openRunId,
+									),
+								)
+								.pipe(
+									Effect.mapError(
+										(cause) =>
+											new ClaudeBoundaryError({ operation: "joinRun", cause }),
+									),
+								);
+						}
+						yield* this.sinks.releaseSinkEffect(steer.eventSink);
+					}
 					const acceptedOwner = inputIds.flatMap((inputId) => {
 						const runId = inputId && ctx.messageRunIds?.get(inputId);
 						return runId ? [{ inputId, runId, eventSink: ctx.eventSink }] : [];
@@ -2431,6 +2471,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 								input.runId ? [input.runId] : [],
 							),
 							...acceptedOwner.map(({ runId }) => runId),
+							...stoppedSteerRunIds,
 						]),
 					];
 					endsCurrentRun =
@@ -2571,7 +2612,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							ctx,
 							translatedResult ?? message,
 						);
-						if (ctx.interruptRequested) ctx.interruptInputId = undefined;
+						if (ctx.interruptRequested) {
+							ctx.interruptInputId = undefined;
+							ctx.stillQueued = undefined;
+						}
 						ctx.interruptRequested = false;
 					}
 				});
@@ -2593,6 +2637,20 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							}),
 					);
 				else yield* delivery;
+				// J6 (AMENDMENT-2026-11-16): the first steer the ended run's result
+				// omitted is now the open run. Any others join it at its result.
+				const [omitted] = ctx.placedSteers ?? [];
+				if (
+					message.type === "result" &&
+					omitted &&
+					!ctx.currentRunId &&
+					!ctx.stopped
+				) {
+					const [inputId, steer] = omitted;
+					ctx.placedSteers?.delete(inputId);
+					yield* this.startInputRunEffect(ctx, inputId, steer);
+					yield* this.sinks.releaseSinkEffect(steer.eventSink);
+				}
 			}
 			// Ownership or launcher input can arrive after the live snapshot,
 			// including through an agent's transcript feed. Final reads still
@@ -2681,50 +2739,73 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			const unplaced = pending?.unplaced;
 			if (!unplaced || ctx.stopped) return;
 			yield* ctx.promptQueue.recall(message.command_uuid);
-			// A steer becomes the current turn when it starts, on its own sink,
-			// and is in flight even when the turn before it already ended.
 			// Stop keeps this query alive for tasks/steers, but closes its run to
 			// new members, including when the daemon has retired it at the bound.
 			if (ctx.currentRunId && ctx.closedRunIds?.has(ctx.currentRunId))
 				ctx.currentRunId = undefined;
-			if (ctx.currentTurnId !== message.command_uuid)
-				ctx.currentTurnStartedAt = Date.now();
-			ctx.currentTurnId = message.command_uuid;
-			ctx.currentUserMessageId =
-				unplaced.continuation?.cutOffMessageId ?? message.command_uuid;
-			ctx.currentRunId ??= unplaced.runId;
+			if (ctx.currentRunId && unplaced.runId) {
+				// J6 (AMENDMENT-2026-11-16): a start inside the open run only places
+				// the steer. It joins that run when the run's result names it.
+				this.sinks.retainSink(unplaced.eventSink);
+				(ctx.placedSteers ??= new Map()).set(message.command_uuid, unplaced);
+				yield* this.placeUserMessageEffect(unplaced);
+			} else
+				yield* this.startInputRunEffect(ctx, message.command_uuid, unplaced);
+			if (ctx.stopped) return;
+			yield* acceptIntakeEffect(
+				this.stateRef,
+				ctx.sessionId,
+				message.command_uuid,
+			);
+		}).pipe(
+			Effect.uninterruptible,
+			(ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1)).withPermits(1),
+		);
+	}
+
+	/**
+	 * Makes a started input the current turn, on its own sink and run, in flight
+	 * even when the turn before it already ended.
+	 */
+	private startInputRunEffect(
+		ctx: ClaudeSessionContext,
+		inputId: string,
+		input: ResolvedSendTurnInput,
+	): Effect.Effect<void, ClaudeAdapterError> {
+		return Effect.gen({ self: this }, function* () {
+			if (ctx.currentTurnId !== inputId) ctx.currentTurnStartedAt = Date.now();
+			ctx.currentTurnId = inputId;
+			ctx.currentUserMessageId = input.continuation?.cutOffMessageId ?? inputId;
+			ctx.currentRunId ??= input.runId;
 			if (ctx.currentRunId) {
-				(ctx.messageRunIds ??= new Map()).set(
-					message.command_uuid,
-					ctx.currentRunId,
-				);
+				(ctx.messageRunIds ??= new Map()).set(inputId, ctx.currentRunId);
 				ctx.acceptedOutputOwner = {
-					inputId: message.command_uuid,
+					inputId,
 					runId: ctx.currentRunId,
 					userMessageId: ctx.currentUserMessageId,
 				};
 			}
 			ctx.turnInFlight = true;
 			this.deps.onTurnStateChanged?.(ctx.sessionId, true);
-			if (unplaced.eventSink !== ctx.eventSink) {
+			if (input.eventSink !== ctx.eventSink) {
 				const priorSink = ctx.eventSink;
-				this.sinks.retainSink(unplaced.eventSink);
-				ctx.eventSink = unplaced.eventSink;
+				this.sinks.retainSink(input.eventSink);
+				ctx.eventSink = input.eventSink;
 				yield* this.sinks.releaseSinkEffect(priorSink);
 			}
-			yield* this.placeUserMessageEffect(unplaced);
+			yield* this.placeUserMessageEffect(input);
 			if (ctx.stopped) return;
-			if (ctx.currentRunId && unplaced.runId) {
+			if (ctx.currentRunId && input.runId) {
 				yield* ctx.eventSink
 					.push(
 						claudeRuntimeEvent(
 							"run.started",
 							ctx.sessionId,
 							{
-								inputId: message.command_uuid,
-								requestedRunId: unplaced.runId,
-								...(unplaced.continuation
-									? { userMessageId: unplaced.continuation.cutOffMessageId }
+								inputId,
+								requestedRunId: input.runId,
+								...(input.continuation
+									? { userMessageId: input.continuation.cutOffMessageId }
 									: {}),
 							},
 							ctx.currentRunId,
@@ -2736,7 +2817,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 								new ClaudeBoundaryError({ operation: "startRun", cause }),
 						),
 					);
-				if (ctx.pendingRunModel?.inputId === message.command_uuid) {
+				if (ctx.pendingRunModel?.inputId === inputId) {
 					yield* ctx.eventSink
 						.push(
 							claudeRuntimeEvent(
@@ -2778,15 +2859,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							new ClaudeBoundaryError({ operation: "startTurn", cause }),
 					),
 				);
-			yield* acceptIntakeEffect(
-				this.stateRef,
-				ctx.sessionId,
-				message.command_uuid,
-			);
-		}).pipe(
-			Effect.uninterruptible,
-			(ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1)).withPermits(1),
-		);
+		});
 	}
 
 	private runSubagentFinalizationEffect(
@@ -3330,8 +3403,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 	/**
 	 * Issues the interrupt to this query; the result awaits its acknowledgement.
-	 * The receipt's `still_queued` is not read: those inputs keep their intakes,
-	 * and only a result naming them ends them (CONTRACT.md 3107-3108).
+	 * J6 (AMENDMENT-2026-11-16): the receipt's `still_queued` inputs will still
+	 * run, so the interrupted result does not end them. The SDK writes the receipt
+	 * before that result, and its callback records it before the stream reads on.
 	 */
 	private interruptQueryEffect(
 		ctx: ClaudeSessionContext,
@@ -3346,7 +3420,13 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					const pending = ctx.query.interrupt();
 					// close() rejects an unanswered interrupt, and callers may fork or drop
 					// the acknowledgement. Unobserved, that rejection kills the runner.
-					pending.catch(() => {});
+					pending.then(
+						(receipt) => {
+							if (ctx.interruptInputId === inputId)
+								ctx.stillQueued = new Set(receipt?.still_queued);
+						},
+						() => {},
+					);
 					return pending;
 				},
 				catch: (cause) =>

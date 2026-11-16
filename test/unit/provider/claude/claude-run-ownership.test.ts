@@ -1243,10 +1243,11 @@ describe("Claude accepted run ownership", () => {
 		}
 	});
 
-	it("acknowledges root and steer intake before the shared native run ends", async () => {
-		const ids: [string, string] = [
+	it("acknowledges steers at their start and joins them only at the result naming them", async () => {
+		const ids: [string, string, string] = [
 			"11111111-1111-4111-8111-111111111111",
 			"22222222-2222-4222-8222-222222222222",
+			"33333333-3333-4333-8333-333333333333",
 		];
 		const finish = Effect.runSync(Deferred.make<void>());
 		const events: ProviderRuntimeEvent[] = [];
@@ -1298,17 +1299,26 @@ describe("Claude accepted run ownership", () => {
 				replies.push(result.status);
 				return result;
 			});
-		const first = send(ids[0], "run-a");
-		let second: ReturnType<typeof send> | undefined;
+		const sends = [send(ids[0], "run-a")];
+		const runFlow = () =>
+			events.flatMap((event) =>
+				event.type === "run.started"
+					? [
+							`run.started ${event.runId} ${Reflect.get(event.data as object, "requestedRunId")}`,
+						]
+					: event.type === "turn.completed"
+						? [`turn.completed ${event.runId}`]
+						: [],
+			);
 		try {
-			await vi.waitFor(() => expect(replies).toEqual(["accepted"]));
-			second = send(ids[1], "run-b");
-			await vi.waitFor(() => expect(replies).toEqual(["accepted", "accepted"]));
-			expect(
-				events
-					.filter((event) => event.type === "run.started")
-					.map((event) => event.runId),
-			).toEqual(["run-a", "run-a"]);
+			await sends[0];
+			sends.push(send(ids[1], "run-b"));
+			await sends[1];
+			sends.push(send(ids[2], "run-c"));
+			await sends[2];
+			expect(replies).toEqual(["accepted", "accepted", "accepted"]);
+			// 103: a steer's start places it; its Run stays pending until the result.
+			expect(runFlow()).toEqual(["run.started run-a run-a"]);
 			expect(
 				events.filter(
 					(event) =>
@@ -1322,13 +1332,17 @@ describe("Claude accepted run ownership", () => {
 					events.filter((event) => event.type === "turn.completed"),
 				).toHaveLength(1),
 			);
-			expect(
-				events.find((event) => event.type === "turn.completed")?.runId,
-			).toBe("run-a");
+			// 104: both listed steers join before the result's terminal.
+			expect(runFlow()).toEqual([
+				"run.started run-a run-a",
+				"run.started run-a run-b",
+				"run.started run-a run-c",
+				"turn.completed run-a",
+			]);
 		} finally {
 			Effect.runSync(Deferred.succeed(finish, undefined));
 			await Effect.runPromise(instance.shutdownEffect().pipe(Effect.ignore));
-			await Promise.allSettled([first, ...(second ? [second] : [])]);
+			await Promise.allSettled(sends);
 		}
 	});
 
@@ -1433,28 +1447,53 @@ describe("Claude accepted run ownership", () => {
 			}),
 		);
 	});
+	const ownRuns = [
+		"run.started run-a run-a",
+		"turn.completed run-a",
+		"run.started run-b run-b",
+		"turn.completed run-b",
+	];
 	it.each([
-		["steer-during-tool-folds.jsonl", false, ["run-a", "run-a"], ["run-a"]],
 		[
-			"steer-misses-boundary.jsonl",
-			false,
-			["run-a", "run-b"],
-			["run-a", "run-b"],
+			"steer-during-tool-folds.jsonl",
+			"recorded",
+			[
+				"run.started run-a run-a",
+				"run.started run-a run-b",
+				"turn.completed run-a",
+			],
 		],
-		[
-			"steer-misses-boundary.jsonl",
-			true,
-			["run-a", "run-b"],
-			["run-a", "run-b"],
-		],
-	])("keeps the terminal event with its run in %s with delayed snapshot=%s", async (file, delayedSnapshot, owners, terminals) => {
-		const messages = readFileSync(
+		["steer-misses-boundary.jsonl", "recorded", ownRuns],
+		["steer-misses-boundary.jsonl", "delayed snapshot", ownRuns],
+		// 84 (vkira-bug mode 9): the steer starts before a result that omits it.
+		["steer-misses-boundary.jsonl", "started before the result", ownRuns],
+	] as const)("keeps the terminal event with its run in %s (%s)", async (file, variant, flow) => {
+		const delayedSnapshot = variant === "delayed snapshot";
+		const recorded = readFileSync(
 			join(import.meta.dirname, "../../../fixtures/claude-sdk-traces", file),
 			"utf8",
 		)
 			.split("\n")
 			.filter((line) => line.trim().length > 0)
 			.map((line) => decodeClaudeSDKMessage(JSON.parse(line)) as SDKMessage);
+		const firstResult = recorded.findIndex(
+			(message) => message.type === "result",
+		);
+		const steerStart = recorded.findIndex(
+			(message, index) =>
+				index > firstResult &&
+				message.type === "command_lifecycle" &&
+				message.state === "started",
+		);
+		const messages =
+			variant === "started before the result"
+				? [
+						...recorded.slice(0, firstResult),
+						...recorded.slice(steerStart, steerStart + 1),
+						...recorded.slice(firstResult, steerStart),
+						...recorded.slice(steerStart + 1),
+					]
+				: recorded;
 		const inputIds = [
 			...new Set(
 				messages.flatMap((message) =>
@@ -1526,28 +1565,34 @@ describe("Claude accepted run ownership", () => {
 		await vi.waitFor(() =>
 			expect(
 				events.filter((event) => event.type === "turn.completed"),
-			).toHaveLength(terminals.length),
-		);
-		const accepted = events.filter((event) => event.type === "run.started");
-		expect(accepted.map((event) => Reflect.get(event, "runId"))).toEqual(
-			owners,
-		);
-		expect(accepted.map((event) => event.data)).toEqual(
-			inputIds.map((inputId, index) => ({
-				inputId,
-				requestedRunId: index === 0 ? "run-a" : "run-b",
-			})),
+			).toHaveLength(flow.filter((step) => step.startsWith("turn.")).length),
 		);
 		expect(
+			events.flatMap((event) =>
+				event.type === "run.started"
+					? [
+							`run.started ${event.runId} ${Reflect.get(event.data as object, "requestedRunId")}`,
+						]
+					: event.type === "turn.completed"
+						? [`turn.completed ${event.runId}`]
+						: [],
+			),
+		).toEqual(flow);
+		expect(
 			events
-				.filter((event) => event.type === "turn.completed")
-				.map((event) => Reflect.get(event, "runId")),
-		).toEqual(terminals);
-		for (const event of events.filter(
-			(event) => event.type === "message.created",
-		)) {
-			expect(Reflect.get(event, "runId")).toBeDefined();
+				.filter((event) => event.type === "run.started")
+				.map((event) => Reflect.get(event.data as object, "inputId")),
+		).toEqual(inputIds);
+		const firstTerminal = events.findIndex(
+			(event) => event.type === "turn.completed",
+		);
+		for (const [index, event] of events.entries()) {
+			if (event.type !== "message.created") continue;
+			expect(event.runId).toBeDefined();
 			expect(Reflect.get(event.data as object, "parentID")).toBeDefined();
+			// A steer the first result omitted owns everything after that result.
+			if (flow.length > 3 && !delayedSnapshot && index > firstTerminal)
+				expect(event.runId).toBe("run-b");
 		}
 		if (delayedSnapshot && previousAnswer) {
 			const messageId = previousAnswer.message.id ?? previousAnswer.uuid;
@@ -1559,6 +1604,117 @@ describe("Claude accepted run ownership", () => {
 					Reflect.get(event.data, "messageId") === messageId,
 			))
 				expect(event.runId, event.type).toBe("run-a");
+		}
+	});
+
+	// 86: the interrupted result lists the queued steer, and the receipt says it will still run.
+	it("keeps a steer the interrupt receipt lists in still_queued pending, not failed", async () => {
+		const ids: [string, string] = [
+			"44444444-4444-4444-8444-444444444444",
+			"55555555-5555-4555-8555-555555555555",
+		];
+		const interrupted = Effect.runSync(Deferred.make<void>());
+		const steerQueued = Effect.runSync(Deferred.make<void>());
+		const receipt = Promise.resolve({ still_queued: [ids[1]] });
+		const events: ProviderRuntimeEvent[] = [];
+		const sink = createMockEventSink();
+		sink.push = (event) =>
+			Effect.sync(() => {
+				events.push(event);
+			});
+		const lifecycle = (command_uuid: string) => ({
+			type: "command_lifecycle" as const,
+			command_uuid,
+			state: "started" as const,
+			session_id: "stop-sdk",
+			uuid: crypto.randomUUID(),
+		});
+		const instance = makeTestClaudeProviderInstance({
+			queryFactory: ({ prompt }) => {
+				if (typeof prompt === "string")
+					throw new Error("Expected streaming input");
+				const inputs = prompt[Symbol.asyncIterator]();
+				return Object.assign(createMockQuery([]), {
+					interrupt: vi.fn(() => {
+						Effect.runSync(Deferred.succeed(interrupted, undefined));
+						return receipt;
+					}),
+					[Symbol.asyncIterator]: () =>
+						(async function* () {
+							await inputs.next();
+							yield lifecycle(ids[0]);
+							await inputs.next();
+							Effect.runSync(Deferred.succeed(steerQueued, undefined));
+							await Effect.runPromise(Deferred.await(interrupted));
+							await receipt;
+							yield makeErrorResult({
+								session_id: "stop-sdk",
+								uuid: crypto.randomUUID(),
+								user_message_uuids: ids,
+							});
+							yield lifecycle(ids[1]);
+							yield makeSuccessResult({
+								session_id: "stop-sdk",
+								uuid: crypto.randomUUID(),
+								user_message_uuids: [ids[1]],
+							});
+						})(),
+				});
+			},
+		});
+		const replies: string[] = [];
+		const send = (inputId: string, runId: string) =>
+			Effect.runPromise(
+				instance.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "stop-session",
+						inputId,
+						runId,
+						eventSink: sink,
+						model: { providerId: "claude", modelId: "claude-fable-5" },
+					}),
+				),
+			).then((result) => {
+				replies.push(`${inputId === ids[0] ? "a" : "b"} ${result.status}`);
+				return result;
+			});
+		const sends = [send(ids[0], "run-a")];
+		try {
+			await sends[0];
+			expect(replies).toEqual(["a accepted"]);
+			sends.push(send(ids[1], "run-b"));
+			await Effect.runPromise(Deferred.await(steerQueued));
+			await Effect.runPromise(
+				instance.interruptTurnEffect("stop-session", ["run-a"]),
+			);
+			await vi.waitFor(() =>
+				expect(
+					events.filter((event) => event.type === "turn.completed"),
+				).toHaveLength(1),
+			);
+			expect(replies).toEqual(["a accepted", "b accepted"]);
+			expect(
+				events.flatMap((event) =>
+					event.type === "run.started"
+						? [
+								`run.started ${event.runId} ${Reflect.get(event.data as object, "requestedRunId")}`,
+							]
+						: event.type === "turn.completed" ||
+								event.type === "turn.interrupted" ||
+								event.type === "turn.error"
+							? [`${event.type} ${event.runId}`]
+							: [],
+				),
+			).toEqual([
+				"run.started run-a run-a",
+				"turn.interrupted run-a",
+				"run.started run-b run-b",
+				"turn.completed run-b",
+			]);
+		} finally {
+			Effect.runSync(Deferred.succeed(interrupted, undefined));
+			await Effect.runPromise(instance.shutdownEffect().pipe(Effect.ignore));
+			await Promise.allSettled(sends);
 		}
 	});
 });

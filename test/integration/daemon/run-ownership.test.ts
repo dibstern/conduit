@@ -216,15 +216,16 @@ describe("provider run ownership through the isolated daemon", () => {
 				message["role"] === "assistant" &&
 				JSON.stringify(message["parts"]).includes("BANANA"),
 		);
+		// J6 (AMENDMENT-2026-11-16): the steer's start places it; it joins at the result.
 		const beforeResult = turns(fixture, sessionId).map(({ state }) => state);
 		proof["beforeResult"] = beforeResult;
-		expect(beforeResult).toEqual(["running", "running"]);
+		expect(beforeResult).toEqual(["running", "pending"]);
 		const accepted = ledger(fixture, sessionId);
 		const runId = accepted.turns[0]?.run_id;
 		expect(runId).toBeTruthy();
-		expect(accepted.turns.map(({ id, run_id }) => ({ id, run_id }))).toEqual([
-			{ id: alpha, run_id: runId },
-			{ id: bravo, run_id: runId },
+		expect(accepted.runs.map(({ status }) => status)).toEqual([
+			"running",
+			"pending",
 		]);
 		expect(terminals(accepted, "claude")).toEqual([]);
 		expect(new Set(accepted.commands.map(({ run_id }) => run_id)).size).toBe(2);
@@ -242,6 +243,10 @@ describe("provider run ownership through the isolated daemon", () => {
 			{ timeout: 15_000 },
 		);
 		const completed = ledger(fixture, sessionId);
+		expect(completed.turns.map(({ id, run_id }) => ({ id, run_id }))).toEqual([
+			{ id: alpha, run_id: runId },
+			{ id: bravo, run_id: runId },
+		]);
 		expect(
 			terminals(completed, "claude").map(({ metadata }) => metadata.runId),
 		).toEqual([runId]);

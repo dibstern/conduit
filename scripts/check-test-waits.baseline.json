@@ -1526,7 +1526,7 @@
 		"polling": 1
 	},
 	"test/unit/provider/claude/claude-run-ownership.test.ts": {
-		"polling": 19,
+		"polling": 18,
 		"timeout-override": 1
 	},
 	"test/unit/provider/claude/claude-runner-connection.test.ts": {

@@ -290,6 +290,14 @@ export interface ClaudeSessionContext {
 	};
 	/** Stop's captured runs cannot take new members while this query stays live. */
 	closedRunIds?: Set<string>;
+	/**
+	 * J6 (AMENDMENT-2026-11-16): steers the SDK started inside the open run, by
+	 * input id. Each holds its sink until that run's result joins it or leaves
+	 * it to start its own run.
+	 */
+	placedSteers?: Map<string, ResolvedSendTurnInput>;
+	/** J6 (AMENDMENT-2026-11-16): inputs the interrupt receipt says will still run. */
+	stillQueued?: ReadonlySet<string> | undefined;
 	/** Init can report a model before the SDK accepts the first input. */
 	pendingRunModel?:
 		| {
