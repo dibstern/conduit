@@ -160,4 +160,54 @@ describe("OpenCode Instances use during an idle stop", () => {
 			timeline: ["use-resolved", "stop-begin", "stop-end", "use-resolved"],
 		});
 	});
+
+	// Failure case: a native_session probe asking during the stop reads the dying process as
+	// running, so its client route waits for the stop and starts OpenCode again.
+	it("answers a probe asking during the stop with the stop's result, not running", async () => {
+		const dying = await serve("/dying");
+		let endpoint: OpenCodeEndpoint = {
+			url: dying.url,
+			status: "stopped",
+			managed: true,
+		};
+		let starts = 0;
+		const result = await Effect.runPromise(
+			Effect.gen(function* () {
+				const stopBegan = yield* Deferred.make<void>();
+				const layer = makeOpenCodeInstancesLive(
+					() => Effect.sync(() => endpoint),
+					{
+						idleTimeoutMs: 1_000,
+						control: {
+							start: () =>
+								Effect.sync(() => {
+									starts++;
+									endpoint = { ...endpoint, status: "healthy" };
+								}),
+							stop: () =>
+								Effect.gen(function* () {
+									yield* Deferred.succeed(stopBegan, undefined);
+									yield* Effect.sleep("300 millis");
+									endpoint = { ...endpoint, status: "stopped" };
+									return true;
+								}),
+							adopted: Effect.succeed([]),
+						},
+					},
+				);
+				return yield* Effect.gen(function* () {
+					const instances = yield* OpenCodeInstancesTag;
+					yield* Effect.scoped(instances.use("opencode", null));
+					yield* TestClock.adjust("1 second");
+					yield* Deferred.await(stopBegan);
+					const asked = yield* Effect.forkChild(
+						instances.isManagedStopped("opencode"),
+					);
+					yield* TestClock.adjust("300 millis");
+					return { stopped: yield* Fiber.join(asked), starts };
+				}).pipe(Effect.provide(layer));
+			}).pipe(Effect.provide([TestConsole.layer, TestClock.layer()])),
+		);
+		expect(result).toEqual({ stopped: true, starts: 1 });
+	});
 });

@@ -1293,14 +1293,19 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						),
 					),
 				isManagedStopped: (instanceId) =>
-					Effect.flatMap(resolveId(instanceId), (id) => {
-						if (starts.has(id) || stopping.has(id))
-							return Effect.succeed(false);
-						if (states.get(id)?.managedStopped) return Effect.succeed(true);
-						return control?.isStopped
-							? control.isStopped(id).pipe(Effect.provide(context))
-							: Effect.succeed(false);
-					}),
+					Effect.flatMap(resolveId(instanceId), (id) =>
+						Effect.gen(function* () {
+							// A stop in flight answers once it ends: read as running, the asker's `use`
+							// would wait for it and start the process it is ending.
+							const stop = stopping.get(id);
+							if (stop) yield* Deferred.await(stop);
+							if (starts.has(id)) return false;
+							if (states.get(id)?.managedStopped) return true;
+							return control?.isStopped
+								? yield* control.isStopped(id).pipe(Effect.provide(context))
+								: false;
+						}),
+					),
 				stop: (instanceId) => Effect.flatMap(resolveId(instanceId), stop),
 			};
 		}),
