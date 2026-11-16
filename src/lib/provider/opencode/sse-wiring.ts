@@ -325,15 +325,22 @@ export const sendPushForEventEffect = (
 			pushManager.sendTo
 		) {
 			const recipients = pushManager.getSubscriptionIds();
-			if (recipients.length > 0) {
-				yield* Effect.forEach(recipients, (recipientId) =>
-					sendPushForEventEffect(pushManager, msg, log, {
-						...context,
-						recipientId,
-					}),
+			// No device subscribed is not a failed send: there is nobody to try,
+			// and no claim is written, so a device that subscribes later still
+			// gets the next notice.
+			if (recipients.length === 0) {
+				yield* Effect.sync(() =>
+					log.verbose(`Push (${kind}) skipped: no subscribed device`),
 				);
 				return;
 			}
+			yield* Effect.forEach(recipients, (recipientId) =>
+				sendPushForEventEffect(pushManager, msg, log, {
+					...context,
+					recipientId,
+				}),
+			);
+			return;
 		}
 
 		const baseAlert = pushAlert(msg, context?.sessionId);

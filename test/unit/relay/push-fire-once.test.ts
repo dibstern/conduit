@@ -456,6 +456,8 @@ it("does not claim a ding for a session with no subscribed device", async () => 
 						n: number;
 					}>`SELECT COUNT(*) AS n FROM sent_alerts WHERE session_id = 's1'`;
 					expect(claims[0]?.n).toBe(0);
+					// Nobody to try is not a failed send.
+					expect(r.warned).toEqual([]);
 				}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 			);
 		},
