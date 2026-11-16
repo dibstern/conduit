@@ -430,6 +430,20 @@ try {
 		}),
 	);
 	for (const watcher of watchers) watcher.on("error", fail);
+	// A merge that moves a dependency changes package.json before `pnpm
+	// install` runs, so that build fails against the old packages. An install
+	// that changes node_modules rewrites .modules.yaml (a no-op one leaves it
+	// alone), so build again then. Polled by path: a watch on node_modules
+	// goes deaf once an install replaces the directory.
+	const modulesStamp = () =>
+		statSync("node_modules/.modules.yaml", { throwIfNoEntry: false })?.mtimeMs;
+	let lastModulesStamp = modulesStamp();
+	setInterval(() => {
+		const stamp = modulesStamp();
+		if (stamp === undefined || stamp === lastModulesStamp) return;
+		lastModulesStamp = stamp;
+		changed();
+	}, 1_000).unref();
 	await runBuild();
 	// Polled, not watched: an external build (a pre-commit `pnpm build`) often
 	// lands while dev:all is mid-cycle, and its one watch event was dropped,
