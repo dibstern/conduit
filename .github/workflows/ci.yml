@@ -39,6 +39,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # the run-ledger differential test reads 6c9ff950's tree
       # Project shell env tests capture a real zsh login shell; the runner image has none.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
       - uses: ./.github/actions/setup
