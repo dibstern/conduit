@@ -39,6 +39,9 @@ export const cursorUsageSource = (
 				: "unsupported";
 
 const DashboardResponseSchema = Schema.Struct({
+	billingCycleStart: Schema.optional(
+		Schema.Union([Schema.String, Schema.Number]),
+	),
 	billingCycleEnd: Schema.optional(
 		Schema.Union([Schema.String, Schema.Number]),
 	),
@@ -46,6 +49,23 @@ const DashboardResponseSchema = Schema.Struct({
 		Schema.Struct({ totalPercentUsed: Schema.optional(Schema.Number) }),
 	),
 });
+
+const EIGHT_DAYS_MS = 8 * 24 * 60 * 60 * 1000;
+
+/** The X Subscription's included pool is a week. A longer cycle is a legacy monthly plan. */
+export function cursorUsageWindowKind(
+	start: number,
+	end: number,
+): "seven_day" | "month" {
+	const span = end - start;
+	return Number.isFinite(start) &&
+		Number.isFinite(end) &&
+		start > 0 &&
+		end > start &&
+		span > EIGHT_DAYS_MS
+		? "month"
+		: "seven_day";
+}
 
 const unavailable = (reason: string): UsageRead => ({
 	status: "unavailable",
@@ -180,10 +200,9 @@ export const makeCursorUsage = (options: {
 						if (percent === undefined || !Number.isFinite(percent))
 							return {
 								authFailed: false,
-								reading: unavailable(
-									"Cursor did not return monthly plan usage.",
-								),
+								reading: unavailable("Cursor did not return plan usage."),
 							};
+						const start = Number(body.billingCycleStart);
 						const reset = Number(body.billingCycleEnd);
 						const date = new Date(reset);
 						const resetsAt =
@@ -199,7 +218,7 @@ export const makeCursorUsage = (options: {
 								status: utilization >= 100 ? "limited" : "available",
 								windows: [
 									{
-										kind: "month",
+										kind: cursorUsageWindowKind(start, reset),
 										utilization,
 										...(resetsAt ? { resetsAt } : {}),
 									},

@@ -2,7 +2,7 @@
 // duplicate prompts, usage deadlines cancelling a prompt, stale CLI identities,
 // auth renewal borrowing another subject, Disable losing to a pending Enable,
 // tokens leaking into persisted/browser state, dashboard errors failing turns,
-// monthly windows acquiring Claude forecasts, and cross-harness auto-switches.
+// plan windows acquiring Claude forecasts, and cross-harness auto-switches.
 import { createHash, randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -70,7 +70,7 @@ function storedState(fixture: ProcessHarness, sessionId?: string) {
 	}
 }
 
-describe("Cursor monthly usage through the built daemon", () => {
+describe("Cursor plan usage through the built daemon", () => {
 	let harness: ProcessHarness | undefined;
 	let dashboard: Server | undefined;
 	let scenario = "setup";
@@ -80,6 +80,9 @@ describe("Cursor monthly usage through the built daemon", () => {
 	let mode: "available" | "500" | "slow" | "bad-json" | "missing-plan" =
 		"available";
 	let totalPercentUsed = 37;
+	let billingCycleStart: number | string = String(
+		RESET_AT - 7 * 24 * 60 * 60 * 1000,
+	);
 	let billingCycleEnd: number | string = String(RESET_AT);
 	let dashboardCalls: DashboardCall[] = [];
 	let credentials = new Map<string, string>();
@@ -123,6 +126,7 @@ describe("Cursor monthly usage through the built daemon", () => {
 		if (options.daemonToken) credentials.set(options.daemonToken, "daemon");
 		mode = "available";
 		totalPercentUsed = 37;
+		billingCycleStart = String(RESET_AT - 7 * 24 * 60 * 60 * 1000);
 		billingCycleEnd = String(RESET_AT);
 		harness = ProcessHarness.create({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
@@ -186,6 +190,7 @@ describe("Cursor monthly usage through the built daemon", () => {
 								? { billingCycleEnd: "invalid" }
 								: {
 										planUsage: { totalPercentUsed },
+										billingCycleStart,
 										billingCycleEnd,
 									},
 						),
@@ -202,7 +207,7 @@ describe("Cursor monthly usage through the built daemon", () => {
 		await restart(options.daemonToken);
 		const added = await harness.requestRpc({
 			_tag: "AddInstance",
-			name: "Cursor monthly usage",
+			name: "Cursor plan usage",
 			driver: "cursor",
 			...(options.accountToken
 				? { env: { CURSOR_AUTH_TOKEN: options.accountToken } }
@@ -281,7 +286,7 @@ describe("Cursor monthly usage through the built daemon", () => {
 	});
 
 	it(
-		"prefers the account session token and keeps monthly windows out of Claude history",
+		"prefers the account session token and keeps plan windows out of Claude history",
 		async () => {
 			const accountToken = jwt("explicit-account");
 			const daemonToken = jwt("daemon-account");
@@ -300,7 +305,7 @@ describe("Cursor monthly usage through the built daemon", () => {
 				harness: "cursor",
 				windows: [
 					{
-						kind: "month",
+						kind: "seven_day",
 						utilization: 37,
 						resetsAt: new Date(RESET_AT).toISOString(),
 					},
@@ -344,7 +349,7 @@ describe("Cursor monthly usage through the built daemon", () => {
 			const reading = await refresh(fixture, accountId);
 			expect(reading).toMatchObject({
 				status: state,
-				windows: [{ kind: "month", utilization }],
+				windows: [{ kind: "seven_day", utilization }],
 			});
 			expect(reading?.windows[0]).not.toHaveProperty("resetsAt");
 			record(`clamp-${percent}`, reading);
@@ -580,7 +585,7 @@ describe("Cursor monthly usage through the built daemon", () => {
 			const reading = await refresh(fixture, accountId);
 			expect(reading).toMatchObject({
 				status: "available",
-				windows: [{ kind: "month", utilization: 37 }],
+				windows: [{ kind: "seven_day", utilization: 37 }],
 			});
 			expect(keychain().reads).toBe(2);
 			expect(dashboardCalls.map(({ credential }) => credential)).toEqual([

@@ -130,10 +130,12 @@ export const settle = (
 		startedAt,
 	}: ReadingOrigin & { readonly startedAt: number },
 ): { readonly reading: UsageReading; readonly record: AccountUsage } => {
+	// Pace history is Claude's 5-hour and weekly series. Cursor publishes a plan
+	// meter, including its weekly pool, without joining that series.
 	const { windows, series } =
-		harness === "codex" || !succeeded(read)
-			? { windows: read.windows, series: {} }
-			: withForecasts(record, read.windows, readAt);
+		harness === "claude" && succeeded(read)
+			? withForecasts(record, read.windows, readAt)
+			: { windows: read.windows, series: {} };
 	const reading: UsageReading =
 		record.inFlight?.overtaken && record.reading
 			? record.reading

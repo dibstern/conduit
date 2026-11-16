@@ -359,7 +359,7 @@
 		{/snippet}
 			{#each cursorAccounts as account (account.id)}
 				{@const reading = account.usageEligible ? usageState.readings.find((item) => item.accountId === account.id) : undefined}
-				{@const month = reading && (reading.status === "available" || reading.status === "limited") ? reading.windows.find((window) => window.kind === "month") : undefined}
+				{@const plan = reading && (reading.status === "available" || reading.status === "limited") ? reading.windows.find((window) => window.kind === "seven_day" || window.kind === "month") : undefined}
 				<div data-testid="cursor-usage-card-{account.id}" class="px-[14px] py-[10px]">
 					<div class="mb-[8px] flex items-center gap-[6px] text-[13.5px] max-md:text-[15px]">
 						<HarnessLogo driver={getInstanceById(account.id)?.driver ?? "cursor"} instanceId={account.id} size={18} aligned data-testid="account-logo" />
@@ -368,10 +368,10 @@
 							<TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" tone="dimmer" underline="always" data-testid="cursor-usage-disable-{account.id}" disabled={keychainPending !== null} aria-busy={keychainPending === account.id} onclick={() => void setCursorKeychain(account.id, false)}>Disable</TextButton>
 						{/if}
 					</div>
-					{#if reading && month}
-						{@render meter(reading, month, "Month", `cursor-usage-${account.id}-month`, false)}
-						{#if month.resetsAt && Number.isFinite(Date.parse(month.resetsAt))}
-							<div data-testid="cursor-usage-{account.id}-reset" class="mt-[3px] font-mono text-[10.5px] text-text-dimmer">Resets {new Date(month.resetsAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</div>
+					{#if reading && plan}
+						{@render meter(reading, plan, plan.kind === "seven_day" ? "Week" : "Month", `cursor-usage-${account.id}-${plan.kind === "seven_day" ? "week" : "month"}`, false)}
+						{#if plan.resetsAt && Number.isFinite(Date.parse(plan.resetsAt))}
+							<div data-testid="cursor-usage-{account.id}-reset" class="mt-[3px] font-mono text-[10.5px] text-text-dimmer">Resets {new Date(plan.resetsAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</div>
 						{/if}
 					{:else}
 						<p data-testid="cursor-usage-reason-{account.id}" class="text-[11px] leading-[1.5] text-text-dimmer">{reading?.reason ?? (account.cursorUsageSource === "unsupported" ? "Set CURSOR_AUTH_TOKEN in Accounts to read usage on this computer." : account.cursorUsageSource === "can_enable" ? "Usage isn't enabled." : "Usage hasn't been read yet.")}</p>
