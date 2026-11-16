@@ -1,0 +1,369 @@
+<p><b>Round three.</b> All five use what you picked: tasks <b>grouped by kind</b> (design 10), <b>finished tasks folded away</b>, and the <b>list and table with a detail view</b> (designs 1 and 2). The head chips stay. Finished tasks fold into one <b>✓ 2 done</b> chip, and tapping it opens the Tasks tab with finished shown.</p>
+<p>Same moment in all five: two subagents running, one of them running its own <code>pnpm test:unit</code>, a vitest watcher, and two finished tasks (one subagent, one shell). <b>Open session →</b> is on every subagent, finished ones too.</p>
+
+<tsp-shared>
+<style>
+:root{
+  --bg: light-dark(#fafafa,#111113);
+  --card: light-dark(#ffffff,#18181b);
+  --card2: light-dark(#f5f5f7,#1f1f23);
+  --chip: light-dark(#ececef,#28282d);
+  --border: light-dark(#e4e4e7,#2b2b30);
+  --text: light-dark(#18181b,#ececee);
+  --muted: light-dark(#52525b,#a1a1aa);
+  --dim: light-dark(#8a8a94,#71717a);
+  --accent: light-dark(#5b5bd6,#8b8cf8);
+  --think: light-dark(#db2777,#f472b6);
+  --tool: light-dark(#0284c7,#38bdf8);
+  --lav: light-dark(#6366f1,#a5b4fc);
+  --agent: light-dark(#7c3aed,#a78bfa);
+  --shell: light-dark(#0f766e,#2dd4bf);
+  --done: light-dark(#7c3aed,#a78bfa);
+  --ok: light-dark(#15803d,#4ade80);
+  --fail: light-dark(#dc2626,#f87171);
+  --ask: light-dark(#b45309,#f59e0b);
+  --termbg: light-dark(#efeff2,#141417);
+  --mono: "JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:22px 26px 28px;background:var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono)}
+.msg{display:grid;grid-template-columns:28px minmax(0,1fr);gap:14px;max-width:780px}
+.av{width:28px;height:28px;border-radius:7px;background:#d97757;color:#fff;display:grid;place-items:center;font-size:16px}
+.who{font-weight:600;font-size:14px;display:flex;gap:6px;align-items:center;height:28px}
+.when{font:500 11px var(--mono);color:var(--dim)}
+.turn{margin-top:6px;border:1px solid var(--border);background:var(--card);border-radius:12px;overflow:hidden}
+.head{display:flex;align-items:center;gap:6px;padding:10px 12px 0;min-height:34px}
+.title{font-weight:600;font-size:14px}
+.dur{font:12px var(--mono);color:var(--dim)}
+.phrase{font-size:12px;color:var(--muted);white-space:nowrap}
+.strip{display:flex;gap:2px;height:3px;margin:12px 12px 0}
+.strip i{display:block;border-radius:2px}
+.show{display:flex;align-items:center;gap:16px;border-top:1px solid var(--border);padding:0 12px;height:38px;font-size:12px;color:var(--muted);white-space:nowrap}
+.show span{position:relative;display:inline-flex;align-items:center;gap:4px;height:100%}
+.show .on{color:var(--text);font-weight:500}
+.show .on::before{content:"";position:absolute;left:-8px;right:-8px;top:-1px;height:2px;background:var(--accent);border-radius:2px}
+.show n{font:10.5px var(--mono);color:var(--dim)}
+.show .sep{width:1px;height:16px;background:var(--border)}
+.show .cost{margin-left:auto;font:11px var(--mono);color:var(--dim)}
+.pill{height:24px;border-radius:999px;padding:0 9px;background:var(--chip);font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.ic{display:inline-flex;flex:none;align-items:center;justify-content:center}
+.dim{color:var(--dim)} .muted{color:var(--muted)}
+.run{width:16px;height:16px;border-radius:4px;background:light-dark(#e3e3f7,#26263a);position:relative;flex:none}
+.run::after{content:"";position:absolute;inset:4px;border:2px solid var(--accent);border-right-color:transparent;border-radius:50%;animation:spin 1s linear infinite}
+.run.sm{width:14px;height:14px}.run.sm::after{inset:3px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--c,var(--accent));flex:none;display:inline-block}
+.pulse{animation:pulse 1.8s ease-out infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c,var(--accent)) 55%,transparent)}100%{box-shadow:0 0 0 6px transparent}}
+.kind{font:10.5px var(--mono);color:var(--dim);background:var(--chip);border-radius:4px;padding:1px 5px;white-space:nowrap;font-weight:400}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* head chips */
+.chips{display:flex;flex-wrap:wrap;gap:6px;padding:9px 12px 0 32px}
+.tchip{height:23px;border-radius:6px;border:1px solid color-mix(in srgb,var(--c) 40%,transparent);background:color-mix(in srgb,var(--c) 9%,transparent);padding:0 8px;font-size:11.5px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.tchip .t{font:10.5px var(--mono);color:var(--dim)}
+.tchip .sub{font:10px var(--mono);color:var(--shell);border-left:1px solid var(--border);padding-left:6px;display:inline-flex;gap:3px;align-items:center}
+.tchip.done{border-color:var(--border);background:transparent;color:var(--muted)}
+.tchip.sel{box-shadow:0 0 0 1.5px var(--c);background:color-mix(in srgb,var(--c) 18%,transparent);color:var(--text)}
+.tchip.done.sel{--c:var(--ok);background:color-mix(in srgb,var(--ok) 10%,transparent)}
+/* buttons */
+.go{height:24px;border-radius:999px;padding:0 9px 0 10px;font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:5px;background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);white-space:nowrap;flex:none}
+.go.solid{background:var(--accent);color:light-dark(#fff,#111)}
+.go.ico{width:22px;height:22px;padding:0;justify-content:center}
+.stopb{width:22px;height:22px;border-radius:999px;display:inline-grid;place-items:center;color:var(--fail);background:var(--chip);flex:none}
+.btn{height:24px;border-radius:999px;padding:0 10px;font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:5px;background:var(--chip);color:var(--text);white-space:nowrap;flex:none}
+.btn.stop{color:var(--fail)}
+/* groups */
+.gh{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;padding:10px 6px 5px;white-space:nowrap}
+.gh .m{font:11px var(--mono);color:var(--dim);font-weight:400}
+.gh .r{margin-left:auto}
+.fin{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:7px;font-size:12px;color:var(--dim);white-space:nowrap;min-width:0}
+.fin b{font-weight:500;color:var(--muted)}
+.lnk{font-size:11.5px;font-weight:500;color:var(--accent);display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+/* detail parts */
+.dh{margin:0;font-size:14px;font-weight:600;display:flex;gap:8px;align-items:center;white-space:nowrap;min-width:0}
+.kv{display:flex;gap:18px;margin:8px 0 10px;flex-wrap:wrap}
+.kv div{display:flex;flex-direction:column;gap:1px}
+.kv span{font:10px var(--mono);color:var(--dim)}
+.kv b{font:500 12px var(--mono)}
+.prompt{font-size:12.5px;color:var(--muted);border-left:2px solid var(--border);padding:1px 0 1px 9px;margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.lbl{font:10.5px var(--mono);color:var(--dim);margin:8px 0 3px}
+.st{display:flex;gap:7px;align-items:center;font-size:12px;height:23px;white-space:nowrap;min-width:0}
+.st .p{font:11.5px var(--mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+.st .e{margin-left:auto;font:10.5px var(--mono);color:var(--dim);flex:none}
+.acts{display:flex;gap:8px;align-items:center}
+.term{font:11px/1.6 var(--mono);color:var(--muted);background:var(--termbg);border-radius:7px;padding:7px 9px;white-space:pre;overflow:hidden}
+</style>
+<script>
+const ICONS={
+  "chev-d":'<path d="m6 9 6 6 6-6"/>',
+  "chev-r":'<path d="m9 18 6-6-6-6"/>',
+  bot:'<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  term:'<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
+  arrow:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  stop:'<rect width="12" height="12" x="6" y="6" rx="2"/>',
+  check:'<path d="M20 6 9 17l-5-5"/>',
+  file:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  cdr:'<polyline points="15 10 20 15 15 20"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/>',
+  copy:'<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'
+};
+const SEG={p:"think",b:"tool",l:"lav",a:"agent",s:"shell"};
+const svg=(n,s=14)=>`<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
+const CHIPS=[
+  {k:"agent",n:"Find route guard call sites",t:"1m 48s"},
+  {k:"agent",n:"Review the router refactor",t:"52s",sub:1},
+  {k:"shell",n:"pnpm vitest --watch",t:"2m 05s",mono:1},
+  {k:"done",n:"2 done"}
+];
+const chipHtml=(c,i,sel)=>{
+  const cls=["tchip",c.k==="done"?"done":"",sel.includes(i)?"sel":""].join(" ");
+  const lead=c.k==="done"?`<span class="ic" style="color:var(--ok)">${svg("check",11)}</span>`:`<i class="dot pulse" style="--c:var(--${c.k})"></i>`;
+  const name=c.mono?`<span class="mono" style="font-size:11px">${c.n}</span>`:c.n;
+  const t=c.t?`<span class="t">${c.t}</span>`:"";
+  const sub=c.sub?`<span class="sub">${svg("term",10)}1</span>`:"";
+  return `<span class="${cls}" style="--c:var(--${c.k})">${lead}${name}${t}${sub}</span>`;
+};
+/* detail parts for the focused subagent, shared by several designs */
+const PARTS={
+  head:`<h4 class="dh"><span class="ic" style="color:var(--agent)">${svg("bot")}</span><span class="trunc">Review the router refactor</span><span class="kind">code-reviewer</span></h4>`,
+  kv:`<div class="kv"><div><span>model</span><b>sonnet-4.5</b></div><div><span>running</span><b>52s</b></div><div><span>steps</span><b>6</b></div><div><span>tokens</span><b>18.2k</b></div><div><span>cost</span><b>$0.09</b></div></div>`,
+  prompt:`<div class="prompt">Review the router refactor in src/lib/server for behaviour changes. Run the unit tests and report anything that regressed, with file and line.</div>`,
+  steps:`<div class="lbl">Now</div><div class="st"><span class="run sm"></span>Running<span class="p">pnpm test:unit</span><span class="kind">its shell</span><span class="e">380/412 · 30s</span></div><div class="lbl">Recent</div><div class="st"><span class="ic" style="color:var(--tool)">${svg("file",12)}</span>Read<span class="p">src/lib/server/router.ts</span><span class="e">2s</span></div><div class="st"><span class="ic" style="color:var(--tool)">${svg("search",12)}</span>Grep<span class="p">"routeGuard" src/lib</span><span class="e">1s</span></div>`,
+  acts:`<div class="acts"><span class="go solid" title="Open subagent session">Open session ${svg("arrow",12)}</span><span class="btn stop"><span class="ic">${svg("stop",11)}</span>Stop</span></div>`
+};
+addEventListener("DOMContentLoaded",()=>{
+  document.querySelectorAll("[data-head]").forEach(e=>{
+    const sel=(e.dataset.head||"").split(",").filter(Boolean).map(Number);
+    e.outerHTML=`<div class="head"><span class="ic dim">${svg("chev-d")}</span><span class="run"></span><span class="title">Working</span><span class="dur">3m 12s</span><span class="phrase">· 9 reads</span><span class="pill" style="margin-left:4px">✦ Summary</span></div>
+<div class="chips">${CHIPS.map((c,i)=>chipHtml(c,i,sel)).join("")}</div>
+<div class="strip" data-seq="p3 b8 p2 b6 p2 b9 p3 b7 a2 p2 b8 p2 b6"></div>`;
+  });
+  document.querySelectorAll("[data-show]").forEach(e=>{
+    e.outerHTML=`<div class="show"><span>Show</span><span>Answer</span><span>Key <n>4</n></span><span>Most <n>6</n></span><span class="sep"></span><span>Full log <n>18</n></span><span class="on">Tasks <i class="dot pulse"></i><n>4</n></span><span class="sep"></span><span>Usage</span><span class="cost">$1.42</span></div>`;
+  });
+  document.querySelectorAll("[data-part]").forEach(e=>{e.outerHTML=e.dataset.part.split(" ").map(p=>PARTS[p]).join("")});
+  document.querySelectorAll("[data-go]").forEach(e=>{
+    const ico="ico" in e.dataset;
+    e.className="go"+(ico?" ico":"");
+    e.title="Open subagent session";
+    e.innerHTML=ico?svg("arrow",12):`Open session ${svg("arrow",12)}`;
+  });
+  document.querySelectorAll("[data-stop]").forEach(e=>{e.className="stopb";e.title="Stop";e.innerHTML=svg("stop",10)});
+  document.querySelectorAll("[data-i]").forEach(e=>{e.classList.add("ic");e.innerHTML=svg(e.dataset.i,e.dataset.s||14)});
+  document.querySelectorAll("[data-seq]").forEach(e=>{e.innerHTML=e.dataset.seq.split(" ").map(t=>`<i style="flex:${t.slice(1)};background:var(--${SEG[t[0]]})"></i>`).join("")});
+});
+</script>
+</tsp-shared>
+
+<tsp-section title="Five designs">
+<tsp-grid min="420">
+
+<!-- 1 -->
+<tsp-card n="1" name="Grouped list, detail beside" why="Design 2's list, split into Subagents and Shells sections. Each section ends in one dim line for its finished tasks, closed by default. The tapped chip picks the detail. Subagent rows also carry a small arrow, so you can jump to a session without opening the detail first." width="820">
+<style>
+.split{display:grid;grid-template-columns:262px minmax(0,1fr);border-top:1px solid var(--border);margin-top:12px}
+.side{border-right:1px solid var(--border);padding:2px 6px 8px}
+.li{padding:6px 8px;border-radius:8px;font-size:12.5px}
+.li .t{display:flex;gap:6px;align-items:center;height:22px}
+.li .e{margin-left:auto;font:10.5px var(--mono);color:var(--dim);white-space:nowrap;flex:none}
+.li .n{font:11px var(--mono);color:var(--muted);margin:0 0 0 13px}
+.li.on{background:color-mix(in srgb,var(--agent) 12%,transparent)}
+.dp{padding:12px 14px}
+</style>
+<div class="msg"><div class="av">✳</div><div>
+<div class="who">Claude <span class="when">· Today · 9:39 AM</span></div>
+<div class="turn">
+  <div data-head="1"></div>
+  <div class="split">
+    <div class="side">
+      <div class="gh"><span data-i="bot" style="color:var(--agent)"></span>Subagents<span class="m">2</span><span class="m r">$0.12</span></div>
+      <div class="li"><div class="t"><i class="dot pulse" style="--c:var(--agent)"></i><span class="trunc">Find route guard call sites</span><span class="e">1m 48s</span><span data-go data-ico></span></div><div class="n trunc">Explore · Read ws.ts</div></div>
+      <div class="li on"><div class="t"><i class="dot pulse" style="--c:var(--agent)"></i><span class="trunc">Review the router refactor</span><span class="e">52s</span><span data-go data-ico></span></div><div class="n trunc">code-reviewer · on its shell</div></div>
+      <div class="fin"><span data-i="chev-r" data-s="12"></span><b>1 finished</b><span class="trunc">· Map session routes</span></div>
+      <div class="gh"><span data-i="term" style="color:var(--shell)"></span>Shells<span class="m">2</span></div>
+      <div class="li"><div class="t"><i class="dot pulse" style="--c:var(--shell)"></i><span class="trunc mono" style="font-size:11.5px">pnpm vitest --watch</span><span class="e">2m 05s</span></div><div class="n trunc">✓ 412 passed · watching</div></div>
+      <div class="li"><div class="t"><i class="dot pulse" style="--c:var(--shell)"></i><span class="trunc mono" style="font-size:11.5px">pnpm test:unit</span><span class="e">30s</span></div><div class="n trunc">380/412 · from the reviewer</div></div>
+      <div class="fin"><span data-i="chev-r" data-s="12"></span><b>1 finished</b><span class="trunc mono" style="font-size:11px">· pnpm check</span></div>
+    </div>
+    <div class="dp">
+      <div data-part="head kv prompt steps"></div>
+      <div style="height:12px"></div>
+      <div data-part="acts"></div>
+    </div>
+  </div>
+  <div data-show></div>
+</div></div></div>
+</tsp-card>
+
+<!-- 2 -->
+<tsp-card n="2" name="Grouped table, detail below" why="Design 1's table at full width, with a header row per kind showing its totals. The selected row's detail docks under the table across the full width. Finished tasks from both kinds share one line at the bottom of the table. Best on a wide screen when you want to compare tasks." width="820">
+<style>
+.tbl{padding:6px 12px 4px}
+.tr{display:grid;grid-template-columns:16px minmax(0,1.3fr) minmax(0,1fr) 78px 48px 146px;gap:10px;align-items:center;height:32px;padding:0 8px;border-radius:7px;font-size:12.5px}
+.tr.h{height:22px;font:10.5px var(--mono);color:var(--dim)}
+.tr .now{font:11.5px var(--mono);color:var(--muted)}
+.tr .m2{font:11px var(--mono);color:var(--dim)}
+.tr .e{font:11px var(--mono);color:var(--dim);text-align:right}
+.tr .a{display:flex;gap:6px;justify-content:flex-end}
+.tr.on{background:color-mix(in srgb,var(--agent) 10%,transparent);box-shadow:inset 2px 0 0 var(--agent)}
+.tr.sub .nm{display:flex;gap:5px;align-items:center;padding-left:12px}
+.tg{display:flex;align-items:center;gap:7px;height:30px;padding:6px 8px 0;font-size:12px;font-weight:600;border-top:1px solid var(--border);margin-top:4px}
+.tg:first-of-type{border-top:none;margin-top:0}
+.tg .m{font:11px var(--mono);color:var(--dim);font-weight:400}
+.dock{border-top:1px solid var(--border);background:var(--card2);display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:22px;padding:12px 14px 14px}
+.dock .acts{margin-top:10px}
+</style>
+<div class="msg"><div class="av">✳</div><div>
+<div class="who">Claude <span class="when">· Today · 9:39 AM</span></div>
+<div class="turn">
+  <div data-head="1"></div>
+  <div class="tbl">
+    <div class="tr h"><span></span><span>Task</span><span>Now</span><span>Model / pid</span><span style="text-align:right">Time</span><span></span></div>
+    <div class="tg"><span data-i="bot" style="color:var(--agent)"></span>Subagents<span class="m">2 running · 34.3k tokens · $0.12</span></div>
+    <div class="tr"><i class="dot pulse" style="--c:var(--agent)"></i><span class="trunc">Find route guard call sites</span><span class="now trunc">Read src/lib/server/ws.ts</span><span class="m2">haiku-4.5</span><span class="e">1m 48s</span><span class="a"><span data-go></span><span data-stop></span></span></div>
+    <div class="tr on"><i class="dot pulse" style="--c:var(--agent)"></i><span class="trunc">Review the router refactor</span><span class="now trunc">waiting on its shell</span><span class="m2">sonnet-4.5</span><span class="e">52s</span><span class="a"><span data-go></span><span data-stop></span></span></div>
+    <div class="tg"><span data-i="term" style="color:var(--shell)"></span>Shells<span class="m">2 running</span></div>
+    <div class="tr"><i class="dot pulse" style="--c:var(--shell)"></i><span class="trunc mono" style="font-size:11.5px">pnpm vitest --watch</span><span class="now trunc">✓ 412 passed · watching</span><span class="m2">48213</span><span class="e">2m 05s</span><span class="a"><span data-stop></span></span></div>
+    <div class="tr sub"><i class="dot pulse" style="--c:var(--shell)"></i><span class="nm trunc mono" style="font-size:11.5px">pnpm test:unit</span><span class="now trunc">380 / 412 passed</span><span class="m2">48377</span><span class="e">30s</span><span class="a"><span data-stop></span></span></div>
+    <div class="fin" style="margin-top:4px"><span data-i="chev-r" data-s="12"></span><b>2 finished</b><span class="trunc">· Map session routes · <span class="mono" style="font-size:11px">pnpm check</span></span></div>
+  </div>
+  <div class="dock">
+    <div><div data-part="head kv prompt"></div><div data-part="acts"></div></div>
+    <div><div data-part="steps"></div></div>
+  </div>
+  <div data-show></div>
+</div></div></div>
+</tsp-card>
+
+<!-- 3 -->
+<tsp-card n="3" name="Row opens in place" why="A grouped table where the selected row opens into its own detail, so list and detail stay in one column. This is the one that still works on a phone. Finished tasks hide behind a small link on each kind's header." width="820">
+<style>
+.ip{padding:2px 12px 12px}
+.ir{display:grid;grid-template-columns:16px minmax(0,1fr) auto 50px auto;gap:10px;align-items:center;height:34px;padding:0 10px;font-size:12.5px;border-radius:8px}
+.ir .now{font:11.5px var(--mono);color:var(--muted);margin-left:6px}
+.ir .e{font:11px var(--mono);color:var(--dim);text-align:right}
+.ir .a{display:flex;gap:6px}
+.open{border:1px solid color-mix(in srgb,var(--agent) 50%,transparent);border-radius:10px;overflow:hidden;margin:2px 0}
+.open .ir{background:color-mix(in srgb,var(--agent) 9%,transparent);border-radius:0}
+.ob{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:20px;padding:4px 12px 12px 36px}
+.ob .acts{margin-top:8px}
+</style>
+<div class="msg"><div class="av">✳</div><div>
+<div class="who">Claude <span class="when">· Today · 9:39 AM</span></div>
+<div class="turn">
+  <div data-head="1"></div>
+  <div class="ip">
+    <div class="gh"><span data-i="bot" style="color:var(--agent)"></span>Subagents<span class="m">2 running · $0.12</span><span class="r lnk">1 finished <span data-i="chev-r" data-s="12"></span></span></div>
+    <div class="ir"><i class="dot pulse" style="--c:var(--agent)"></i><span class="trunc">Find route guard call sites<span class="now">Read ws.ts</span></span><span class="kind">Explore</span><span class="e">1m 48s</span><span class="a"><span data-go data-ico></span><span data-stop></span></span></div>
+    <div class="open">
+      <div class="ir"><i class="dot pulse" style="--c:var(--agent)"></i><span class="trunc" style="font-weight:500">Review the router refactor</span><span class="kind">code-reviewer</span><span class="e">52s</span><span data-i="chev-d" data-s="13" class="dim"></span></div>
+      <div class="ob">
+        <div><div data-part="kv prompt"></div><div data-part="acts"></div></div>
+        <div><div data-part="steps"></div></div>
+      </div>
+    </div>
+    <div class="gh"><span data-i="term" style="color:var(--shell)"></span>Shells<span class="m">2 running</span><span class="r lnk">1 finished <span data-i="chev-r" data-s="12"></span></span></div>
+    <div class="ir"><i class="dot pulse" style="--c:var(--shell)"></i><span class="trunc mono" style="font-size:11.5px">pnpm vitest --watch<span class="now">✓ 412 passed · watching</span></span><span></span><span class="e">2m 05s</span><span class="a"><span data-stop></span></span></div>
+    <div class="ir"><i class="dot pulse" style="--c:var(--shell)"></i><span class="trunc mono" style="font-size:11.5px">pnpm test:unit<span class="now">380/412 · from the reviewer</span></span><span></span><span class="e">30s</span><span class="a"><span data-stop></span></span></div>
+  </div>
+  <div data-show></div>
+</div></div></div>
+</tsp-card>
+
+<!-- 4 -->
+<tsp-card n="4" name="Detail fits the kind" why="The same split, drawn with a shell selected to show that the detail changes by kind. A shell shows its output, pid and who started it. When a subagent started it, that line links to the subagent's session. Finished is drawn open here: one tap from the ✓ 2 done chip, and each finished subagent keeps its Open session." width="820">
+<style>
+.split4{display:grid;grid-template-columns:262px minmax(0,1fr);border-top:1px solid var(--border);margin-top:12px}
+.side4{border-right:1px solid var(--border);padding:2px 6px 8px}
+.r4{display:flex;align-items:center;gap:7px;height:30px;padding:0 8px;border-radius:7px;font-size:12.5px;white-space:nowrap}
+.r4 .e{margin-left:auto;font:10.5px var(--mono);color:var(--dim);flex:none}
+.r4.on{background:color-mix(in srgb,var(--shell) 12%,transparent)}
+.r4.sub{padding-left:22px}
+.r4.f{color:var(--muted)}
+.finh{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:10px 6px 4px;color:var(--muted);border-top:1px solid var(--border);margin-top:8px}
+.finh .m{font:11px var(--mono);color:var(--dim);font-weight:400}
+.dp4{padding:12px 14px;min-width:0}
+.from{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin:2px 0 10px;white-space:nowrap}
+.dp4 .acts{margin-top:10px}
+</style>
+<div class="msg"><div class="av">✳</div><div>
+<div class="who">Claude <span class="when">· Today · 9:39 AM</span></div>
+<div class="turn">
+  <div data-head="1,3"></div>
+  <div class="split4">
+    <div class="side4">
+      <div class="gh"><span data-i="bot" style="color:var(--agent)"></span>Subagents<span class="m">2</span></div>
+      <div class="r4"><i class="dot pulse" style="--c:var(--agent)"></i><span class="trunc">Find route guard call sites</span><span class="e">1m 48s</span><span data-go data-ico></span></div>
+      <div class="r4"><i class="dot pulse" style="--c:var(--agent)"></i><span class="trunc">Review the router refactor</span><span class="e">52s</span><span data-go data-ico></span></div>
+      <div class="gh"><span data-i="term" style="color:var(--shell)"></span>Shells<span class="m">2</span></div>
+      <div class="r4"><i class="dot pulse" style="--c:var(--shell)"></i><span class="trunc mono" style="font-size:11.5px">pnpm vitest --watch</span><span class="e">2m 05s</span></div>
+      <div class="r4 on"><i class="dot pulse" style="--c:var(--shell)"></i><span class="trunc mono" style="font-size:11.5px">pnpm test:unit</span><span class="e">30s</span></div>
+      <div class="finh"><span data-i="chev-d" data-s="12" class="dim"></span>Finished<span class="m">2</span></div>
+      <div class="r4 f"><span data-i="check" data-s="12" style="color:var(--ok)"></span><span class="trunc">Map session routes</span><span class="e">58s</span><span data-go data-ico></span></div>
+      <div class="r4 f"><span data-i="check" data-s="12" style="color:var(--ok)"></span><span class="trunc mono" style="font-size:11.5px">pnpm check</span><span class="e">exit 0</span></div>
+    </div>
+    <div class="dp4">
+      <h4 class="dh"><span data-i="term" style="color:var(--shell)"></span><span class="mono" style="font-size:13px">pnpm test:unit</span><span class="kind">shell</span></h4>
+      <div class="kv"><div><span>pid</span><b>48377</b></div><div><span>running</span><b>30s</b></div><div><span>passed</span><b>380 / 412</b></div><div><span>cwd</span><b>~/conduit</b></div></div>
+      <div class="from">Started by <span data-i="bot" data-s="12" style="color:var(--agent)"></span><b style="font-weight:500;color:var(--text)">Review the router refactor</b><span data-go></span></div>
+      <div class="term"> ✓ test/unit/router/guard.test.ts (24)
+ ✓ test/unit/router/match.test.ts (61)
+ ❯ test/unit/server/ws.test.ts 12/38
+ Test Files  31 passed | 1 running (38)
+      Tests  380 passed (412)</div>
+      <div class="acts"><span class="btn">Full output</span><span class="btn"><span data-i="copy" data-s="11"></span>Copy command</span><span class="btn stop"><span data-i="stop" data-s="11"></span>Stop</span></div>
+    </div>
+  </div>
+  <div data-show></div>
+</div></div></div>
+</tsp-card>
+
+<!-- 5 -->
+<tsp-card n="5" name="Kind tabs" why="Instead of sections, a switch at the top picks one kind, and Finished is its own tab, out of sight until you want it. Since a table only shows one kind, it can use columns that fit: model, steps and cost for subagents; pid and output for shells. The detail sits in a narrow pane on the right." width="820">
+<style>
+.seg{display:flex;gap:2px;margin:12px 12px 4px;background:var(--chip);border-radius:9px;padding:3px;width:max-content}
+.seg>span{height:26px;border-radius:7px;padding:0 11px;font-size:12px;display:inline-flex;align-items:center;gap:6px;color:var(--muted);white-space:nowrap}
+.seg>span.on{background:var(--card);color:var(--text);font-weight:500;box-shadow:0 1px 2px light-dark(#0000001a,#00000066)}
+.seg n{font:10.5px var(--mono);color:var(--dim)}
+.k5{display:grid;grid-template-columns:minmax(0,1fr) 244px;border-top:1px solid var(--border);margin-top:8px}
+.t5{padding:4px 8px 10px;border-right:1px solid var(--border);min-width:0}
+.r5{display:grid;grid-template-columns:minmax(0,1fr) 68px 34px 40px 44px 22px;gap:8px;align-items:center;padding:6px 8px;border-radius:8px;font-size:12.5px}
+.r5.h{font:10.5px var(--mono);color:var(--dim);padding-top:8px;padding-bottom:2px}
+.r5 .n{display:block;font:11px var(--mono);color:var(--muted);margin-top:1px}
+.r5 .c{font:11px var(--mono);color:var(--dim);text-align:right}
+.r5.on{background:color-mix(in srgb,var(--agent) 10%,transparent);box-shadow:inset 2px 0 0 var(--agent)}
+.p5{padding:12px 13px;min-width:0}
+.p5 .kv{gap:12px}.p5 .kind{display:none}
+.p5 .acts{margin-top:10px;flex-wrap:wrap}
+</style>
+<div class="msg"><div class="av">✳</div><div>
+<div class="who">Claude <span class="when">· Today · 9:39 AM</span></div>
+<div class="turn">
+  <div data-head="1"></div>
+  <div class="seg"><span class="on"><span data-i="bot" data-s="13" style="color:var(--agent)"></span>Subagents<n>2</n></span><span><span data-i="term" data-s="13" style="color:var(--shell)"></span>Shells<n>2</n></span><span><span data-i="check" data-s="13" style="color:var(--ok)"></span>Finished<n>2</n></span></div>
+  <div class="k5">
+    <div class="t5">
+      <div class="r5 h"><span>Task</span><span>Model</span><span class="c">Steps</span><span class="c">Cost</span><span class="c">Time</span><span></span></div>
+      <div class="r5"><span class="trunc"><span style="display:inline-flex;gap:6px;align-items:center"><i class="dot pulse" style="--c:var(--agent)"></i>Find route guard call sites</span><span class="n trunc">Explore · Read src/lib/server/ws.ts</span></span><span class="c" style="text-align:left">haiku-4.5</span><span class="c">14</span><span class="c">$0.03</span><span class="c">1m 48s</span><span data-go data-ico></span></div>
+      <div class="r5 on"><span class="trunc"><span style="display:inline-flex;gap:6px;align-items:center"><i class="dot pulse" style="--c:var(--agent)"></i>Review the router refactor</span><span class="n trunc">code-reviewer · on its shell</span></span><span class="c" style="text-align:left">sonnet-4.5</span><span class="c">6</span><span class="c">$0.09</span><span class="c">52s</span><span data-go data-ico></span></div>
+    </div>
+    <div class="p5">
+      <div data-part="head prompt steps"></div>
+      <div data-part="acts"></div>
+    </div>
+  </div>
+  <div data-show></div>
+</div></div></div>
+</tsp-card>
+
+</tsp-grid>
+</tsp-section>
+
+<tsp-section title="Shared rules">
+<ol>
+<li><b>Finished stays folded</b> until you open it, and it stays open for that turn once you do. Tapping the <b>✓ 2 done</b> chip opens the Tasks tab with finished shown.</li>
+<li><b>Subagents always get Open session →</b>, running or finished. Shells get Output and Stop. A shell started by a subagent links to that subagent's session.</li>
+<li><b>The tapped chip picks the detail.</b> With no chip tapped, the first running subagent is selected.</li>
+</ol>
+</tsp-section>
