@@ -5,7 +5,7 @@ flowchart LR
     browser[Browser Clients
     Svelte SPA + WebSocket client]
 
-    subgraph relay[conduit daemon]
+    subgraph conduitDaemon[conduit daemon]
         daemon[Daemon
         src/lib/daemon/daemon.ts]
         server[Shared HTTP and WS edge
@@ -15,9 +15,9 @@ flowchart LR
         providers[Provider adapters
         src/lib/provider/*]
 
-        subgraph projects[Per-project mounts under /p/<slug>]
-            relayA[Project Relay A]
-            relayB[Project Relay B]
+        subgraph projects[Project services, opened on first use]
+            projectA[Project A services]
+            projectB[Project B services]
         end
     end
 
@@ -29,10 +29,10 @@ flowchart LR
     browser -->|HTTP for SPA and APIs| server
     browser <-->|WebSocket messages| server
     daemon --> server
-    server --> relayA
-    server --> relayB
-    relayA --> providers
-    relayB --> providers
+    server --> projectA
+    server --> projectB
+    projectA --> providers
+    projectB --> providers
     providers <-->|REST, SSE, PTY upstream| opencode
     providers -->|stream events| persistence
     persistence --> server

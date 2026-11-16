@@ -77,7 +77,7 @@ tests alone).
 
 ### Integration
 
-Run this when changing daemon, relay, server, session, or instance behavior that depends on a real relay stack or OpenCode interaction.
+Run this when changing daemon, project services, server, session, or instance behavior that depends on a real project-services stack or OpenCode interaction.
 
 ```bash
 pnpm build
@@ -421,7 +421,7 @@ pnpm exec vitest run --project guards
 pnpm exec vitest related --run --project unit --project unit-sqlite --project components <changed-files>
 ```
 
-Run the static guardrail suite when touching Effect ownership, daemon/relay composition, provider adapters, persistence, or transport boundaries:
+Run the static guardrail suite when touching Effect ownership, daemon/project-services composition, provider adapters, persistence, or transport boundaries:
 
 ```bash
 pnpm exec vitest run test/unit/effect/runtime-boundary-grep.guard.test.ts
@@ -430,5 +430,5 @@ pnpm exec vitest run test/unit/effect/runtime-boundary-grep.guard.test.ts
 Final guardrail expectations as of 2026-05-15:
 
 - `startDaemonProcess`, `PersistenceLayer.open(...)`, rejectable `Effect.promise(...)`, and dynamic `concurrency: "unbounded"` have zero production hits under `src`.
-- Runtime entry grep has explicitly accepted hits: standalone HTTP compatibility, OpenCode SDK fetch, Claude SDK permission callback, frontend transport, local CLI RPC, and relay startup.
-- `relay-stack.ts` has zero `Layer.succeed(...)` relay bridge composition hits.
+- Runtime entry grep has explicitly accepted hits: standalone HTTP compatibility, OpenCode SDK fetch, Claude SDK permission callback, frontend transport, local CLI RPC, and project startup.
+- `project-services-layer.ts` has zero `Layer.succeed(...)` bridge composition hits beyond the borrowed daemon tracer.

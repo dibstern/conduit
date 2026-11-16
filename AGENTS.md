@@ -25,7 +25,7 @@ Read `docs/agent-guide/architecture.md` before changing daemon behavior, project
 
 - `src/bin/`: CLI entrypoints.
 - `src/lib/daemon/`: daemon lifecycle, IPC,  config persistence, projects.
-- `src/lib/domain/`: Effect service and Layer owners, organized by daemon, relay (per-project services; the folder keeps its old name), provider, persistence, and server domain.
+- `src/lib/domain/`: Effect service and Layer owners, organized by daemon, project-services (each project's services), provider, persistence, and server domain.
 - `src/lib/contracts/`: implementation-free shared schemas and protocol declarations.
 - `src/lib/server/`: HTTP and WebSocket server, router, static files, push.
 - `src/lib/terminal/`: PTY manager and PTY upstream wiring.

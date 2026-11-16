@@ -195,7 +195,7 @@ describe("Effect runtime boundary grep", () => {
 				pattern:
 					/Layer\.succeed\s*\((?!\s*Tracer\.Tracer\s*(?:,\s*config\.tracer\s*\)|\)\s*\(\s*config\.tracer\s*\)))/g,
 				reason:
-					"relay-stack should compose self-constructing relay Layers; only the borrowed daemon tracer may be provided directly",
+					"project services should compose self-constructing Layers; only the borrowed daemon tracer may be provided directly",
 			},
 		] as const;
 

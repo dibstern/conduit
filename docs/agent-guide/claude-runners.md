@@ -13,10 +13,10 @@ inherited settings can discard the warm SDK query. An exited runner also makes
 the next send spawn a fresh process unless another open or focus hint warms it.
 
 A focused draft also warms its selected provider. Claude reserves the future
-session ID in the relay, without writing a session. Matching creation consumes
+session ID in the project's services, without writing a session. Matching creation consumes
 that reservation. Changed launch settings, a replacement draft, ten minutes
-without a refresh, or relay disposal stop unused draft runners. Each origin can
-hold one reservation, with eight per relay. Recovery verifies and stops runners
+without a refresh, or closing the project stop unused draft runners. Each origin
+can hold one reservation, with eight per project. Recovery verifies and stops runners
 whose reserved session was never persisted. New-worktree drafts skip warming.
 
 The project runtime directory is `<config>/r/<project-path-sha256-prefix>/`.
@@ -25,7 +25,7 @@ its runner ID, session ID, build ID and PID, and a `.spool` file. The directory
 is private and the socket and files are owner-only. Socket names stay outside
 the project tree to fit the Unix socket path limit.
 
-On relay startup, Conduit checks each registered PID for liveness and verifies
+On project startup, Conduit checks each registered PID for liveness and verifies
 the runner's identity through its socket hello. Adoption never signals an
 unverified PID. Invalid registrations and entries whose PID is
 verifiably dead are removed without signalling their listed PID. A rejected
@@ -76,7 +76,7 @@ cannot remove the retry's sink, approval waiter or abort ownership.
 ## Stop and restart
 
 - Each runner owns its lifetime. Its on-disk registration records its existence;
-  the server only attaches. Closing a relay detaches started runners, including
+  the server only attaches. Closing a project detaches started runners, including
   failed startup and invalidation. Children still starting before listening are
   stopped; the runner writes its registration before reporting listening.
 - Unexpected attachment loss while the server is running fails the session's
@@ -90,16 +90,16 @@ cannot remove the retry's sink, approval waiter or abort ownership.
   Start another `conduit serve` to re-adopt them. A second `SIGINT` during
   shutdown exits immediately.
 - `conduit stop`, `Shutdown` RPC and the foreground handle's `stop()` are full
-  stops. After relays drain, they stop every registered runner for each project,
-  including runners whose relay never started, and terminate the PTY host and
-  managed OpenCode. Project removal disposes its relay, then stops that directory's
+  stops. After open projects drain, they stop every registered runner for each
+  project, including projects that never opened, and terminate the PTY host and
+  managed OpenCode. Project removal closes the project, then stops that directory's
   registered runners. These explicit intents use the private registration as
   authority for bounded termination even if a suspended runner cannot answer
   its hello. Deleting a session also kills its runner.
 
 A disconnected runner has no reattachment deadline. It waits for a server to
 return until an explicit stop, project removal, session deletion, or idle exit.
-When a terminated runner leaves an undelivered turn, the next relay startup
+When a terminated runner leaves an undelivered turn, the next project startup
 fails the running turn and outbox admission unless a live registration claims
 that session. Undelivered output can be lost on full stop; the SDK transcript
 retains the conversation history.
@@ -158,7 +158,7 @@ without adopting that incompatible runner, and a new send starts a fresh runner.
 Current runners stamp their own output. Recovery restores transport and provider
 state; it never synthesizes completion from a command result.
 
-Project folder changes rebuild the relay. At send admission, the server compares
+Project folder changes reopen the project's services. At send admission, the server compares
 an existing runner's launch snapshot with the current main and extra folders.
 An idle, quiescent runner with different folders drains through end-session;
 the send starts a new runner with its last reported resume cursor. Folder changes
