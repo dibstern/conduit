@@ -5,6 +5,7 @@ import {
 	Effect,
 	Layer,
 	Option,
+	Queue,
 	Ref,
 	Schedule,
 	Schema,
@@ -85,8 +86,10 @@ export const DaemonOrchestrationLive = Layer.effect(
 		const accounts = yield* AccountDirectory;
 		const configRef = yield* DaemonConfigRefTag;
 		const sessionWorkspace = yield* SessionWorkspaceTag;
-		const projectGate = yield* makeProjectGate((projectId) =>
-			Option.isSome(adapters.projectContext(projectId)),
+		const unserved = yield* Queue.sliding<string>(64);
+		const projectGate = yield* makeProjectGate(
+			(projectId) => Option.isSome(adapters.projectContext(projectId)),
+			unserved,
 		);
 		const projectOfSession = (sessionId: string) =>
 			directory.projectOf(sessionId).pipe(
@@ -395,6 +398,7 @@ export const DaemonOrchestrationLive = Layer.effect(
 		return {
 			engine,
 			drafts,
+			unserved,
 			start: Effect.gen(function* () {
 				yield* adapters.recover;
 				if (started) return;

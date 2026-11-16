@@ -11,6 +11,7 @@
 // A project's start and end go through ProjectServices open and close.
 
 import {
+	existsSync,
 	lstatSync,
 	mkdirSync,
 	readdirSync,
@@ -29,6 +30,7 @@ import {
 	Layer,
 	Option,
 	PubSub,
+	Queue,
 	Ref,
 	Result,
 	Semaphore,
@@ -301,9 +303,16 @@ export class ProjectSaveLockTag extends Context.Service<
 /**
  * The one project gate (H4, CONTRACT 3.11) every executor reads before it
  * transmits. Registration imports, and removal stops every runner, under the
- * save lock, so removed is answered only once neither runs.
+ * save lock, so removed is answered only once neither runs. A registered
+ * project not served only for want of its services, with its folder present
+ * (as when it was missing at startup and has returned), goes to `unserved`,
+ * whose reader opens it, so its waiting sends go at their next try without a
+ * browser (CONTRACT 6759-6765).
  */
-export const makeProjectGate = (hasServices: (projectId: string) => boolean) =>
+export const makeProjectGate = (
+	hasServices: (projectId: string) => boolean,
+	unserved: Queue.Enqueue<string>,
+) =>
 	Effect.gen(function* () {
 		const projects = yield* ProjectRegistryTag;
 		const lock = yield* ProjectSaveLockTag;
@@ -311,12 +320,14 @@ export const makeProjectGate = (hasServices: (projectId: string) => boolean) =>
 		return (projectId: string): Effect.Effect<ProjectGate> =>
 			Effect.gen(function* () {
 				const entry = HashMap.get(yield* Ref.get(projects), projectId);
-				if (Option.isSome(entry))
-					return entry.value._tag !== "Error" &&
-						!unavailable.has(projectId) &&
-						hasServices(projectId)
-						? "served"
-						: "not_served";
+				if (Option.isSome(entry)) {
+					if (entry.value._tag === "Error" || unavailable.has(projectId))
+						return "not_served";
+					if (hasServices(projectId)) return "served";
+					if (existsSync(entry.value.project.folders[0]))
+						yield* Queue.offer(unserved, projectId);
+					return "not_served";
+				}
 				const settled = yield* lock.withPermitsIfAvailable(1)(
 					Ref.get(projects),
 				);

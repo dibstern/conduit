@@ -652,6 +652,64 @@ describe("82tn.15: running sessions resume after restart", () => {
 	}, 180_000);
 
 	// test-waits-allow timeout-override: daemon restarts with several runners exceed the 30 s default.
+	it("brings a project whose folder returns back into service with no browser attached (h0x3p)", async () => {
+		const { fixture, browser, ids, enqueued, runner } = await heldClaude([
+			"Folder returns",
+		]);
+		const [sessionId = ""] = ids;
+		const pid = runner(sessionId);
+		await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId,
+				originId: browser.originId,
+				inputId: randomUUID(),
+				delivery: "queue",
+				text: "queued-while-gone",
+			}),
+		);
+		await browser.close();
+		await fixture.kill();
+		const moved = `${fixture.projectDir}.moved`;
+		renameSync(fixture.projectDir, moved);
+		await fixture.restart({ skipBrowserProbe: true });
+		renameSync(moved, fixture.projectDir);
+		writeFileSync(join(fixture.root, "release-upgrade-turn"), "release");
+		const returnedAt = Date.now();
+		// CONTRACT 3.11 H4 and its risk (6759-6765): once served, the waiting input goes at its
+		// next backoff, at most 30 s later.
+		// test-waits-allow polling: durable run state and the fake SDK's proof file have no event.
+		await vi.waitFor(
+			() => {
+				expect(store(fixture, sessionId).busy).toBe(false);
+				expect(enqueued("queued-while-gone")).toBe(1);
+			},
+			{ timeout: 45_000 },
+		);
+		const after = store(fixture, sessionId);
+		evidence["folderReturns"] = {
+			goneAfterMs: Date.now() - returnedAt,
+			runners: [
+				...new Set(
+					fixture.marks.flatMap((mark) =>
+						mark.kind === "runner-started" && mark.sessionId === sessionId
+							? [mark.pid]
+							: [],
+					),
+				),
+			],
+			sends: after.sends.map(({ status, receipt }) => ({ status, receipt })),
+		};
+		expect(Date.now() - returnedAt).toBeLessThan(35_000);
+		expect(evidence["folderReturns"]).toMatchObject({ runners: [pid] });
+		expect(enqueued("upgrade-long-turn")).toBe(1);
+		expect(after.sends.map(({ status }) => status)).toEqual([
+			"completed",
+			"completed",
+		]);
+		expect(new Set(after.receipts).size).toBe(after.receipts.length);
+	}, 180_000);
+
+	// test-waits-allow timeout-override: daemon restarts with several runners exceed the 30 s default.
 	it("deletes a session whose runner is being adopted without disturbing another adopted turn", async () => {
 		const { fixture, browser, ids, enqueued, runner } = await heldClaude([
 			"Deleted at startup",

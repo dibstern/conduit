@@ -179,7 +179,7 @@ export const makeProjectServicesLive = (options: {
 			};
 			const managers = yield* SessionManagerOwner;
 			const providerTurns = yield* ProviderTurns;
-			const { engine } = yield* DaemonOrchestration;
+			const { engine, unserved } = yield* DaemonOrchestration;
 			const shared = yield* Effect.context<
 				| AccountDirectory
 				| InputDraftsTag
@@ -593,6 +593,9 @@ export const makeProjectServicesLive = (options: {
 				}
 			>();
 			const started = new WeakSet<Scope.Scope>();
+			// Generations that have started once; `close` leaves them here, so a
+			// held send never reopens a project its owner closed (H4).
+			const startedOnce = new WeakSet<Scope.Scope>();
 			const startContext = Context.mergeAll(ingestionShared, turnShared).pipe(
 				Context.add(SessionManagerServiceTag, sessionManagers),
 				Context.add(
@@ -653,6 +656,7 @@ export const makeProjectServicesLive = (options: {
 							Effect.andThen(
 								Effect.sync(() => {
 									started.add(scope);
+									startedOnce.add(scope);
 									// Child-process tests wait for the project to run their fake SDK.
 									if (testSdk && !options.claudeSdk && process.connected)
 										process.send?.({
@@ -714,11 +718,21 @@ export const makeProjectServicesLive = (options: {
 					started.delete(scope);
 					yield* Scope.close(current.scope, Exit.void);
 				});
-			// A project holding OpenCode events with no tab open starts in its
+			// A project holding OpenCode events with no tab open, or a send the gate
+			// holds (H4) for a generation that never started, starts in its
 			// generation, as t3code starts its reactors in the server scope
 			// (apps/server/src/server.ts:540-627).
-			yield* Stream.fromQueue(
-				Context.get(turnShared, OpenCodeProjectStreams).wakes,
+			yield* Stream.merge(
+				Stream.fromQueue(Context.get(turnShared, OpenCodeProjectStreams).wakes),
+				Stream.fromQueue(unserved).pipe(
+					Stream.filter((slug) => {
+						const parts = generations.get(slug);
+						return !(
+							parts &&
+							startedOnce.has(Context.get(parts, RpcSubscriptionScopeTag))
+						);
+					}),
+				),
 			).pipe(
 				Stream.runForEach((slug) =>
 					open(slug).pipe(
