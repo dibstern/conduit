@@ -482,8 +482,14 @@ export class ProviderSideEffectReactor {
 												})
 											: Effect.void,
 									),
+									Effect.catch((cause) =>
+										Effect.logError("Run Ledger effect failed", cause),
+									),
+									// Each effect runs on its own fiber: an abort that never returns must not
+									// hold the next wake's effects, such as another session's probe.
+									Effect.forkIn(wakeScope),
 								),
-							{ concurrency: "unbounded", discard: true },
+							{ discard: true },
 						),
 					),
 				);
