@@ -326,7 +326,7 @@ describe("Session Rows read paths", () => {
 							projectSlug: slug,
 						});
 						const readAll = Effect.gen(function* () {
-							const relay = yield* operations.serviceListSessions();
+							const daemonProject = yield* operations.serviceListSessions();
 							const shell = yield* Stream.runHead(
 								subscribeShell().pipe(
 									Stream.filter((frame) => frame._tag !== "projects"),
@@ -340,7 +340,7 @@ describe("Session Rows read paths", () => {
 								{ projectSlug: slug, available: true },
 							]);
 							return [
-								relay.find((row) => row.id === sessionId),
+								daemonProject.find((row) => row.id === sessionId),
 								snapshotRow(shell),
 								snapshotRow(family),
 								daemon.sessions.find((row) => row.id === sessionId),

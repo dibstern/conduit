@@ -11,7 +11,7 @@ import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 import { singleInstanceList } from "../fixtures/mockup-state.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 // Action failures reach the toast without navigating, deleting a row,
 // applying a failed read mark, clearing a draft, or hiding a cut-off message.
@@ -81,7 +81,7 @@ async function openSession(
 			...stubs,
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -204,7 +204,7 @@ for (const scenario of [
 	}, testInfo) => {
 		const snoozed = scenario.command === "unsnooze";
 		const unread = scenario.command === "mark-read";
-		const rpc = await openSession(page, harness.relayBaseUrl, scenario.stubs, {
+		const rpc = await openSession(page, harness.appBaseUrl, scenario.stubs, {
 			unread,
 			attention: unread ? "done-unread" : "idle",
 			...(snoozed
@@ -242,7 +242,7 @@ for (const action of ["sidebar", "reply"] as const) {
 		page,
 		harness,
 	}, testInfo) => {
-		const rpc = await openSession(page, harness.relayBaseUrl, {
+		const rpc = await openSession(page, harness.appBaseUrl, {
 			ForkSession: () => {
 				throw unroutable;
 			},
@@ -277,7 +277,7 @@ test("a dropped fork connection shows only the action fallback and keeps the dra
 	page,
 	harness,
 }, testInfo) => {
-	const rpc = await openSession(page, harness.relayBaseUrl, {
+	const rpc = await openSession(page, harness.appBaseUrl, {
 		ForkSession: () => new Promise<never>(() => {}),
 	});
 	await openMenu(page, seed);
@@ -293,7 +293,7 @@ test("Side Thread AccountUnroutable keeps the question in the composer", async (
 	page,
 	harness,
 }, testInfo) => {
-	const rpc = await openSession(page, harness.relayBaseUrl, {
+	const rpc = await openSession(page, harness.appBaseUrl, {
 		StartSideThread: () => {
 			throw unroutable;
 		},
@@ -331,7 +331,7 @@ for (const failure of ["AccountUnroutable", "DraftAlreadySent"] as const)
 			],
 			active: { model: "test-model", provider: "anthropic" },
 		};
-		const rpc = await openSession(page, harness.relayBaseUrl, {
+		const rpc = await openSession(page, harness.appBaseUrl, {
 			CreateSession: ({ draftId }) => {
 				if (failure === "DraftAlreadySent")
 					throw new DraftAlreadySent({ draftId: draftId ?? "missing-draft" });
@@ -388,7 +388,7 @@ test("cut-off dismissal refusal keeps the tag visible with its server reason", a
 }, testInfo) => {
 	const rpc = await openSession(
 		page,
-		harness.relayBaseUrl,
+		harness.appBaseUrl,
 		{ DismissCutOff: refuse },
 		{},
 		{
@@ -417,7 +417,7 @@ test("provider reload refusal shows its server reason and keeps the conversation
 }, testInfo) => {
 	const rpc = await openSession(
 		page,
-		harness.relayBaseUrl,
+		harness.appBaseUrl,
 		{
 			ReloadProviderSession: refuse,
 			GetClaudeSettings: () => ({ projectSlug, overrides: {} }),
@@ -475,7 +475,7 @@ test("warm session resolution refusal shows its server reason and keeps the curr
 	page,
 	harness,
 }, testInfo) => {
-	const rpc = await openSession(page, harness.relayBaseUrl, {});
+	const rpc = await openSession(page, harness.appBaseUrl, {});
 	rpc.setStubs({ ResolveSession: refuse });
 	const missing = "session-error-missing";
 	await page.evaluate((id) => {
@@ -520,7 +520,7 @@ test("deep search refusal shows the server reason inline and preserves the curre
 	page,
 	harness,
 }, testInfo) => {
-	const rpc = await openSession(page, harness.relayBaseUrl, {});
+	const rpc = await openSession(page, harness.appBaseUrl, {});
 	rpc.setStubs({ ListDaemonSessions: refuse });
 	await page.keyboard.press("ControlOrMeta+k");
 	const palette = page.getByTestId("deep-search");

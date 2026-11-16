@@ -73,12 +73,12 @@ async function selectReplyWord(page: Page): Promise<string> {
 
 test("phone: scrolling the session sheet, then tapping an item, keeps chat text selectable", async ({
 	page,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	// Short enough that the tile sheet overflows and the swipe can scroll it.
 	await page.setViewportSize({ width: 375, height: 420 });
 	const app = new AppPage(page);
-	await app.goto(relayUrl);
+	await app.goto(appUrl);
 	await app.sendMessage("Hello, reply with just the word pong");
 	await new ChatPage(page).waitForStreamingComplete();
 

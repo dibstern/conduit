@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { dragSheet, settleSheet } from "../helpers/sheet-drag.js";
 
 test.use({
@@ -9,11 +9,8 @@ test.use({
 	isMobile: true,
 });
 
-async function openOverflowSheet(
-	page: Page,
-	relayUrl: string,
-): Promise<Locator> {
-	await gotoRelay(page, relayUrl);
+async function openOverflowSheet(page: Page, appUrl: string): Promise<Locator> {
+	await gotoApp(page, appUrl);
 	await page.getByTestId("session-bar-island-overflow").tap();
 	const sheet = page.getByTestId("session-bar-island-menu");
 	await expect(sheet).toBeVisible();
@@ -26,9 +23,9 @@ async function openOverflowSheet(
 
 test("phone: dragging the session sheet up from its handle follows the finger and dismisses", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const sheet = await openOverflowSheet(page, relayUrl);
+	const sheet = await openOverflowSheet(page, appUrl);
 	const { top, end } = await dragSheet(page, sheet, -200, false, -10);
 	// Mid-drag the sheet tracks the finger instead of scrolling its content.
 	const moved = await sheet.boundingBox();
@@ -39,9 +36,9 @@ test("phone: dragging the session sheet up from its handle follows the finger an
 
 test("phone: a short drag springs the session sheet back open", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const sheet = await openOverflowSheet(page, relayUrl);
+	const sheet = await openOverflowSheet(page, appUrl);
 	const { top } = await dragSheet(page, sheet, -30, true, -10);
 	await expect(sheet).toBeVisible();
 	await expect
@@ -51,10 +48,10 @@ test("phone: a short drag springs the session sheet back open", async ({
 
 test("phone: dragging a scrolled sheet body scrolls without dismissing", async ({
 	page,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	await page.setViewportSize({ width: 390, height: 320 });
-	const sheet = await openOverflowSheet(page, relayUrl);
+	const sheet = await openOverflowSheet(page, appUrl);
 	const body = sheet.locator("[data-sheet-body]");
 	await expect
 		.poll(() => body.evaluate((node) => node.scrollHeight - node.clientHeight))

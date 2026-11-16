@@ -5,7 +5,7 @@ import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
 import type { WorktreeInfo } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -121,7 +121,7 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: "e2e-replay" },
 			{ type: "shell_snapshot", roots: true, sessions: [] },
@@ -225,7 +225,7 @@ for (const mode of [
 					JSON.stringify({ controls: "words" }),
 				);
 			});
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			await page.locator("#input").fill("Start in docs");
 			await press(page.getByTestId("draft-start-chip"));
 			await expect(
@@ -299,7 +299,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			await press(page.getByTestId("draft-start-chip"));
 			await press(
 				page.getByRole("menuitem", { name: "Existing worktree", exact: true }),
@@ -324,7 +324,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			await press(page.getByTestId("draft-start-chip"));
 			await press(
 				page.getByRole("menuitem", { name: "Existing worktree", exact: true }),
@@ -345,7 +345,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl, false);
+			const rpc = await openDraft(page, harness.appBaseUrl, false);
 			await press(page.getByTestId("draft-start-chip"));
 			await expect(
 				page.getByRole("menuitem", { name: /Existing worktree/ }),
@@ -362,7 +362,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			rpc.setStubs({
 				CreateSession: () => {
 					throw new WorkspaceMoveError({ path: linked, reason: "missing" });
@@ -398,7 +398,7 @@ test.describe("desktop", () => {
 		page,
 		harness,
 	}) => {
-		const rpc = await openDraft(page, harness.relayBaseUrl);
+		const rpc = await openDraft(page, harness.appBaseUrl);
 		const create = rpc.stubs.CreateSession;
 		if (!create) throw new Error("openDraft stubs CreateSession");
 		let release = () => {};
@@ -435,7 +435,7 @@ test.describe("desktop", () => {
 		page,
 		harness,
 	}) => {
-		const rpc = await openDraft(page, harness.relayBaseUrl);
+		const rpc = await openDraft(page, harness.appBaseUrl);
 		rpc.setStubs({ CreateSession: () => new Promise<never>(() => {}) });
 		await page.locator("#input").fill("First, slow");
 		await page.locator("#send").click();

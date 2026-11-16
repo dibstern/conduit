@@ -185,12 +185,12 @@ function appendCalls(sourceNodes: readonly ts.Node[]) {
 	);
 }
 
-const relay = "src/lib/domain/project-services/Services/";
+const project = "src/lib/domain/project-services/Services/";
 const claudePath = "src/lib/persistence/effect/claude-event-persist-effect.ts";
 const writers = [
-	`${relay}session-command.ts`,
-	`${relay}session-manager-service.ts`,
-	`${relay}provider-runtime-ingestion-service.ts`,
+	`${project}session-command.ts`,
+	`${project}session-manager-service.ts`,
+	`${project}provider-runtime-ingestion-service.ts`,
 	claudePath,
 ];
 
@@ -214,7 +214,8 @@ function writerFailures(sources: Source[]) {
 				(call) =>
 					ts.isIdentifier(call.expression) && call.expression.text === name,
 			);
-		const closedPayload = source.path === `${relay}session-manager-service.ts`;
+		const closedPayload =
+			source.path === `${project}session-manager-service.ts`;
 		if (
 			!callsNamed("isSessionDeleted") &&
 			(closedPayload || !callsNamed("requireUndeletedSession"))
@@ -402,7 +403,7 @@ describe("SessionRef contract", () => {
 	});
 
 	it.each(
-		writers.filter((path) => path !== `${relay}session-manager-service.ts`),
+		writers.filter((path) => path !== `${project}session-manager-service.ts`),
 	)("rejects a removed sessionCreatedLineage call in %s", (path) => {
 		const mutated = reviewedSources.map((source) =>
 			source.path === path
@@ -436,7 +437,7 @@ describe("SessionRef contract", () => {
 
 	it("accepts local renames, formatting and unrelated append sites", () => {
 		const changed = reviewedSources.map((source) =>
-			source.path === `${relay}session-manager-service.ts`
+			source.path === `${project}session-manager-service.ts`
 				? source
 				: {
 						...source,
@@ -493,7 +494,7 @@ describe("SessionRef contract", () => {
 	});
 
 	it("rejects an unchecked holding field emitted by the closed-payload writer", () => {
-		const path = `${relay}session-manager-service.ts`;
+		const path = `${project}session-manager-service.ts`;
 		const mutated = reviewedSources.map((source) =>
 			source.path === path
 				? {

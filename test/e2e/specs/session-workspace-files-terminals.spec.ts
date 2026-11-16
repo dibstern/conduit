@@ -1,6 +1,6 @@
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", viewport: { width: 1440, height: 900 } });
 
@@ -121,14 +121,14 @@ test("files, mentions and new terminals follow a session move and navigation", a
 			],
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: projectSlug },
 			{ type: "shell_snapshot", roots: true, sessions },
 		],
 		responses: new Map(),
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/workspace-session`);
+	await page.goto(`${harness.appBaseUrl}/s/workspace-session`);
 	await expect(page.getByTestId("session-bar-title")).toHaveText(
 		"Workspace session",
 	);
@@ -174,7 +174,7 @@ test("files, mentions and new terminals follow a session move and navigation", a
 			.getByRole("option", { name: "worktree-only.txt" }),
 	).toBeVisible();
 	await page.locator("#input").fill("");
-	await page.goto(`${harness.relayBaseUrl}/s/main-session`);
+	await page.goto(`${harness.appBaseUrl}/s/main-session`);
 	await expect(page.getByTestId("session-bar-title")).toHaveText(
 		"Main session",
 	);

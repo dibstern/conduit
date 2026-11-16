@@ -1489,7 +1489,7 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 			noPidArtifacts();
 			scenarios.push({
 				withoutBrowserAttachment: true,
-				withoutAcquiredRelay: true,
+				withoutOpenedProject: true,
 				status,
 				runners: [runner, neverStarted.runner],
 				replacement,

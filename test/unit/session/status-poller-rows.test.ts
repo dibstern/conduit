@@ -157,9 +157,9 @@ it("drops a changed listener when the scope that added it closes", async () => {
 			Effect.gen(function* () {
 				const poller = yield* StatusPollerTag;
 				const pubsub = yield* PollerPubSubTag;
-				const relay = yield* Scope.make();
-				yield* poller.on("changed", seen).pipe(Scope.provide(relay));
-				yield* Scope.close(relay, Exit.void);
+				const project = yield* Scope.make();
+				yield* poller.on("changed", seen).pipe(Scope.provide(project));
+				yield* Scope.close(project, Exit.void);
 				const kept = yield* Deferred.make<void>();
 				yield* poller.on("changed", () => {
 					Deferred.doneUnsafe(kept, Exit.void);

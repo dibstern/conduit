@@ -3,7 +3,7 @@ import type { ProjectInfo } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { closeSettings } from "../helpers/settings.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -50,7 +50,7 @@ async function openList(page: Page, baseUrl: string, query = "") {
 			FindFolders: () => ({ home: "/workspace", entries: [] }),
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [{ type: "project_list", projects, current: "e2e-replay" }],
 		responses: new Map(),
 	});
@@ -81,7 +81,7 @@ for (const viewport of [
 			page,
 			harness,
 		}) => {
-			await openList(page, harness.relayBaseUrl, "?group=project");
+			await openList(page, harness.appBaseUrl, "?group=project");
 			const list = page.locator("#session-list");
 			for (const project of projects) {
 				const heading = list
@@ -118,7 +118,7 @@ for (const viewport of [
 			const oldScope = ["", "group", "anything"].join("/");
 			const rpc = await openList(
 				page,
-				harness.relayBaseUrl,
+				harness.appBaseUrl,
 				`?${new URLSearchParams({ p: oldScope, group: "project" })}`,
 			);
 			await expect(page.getByTestId("session-scope-chip")).toHaveText(
@@ -154,7 +154,7 @@ for (const viewport of [
 			page,
 			harness,
 		}, info) => {
-			await openList(page, harness.relayBaseUrl);
+			await openList(page, harness.appBaseUrl);
 			// Each layout reaches Settings through its visible toolbar.
 			const listSettings = page.getByTestId("list-bar-settings");
 			const sessionOverflow = page

@@ -21,7 +21,7 @@ import {
 } from "../../../test/e2e/fixtures/mockup-state.js";
 import { mockDetailPage } from "../../../test/e2e/helpers/detail-projection-mock.js";
 import { mockWsRpc } from "../../../test/e2e/helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -582,7 +582,7 @@ export const mockAppHandlers: StepHandler[] = [
 				(url) => url.pathname === "/info",
 				(route) => route.fulfill({ json: {} }),
 			);
-			const relayControl = await mockRelayWebSocket(world.page, {
+			const relayControl = await mockDaemonWebSocket(world.page, {
 				initMessages: modelExecutionMockup?.initMessages ?? unboundInitMessages,
 				responses: new Map(),
 				initDelay: 0,

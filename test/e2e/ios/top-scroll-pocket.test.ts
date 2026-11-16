@@ -243,7 +243,7 @@ describe.skipIf(!RUN)("iOS top scroll pocket (WKWebView probe app)", () => {
 			if (!harness) throw new Error("No harness");
 			const result = await probe(
 				name,
-				`${harness.relayBaseUrl}${harness.projectUrl}`,
+				`${harness.appBaseUrl}${harness.projectUrl}`,
 				steps,
 			);
 			results[name] = result;

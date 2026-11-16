@@ -18,7 +18,7 @@ test.describe("Phone terminal controls", () => {
 	// The picker must open on touch, create in the selected root, and attach a PTY.
 	test("folder picker taps open a working terminal", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
 		const root = process.cwd();
 		// Supply multi-folder metadata while keeping terminal RPCs and shells real.
@@ -49,7 +49,7 @@ test.describe("Phone terminal controls", () => {
 			});
 			server.onMessage((data) => ws.send(data));
 		});
-		await openPhoneTerminal(page, relayUrl);
+		await openPhoneTerminal(page, appUrl);
 		const picker = page.getByTestId("new-terminal-folder-picker");
 		await picker.tap();
 		await expect(picker).toHaveAttribute("aria-expanded", "true");
@@ -77,9 +77,9 @@ test.describe("Phone terminal controls", () => {
 
 	test("overflowing tabs keep panel controls visible and tabs reachable", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openPhoneTerminal(page, relayUrl);
+		await openPhoneTerminal(page, appUrl);
 		const tabs = page.getByRole("tablist", { name: "Terminal sessions" });
 		const newTerminal = page.getByTitle("New terminal", { exact: true });
 		const decrease = page.getByRole("button", { name: "Decrease font size" });
@@ -180,10 +180,10 @@ test.describe("Phone terminal controls", () => {
 test.describe("Terminal Panel", () => {
 	test("phone terminal view fills the viewport width", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await page.setViewportSize({ width: 390, height: 844 });
-		await new AppPage(page).goto(relayUrl);
+		await new AppPage(page).goto(appUrl);
 		await page.getByTestId("session-bar-island-overflow").click();
 		await page.getByTestId("overflow-view-terminal").click();
 		const panel = page.locator("#terminal-panel");
@@ -193,10 +193,10 @@ test.describe("Terminal Panel", () => {
 
 	test("clicking terminal toggle opens the panel and creates a tab", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Terminal panel should not be visible initially
 		await expect(page.locator("#terminal-panel")).toBeHidden();
@@ -215,10 +215,10 @@ test.describe("Terminal Panel", () => {
 
 	test("terminal tab renders xterm and shows initial prompt", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Open terminal panel
 		await app.terminalToggleBtn.click();
@@ -239,12 +239,9 @@ test.describe("Terminal Panel", () => {
 		await expect(xtermRows).toBeVisible();
 	});
 
-	test("typing in terminal produces shell output", async ({
-		page,
-		relayUrl,
-	}) => {
+	test("typing in terminal produces shell output", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Open terminal
 		await app.terminalToggleBtn.click();
@@ -265,9 +262,9 @@ test.describe("Terminal Panel", () => {
 		);
 	});
 
-	test("creating a second terminal tab works", async ({ page, relayUrl }) => {
+	test("creating a second terminal tab works", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Open terminal (auto-creates first tab)
 		await app.terminalToggleBtn.click();
@@ -291,9 +288,9 @@ test.describe("Terminal Panel", () => {
 		await expect(tabs.nth(1)).toHaveClass(/term-tab-active/);
 	});
 
-	test("closing a terminal tab removes it", async ({ page, relayUrl }) => {
+	test("closing a terminal tab removes it", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Open terminal (auto-creates first tab)
 		await app.terminalToggleBtn.click();
@@ -309,9 +306,9 @@ test.describe("Terminal Panel", () => {
 		await expect(page.locator("#terminal-panel")).toBeHidden();
 	});
 
-	test("close panel button hides the panel", async ({ page, relayUrl }) => {
+	test("close panel button hides the panel", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Open terminal
 		await app.terminalToggleBtn.click();
@@ -335,10 +332,10 @@ test.describe("Terminal Panel", () => {
 
 	test("switching between tabs shows different terminal content", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Open terminal (creates tab 1)
 		await app.terminalToggleBtn.click();
@@ -390,13 +387,13 @@ test.describe("Terminal Panel", () => {
 test.describe("Terminal host startup", () => {
 	test("a slow host start shows the starting tab, then attaches", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		// Longer than the fixed 5 s start deadline this replaced.
 		process.env["CONDUIT_PTY_HOST_START_DELAY_MS"] = "6000";
 		try {
 			const app = new AppPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			await app.terminalToggleBtn.click();
 
 			await expect(page.locator(".term-starting")).toHaveText(
@@ -419,10 +416,10 @@ test.describe("Terminal host startup", () => {
 
 	test("a host that exits at once fails fast with the error shown", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		const nodeOptions = process.env["NODE_OPTIONS"];
 		// Node rejects this before running any code, so the host exits at once.
 		process.env["NODE_OPTIONS"] = "--conduit-invalid-option";
@@ -451,9 +448,9 @@ test.describe("Terminal host startup", () => {
 // Pinch over the terminal steps the header's font size (conduit-test-6lk5).
 // A trackpad pinch is a ctrl+wheel; 10 units of deltaY make one 1px step.
 test.describe("Terminal pinch zoom", () => {
-	async function openTerminal(page: Page, relayUrl: string) {
+	async function openTerminal(page: Page, appUrl: string) {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.terminalToggleBtn.click();
 		await expect(page.locator("#terminal-panel .xterm-screen")).toBeVisible({
 			timeout: 10_000,
@@ -481,9 +478,9 @@ test.describe("Terminal pinch zoom", () => {
 
 	test("ctrl+wheel over the terminal steps and clamps the font size; elsewhere it is left alone", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		const { fontSize, center } = await openTerminal(page, relayUrl);
+		const { fontSize, center } = await openTerminal(page, appUrl);
 		await expect(fontSize).toHaveText("13");
 		let colsAt13 = 0;
 		await expectPtyCols(page, (cols) => {
@@ -560,9 +557,9 @@ test.describe("Terminal pinch zoom", () => {
 
 		test("two-finger pinch steps the font size and one finger still scrolls", async ({
 			page,
-			relayUrl,
+			appUrl,
 		}) => {
-			const { fontSize, center } = await openTerminal(page, relayUrl);
+			const { fontSize, center } = await openTerminal(page, appUrl);
 			await expect(fontSize).toHaveText("13");
 			await page.keyboard.type("seq 1 200 | sed 's/^/L/'");
 			await page.keyboard.press("Enter");

@@ -20,7 +20,7 @@ test.describe("Unified Rendering: No Duplication", () => {
 
 	test("prompt produces exactly one new user message and one new assistant response", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
@@ -28,7 +28,7 @@ test.describe("Unified Rendering: No Duplication", () => {
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Baseline: no messages before first prompt
 		const usersBefore = await chat.userMessages.count();
@@ -49,7 +49,7 @@ test.describe("Unified Rendering: No Duplication", () => {
 
 	test("no duplicate data-uuid attributes in the DOM", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		// This test sends two messages (double the work of other tests in this
 		// describe block), so the default 30 s timeout can be too tight in CI.
@@ -61,7 +61,7 @@ test.describe("Unified Rendering: No Duplication", () => {
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Send a message to populate the DOM
 		await app.sendMessage("Show me a tool call");
@@ -89,16 +89,13 @@ test.describe("Unified Rendering: Session Markers", () => {
 	test.describe.configure({ timeout: 30_000 });
 	test.use({ recording: "chat-simple" });
 
-	test("'Beginning of session' marker is visible", async ({
-		page,
-		relayUrl,
-	}) => {
+	test("'Beginning of session' marker is visible", async ({ page, appUrl }) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
 		test.skip(!isDesktop, "Unified rendering tests run on desktop only");
 
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		const marker = page.locator(".history-beginning");
 		await expect(marker).toBeVisible({ timeout: 10_000 });
@@ -107,14 +104,14 @@ test.describe("Unified Rendering: Session Markers", () => {
 
 	test("loading indicator is not visible when not loading", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
 		test.skip(!isDesktop, "Unified rendering tests run on desktop only");
 
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await page.locator(".history-beginning").waitFor({ timeout: 10_000 });
 
@@ -132,7 +129,7 @@ test.describe("Unified Rendering: Markdown", () => {
 
 	test("assistant response renders markdown as HTML, not raw text", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
@@ -140,7 +137,7 @@ test.describe("Unified Rendering: Markdown", () => {
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await app.sendMessage("Show me a code example");
 		await chat.waitForAssistantMessage();
@@ -157,7 +154,7 @@ test.describe("Unified Rendering: Markdown", () => {
 
 	test("code blocks render with pre/code structure", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
@@ -165,7 +162,7 @@ test.describe("Unified Rendering: Markdown", () => {
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await app.sendMessage("Show me code");
 		await chat.waitForAssistantMessage();
@@ -193,7 +190,7 @@ test.describe("Unified Rendering: Scroll", () => {
 
 	test("scroll-to-bottom button appears when scrolled up and works when clicked", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
@@ -205,7 +202,7 @@ test.describe("Unified Rendering: Scroll", () => {
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Send a prompt that produces a code block response (tall content)
 		await app.sendMessage("Show me a code example");

@@ -5,7 +5,7 @@ import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
 import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -235,7 +235,7 @@ async function openDraft(
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: "e2e-replay" },
 			{ type: "shell_snapshot", roots: true, sessions: [] },
@@ -329,7 +329,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			await expect(page.getByTestId("draft-base-branch-chip")).toHaveCount(0);
 			await page.locator("#input").fill("Work in isolation");
 			await press(page.getByTestId("draft-start-chip"));
@@ -384,7 +384,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			await press(page.getByTestId("draft-start-chip"));
 			await press(
 				page.getByRole("menuitem", { name: "New worktree", exact: true }),
@@ -413,7 +413,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			await press(page.getByTestId("draft-start-chip"));
 			await press(
 				page.getByRole("menuitem", { name: "New worktree", exact: true }),
@@ -450,7 +450,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			await press(page.getByTestId("draft-start-chip"));
 			await press(
 				page.getByRole("menuitem", { name: "New worktree", exact: true }),
@@ -484,7 +484,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl, {
+			const rpc = await openDraft(page, harness.appBaseUrl, {
 				secondProject: true,
 			});
 			await press(page.getByTestId("draft-start-chip"));
@@ -529,7 +529,7 @@ for (const mode of [
 				page,
 				harness,
 			}) => {
-				const rpc = await openDraft(page, harness.relayBaseUrl, {
+				const rpc = await openDraft(page, harness.appBaseUrl, {
 					multiFolder: true,
 					nonGitPrimary,
 				});
@@ -604,7 +604,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			await press(page.getByTestId("draft-start-chip"));
 			await press(
 				page.getByRole("menuitem", { name: "New worktree", exact: true }),
@@ -634,7 +634,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl, { fail: true });
+			const rpc = await openDraft(page, harness.appBaseUrl, { fail: true });
 			await press(page.getByTestId("draft-start-chip"));
 			await press(
 				page.getByRole("menuitem", { name: "New worktree", exact: true }),
@@ -659,7 +659,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl, {
+			const rpc = await openDraft(page, harness.appBaseUrl, {
 				provider: "opencode",
 			});
 			await press(page.getByTestId("draft-start-chip"));
@@ -685,7 +685,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl, {
+			const rpc = await openDraft(page, harness.appBaseUrl, {
 				switchProviders: true,
 			});
 			await page
@@ -765,7 +765,7 @@ for (const mode of [
 				page,
 				harness,
 			}) => {
-				const rpc = await openDraft(page, harness.relayBaseUrl, options);
+				const rpc = await openDraft(page, harness.appBaseUrl, options);
 				await press(page.getByTestId("draft-start-chip"));
 				await expect(
 					page.getByRole("menuitem", { name: /New worktree/ }),

@@ -1,6 +1,6 @@
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 // Failure modes: the picker requires an open file panel; folder order or labels
 // change; selection sends a worktree path instead of its root; default creates
@@ -132,14 +132,14 @@ for (const scenario of [
 					],
 				},
 			});
-			await mockRelayWebSocket(page, {
+			await mockDaemonWebSocket(page, {
 				initMessages: [
 					{ type: "project_list", projects, current: projectSlug },
 					{ type: "shell_snapshot", roots: true, sessions: [session] },
 				],
 				responses: new Map(),
 			});
-			await page.goto(`${harness.relayBaseUrl}/s/${session.id}`);
+			await page.goto(`${harness.appBaseUrl}/s/${session.id}`);
 			await expect(page.getByTestId("session-bar-title")).toHaveText(
 				session.title,
 			);

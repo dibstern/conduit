@@ -12,7 +12,7 @@ import { detailRowsOf } from "../../helpers/detail-rows.js";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import { toWire } from "../helpers/detail-projection-mock.js";
 import { mockWsRpc, sendMockFamily } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
@@ -148,7 +148,7 @@ async function waitForChatReady(page: import("@playwright/test").Page) {
 test.describe("Roots-only sidebar", () => {
 	test("hides subagent sessions by default", async ({ page, baseURL }) => {
 		await mockWsRpc(page);
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
@@ -196,7 +196,7 @@ test.describe("Subagent navigation", () => {
 			agentListMsg,
 		];
 
-		let control!: Awaited<ReturnType<typeof mockRelayWebSocket>>;
+		let control!: Awaited<ReturnType<typeof mockDaemonWebSocket>>;
 		const rpc = await mockWsRpc(page, {
 			stubs: {
 				ViewSession: (params) => {
@@ -214,7 +214,7 @@ test.describe("Subagent navigation", () => {
 			snapshot.parentHistory.messages.map(toWire).flatMap(detailRowsOf),
 		);
 
-		control = await mockRelayWebSocket(page, {
+		control = await mockDaemonWebSocket(page, {
 			initMessages: [...initMessages, ...childInitMessages],
 			responses: new Map(),
 		});
@@ -279,7 +279,7 @@ test.describe("Subagent navigation", () => {
 			agentListMsg,
 		];
 
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: childInitMessages,
 			responses: new Map(),
 		});
@@ -318,7 +318,7 @@ test.describe("Subagent navigation", () => {
 			agentListMsg,
 		];
 
-		let control!: Awaited<ReturnType<typeof mockRelayWebSocket>>;
+		let control!: Awaited<ReturnType<typeof mockDaemonWebSocket>>;
 		const rpc = await mockWsRpc(page, {
 			stubs: {
 				ViewSession: (params) => {
@@ -329,7 +329,7 @@ test.describe("Subagent navigation", () => {
 				},
 			},
 		});
-		control = await mockRelayWebSocket(page, {
+		control = await mockDaemonWebSocket(page, {
 			initMessages: childInitMessages,
 			responses: new Map(),
 		});

@@ -18,7 +18,7 @@ import type { MockMessage } from "../fixtures/mockup-state.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import {
-	mockRelayWebSocket,
+	mockDaemonWebSocket,
 	type WsMockControl,
 	type WsMockOptions,
 } from "../helpers/ws-mock.js";
@@ -80,7 +80,7 @@ async function scrollTo(page: Page, scrollTop: number): Promise<void> {
 	await waitForStableScroll(page);
 }
 
-async function mockRelayWithViewSessionRpc(
+async function mockDaemonWithViewSessionRpc(
 	page: Page,
 	options: WsMockOptions,
 	viewResponses: ReadonlyMap<string, readonly MockMessage[]>,
@@ -98,7 +98,7 @@ async function mockRelayWithViewSessionRpc(
 			},
 		},
 	});
-	control = await mockRelayWebSocket(page, options);
+	control = await mockDaemonWebSocket(page, options);
 	return control;
 }
 
@@ -259,7 +259,7 @@ const MAX_DRIFT_PX = 5;
 
 test("revealing a trailing reply inside the follow hysteresis band holds position during growth", async ({
 	page,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	await mockWsRpc(page, {
 		stubs: {
@@ -293,8 +293,8 @@ test("revealing a trailing reply inside the follow hysteresis band holds positio
 		},
 		{ type: "done", code: 0 },
 	);
-	await mockRelayWebSocket(page, { initMessages, responses: new Map() });
-	await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+	await mockDaemonWebSocket(page, { initMessages, responses: new Map() });
+	await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 	await waitForInitialMessages(page);
 	await page.addStyleTag({
 		content:
@@ -341,7 +341,7 @@ test("revealing a trailing reply inside the follow hysteresis band holds positio
 
 test("Tab exposes a log row beneath the sticky head before any reveal or dwell", async ({
 	page,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	const initMessages = createInitMessages(4);
 	const snapshot = initMessages.find(
@@ -367,8 +367,8 @@ test("Tab exposes a log row beneath the sticky head before any reveal or dwell",
 		);
 	}
 	snapshot["events"].push({ type: "done", code: 0 });
-	await mockRelayWebSocket(page, { initMessages, responses: new Map() });
-	await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+	await mockDaemonWebSocket(page, { initMessages, responses: new Map() });
+	await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 	await waitForInitialMessages(page);
 	const turn = page.locator("#messages .turn-activity").last();
 	await turn.getByRole("button", { name: "Expand turn", exact: true }).click();
@@ -420,7 +420,7 @@ test.describe("Scroll Stability — Mobile", () => {
 
 	test("Tab exposes a log row beneath the sticky head after the phone bar expands", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
 		const initMessages = createInitMessages(4);
 		const snapshot = initMessages.find(
@@ -446,8 +446,8 @@ test.describe("Scroll Stability — Mobile", () => {
 			);
 		}
 		snapshot["events"].push({ type: "done", code: 0 });
-		await mockRelayWebSocket(page, { initMessages, responses: new Map() });
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await mockDaemonWebSocket(page, { initMessages, responses: new Map() });
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await waitForInitialMessages(page);
 		await page.locator("#messages").dispatchEvent("wheel", { deltaY: 120 });
 		const bar = page.getByTestId("session-bar");
@@ -525,19 +525,19 @@ test.describe("Scroll Stability — Mobile", () => {
 
 	test("scroll position stays stable when background events arrive on inactive session", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const initMessages = createInitMessages(TURN_COUNT);
 
 		// Intercept WebSocket BEFORE navigating — this replaces the relay's WS
 		// with our controlled mock that sends a large conversation history.
-		const wsMock = await mockRelayWebSocket(page, {
+		const wsMock = await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
 
 		// Navigate to the relay URL (relay serves the built frontend)
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -594,16 +594,16 @@ test.describe("Scroll Stability — Mobile", () => {
 
 	test("scroll position stable after rapid burst of WS events near top of conversation", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const initMessages = createInitMessages(TURN_COUNT);
 
-		const wsMock = await mockRelayWebSocket(page, {
+		const wsMock = await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
 
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -638,16 +638,16 @@ test.describe("Scroll Stability — Mobile", () => {
 
 	test("scroll-to-bottom button appears when scrolled up and restores position", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const initMessages = createInitMessages(TURN_COUNT);
 
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
 
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -684,11 +684,11 @@ test.describe("Scroll Controller — History Load", () => {
 
 	test("history replay renders at bottom without visible scroll animation", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const initMessages = createInitMessages(TURN_COUNT);
 
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
@@ -696,7 +696,7 @@ test.describe("Scroll Controller — History Load", () => {
 		// Capture scroll positions over time during page load
 		const scrollPositions: number[] = [];
 
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -748,17 +748,17 @@ test.describe("Scroll Controller — History Load", () => {
 
 	test("large session only renders last ~50 messages initially", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		// Create a session with 60 turns (120+ messages after processing)
 		const initMessages = createInitMessages(60);
 
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
 
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -785,16 +785,16 @@ test.describe("Scroll Controller — Streaming", () => {
 
 	test("auto-scroll follows streaming content to bottom", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const initMessages = createInitMessages(TURN_COUNT);
 
-		const wsMock = await mockRelayWebSocket(page, {
+		const wsMock = await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
 
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -831,13 +831,13 @@ test.describe("Scroll Controller — Streaming", () => {
 
 	test("showing and hiding a live step log keeps the newest steps on screen", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		const wsMock = await mockRelayWebSocket(page, {
+		const wsMock = await mockDaemonWebSocket(page, {
 			initMessages: createInitMessages(TURN_COUNT),
 			responses: new Map(),
 		});
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page
 			.locator("#connect-overlay")
 			.waitFor({ state: "hidden", timeout: 15_000 });
@@ -897,16 +897,16 @@ test.describe("Scroll Controller — Streaming", () => {
 
 	test("wheel-up detaches during streaming, button appears, no snap-back", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const initMessages = createInitMessages(TURN_COUNT);
 
-		const wsMock = await mockRelayWebSocket(page, {
+		const wsMock = await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
 
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -990,16 +990,16 @@ test.describe("Scroll Stability — Desktop", () => {
 
 	test("scroll position stays stable on desktop with background WS events", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const initMessages = createInitMessages(TURN_COUNT);
 
-		const wsMock = await mockRelayWebSocket(page, {
+		const wsMock = await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
 
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -1041,14 +1041,14 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 
 	test("switching sessions scrolls new session to bottom", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		// Session A: 40-turn conversation (starts loaded)
 		const sessionAEvents = generateConversationEvents(TURN_COUNT);
 		// Session B: 20-turn conversation (loaded on switch)
 		const sessionBEvents = generateConversationEvents(20);
 
-		const _wsMock = await mockRelayWithViewSessionRpc(
+		const _wsMock = await mockDaemonWithViewSessionRpc(
 			page,
 			{
 				initMessages: [
@@ -1130,7 +1130,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			]),
 		);
 
-		await page.goto(new URL("/s/sess-switch-A", relayUrl).href);
+		await page.goto(new URL("/s/sess-switch-A", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -1173,10 +1173,10 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 
 	test("empty session shows content when first message streams in", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		// Start with an empty session (no events, no history)
-		const wsMock = await mockRelayWebSocket(page, {
+		const wsMock = await mockDaemonWebSocket(page, {
 			initMessages: [
 				{
 					type: "mock_transcript_snapshot",
@@ -1231,10 +1231,10 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			responses: new Map(),
 		});
 
-		// Open the empty session's own address. relayUrl names the recording's
+		// Open the empty session's own address. appUrl names the recording's
 		// session, and a switch to a different session that brings no replay
 		// is treated as stale and ignored.
-		await page.goto(new URL("/s/sess-empty-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-empty-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -1298,16 +1298,16 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 
 	test("multi-turn streaming: auto-scroll works across done→new message→streaming cycles", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const initMessages = createInitMessages(10);
 
-		const wsMock = await mockRelayWebSocket(page, {
+		const wsMock = await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
 
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -1369,17 +1369,17 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 
 	test("large session loads an older page on scroll-up", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		// 80 turns = ~160+ messages. Only the newest 50 render initially.
 		const initMessages = createInitMessages(80);
 
-		const _wsMock = await mockRelayWebSocket(page, {
+		const _wsMock = await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
 
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -1425,18 +1425,18 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 
 	test("a first page shorter than the pane keeps loading older pages", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		// The whole first page fits, so the history sentinel is on screen from
 		// the start and never scrolls in. Older pages must load anyway.
 		// The 50-row first page renders about 13,000px tall.
 		await page.setViewportSize({ width: 1280, height: 20_000 });
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: createInitMessages(30),
 			responses: new Map(),
 		});
 
-		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.goto(new URL("/s/sess-scroll-001", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,
@@ -1449,7 +1449,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 
 	test("a fork with collapsed prior conversation does not page its inherited history", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		// A side thread of a long session: every older page is inherited and
 		// lands inside the collapsed "Prior conversation" block, so the history
@@ -1509,7 +1509,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 				],
 			},
 		});
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: [
 				{
 					type: "shell_snapshot",
@@ -1531,7 +1531,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			responses: new Map(),
 		});
 
-		await page.goto(new URL(`/s/${forkId}`, relayUrl).href);
+		await page.goto(new URL(`/s/${forkId}`, appUrl).href);
 		await expect(page.locator(".msg-assistant").last()).toContainText(
 			"Response 31",
 		);
@@ -1550,12 +1550,12 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 
 	test("session switch while scrolled up resets to bottom on new session", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const sessionAEvents = generateConversationEvents(TURN_COUNT);
 		const sessionBEvents = generateConversationEvents(15);
 
-		const _wsMock = await mockRelayWithViewSessionRpc(
+		const _wsMock = await mockDaemonWithViewSessionRpc(
 			page,
 			{
 				initMessages: [
@@ -1637,7 +1637,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			]),
 		);
 
-		await page.goto(new URL("/s/sess-scrollup-A", relayUrl).href);
+		await page.goto(new URL("/s/sess-scrollup-A", appUrl).href);
 		await page.locator("#connect-overlay").waitFor({
 			state: "hidden",
 			timeout: 15_000,

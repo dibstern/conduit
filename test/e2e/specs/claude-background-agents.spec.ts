@@ -18,7 +18,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -140,7 +140,7 @@ for (const transcriptOnlySubagents of [false, true]) {
 
 			test("keeps each background agent's work in its Child Session", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(120_000);
@@ -310,7 +310,7 @@ for (const transcriptOnlySubagents of [false, true]) {
 				if (!replayer) throw new Error("no Claude replayer");
 				expect(AGENT_A_LATE_TOOL_IDS.length).toBeGreaterThan(0);
 				try {
-					await app.goto(relayUrl);
+					await app.goto(appUrl);
 					await app.sendMessage("Launch the background work");
 					await expect
 						.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
@@ -354,7 +354,7 @@ for (const transcriptOnlySubagents of [false, true]) {
 					expectAllAgentSteps("background work finished", placement());
 
 					await harness.restart();
-					await gotoRelay(page, relayUrl);
+					await gotoApp(page, appUrl);
 					await app.sendMessage("Reply with only: ok, still here.");
 					await expect
 						.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })

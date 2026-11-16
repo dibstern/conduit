@@ -11,7 +11,7 @@ import { expect, test } from "@playwright/test";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { initMessages, type MockMessage } from "../fixtures/mockup-state.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
 type Page = import("@playwright/test").Page;
 type QuestionFlowControl = WsMockControl & { rpc: RpcMockControl };
@@ -105,11 +105,11 @@ test.describe("Question/Answer Flow", () => {
 		page: Page,
 		baseURL?: string,
 	): Promise<QuestionFlowControl> {
-		let relay: WsMockControl | null = null;
+		let project: WsMockControl | null = null;
 		const rpc = await mockWsRpc(page, {
 			stubs: {
 				"input.submit": async ({ sessionId }) => {
-					await relay?.sendMessages(questionResponseMessages);
+					await project?.sendMessages(questionResponseMessages);
 					rpc.sendChunk("SubscribeApprovals", [questionAsked]);
 					return { ok: true, sessionId, handedOff: true };
 				},
@@ -123,14 +123,14 @@ test.describe("Question/Answer Flow", () => {
 				],
 			},
 		});
-		relay = await mockRelayWebSocket(page, {
+		project = await mockDaemonWebSocket(page, {
 			initMessages: [...initMessages],
 			responses: new Map(),
 		});
 
 		await page.goto(`${baseURL ?? "http://localhost:4173"}${PROJECT_URL}`);
 		await waitForChatReady(page);
-		return Object.assign(relay, { rpc });
+		return Object.assign(project, { rpc });
 	}
 
 	test("question card appears when agent asks a question", async ({

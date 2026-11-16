@@ -17,10 +17,10 @@ import {
 import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { closeSettings } from "../helpers/settings.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 type Page = import("@playwright/test").Page;
-type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
+type WsMockControl = Awaited<ReturnType<typeof mockDaemonWebSocket>>;
 type MultiInstanceControl = WsMockControl & { rpc: RpcMockControl };
 
 // Defaults can diverge across clients, overwrite explicit picks through shared
@@ -174,7 +174,7 @@ function defaultAccountDaemon() {
 			},
 		});
 		publishModels(defaultId());
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			// The daemon above owns the accounts; a draft sends into a project.
 			initMessages: [
 				...unboundInitMessages.filter(
@@ -460,7 +460,7 @@ async function setupMultiInstance(
 	baseURL?: string,
 ): Promise<MultiInstanceControl> {
 	const rpc = await mockInstanceRpc(page);
-	const control = await mockRelayWebSocket(page, {
+	const control = await mockDaemonWebSocket(page, {
 		initMessages: multiInstanceInitMessages,
 		responses: new Map(),
 		initDelay: 0,
@@ -476,7 +476,7 @@ async function setupSingleInstance(
 	baseURL?: string,
 ): Promise<MultiInstanceControl> {
 	const rpc = await mockInstanceRpc(page);
-	const control = await mockRelayWebSocket(page, {
+	const control = await mockDaemonWebSocket(page, {
 		initMessages: singleInstanceInitMessages,
 		responses: new Map(),
 		initDelay: 0,
@@ -492,7 +492,7 @@ async function setupNoInstances(
 	baseURL?: string,
 ): Promise<MultiInstanceControl> {
 	const rpc = await mockInstanceRpc(page);
-	const control = await mockRelayWebSocket(page, {
+	const control = await mockDaemonWebSocket(page, {
 		initMessages: noInstanceInitMessages,
 		responses: new Map(),
 		initDelay: 0,
@@ -984,7 +984,7 @@ test.describe("Session List: Instance Status Banner", () => {
 			return m;
 		});
 		await mockInstanceRpc(page);
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: unhealthyInit,
 			responses: new Map(),
 			initDelay: 0,
@@ -1009,7 +1009,7 @@ test.describe("Session List: Instance Status Banner", () => {
 			return m;
 		});
 		await mockInstanceRpc(page);
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: unhealthyInit,
 			responses: new Map(),
 			initDelay: 0,
@@ -1049,7 +1049,7 @@ test.describe("Session List: Instance Status Banner", () => {
 			return m;
 		});
 		const rpc = await mockInstanceRpc(page);
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: unhealthyInit,
 			responses: new Map(),
 			initDelay: 0,

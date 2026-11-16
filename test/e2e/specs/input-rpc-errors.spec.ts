@@ -7,13 +7,13 @@ import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 import { initMessages } from "../fixtures/mockup-state.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, rowActivity } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 // Failures must keep the action, reveal only a server-supplied reason, and
 // leave the composer usable for retry.
 async function openChat(page: Page, baseUrl: string, stubs: StubTable) {
 	const rpc = await mockWsRpc(page, { stubs });
-	const relay = await mockRelayWebSocket(page, {
+	const project = await mockDaemonWebSocket(page, {
 		initMessages,
 		responses: new Map(),
 		initDelay: 0,
@@ -22,7 +22,7 @@ async function openChat(page: Page, baseUrl: string, stubs: StubTable) {
 	await page.goto(`${baseUrl}/s/sess-mockup-001`);
 	await expect(page.locator("#input")).toBeVisible();
 	await expect(page.locator(".connect-overlay")).not.toBeVisible();
-	return { rpc, relay };
+	return { rpc, project };
 }
 
 async function attachScreen(page: Page, testInfo: TestInfo) {
@@ -36,7 +36,7 @@ for (const scenario of ["account", "generic", "empty", "socket"] as const) {
 		page,
 		harness,
 	}, testInfo) => {
-		const { rpc } = await openChat(page, harness.relayBaseUrl, {
+		const { rpc } = await openChat(page, harness.appBaseUrl, {
 			"input.submit": () => {
 				if (scenario === "account")
 					throw new AccountUnroutable({ ref: { _tag: "Id", id: "retired" } });
@@ -71,12 +71,12 @@ test("composer stop shows the server refusal and permits retry", async ({
 	page,
 	harness,
 }, testInfo) => {
-	const { relay, rpc } = await openChat(page, harness.relayBaseUrl, {
+	const { project, rpc } = await openChat(page, harness.appBaseUrl, {
 		CancelSession: () => {
 			throw new WsRpcError({ message: "The provider refused to stop." });
 		},
 	});
-	relay.sendMessage({ type: "status", status: "processing" });
+	project.sendMessage({ type: "status", status: "processing" });
 	await page.locator("#stop").click();
 	await rpc.waitForRequest(({ tag }) => tag === "CancelSession");
 	const toast = page.getByRole("alert");
@@ -90,7 +90,7 @@ test("background task stop shows the server refusal and keeps the task", async (
 	page,
 	harness,
 }, testInfo) => {
-	const { rpc } = await openChat(page, harness.relayBaseUrl, {
+	const { rpc } = await openChat(page, harness.appBaseUrl, {
 		StopTasks: () => {
 			throw new WsRpcError({ message: "The task cannot be stopped yet." });
 		},
@@ -155,7 +155,7 @@ for (const ending of [
 		page,
 		harness,
 	}, testInfo) => {
-		const { rpc } = await openChat(page, harness.relayBaseUrl, {
+		const { rpc } = await openChat(page, harness.appBaseUrl, {
 			CancelSession: () => ({ ok: true }),
 			StopTasks: () => ({ ok: true }),
 		});
@@ -342,17 +342,17 @@ for (const action of ["remove", "resume"] as const) {
 		const refuse = () => {
 			throw new WsRpcError({ message: "The queue is locked." });
 		};
-		const { relay } = await openChat(page, harness.relayBaseUrl, {
+		const { project } = await openChat(page, harness.appBaseUrl, {
 			"input.cancel": refuse,
 			"input.sendNow": refuse,
 		});
-		relay.sendMessage({
+		project.sendMessage({
 			type: "mock_pending_input",
 			sessionId: "sess-mockup-001",
 			inputId: "held-input",
 			text: "Held message",
 		});
-		relay.sendMessage({
+		project.sendMessage({
 			type: "mock_inbox",
 			sessionId: "sess-mockup-001",
 			paused: true,
@@ -375,14 +375,14 @@ for (const withReason of [true, false]) {
 		page,
 		harness,
 	}, testInfo) => {
-		const { relay } = await openChat(page, harness.relayBaseUrl, {
+		const { project } = await openChat(page, harness.appBaseUrl, {
 			GetToolDetails: () => {
 				throw new WsRpcError({
 					message: withReason ? "Tool details are unavailable." : "",
 				});
 			},
 		});
-		relay.sendMessage({
+		project.sendMessage({
 			type: "mock_transcript_snapshot",
 			id: "sess-mockup-001",
 			history: {

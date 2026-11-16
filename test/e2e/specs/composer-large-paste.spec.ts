@@ -13,13 +13,13 @@
 import { expect, test } from "@playwright/test";
 import { initMessages } from "../fixtures/mockup-state.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 /** Comfortably past the composer's 20k-char highlight limit. */
 const LARGE_DRAFT = "conduit relay event log line\n".repeat(4_000);
 
 test.beforeEach(async ({ page }) => {
-	await mockRelayWebSocket(page, { initMessages, responses: new Map() });
+	await mockDaemonWebSocket(page, { initMessages, responses: new Map() });
 	await mockWsRpc(page, {
 		stubs: {
 			GetProjects: async () => ({

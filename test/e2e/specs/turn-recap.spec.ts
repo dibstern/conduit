@@ -8,7 +8,7 @@ import { AppPage } from "../page-objects/app.page.js";
 
 test("a history page without its prompt subscribes to the stored turn", async ({
 	page,
-	relayUrl,
+	appUrl,
 	harness,
 }, testInfo) => {
 	const { sessionId, turnId } = await seedPagedRecapTurn(harness);
@@ -68,7 +68,7 @@ test("a history page without its prompt subscribes to the stored turn", async ({
 		});
 		server.onMessage((data) => ws.send(data));
 	});
-	await new AppPage(page).goto(relayUrl);
+	await new AppPage(page).goto(appUrl);
 	await expect(page.getByText("Next question", { exact: true })).toHaveCount(1);
 	await expect(
 		page.getByText("Follow-up detail 40.", { exact: true }),

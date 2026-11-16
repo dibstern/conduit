@@ -21,9 +21,9 @@ import { AppPage } from "../page-objects/app.page.js";
 
 test.use({ recording: "chat-simple" });
 
-async function openTerminal(page: Page, relayUrl: string): Promise<void> {
+async function openTerminal(page: Page, appUrl: string): Promise<void> {
 	const app = new AppPage(page);
-	await app.goto(relayUrl);
+	await app.goto(appUrl);
 	await app.terminalToggleBtn.click();
 	await expect(page.locator("#terminal-panel .xterm-screen")).toBeVisible({
 		timeout: 10_000,
@@ -52,9 +52,9 @@ async function chooseMenuKey(page: Page, name: string): Promise<void> {
 test.describe("Terminal keys menu on desktop", () => {
 	test("the panel's own width folds and unfolds the keys without changing the viewport", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const viewport = page.viewportSize();
 		const toolbar = page.getByRole("toolbar", { name: "Terminal keys" });
 		await expect(toolbar).toBeVisible();
@@ -84,9 +84,9 @@ test.describe("Terminal keys menu on desktop", () => {
 
 	test("menu escape, arrow and Control-arrow send the inline keys' exact bytes", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 		await key(page, "Escape").click();
 		await key(page, "Right arrow").click();
@@ -106,9 +106,9 @@ test.describe("Terminal keys menu on desktop", () => {
 
 	test("choosing Control and dismissing the menu both return focus to the terminal", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 		await setTerminalPanelWidth(page, 420);
 		await chooseMenuKey(page, "Control");
@@ -126,9 +126,9 @@ test.describe("Terminal keys menu on desktop", () => {
 
 	test("the Keys button and menu expose waiting and locked modifiers", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		await setTerminalPanelWidth(page, 420);
 		const trigger = keysMenuTrigger(page);
 		await chooseMenuKey(page, "Control");
@@ -162,9 +162,9 @@ test.describe("Terminal keys menu on desktop", () => {
 test.describe("Terminal keys on desktop", () => {
 	test("esc, tab and arrows send what the physical keys send, and typing keeps its place", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		// A fine pointer gets the tab-bar keys and never the touch row.
 		await expect(page.locator(".term-key-row")).toHaveCount(0);
 		const dump = await startByteDump(page, testInfo);
@@ -187,9 +187,9 @@ test.describe("Terminal keys on desktop", () => {
 
 	test("arrows send SS3 in application cursor mode", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo, {
 			applicationCursor: true,
 		});
@@ -203,9 +203,9 @@ test.describe("Terminal keys on desktop", () => {
 
 	test("a held arrow repeats after a delay, and a short click sends one", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 
 		await key(page, "Up arrow").hover();
@@ -234,9 +234,9 @@ const clipboardRead = (page: Page) => page.waitForTimeout(300);
 test.describe("Sticky modifiers on desktop", () => {
 	test("⌃ applies to a physical key and an on-screen one, and confirms only on-screen combinations", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		await countConfirmations(page);
 		const dump = await startByteDump(page, testInfo);
 
@@ -258,9 +258,9 @@ test.describe("Sticky modifiers on desktop", () => {
 
 	test("⌥ sends Meta with its tip, ⇧ tab sends back-tab, and ⌃⇧ apply together", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 		const tip = page.getByRole("note");
 
@@ -289,9 +289,9 @@ test.describe("Sticky modifiers on desktop", () => {
 
 	test("waiting is spent by one key, locked is kept until clicked off, and ⌃1 sends 1", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 		const shift = key(page, "Shift");
 
@@ -314,9 +314,9 @@ test.describe("Sticky modifiers on desktop", () => {
 
 	test("multi-character input passes through and leaves a waiting modifier waiting", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 
 		await key(page, "Control").click();
@@ -329,9 +329,9 @@ test.describe("Sticky modifiers on desktop", () => {
 
 	test("with ⌃ locked, a held arrow shows one confirmation", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		await countConfirmations(page);
 		const dump = await startByteDump(page, testInfo);
 		const control = key(page, "Control");
@@ -355,9 +355,9 @@ test.describe("Sticky modifiers on desktop", () => {
 	for (const applicationCursor of [false, true]) {
 		test(`on-screen ⌃ and ⇧ match the physical combination for every recognised key${applicationCursor ? " in application cursor mode" : ""}`, async ({
 			page,
-			relayUrl,
+			appUrl,
 		}, testInfo) => {
-			await openTerminal(page, relayUrl);
+			await openTerminal(page, appUrl);
 			const dump = await startByteDump(page, testInfo, { applicationCursor });
 			const physical = [
 				"ArrowUp",
@@ -404,9 +404,9 @@ test.describe("Sticky modifiers on desktop", () => {
 
 	test("each modifier reports off, waiting and locked", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		for (const name of ["Control", "Option", "Command", "Shift"]) {
 			const modifier = key(page, name);
 			await expect(modifier).toHaveAttribute("aria-pressed", "false");
@@ -431,9 +431,9 @@ test.describe("Paste on desktop", () => {
 
 	test("a single line arrives as typed, and a waiting ⌃ is neither applied nor spent", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 
 		await copy(page, "echo hi");
@@ -453,9 +453,9 @@ test.describe("Paste on desktop", () => {
 
 	test("with bracketed paste on, several lines arrive as one block", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo, { bracketedPaste: true });
 
 		await copy(page, "a\nb\nc\n");
@@ -472,9 +472,9 @@ test.describe("Paste on desktop", () => {
 
 	test("with bracketed paste off, several lines wait for confirmation", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 
 		await copy(page, "a\nb\nc");
@@ -495,9 +495,9 @@ test.describe("Paste on desktop", () => {
 
 	test("the keyboard's own paste gets the same confirmation", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 
 		await copy(page, "a\nb");
@@ -515,9 +515,9 @@ test.describe("Paste on desktop", () => {
 	test("a denied clipboard says so and suggests the keyboard", async ({
 		page,
 		context,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		await context.clearPermissions();
 
 		await key(page, "Paste").click();
@@ -548,9 +548,9 @@ test.describe("⌘ commands on desktop", () => {
 
 	test("⌘ then V pastes through the multi-line guard", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 
 		await copy(page, "a\nb");
@@ -568,9 +568,9 @@ test.describe("⌘ commands on desktop", () => {
 
 	test("⌘ then c copies the selection kept while ⌘ is held, and says when there is none", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		await page.keyboard.type("echo SELECTME");
 		await page.keyboard.press("Enter");
 		const word = page
@@ -603,9 +603,9 @@ test.describe("⌘ commands on desktop", () => {
 
 	test("⌘ then k clears to the prompt line, sends nothing, and stays cleared", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		await page.keyboard.type("echo BEFORE-CLEAR");
 		await page.keyboard.press("Enter");
 		const dump = await startByteDump(page, testInfo);
@@ -637,9 +637,9 @@ test.describe("⌘ commands on desktop", () => {
 
 	test("pastes skip ⌘, other keys go as Meta, and ⌃⌘ apply together", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 		const command = key(page, "Command");
 
@@ -658,11 +658,8 @@ test.describe("⌘ commands on desktop", () => {
 		expect(await dump.finish()).toEqual(["6b 1b 78", "1b 03"]);
 	});
 
-	test("the physical ⌘K still opens deep search", async ({
-		page,
-		relayUrl,
-	}) => {
-		await openTerminal(page, relayUrl);
+	test("the physical ⌘K still opens deep search", async ({ page, appUrl }) => {
+		await openTerminal(page, appUrl);
 		await page.keyboard.press("Meta+k");
 		await expect(page.getByTestId("deep-search")).toBeVisible();
 	});
@@ -683,9 +680,9 @@ test.describe("Find on desktop", () => {
 
 	test("⌘ then F finds in the output, steps between matches, and esc hands focus back, sending nothing", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		await print(page, "FINDME", 2);
 		const dump = await startByteDump(page, testInfo);
 
@@ -713,9 +710,9 @@ test.describe("Find on desktop", () => {
 
 	test("after switching tabs, ⌘ then F searches the new tab", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await openTerminal(page, relayUrl);
+		await openTerminal(page, appUrl);
 		await print(page, "FIRSTTAB");
 		await page.locator(".term-new-btn").click();
 		await expect(page.locator(".term-tab-label")).toHaveCount(2);
@@ -750,9 +747,9 @@ test.describe("Phone row", () => {
 
 	test("a touch-primary device gets the row instead of tab-bar keys, each key named for both its actions", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openPhoneTerminal(page, relayUrl);
+		await openPhoneTerminal(page, appUrl);
 
 		await expect(page.locator(".term-tab-bar [role=toolbar]")).toHaveCount(0);
 		await expect(row(page)).toBeVisible();
@@ -774,9 +771,9 @@ test.describe("Phone row", () => {
 
 	test("tapping and flicking each key sends its action, and a waiting modifier applies to the software keyboard", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openPhoneTerminal(page, relayUrl);
+		await openPhoneTerminal(page, appUrl);
 		await page.evaluate(() => navigator.clipboard.writeText("echo hi"));
 		const dump = await startByteDump(page, testInfo);
 		const paste = rowKey(page, "Paste, flick up for Copy");
@@ -824,9 +821,9 @@ test.describe("Phone row", () => {
 
 	test("the bubble shows the flick, sliding back cancels to the tap, and the corner label sends the flick", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openPhoneTerminal(page, relayUrl);
+		await openPhoneTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 		const esc = rowKey(page, "Escape, flick up for Tab");
 		const bubble = row(page).locator(".flick-bubble");
@@ -848,9 +845,9 @@ test.describe("Phone row", () => {
 
 	test("the keyboard toggle hides the keyboard, the row stays and still sends, and a second tap brings it back", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openPhoneTerminal(page, relayUrl);
+		await openPhoneTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 		const toggle = rowKey(page, "Keyboard");
 
@@ -868,9 +865,9 @@ test.describe("Phone row", () => {
 
 	test("when the software keyboard shrinks the viewport, the row sits at its bottom under the prompt line", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openPhoneTerminal(page, relayUrl);
+		await openPhoneTerminal(page, appUrl);
 		await page.keyboard.type("PROMPT-LINE");
 		const prompt = page
 			.locator("#terminal-panel .xterm-rows")
@@ -921,9 +918,9 @@ test.describe("Phone row", () => {
 
 	test("dragging the arrow pad sends one arrow per step in the dominant direction, and tapping a side sends that arrow once", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openPhoneTerminal(page, relayUrl);
+		await openPhoneTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 
 		// Released without pausing, with a wobble across the drag.
@@ -950,9 +947,9 @@ test.describe("Phone row", () => {
 
 	test("holding still after a drag repeats its direction", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openPhoneTerminal(page, relayUrl);
+		await openPhoneTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 
 		const touch = await finger(page, pad(page));
@@ -969,9 +966,9 @@ test.describe("Phone row", () => {
 
 	test("with ⌃ waiting, the pad sends the ⌃ arrow and the modifier is spent", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await openPhoneTerminal(page, relayUrl);
+		await openPhoneTerminal(page, appUrl);
 		const dump = await startByteDump(page, testInfo);
 		const ctrl = rowKey(page, "Control, flick up for Command");
 

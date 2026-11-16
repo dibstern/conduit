@@ -193,7 +193,7 @@ async function editRpc(
 	await page.routeWebSocket(/\/rpc$/, (ws) => {
 		const server = ws.connectToServer();
 		const requests = new Map<string, RpcFrame>();
-		const relay =
+		const project =
 			(send: (message: string | Buffer) => void) =>
 			async (message: string | Buffer) => {
 				if (typeof message !== "string") return send(message);
@@ -208,8 +208,8 @@ async function editRpc(
 				);
 				if (edited !== null) send(JSON.stringify(edited));
 			};
-		ws.onMessage(relay((message) => server.send(message)));
-		server.onMessage(relay((message) => ws.send(message)));
+		ws.onMessage(project((message) => server.send(message)));
+		server.onMessage(project((message) => ws.send(message)));
 	});
 }
 
@@ -5655,7 +5655,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 				legacy,
 				pidsBefore,
 				requestsBefore,
-				relayStartupRequest: {
+				projectStartupRequest: {
 					method: "LoadMoreHistory",
 					projectSlug: slug,
 					sessionId: firstSample.sessionId,

@@ -231,7 +231,7 @@ describe.skipIf(!RUN)("iOS Safari long-press (Simulator)", () => {
 		);
 		// A transcript to select from.
 		harness.mock.triggerPromptSse(sessionId);
-		url = `${harness.relayBaseUrl}${harness.projectUrl}`;
+		url = `${harness.appBaseUrl}${harness.projectUrl}`;
 		const port = await freePort();
 		safaridriver = spawn("safaridriver", ["-p", String(port)], {
 			stdio: "ignore",

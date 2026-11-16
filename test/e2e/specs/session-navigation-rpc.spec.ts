@@ -7,7 +7,7 @@ import {
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, rowActivity } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 const projectSlug = "e2e-replay";
 const seed = "session-seed";
@@ -86,7 +86,7 @@ async function setup(
 			...stubs,
 		},
 	});
-	const relay = await mockRelayWebSocket(page, {
+	const project = await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -141,7 +141,7 @@ async function setup(
 			},
 		},
 	});
-	return { rpc, relay };
+	return { rpc, project };
 }
 
 test("cold session navigation resolves once; warm navigation needs no resolution", async ({
@@ -149,7 +149,7 @@ test("cold session navigation resolves once; warm navigation needs no resolution
 	harness,
 }, testInfo) => {
 	const { rpc } = await setup(page);
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await rpc.waitForRequest(
 		(request) =>
@@ -206,7 +206,7 @@ test("a cold session link waits for its resolve before scoped reads", async ({
 		},
 		[],
 	);
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}?p=${projectSlug}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}?p=${projectSlug}`);
 	const resolve = await rpc.waitForRequest(
 		(request) => request.tag === "ResolveSession",
 	);
@@ -271,7 +271,7 @@ test("a failed cold resolve still reports the failure after the shell reveals it
 		},
 		[],
 	);
-	const url = `${harness.relayBaseUrl}/s/${seed}`;
+	const url = `${harness.appBaseUrl}/s/${seed}`;
 	await page.goto(url);
 	const resolve = await rpc.waitForRequest(
 		(request) => request.tag === "ResolveSession",
@@ -335,7 +335,7 @@ test("a cold resolve retries after a dropped socket reconnects without navigatio
 		{ ResolveSession: () => new Promise<never>(() => {}) },
 		[],
 	);
-	const url = `${harness.relayBaseUrl}/s/${seed}`;
+	const url = `${harness.appBaseUrl}/s/${seed}`;
 	await page.goto(url);
 	const resolve = await rpc.waitForRequest(
 		(request) => request.tag === "ResolveSession",
@@ -364,8 +364,8 @@ test("an unknown session link goes home with a not-found notice", async ({
 	const { rpc } = await setup(page, {
 		ResolveSession: () => ({ projectSlug: null }),
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${unknown}`);
-	await expect(page).toHaveURL(`${harness.relayBaseUrl}/`);
+	await page.goto(`${harness.appBaseUrl}/s/${unknown}`);
+	await expect(page).toHaveURL(`${harness.appBaseUrl}/`);
 	await expect(page.getByText(notFound)).toBeVisible();
 	expect(
 		rpc.getRequests().some((request) => request.tag === "ViewSession"),
@@ -400,7 +400,7 @@ test("a warm unplaced route sends no file list or preview reads", async ({
 			content: "export const preview = true;",
 		}),
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.getByTestId("views-rail-files").click();
 	await page
@@ -469,7 +469,7 @@ test("a warm unplaced route sends no file reads while the previous directory is 
 						entries: [{ name: "placed-directory.ts", type: "file" }],
 					},
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.getByTestId("views-rail-files").click();
 	await expect(page.locator("#sidebar-panel-files")).toBeVisible();
@@ -588,7 +588,7 @@ test("opening another project's session shows its transcript and files with no p
 			},
 		},
 	]);
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page
 		.locator(`#session-list [data-session-id="${target}"]`)
@@ -631,7 +631,7 @@ test("choosing a project scope from home marks that project with no round trip",
 	harness,
 }) => {
 	const { rpc } = await setup(page);
-	await page.goto(`${harness.relayBaseUrl}/`);
+	await page.goto(`${harness.appBaseUrl}/`);
 	await rpc.waitForRequest(
 		(request) =>
 			request.tag === "GetFileTree" &&
@@ -641,7 +641,7 @@ test("choosing a project scope from home marks that project with no round trip",
 	await page
 		.getByRole("menuitemradio", { name: new RegExp(`^${otherProject}\\b`) })
 		.click();
-	await expect(page).toHaveURL(`${harness.relayBaseUrl}/?p=${otherProject}`);
+	await expect(page).toHaveURL(`${harness.appBaseUrl}/?p=${otherProject}`);
 	await rpc.waitForRequest(
 		(request) =>
 			request.tag === "GetFileTree" &&
@@ -684,7 +684,7 @@ test("a first send from home places the session in the chosen draft project", as
 		ResolveSession: () => new Promise(() => {}),
 	});
 	await page.goto(
-		`${harness.relayBaseUrl}/?p=${projectSlug}&project=${otherProject}`,
+		`${harness.appBaseUrl}/?p=${projectSlug}&project=${otherProject}`,
 	);
 	await rpc.waitForRequest(
 		(request) =>
@@ -716,7 +716,7 @@ test("a draft's first send creates the session in its project and sends into it"
 	harness,
 }) => {
 	const { rpc } = await setup(page);
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#new-session-btn").click();
 	await expect(page).toHaveURL(
@@ -763,7 +763,7 @@ test("a draft's first send shows working before its session row arrives", async 
 				Stream.never,
 			),
 	});
-	await page.goto(`${harness.relayBaseUrl}/new?project=${projectSlug}`);
+	await page.goto(`${harness.appBaseUrl}/new?project=${projectSlug}`);
 	await page.locator("#input").fill("First draft send");
 	await page.locator("#send").click();
 	await rpc.waitForRequest((request) => request.tag === "input.submit");
@@ -790,7 +790,7 @@ test("an unplaced session disables send until it is resolved", async ({
 			}),
 		ViewSession: () => ({ ok: true }),
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toBeVisible();
 	await page.evaluate(() => {
 		window.history.pushState(null, "", "/s/session-unplaced-send");
@@ -817,7 +817,7 @@ test("a draft with no model pick for its account cannot send", async ({
 		_tag: "harnessDefaults",
 		opencode: { status: "missing" },
 	});
-	await page.goto(`${harness.relayBaseUrl}/new?project=${projectSlug}`);
+	await page.goto(`${harness.appBaseUrl}/new?project=${projectSlug}`);
 	await page.locator("#input").fill("Wait for a model pick");
 	await expect(page.locator("#send")).toBeDisabled();
 	expect(
@@ -849,7 +849,7 @@ test("a draft on an account without multi-folder support cannot send", async ({
 			},
 		],
 	});
-	await page.goto(`${harness.relayBaseUrl}/new?project=${projectSlug}`);
+	await page.goto(`${harness.appBaseUrl}/new?project=${projectSlug}`);
 	await page.locator("#input").fill("Cannot send multiple folders");
 	await expect(page.locator("#send")).toBeDisabled();
 	expect(
@@ -942,7 +942,7 @@ test("send stays disabled while switching the account before the send", async ({
 			stale: false,
 		},
 	]);
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await page.locator("#input").fill("Switch then send");
 	await expect(page.locator("#send")).toHaveAttribute(
 		"data-send-mode",
@@ -972,7 +972,7 @@ test("a placed session only enables send for nonempty input", async ({
 	harness,
 }) => {
 	const { rpc } = await setup(page, { ViewSession: () => ({ ok: true }) });
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	// The seed session restores a saved draft; wait for it so the empty check
 	// below cannot pass before the draft arrives.
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
@@ -1003,7 +1003,7 @@ test("a draft's first send places the session before any navigation frame", asyn
 		ViewSession: () => ({ ok: true }),
 		ResolveSession: () => new Promise(() => {}),
 	});
-	await page.goto(`${harness.relayBaseUrl}/new?project=${projectSlug}`);
+	await page.goto(`${harness.appBaseUrl}/new?project=${projectSlug}`);
 	await page.locator("#input").fill("First send without a session row");
 	const frames = page.evaluate(async () => {
 		const samples: Array<{
@@ -1084,7 +1084,7 @@ for (const changed of ["unchanged", "text", "images"] as const) {
 					Stream.never,
 				),
 		});
-		await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+		await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 		await expect(page.locator("#input")).toBeVisible();
 		await page.locator("#input").fill("$btw What changed?");
 		await page.locator("#send").click();
@@ -1156,7 +1156,7 @@ test("a side-thread reply after opening another session leaves its route and com
 				started = resolve;
 			}),
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#input").fill("$btw Delayed side thread");
 	await page.locator("#send").click();
@@ -1206,7 +1206,7 @@ test("a side-thread prepared after opening another session still belongs to its 
 				started = resolve;
 			}),
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#input").fill("$btw Explain @notes.md");
 	await page.locator("#send").click();
@@ -1260,7 +1260,7 @@ test("a redirect after opening another session leaves its route and composer alo
 				accept = resolve;
 			}),
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#send").click();
 	await rpc.waitForRequest((request) => request.tag === "input.submit");
@@ -1289,7 +1289,7 @@ test("a failed send restores composer text and shows the RPC failure toast", asy
 			throw new WsRpcError({ message: "Send denied by server" });
 		},
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#input").fill("Keep this message");
 	await page.locator("#send").click();
@@ -1318,7 +1318,7 @@ test("a draft creation failure restores text and shows the RPC failure toast", a
 			throw new WsRpcError({ message: "Creation denied by server" });
 		},
 	});
-	await page.goto(`${harness.relayBaseUrl}/new?project=${projectSlug}`);
+	await page.goto(`${harness.appBaseUrl}/new?project=${projectSlug}`);
 	await page.locator("#input").fill("Keep my draft");
 	await page.locator("#send").click();
 	await expect(
@@ -1343,7 +1343,7 @@ test("a refused steer keeps the text and shows the server's reason", async ({
 	const { rpc } = await setup(page, {
 		"input.submit": () => ({ ok: false, reason: "model_differs" }),
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	rpc.upsertShellRow({
 		...rows[0],
@@ -1412,7 +1412,7 @@ test("an inbox-queued reply clears guessed working and renders the queued messag
 			return { ok: true, sessionId: seed, handedOff: false };
 		},
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#input").fill("Waiting in the inbox");
 	await page.locator("#send").click();
@@ -1435,7 +1435,7 @@ test("ForkSession response selects the fork and restores its draft", async ({
 	harness,
 }, testInfo) => {
 	const { rpc } = await setup(page);
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	const item = page.locator(`#session-list [data-session-id="${seed}"]`);
 	await item.hover();
@@ -1468,7 +1468,7 @@ test("a fork reply after opening another session leaves its route and composer a
 				completeFork = resolve;
 			}),
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	const item = page.locator(`#session-list [data-session-id="${seed}"]`);
 	await item.hover();
@@ -1508,7 +1508,7 @@ test("New session pushes from a session and replaces an existing draft entry", a
 	harness,
 }, testInfo) => {
 	const { rpc } = await setup(page);
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}?keep=draft-history`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}?keep=draft-history`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#new-session-btn").click();
 	await expect(page).toHaveURL(
@@ -1520,7 +1520,7 @@ test("New session pushes from a session and replaces an existing draft entry", a
 	);
 	await page.goBack();
 	await expect(page).toHaveURL(
-		`${harness.relayBaseUrl}/s/${seed}?keep=draft-history`,
+		`${harness.appBaseUrl}/s/${seed}?keep=draft-history`,
 	);
 	await page.goForward();
 	// An unpinned draft is a valid link; New pins the project's default.
@@ -1541,7 +1541,7 @@ test("New session pushes from a session and replaces an existing draft entry", a
 	);
 	await page.goBack();
 	await expect(page).toHaveURL(
-		`${harness.relayBaseUrl}/s/${seed}?keep=draft-history`,
+		`${harness.appBaseUrl}/s/${seed}?keep=draft-history`,
 	);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	expect(
@@ -1567,7 +1567,7 @@ test("deleting the viewed session selects the next sidebar row and replaces hist
 			projectSlug: otherProject,
 		},
 	]);
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}?p=${projectSlug}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}?p=${projectSlug}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	rpc.removeShellRow(seed);
 	await expect(page).toHaveURL(
@@ -1593,10 +1593,10 @@ test("deleting the last session in the filtered list goes home without not-found
 			projectSlug: otherProject,
 		},
 	]);
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}?p=${projectSlug}`);
+	await page.goto(`${harness.appBaseUrl}/s/${seed}?p=${projectSlug}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	rpc.removeShellRow(seed);
-	await expect(page).toHaveURL(`${harness.relayBaseUrl}/?p=${projectSlug}`);
+	await expect(page).toHaveURL(`${harness.appBaseUrl}/?p=${projectSlug}`);
 	await expect(page.getByText(notFound)).toHaveCount(0);
 	await expect(page.locator(`[data-session-id="${seed}"]`)).toHaveCount(0);
 });
@@ -1609,7 +1609,7 @@ test("deleting a session moves every tab showing it without not-found", async ({
 	const tabs = await Promise.all(
 		[page, secondPage].map(async (tab) => {
 			const { rpc } = await setup(tab);
-			await tab.goto(`${harness.relayBaseUrl}/s/${seed}`);
+			await tab.goto(`${harness.appBaseUrl}/s/${seed}`);
 			await expect(tab.locator("#input")).toHaveValue("Seed draft");
 			return { tab, rpc };
 		}),
@@ -1640,7 +1640,7 @@ test("input.submit response selects a materialized OpenCode session", async ({
 	harness,
 }, testInfo) => {
 	const { rpc } = await setup(page);
-	await page.goto(`${harness.relayBaseUrl}/s/${survivor}`);
+	await page.goto(`${harness.appBaseUrl}/s/${survivor}`);
 	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
 	await page.evaluate((path) => {
 		window.history.pushState(null, "", path);

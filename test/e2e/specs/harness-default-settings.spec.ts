@@ -376,7 +376,7 @@ test("defaults follow RPC writes across relays", async ({
 	);
 	const published = latestDefaults(other);
 	await artifact(testInfo, "5-relay-fanout", page, harness, {
-		otherRelay: savedSlug,
+		otherProject: savedSlug,
 		published,
 	});
 	expect(published?.claude).toMatchObject({

@@ -1237,7 +1237,7 @@ async function main(): Promise<void> {
 				),
 			).href
 		)) as typeof import("../../src/lib/domain/daemon/Services/account-directory.js");
-		let relayGateInstalled = false;
+		let gateInstalled = false;
 		OrchestrationEngine.prototype.drainSideEffects = function (...args) {
 			return Effect.gen({ self: this }, function* () {
 				const detach = join(root, "detach-relay");
@@ -1250,7 +1250,7 @@ async function main(): Promise<void> {
 						record({ kind: "relay-gap", projectId: slug });
 					}
 				}
-				if (!relayGateInstalled) {
+				if (!gateInstalled) {
 					const accounts = yield* Effect.serviceOption(AccountDirectory);
 					if (accounts._tag === "Some") {
 						const resolve = accounts.value.resolve;
@@ -1309,7 +1309,7 @@ async function main(): Promise<void> {
 								return yield* open(slug);
 							});
 						Object.assign(service.value, { open: gated });
-						relayGateInstalled = true;
+						gateInstalled = true;
 					}
 				}
 				const project = yield* Effect.serviceOption(PersistenceProjectTag);

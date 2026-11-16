@@ -74,7 +74,7 @@ test.describe("Late turn end", () => {
 
 	test("an earlier turn's late end leaves the next prompt working until its own end", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 		mockServer,
 	}, testInfo) => {
@@ -85,7 +85,7 @@ test.describe("Late turn end", () => {
 		);
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Turn A runs and ends.
 		await app.sendMessage("Stream a response");

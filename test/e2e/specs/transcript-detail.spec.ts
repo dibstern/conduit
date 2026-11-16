@@ -1,6 +1,6 @@
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 const project = "e2e-replay";
 const a = "transcript-a";
@@ -76,7 +76,7 @@ test.describe("message calendar timestamps", () => {
 				],
 			},
 		});
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: [
 				{
 					type: "project_list",
@@ -101,7 +101,7 @@ test.describe("message calendar timestamps", () => {
 			],
 			responses: new Map(),
 		});
-		await page.goto(`${harness.relayBaseUrl}/s/${a}`);
+		await page.goto(`${harness.appBaseUrl}/s/${a}`);
 		for (const [index, [instant, label]] of cases.entries()) {
 			const time = page
 				.locator(".msg-user")
@@ -200,7 +200,7 @@ test("detail feed renders streamed text once and resumes cached content across s
 					: [{ _tag: "synchronized" }],
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -232,7 +232,7 @@ test("detail feed renders streamed text once and resumes cached content across s
 		],
 		responses: new Map(),
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${a}`);
+	await page.goto(`${harness.appBaseUrl}/s/${a}`);
 	await rpc.waitForRequest(
 		(request) =>
 			request.tag === "SubscribeSessionDetail" &&
@@ -328,7 +328,7 @@ test("detail catch-up removes a message after returning to a session", async ({
 							],
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -360,7 +360,7 @@ test("detail catch-up removes a message after returning to a session", async ({
 		],
 		responses: new Map(),
 	});
-	await page.goto(`${harness.relayBaseUrl}/s/${a}`);
+	await page.goto(`${harness.appBaseUrl}/s/${a}`);
 	await expect(page.locator(".msg-assistant .md-content")).toContainText(
 		"Remove me",
 	);

@@ -10,7 +10,7 @@ import {
 } from "../fixtures/mockup-state.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 async function waitForChatReady(page: Page): Promise<void> {
 	await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
@@ -53,7 +53,7 @@ async function setup(
 			},
 		},
 	});
-	const control = await mockRelayWebSocket(page, {
+	const control = await mockDaemonWebSocket(page, {
 		initMessages: messages,
 		responses: new Map(),
 		initDelay: 0,

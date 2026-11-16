@@ -10,11 +10,11 @@ test.use({ recording: "chat-simple" });
 test.describe("Session Management", () => {
 	test("new session opens it while another session is open", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await sidebar.waitForSessions();
 
 		const current = await sidebar.sessionList
@@ -34,10 +34,10 @@ test.describe("Session Management", () => {
 			.toBeGreaterThan(countBefore);
 	});
 
-	test("search sessions filters the list", async ({ page, relayUrl }) => {
+	test("search sessions filters the list", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Wait for sessions to render (auto-retrying, avoids race with WS data)
 		await sidebar.waitForSessions();
@@ -58,11 +58,11 @@ test.describe("Session Management", () => {
 
 	test("new session lives in the sidebar header, not an action list", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await expect(
 			page.locator("#sidebar-header #new-session-btn"),
@@ -77,11 +77,11 @@ test.describe("Session Management", () => {
 
 	test("Files pane opens and closes beside sessions", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await expect(sidebar.sessionsPanel).toBeVisible();
 		const files = page.getByTestId("views-rail-files");

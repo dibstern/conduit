@@ -10,14 +10,14 @@ test.describe("Tool Call", () => {
 	test.describe.configure({ timeout: 30_000 });
 	test.use({ recording: "chat-tool-call" });
 
-	test("tool call appears and completes", async ({ page, relayUrl }) => {
+	test("tool call appears and completes", async ({ page, appUrl }) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
 		test.skip(!isDesktop, "Chat lifecycle tests run on desktop viewport only");
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Send prompt — the mock will serve the first prompt_async response
 		await app.sendMessage("Show me a tool call");
@@ -49,12 +49,12 @@ test.describe("Tool Call", () => {
 	// ledger — the same shape a Claude turn renders.
 	test("a multi-step turn renders one ledger, live and after reload", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 		const ledgers = page.locator(".turn-activity");
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// The recorded prompt: the optimistic send is adopted by its text
 		// (812de08a), and a stray one would sit between the turn's two steps.
@@ -86,7 +86,7 @@ test.describe("Result Bar", () => {
 
 	test("result bar shows token usage after response", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
@@ -94,7 +94,7 @@ test.describe("Result Bar", () => {
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await app.sendMessage("Give a response with usage");
 
@@ -116,7 +116,7 @@ test.describe("Multi-Turn", () => {
 
 	test("multi-turn conversation renders correctly", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
@@ -124,7 +124,7 @@ test.describe("Multi-Turn", () => {
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Capture message counts before this test
 		const _userCountBefore = await chat.getUserMessageCount();
@@ -156,7 +156,7 @@ test.describe("Thinking Block", () => {
 
 	test("thinking block appears for reasoning models", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
@@ -164,7 +164,7 @@ test.describe("Thinking Block", () => {
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await app.sendMessage("Think about this");
 

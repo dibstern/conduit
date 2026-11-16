@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const REPO_ROOT = process.cwd();
 const OLD_EFFECT_DIR = join(REPO_ROOT, "src/lib/effect");
 const DOMAIN_ROOT = join(REPO_ROOT, "src/lib/domain");
-const RELAY_SERVICES_INDEX = join(
+const PROJECT_SERVICES_INDEX = join(
 	REPO_ROOT,
 	"src/lib/domain/project-services/Services/services.ts",
 );
@@ -50,7 +50,7 @@ describe("Effect domain organization guard", () => {
 	});
 
 	it("does not use the relay services index as a cross-domain export barrel", () => {
-		const text = readFileSync(RELAY_SERVICES_INDEX, "utf8");
+		const text = readFileSync(PROJECT_SERVICES_INDEX, "utf8");
 
 		expect(text).not.toMatch(
 			/export\s*\{[\s\S]*\}\s*from\s*["']\.\.\/\.\.\/(daemon|persistence|provider|server)\//,

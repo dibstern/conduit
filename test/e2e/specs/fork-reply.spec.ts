@@ -49,7 +49,7 @@ test.describe("OpenCode fork from a reply", () => {
 
 	test("keeps the reply and drops the later turn", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 		mockServer,
 	}) => {
@@ -57,7 +57,7 @@ test.describe("OpenCode fork from a reply", () => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 		const db = harness.eventsDbPath;
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		const parentId = new URL(page.url()).pathname.split("/").at(-1);
 		if (!parentId) throw new Error("Parent session route is missing");
 

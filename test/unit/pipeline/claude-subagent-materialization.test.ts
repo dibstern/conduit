@@ -221,7 +221,7 @@ describe("Claude subagent materialization pipeline", () => {
 							sessionMessage("assistant", "sub-assistant-1", "Auth is fine"),
 						]),
 					};
-					const relaySink = createProjectEventSink({
+					const projectSink = createProjectEventSink({
 						sessionId: parentSessionId,
 						persist: { persistEvent: appendProject },
 					});
@@ -348,7 +348,7 @@ describe("Claude subagent materialization pipeline", () => {
 								firstSequence: 0,
 								deliveredThrough: 0,
 							},
-							eventSink: relaySink,
+							eventSink: projectSink,
 						}),
 					);
 					// Message rows can exist before the final read projects their text parts.
@@ -578,7 +578,7 @@ describe("Claude subagent materialization pipeline", () => {
 							return transcript;
 						}),
 					};
-					const relaySink = createProjectEventSink({
+					const projectSink = createProjectEventSink({
 						sessionId: parentSessionId,
 						persist: { persistEvent: appendProject },
 					});
@@ -728,7 +728,7 @@ describe("Claude subagent materialization pipeline", () => {
 									firstSequence: 0,
 									deliveredThrough: 0,
 								},
-								eventSink: relaySink,
+								eventSink: projectSink,
 							}),
 						),
 					);

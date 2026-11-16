@@ -2,13 +2,13 @@ import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { devices } from "@playwright/test";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 
 test.use({ recording: "chat-simple" });
 
 test("cold mobile first paint records the entry bundle and requests", async ({
 	browser,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	const context = await browser.newContext({
 		...devices["Pixel 7"],
@@ -29,7 +29,7 @@ test("cold mobile first paint records the entry bundle and requests", async ({
 	const requests: string[] = [];
 	page.on("request", (request) => requests.push(request.url()));
 	try {
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		const paint = await page.evaluate(() => ({
 			fcpMs: performance.getEntriesByName("first-contentful-paint")[0]
 				?.startTime,

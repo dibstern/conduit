@@ -16,7 +16,7 @@ import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import {
-	mockRelayWebSocket,
+	mockDaemonWebSocket,
 	type WsMockControl,
 	type WsMockOptions,
 } from "../helpers/ws-mock.js";
@@ -121,7 +121,7 @@ function arrivalToast(page: Page) {
 	return page.locator('[data-testid="toast"][data-variant="attention"]');
 }
 
-async function mockRelayWithViewSessionRpc(
+async function mockDaemonWithViewSessionRpc(
 	page: Page,
 	options: WsMockOptions,
 ): Promise<WsMockControl> {
@@ -131,11 +131,11 @@ async function mockRelayWithViewSessionRpc(
 			ViewSession: () => ({ ok: true }),
 		},
 	});
-	return mockRelayWebSocket(page, options);
+	return mockDaemonWebSocket(page, options);
 }
 
 async function openChat(page: Page, baseURL: string | undefined) {
-	const control = await mockRelayWithViewSessionRpc(page, {
+	const control = await mockDaemonWithViewSessionRpc(page, {
 		initMessages: twoSessionInit,
 		responses: new Map(),
 		initDelay: 0,
@@ -285,7 +285,7 @@ test.describe("server-derived notification indicators", () => {
 		page,
 		baseURL,
 	}) => {
-		const control = await mockRelayWithViewSessionRpc(page, {
+		const control = await mockDaemonWithViewSessionRpc(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,

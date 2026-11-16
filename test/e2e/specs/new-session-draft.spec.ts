@@ -8,7 +8,7 @@ import { Effect } from "effect";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, sendMockDaemonList } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
@@ -20,10 +20,10 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
 	await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
-async function openDraft(page: Page, relayUrl: string) {
+async function openDraft(page: Page, appUrl: string) {
 	const app = new AppPage(page);
 	const sidebar = new SidebarPage(page);
-	await app.goto(relayUrl);
+	await app.goto(appUrl);
 	await sidebar.waitForSessions();
 	const countBefore = await sidebar.getSessionCount();
 	await sidebar.newSessionBtn.click();
@@ -57,7 +57,7 @@ async function mockTwoProjects(page: Page) {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: "e2e-replay" },
 			{ type: "shell_snapshot", roots: true, sessions: [] },
@@ -69,9 +69,9 @@ async function mockTwoProjects(page: Page) {
 test.describe("New session draft", () => {
 	test("+ opens an empty draft and creates nothing", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		const { app, sidebar, countBefore } = await openDraft(page, relayUrl);
+		const { app, sidebar, countBefore } = await openDraft(page, appUrl);
 		const draftUrl = page.url();
 
 		await expect(app.input).toBeFocused();
@@ -117,7 +117,7 @@ test.describe("New session draft", () => {
 				createdAt: 0,
 			})),
 		});
-		await page.goto(`${harness.relayBaseUrl}/new?project=e2e-replay`);
+		await page.goto(`${harness.appBaseUrl}/new?project=e2e-replay`);
 
 		await page.getByTestId("draft-start-chip").click();
 		await expect(
@@ -131,9 +131,9 @@ test.describe("New session draft", () => {
 
 	test("project chip lists projects and keeps the typed prompt", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		const { app } = await openDraft(page, relayUrl);
+		const { app } = await openDraft(page, appUrl);
 		await app.input.fill("Keep me");
 
 		await page.getByTestId("draft-project-chip").click();
@@ -156,7 +156,7 @@ test.describe("New session draft", () => {
 	}, testInfo) => {
 		await mockTwoProjects(page);
 		const app = new AppPage(page);
-		await page.goto(`${harness.relayBaseUrl}/new?project=e2e-replay`);
+		await page.goto(`${harness.appBaseUrl}/new?project=e2e-replay`);
 		const chip = page.getByTestId("draft-project-chip");
 		await chip.click();
 		await page.getByRole("menuitemradio", { name: /other/ }).click();
@@ -169,8 +169,8 @@ test.describe("New session draft", () => {
 		await capture(page, testInfo, "desktop-pick-then-type");
 	});
 
-	test("a reload keeps the half-typed prompt", async ({ page, relayUrl }) => {
-		const { app } = await openDraft(page, relayUrl);
+	test("a reload keeps the half-typed prompt", async ({ page, appUrl }) => {
+		const { app } = await openDraft(page, appUrl);
 		const draftUrl = page.url();
 		await app.input.fill("Survive a reload");
 		const observer = new AppPage(await page.context().newPage());
@@ -189,11 +189,11 @@ test.describe("New session draft", () => {
 
 		test("+ opens the draft full screen, not the list", async ({
 			page,
-			relayUrl,
+			appUrl,
 		}, testInfo) => {
 			const app = new AppPage(page);
 			const sidebar = new SidebarPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			// The harness lands in a session; a phone shows the list only after back.
 			await app.sessionBarBack.click();
 			await sidebar.waitForSessions();
@@ -214,7 +214,7 @@ test.describe("New session draft", () => {
 			harness,
 		}, testInfo) => {
 			await mockTwoProjects(page);
-			await page.goto(`${harness.relayBaseUrl}/new?project=e2e-replay`);
+			await page.goto(`${harness.appBaseUrl}/new?project=e2e-replay`);
 			const chip = page.getByTestId("draft-project-chip");
 			await expect(chip).toContainText("e2e-replay");
 

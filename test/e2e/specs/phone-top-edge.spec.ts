@@ -12,7 +12,7 @@
  */
 import { writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 
 test.use({
 	recording: "chat-simple",
@@ -92,11 +92,11 @@ async function scrollTranscriptUp(page: Page): Promise<void> {
 
 test("nothing the iOS sampler reads covers the top-edge strip", async ({
 	page,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	const samples: Record<string, string[]> = {};
 	const controls: Record<string, string[]> = {};
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	await expect(page.locator("#session-bar-more")).toBeVisible();
 	samples["chat"] = await sampledOverEdge(page);
 

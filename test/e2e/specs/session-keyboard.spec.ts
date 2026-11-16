@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({
@@ -8,8 +8,8 @@ test.use({
 	screenshot: "off",
 });
 
-async function twoRows(page: Page, relayUrl: string) {
-	await gotoRelay(page, relayUrl);
+async function twoRows(page: Page, appUrl: string) {
+	await gotoApp(page, appUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
 	await new SidebarPage(page).createNewSession();
@@ -19,9 +19,9 @@ async function twoRows(page: Page, relayUrl: string) {
 
 test("j/k cross groups; Enter opens; settle, undo, pin, snooze and rename work from focus", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const rows = await twoRows(page, relayUrl);
+	const rows = await twoRows(page, appUrl);
 	const first = rows.first();
 	const firstId = await first.getAttribute("data-session-id");
 	if (!firstId) throw new Error("missing session id");
@@ -74,9 +74,9 @@ test("j/k cross groups; Enter opens; settle, undo, pin, snooze and rename work f
 
 test("row rename commits on Enter, ignores empty titles, and cancels on Escape", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const rows = await twoRows(page, relayUrl);
+	const rows = await twoRows(page, appUrl);
 	const id = await rows.first().getAttribute("data-session-id");
 	if (!id) throw new Error("missing session id");
 	const row = page.locator(`#session-list [data-session-id="${id}"]`);
@@ -117,9 +117,9 @@ test("row rename commits on Enter, ignores empty titles, and cancels on Escape",
 
 test("row rename keeps the draft through updates and offers a title that lands mid-edit", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const rows = await twoRows(page, relayUrl);
+	const rows = await twoRows(page, appUrl);
 	const id = await rows.first().getAttribute("data-session-id");
 	if (!id) throw new Error("missing session id");
 	const rowIn = (p: Page) =>
@@ -129,7 +129,7 @@ test("row rename keeps the draft through updates and offers a title that lands m
 	// A second tab renames the same session, which pushes a session update to
 	// the first tab while its rename field is open.
 	const other = await page.context().newPage();
-	await gotoRelay(other, relayUrl);
+	await gotoApp(other, appUrl);
 	const renameFromOtherTab = async (title: string) => {
 		// Not dblclick: the first click reads the unread row, which rebuilds it.
 		await rowIn(other).focus();
@@ -191,9 +191,9 @@ test("row rename keeps the draft through updates and offers a title that lands m
 
 test("scope digits, shortcut sheet and text-field guards", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const rows = await twoRows(page, relayUrl);
+	const rows = await twoRows(page, appUrl);
 	await rows.first().focus();
 	await page.keyboard.press("1");
 	await expect(page.getByTestId("session-scope-chip")).not.toContainText(
@@ -235,9 +235,9 @@ test("scope digits, shortcut sheet and text-field guards", async ({
 
 test("hover commands have pointer and touch controls, with unread in the menu", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const rows = await twoRows(page, relayUrl);
+	const rows = await twoRows(page, appUrl);
 	const row = rows.last();
 	const twins = [
 		{ key: "s", pointer: "session-act-settle", touch: "session-ctx-settle" },

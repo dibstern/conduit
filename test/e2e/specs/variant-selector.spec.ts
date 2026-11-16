@@ -10,10 +10,10 @@ import {
 	variantInitMessages,
 } from "../fixtures/mockup-state.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 type Page = import("@playwright/test").Page;
-type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
+type WsMockControl = Awaited<ReturnType<typeof mockDaemonWebSocket>>;
 type VariantSetupControl = WsMockControl & {
 	readonly rpcCalls: Record<string, unknown>[];
 };
@@ -47,7 +47,7 @@ async function setupWithVariants(
 			},
 		},
 	});
-	const control = await mockRelayWebSocket(page, {
+	const control = await mockDaemonWebSocket(page, {
 		initMessages: variantInitMessages,
 		responses: new Map(),
 		initDelay: 0,
@@ -78,7 +78,7 @@ async function setupWithoutVariants(
 			}),
 		},
 	});
-	const control = await mockRelayWebSocket(page, {
+	const control = await mockDaemonWebSocket(page, {
 		initMessages: noVariantInitMessages,
 		responses: new Map(),
 		initDelay: 0,

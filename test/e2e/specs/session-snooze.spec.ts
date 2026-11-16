@@ -1,4 +1,4 @@
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({
@@ -9,7 +9,7 @@ test.use({
 
 test("snooze, undo, shelf, reload, search, unsnooze and a time wake", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
 	// Tomorrow noon stays ahead of the server clock without crossing a day
 	// boundary when the one-hour label and wake are exercised.
@@ -17,7 +17,7 @@ test("snooze, undo, shelf, reload, search, unsnooze and a time wake", async ({
 	noon.setDate(noon.getDate() + 1);
 	noon.setHours(12, 0, 0, 0);
 	await page.clock.install({ time: noon });
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
 	// The recording holds one session; snooze needs a second to move around.

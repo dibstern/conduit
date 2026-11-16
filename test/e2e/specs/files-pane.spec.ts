@@ -6,8 +6,8 @@ import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({ recording: "chat-simple", viewport: { width: 1440, height: 900 } });
 
-async function openPane(page: Page, relayUrl: string) {
-	await new AppPage(page).goto(relayUrl);
+async function openPane(page: Page, appUrl: string) {
+	await new AppPage(page).goto(appUrl);
 	const files = page.getByTestId("views-rail-files");
 	await files.click();
 	const pane = page.getByTestId("side-pane-files");
@@ -56,9 +56,9 @@ async function failFileContentRpc(page: Page) {
 
 test("Files opens between chat and rail without horizontal overflow", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const { files, pane, divider } = await openPane(page, relayUrl);
+	const { files, pane, divider } = await openPane(page, appUrl);
 	const rail = page.getByTestId("views-rail");
 	const chat = await page.locator("#messages").boundingBox();
 	const split = await divider.boundingBox();
@@ -78,9 +78,9 @@ test("Files opens between chat and rail without horizontal overflow", async ({
 
 test("divider pointer and keyboard controls resize and clamp both columns", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const { divider, pane } = await openPane(page, relayUrl);
+	const { divider, pane } = await openPane(page, appUrl);
 	const initial = await divider.boundingBox();
 	expect(initial).toBeTruthy();
 	if (!initial) return;
@@ -115,9 +115,9 @@ test("divider pointer and keyboard controls resize and clamp both columns", asyn
 
 test("expand restores split width and focus; close returns focus to Files", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const { files, divider } = await openPane(page, relayUrl);
+	const { files, divider } = await openPane(page, appUrl);
 	await divider.press("Home");
 	await divider.press("ArrowLeft");
 	const width = await divider.getAttribute("aria-valuenow");
@@ -141,9 +141,9 @@ test("expand restores split width and focus; close returns focus to Files", asyn
 
 test("800px forces expansion without changing the saved split", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const { divider } = await openPane(page, relayUrl);
+	const { divider } = await openPane(page, appUrl);
 	await divider.press("Home");
 	await divider.press("ArrowLeft");
 	const width = await divider.getAttribute("aria-valuenow");
@@ -166,9 +166,9 @@ test("800px forces expansion without changing the saved split", async ({
 
 test("width and open state survive reload only for their session", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const { files, divider } = await openPane(page, relayUrl);
+	const { files, divider } = await openPane(page, appUrl);
 	const firstUrl = page.url();
 	await divider.press("Home");
 	await divider.press("ArrowLeft");
@@ -188,9 +188,9 @@ test("width and open state survive reload only for their session", async ({
 
 test("preview shows a path chip and File browser restores the tree", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	const { pane } = await openPane(page, relayUrl);
+	const { pane } = await openPane(page, appUrl);
 	await pane.locator(".fb-entry:not([aria-expanded])").first().click();
 	await expect(pane.locator("#file-viewer")).toBeVisible();
 	const path = (await pane.locator("#file-viewer-path").textContent())?.trim();
@@ -205,10 +205,10 @@ test("preview shows a path chip and File browser restores the tree", async ({
 
 test("failed content RPC shows an inline alert and tree navigation", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
 	await failFileContentRpc(page);
-	const { pane } = await openPane(page, relayUrl);
+	const { pane } = await openPane(page, appUrl);
 	await pane.locator(".fb-entry:not([aria-expanded])").first().click();
 	await expect(pane.getByRole("alert")).toContainText(
 		"Failed to load file preview",
@@ -220,9 +220,9 @@ test("failed content RPC shows an inline alert and tree navigation", async ({
 
 test("1000px chat keeps send and model picker inside the viewport", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	await openPane(page, relayUrl);
+	await openPane(page, appUrl);
 	await page.setViewportSize({ width: 1000, height: 900 });
 	const chat = await page.locator("#messages").boundingBox();
 	const send = await page.locator("#send").boundingBox();
@@ -241,11 +241,11 @@ test.describe("reading position", () => {
 	test.use({ recording: "chat-code-block" });
 	test("opening and closing Files keeps scrollTop within 2px with a replayed transcript", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
 		test.setTimeout(60_000);
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.sendMessage("Show the code block");
 		await expect(page.locator("#messages pre code").first()).toBeVisible();
 		await expect(page.locator(".turn-activity-toggle").last()).toContainText(

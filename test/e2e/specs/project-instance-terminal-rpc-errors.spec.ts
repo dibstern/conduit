@@ -9,7 +9,7 @@ import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 import { initMessages } from "../fixtures/mockup-state.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 // Failure modes: structured project issues flatten into generic text; server
 // reasons disappear; a failed action leaves controls disabled or closes a form.
@@ -64,7 +64,7 @@ async function openChat(page: Page, baseUrl: string, stubs: StubTable) {
 			...stubs,
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			...initMessages.filter((message) => message.type !== "instance_list"),
 			{
@@ -105,7 +105,7 @@ for (const scenario of ["validation", "generic", "socket"] as const) {
 		page,
 		harness,
 	}, testInfo) => {
-		const rpc = await openChat(page, harness.relayBaseUrl, {
+		const rpc = await openChat(page, harness.appBaseUrl, {
 			SaveProject: () => {
 				if (scenario === "validation")
 					throw new ProjectSaveRejected({
@@ -151,7 +151,7 @@ for (const action of ["default", "edit", "add", "remove"] as const) {
 				reason: "This account is in use by a running session.",
 			});
 		};
-		const rpc = await openChat(page, harness.relayBaseUrl, {
+		const rpc = await openChat(page, harness.appBaseUrl, {
 			SetDefault: refuse,
 			UpdateInstance: refuse,
 			AddInstance: refuse,
@@ -215,7 +215,7 @@ for (const action of ["start", "stop", "scan"] as const) {
 		const refuse = () => {
 			throw new WsRpcError({ message: "The provider is unavailable." });
 		};
-		const rpc = await openChat(page, harness.relayBaseUrl, {
+		const rpc = await openChat(page, harness.appBaseUrl, {
 			StartInstance: refuse,
 			StopInstance: refuse,
 			ScanNow: refuse,
@@ -258,7 +258,7 @@ test("terminal creation failure shows the server reason and permits retry", asyn
 	page,
 	harness,
 }, testInfo) => {
-	const rpc = await openChat(page, harness.relayBaseUrl, {
+	const rpc = await openChat(page, harness.appBaseUrl, {
 		CreatePty: () => {
 			throw new WsRpcError({ message: "The terminal host is unavailable." });
 		},

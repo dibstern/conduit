@@ -92,15 +92,15 @@ describe("archived event retention through the relay", () => {
 	async function setup(name: string) {
 		const scenario: Record<string, unknown> = {};
 		evidence[name] = scenario;
-		const relay = await createDaemonProject("chat-simple", {
+		const project = await createDaemonProject("chat-simple", {
 			configDir: directory,
 			defaultModel: null,
 			claudeSdk,
 		});
-		harness = relay;
-		const database = new Database(relay.eventsDbPath, { readonly: true });
+		harness = project;
+		const database = new Database(project.eventsDbPath, { readonly: true });
 		db = database;
-		const run = relay.run;
+		const run = project.run;
 		const retention = await run(EventRetentionTag);
 		const originalDrain = retention.drain;
 		// Separate sweep and drain observations. Automatic kicks are covered by
@@ -109,7 +109,7 @@ describe("archived event retention through the relay", () => {
 			.spyOn(retention, "drain")
 			.mockImplementation(() => Effect.succeed(emptyReport));
 		const commit = await run(makeCommitAndSignal);
-		const client = await relay.connectWsClient();
+		const client = await project.connectWsClient();
 		await client.waitForInitialState();
 		const root = String(
 			(
@@ -229,7 +229,7 @@ describe("archived event retention through the relay", () => {
 			const scheduledBefore = scheduledDrains.mock.calls.length;
 			scenario["eventsBeforeSweep"] = beforeSweep;
 			// The daemon invokes this effect outside the project's runtime.
-			const { deleteArchivedSessions } = await relay.sessions();
+			const { deleteArchivedSessions } = await project.sessions();
 			const sweepResult = await Effect.runPromise(
 				deleteArchivedSessions(30 * DAY, Date.now()),
 			);
@@ -278,7 +278,7 @@ describe("archived event retention through the relay", () => {
 				scheduledDrains.mock.calls.length - scheduledBefore;
 			const drainReport = await run(originalDrain());
 			const afterDrain = events();
-			const parity = await relay.checkReplayParity();
+			const parity = await project.checkReplayParity();
 			scenario["drainReport"] = drainReport;
 			scenario["eventsAfterDrain"] = afterDrain;
 			scenario["parity"] = parity;
@@ -297,7 +297,7 @@ describe("archived event retention through the relay", () => {
 			return { drainReport, afterDrain };
 		};
 		return {
-			relay,
+			project,
 			database,
 			run,
 			commit,
@@ -446,7 +446,7 @@ describe("archived event retention through the relay", () => {
 				.map((row) => row.type),
 		).toEqual(["session.deleted"]);
 		const strict = await Effect.runPromise(
-			verifyReplayParity(flow.relay.eventsDbPath, {
+			verifyReplayParity(flow.project.eventsDbPath, {
 				projectId: "integration-test",
 				ignoredColumns: [
 					"version",

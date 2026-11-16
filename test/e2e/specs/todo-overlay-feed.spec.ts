@@ -6,14 +6,14 @@
 import { expect, test } from "@playwright/test";
 import { initMessages } from "../fixtures/mockup-state.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 const sessionId = "sess-mockup-001";
 
 test("todo overlay shows the session's snapshot and follows its upserts", async ({
 	page,
 }) => {
-	await mockRelayWebSocket(page, { initMessages, responses: new Map() });
+	await mockDaemonWebSocket(page, { initMessages, responses: new Map() });
 	const rpc = await mockWsRpc(page);
 	rpc.setSessionTodos(sessionId, [
 		{ id: "t1", subject: "Write the failing test", status: "completed" },

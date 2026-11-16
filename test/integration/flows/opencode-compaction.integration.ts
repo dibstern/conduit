@@ -53,31 +53,36 @@ function recording(status = 200): OpenCodeRecording {
 }
 
 function seedNativeUserTurn(
-	relay: DaemonProject,
+	daemonProject: DaemonProject,
 	sessionId: string,
 	modelID: string,
 ): void {
-	relay.mock.setExactResponse("GET", `/session/${sessionId}/message`, 200, [
-		{
-			info: {
-				id: "msg_prior_user",
-				sessionID: sessionId,
-				role: "user",
-				time: { created: Date.now() - 1_000 },
-				agent: "build",
-				model: { providerID: "opencode", modelID },
-			},
-			parts: [
-				{
-					id: "prt_prior_user",
+	daemonProject.mock.setExactResponse(
+		"GET",
+		`/session/${sessionId}/message`,
+		200,
+		[
+			{
+				info: {
+					id: "msg_prior_user",
 					sessionID: sessionId,
-					messageID: "msg_prior_user",
-					type: "text",
-					text: "Earlier prompt",
+					role: "user",
+					time: { created: Date.now() - 1_000 },
+					agent: "build",
+					model: { providerID: "opencode", modelID },
 				},
-			],
-		},
-	]);
+				parts: [
+					{
+						id: "prt_prior_user",
+						sessionID: sessionId,
+						messageID: "msg_prior_user",
+						type: "text",
+						text: "Earlier prompt",
+					},
+				],
+			},
+		],
+	);
 }
 
 function persistedCompactions(harness: DaemonProject, sessionId: string) {
@@ -174,11 +179,11 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		name,
 		modelID,
 	}) => {
-		const relay = await createDaemonProject(recording(), {
+		const daemonProject = await createDaemonProject(recording(), {
 			defaultModel: "claude/sonnet",
 		});
-		harness = relay;
-		const client = await relay.connectWsClient();
+		harness = daemonProject;
+		const client = await daemonProject.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = String(
 			(
@@ -196,7 +201,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		await client.viewSession(sessionId);
 		await client.switchModel(modelID, "opencode", sessionId);
 		seedNativeUserTurn(
-			relay,
+			daemonProject,
 			sessionId,
 			modelID === "big-pickle" ? "mimo-v2-omni-free" : "big-pickle",
 		);
@@ -204,13 +209,13 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		await expect
 			.poll(
 				() =>
-					relay.mock.requestBodies.find(
+					daemonProject.mock.requestBodies.find(
 						(request) => request.path === `/session/${sessionId}/summarize`,
 					),
 				{ timeout: 10_000 },
 			)
 			.toBeDefined();
-		const request = relay.mock.requestBodies.find(
+		const request = daemonProject.mock.requestBodies.find(
 			(candidate) => candidate.path === `/session/${sessionId}/summarize`,
 		);
 		expect(JSON.parse(request?.body ?? "null")).toEqual({
@@ -218,11 +223,11 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			modelID,
 		});
 		expect(
-			relay.mock.requestBodies.some((candidate) =>
+			daemonProject.mock.requestBodies.some((candidate) =>
 				/\/(?:prompt_async|message)$/.test(candidate.path),
 			),
 		).toBe(false);
-		relay.mock.injectSSEEvents([
+		daemonProject.mock.injectSSEEvents([
 			{
 				type: "session.status",
 				properties: { sessionID: sessionId, status: { type: "idle" } },
@@ -234,11 +239,11 @@ describe("Integration: OpenCode compaction through the relay", () => {
 	});
 
 	it("rejects Compact without a stored pick even when native history has a model", async () => {
-		const relay = await createDaemonProject(recording(), {
+		const daemonProject = await createDaemonProject(recording(), {
 			defaultModel: "claude/sonnet",
 		});
-		harness = relay;
-		const client = await relay.connectWsClient();
+		harness = daemonProject;
+		const client = await daemonProject.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = String(
 			(
@@ -254,14 +259,16 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			)["id"],
 		);
 		await client.viewSession(sessionId);
-		seedNativeUserTurn(relay, sessionId, "big-pickle");
+		seedNativeUserTurn(daemonProject, sessionId, "big-pickle");
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE sessions SET model_id = NULL, model_provider = NULL,
 					variant = NULL, context_window = NULL WHERE id = ${sessionId}`;
 			}).pipe(
-				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
+				Effect.provide(
+					SqliteClient.layer({ filename: daemonProject.eventsDbPath }),
+				),
 			),
 		);
 		await client.syncInputDraft("/compact");
@@ -300,7 +307,9 @@ describe("Integration: OpenCode compaction through the relay", () => {
 						WHERE draft_key = ${sessionId}`,
 				};
 			}).pipe(
-				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
+				Effect.provide(
+					SqliteClient.layer({ filename: daemonProject.eventsDbPath }),
+				),
 			),
 		);
 		expect(stored).toEqual({
@@ -310,7 +319,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			draft: [{ text: "/compact" }],
 		});
 		expect(
-			relay.mock.requestBodies.some((request) =>
+			daemonProject.mock.requestBodies.some((request) =>
 				/\/(?:summarize|prompt_async|message)$/.test(request.path),
 			),
 		).toBe(false);
@@ -319,7 +328,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 
 	it("keeps Claude context when compact_boundary omits post_tokens", async () => {
 		let turns = 0;
-		const relay = await createDaemonProject(recording(), {
+		const daemonProject = await createDaemonProject(recording(), {
 			defaultModel: "claude/sonnet",
 			claudeSdk: {
 				query: () => {
@@ -367,8 +376,8 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				},
 			},
 		});
-		harness = relay;
-		const client = await relay.connectWsClient();
+		harness = daemonProject;
+		const client = await daemonProject.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = client.getActiveSessionId();
 		if (!sessionId) throw new Error("No Claude session was created");
@@ -420,7 +429,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		restoreContextFromMessages(messages);
 		expect(messages.contextPercent).toBe(85);
 		expect(
-			relay.mock.requestBodies.some((request) =>
+			daemonProject.mock.requestBodies.some((request) =>
 				request.path.endsWith("/summarize"),
 			),
 		).toBe(false);
@@ -435,20 +444,20 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		"MessageAbortedError",
 		"UnknownError",
 	])("does not clear context for an unsuccessful live summary (%s)", async (name) => {
-		const relay = await createDaemonProject(recording(), {
+		const daemonProject = await createDaemonProject(recording(), {
 			defaultModel: "opencode/big-pickle",
 		});
-		harness = relay;
-		const client = await relay.connectWsClient();
+		harness = daemonProject;
+		const client = await daemonProject.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = client.getActiveSessionId();
 		if (!sessionId) throw new Error("No OpenCode session was created");
-		seedNativeUserTurn(relay, sessionId, "big-pickle");
+		seedNativeUserTurn(daemonProject, sessionId, "big-pickle");
 		await client.sendMessage("/compact");
 		await expect
 			.poll(
 				() =>
-					relay.mock.requestBodies.some((request) =>
+					daemonProject.mock.requestBodies.some((request) =>
 						request.path.endsWith("/summarize"),
 					),
 				{ timeout: 10_000 },
@@ -475,7 +484,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				cache: { read: 0, write: 0 },
 			},
 		};
-		relay.mock.injectSSEEvents([
+		daemonProject.mock.injectSSEEvents([
 			{
 				type: "session.status",
 				properties: { sessionID: sessionId, status: { type: "busy" } },
@@ -493,7 +502,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		);
 		expect(message.contextTokens).toBeUndefined();
 		expect(message.tokens?.["input"]).toBe(170_000);
-		const stored = await persistedCompactions(relay, sessionId);
+		const stored = await persistedCompactions(daemonProject, sessionId);
 		expect(
 			stored.events.some(
 				(event) => JSON.parse(event.data).state === "completed",
@@ -509,16 +518,16 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		"legacy-only",
 		"summary-only",
 	])("summarizes with the current model and delivers one durable notice per compaction (%s)", async (mode) => {
-		const relay = await createDaemonProject(recording(), {
+		const daemonProject = await createDaemonProject(recording(), {
 			defaultModel: "opencode/big-pickle",
 		});
-		harness = relay;
-		const client = await relay.connectWsClient();
+		harness = daemonProject;
+		const client = await daemonProject.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = client.getActiveSessionId();
 		if (!sessionId) throw new Error("No OpenCode session was created");
-		seedNativeUserTurn(relay, sessionId, "big-pickle");
-		const requestsBefore = relay.mock.requestBodies.length;
+		seedNativeUserTurn(daemonProject, sessionId, "big-pickle");
+		const requestsBefore = daemonProject.mock.requestBodies.length;
 		const evidence = [];
 
 		// Each compaction must use the stored pick, including a later model switch.
@@ -527,7 +536,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			"mimo-v2-omni-free",
 		].entries()) {
 			let finishSummarize = () => {};
-			relay.mock.summarizeHold = new Promise<void>((resolve) => {
+			daemonProject.mock.summarizeHold = new Promise<void>((resolve) => {
 				finishSummarize = resolve;
 			});
 			if (index > 0) await client.switchModel(modelID, "opencode", sessionId);
@@ -539,13 +548,13 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			await expect
 				.poll(
 					() =>
-						relay.mock.requestBodies.filter(
+						daemonProject.mock.requestBodies.filter(
 							(request) => request.path === `/session/${sessionId}/summarize`,
 						).length,
 					{ timeout: 10_000 },
 				)
 				.toBe(index + 1);
-			const request = relay.mock.requestBodies.filter(
+			const request = daemonProject.mock.requestBodies.filter(
 				(candidate) => candidate.path === `/session/${sessionId}/summarize`,
 			)[index];
 			expect(request?.method).toBe("POST");
@@ -554,14 +563,14 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				modelID,
 			});
 			expect(
-				relay.mock.requestBodies
+				daemonProject.mock.requestBodies
 					.slice(requestsBefore)
 					.some((candidate) =>
 						/\/(?:prompt_async|message)$/.test(candidate.path),
 					),
 			).toBe(false);
 			if (index > 0)
-				relay.mock.injectSSEEvents([
+				daemonProject.mock.injectSSEEvents([
 					{
 						type: "message.part.updated",
 						properties: {
@@ -577,7 +586,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				]);
 			// summarize has no recorded prompt stream; deliver its busy event
 			// before waiting for the shell to report a running turn.
-			relay.mock.injectSSEEvents([
+			daemonProject.mock.injectSSEEvents([
 				{
 					type: "session.status",
 					properties: { sessionID: sessionId, status: { type: "busy" } },
@@ -619,7 +628,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 					cache: { read: 0, write: 0 },
 				},
 			};
-			relay.mock.injectSSEEvents([
+			daemonProject.mock.injectSSEEvents([
 				{
 					type: "message.updated",
 					properties: {
@@ -668,7 +677,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			);
 			expect(unrelated.inputId).toBeUndefined();
 			if (mode !== "legacy-only" && mode !== "summary-only") {
-				relay.mock.injectSSEEvents([
+				daemonProject.mock.injectSSEEvents([
 					{ type: "session.next.compaction.started", properties },
 					{
 						type: "session.next.compaction.delta",
@@ -684,11 +693,11 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			);
 			expect(announcedSummary.contextTokens).toBeUndefined();
 			const legacy = () =>
-				relay.mock.injectSSEEvents([
+				daemonProject.mock.injectSSEEvents([
 					{ type: "session.compacted", properties: { sessionID: sessionId } },
 				]);
 			const next = () =>
-				relay.mock.injectSSEEvents([
+				daemonProject.mock.injectSSEEvents([
 					{
 						type: "session.next.compaction.ended",
 						properties: {
@@ -707,7 +716,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			}
 			// A transport completion cannot claim success before the summary
 			// message itself finishes. The rename fences the injected events.
-			relay.mock.injectSSEEvents([
+			daemonProject.mock.injectSSEEvents([
 				{
 					type: "session.updated",
 					properties: {
@@ -725,7 +734,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 						`Awaiting summary ${index}`,
 			});
 			expect(
-				(await persistedCompactions(relay, sessionId)).events,
+				(await persistedCompactions(daemonProject, sessionId)).events,
 			).toHaveLength(index);
 			const notice = client.waitForTranscriptMessage(
 				(message) =>
@@ -742,7 +751,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				(message) => message.id === summaryId && message.contextTokens === 0,
 				sessionId,
 			);
-			relay.mock.injectSSEEvents([
+			daemonProject.mock.injectSSEEvents([
 				{
 					type: "message.updated",
 					properties: {
@@ -770,7 +779,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 					message.id === properties.messageID && message.inputId === inputId,
 				sessionId,
 			);
-			const stored = await persistedCompactions(relay, sessionId);
+			const stored = await persistedCompactions(daemonProject, sessionId);
 			expect(stored.events.map((event) => JSON.parse(event.data))).toEqual(
 				Array.from({ length: index + 1 }, () => ({
 					sessionId,
@@ -791,7 +800,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		}
 		// An older keyed completion may be redelivered after a newer cycle.
 		const cursor = client.getReceived().length;
-		relay.mock.injectSSEEvents([
+		daemonProject.mock.injectSSEEvents([
 			{
 				type: "session.next.compaction.ended",
 				properties: {
@@ -826,7 +835,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 					"Compaction replay checked",
 		});
 
-		const reconnected = await relay.connectWsClient();
+		const reconnected = await daemonProject.connectWsClient();
 		await reconnected.viewSession(sessionId);
 		await reconnected.waitForTranscriptMessage(
 			(message) =>
@@ -858,12 +867,12 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		setMessages(messages, historyToChatMessages(transcript.rows));
 		restoreContextFromMessages(messages);
 		expect(messages.contextPercent).toBe(0);
-		expect((await persistedCompactions(relay, sessionId)).parts).toHaveLength(
-			2,
-		);
-		expect((await persistedCompactions(relay, sessionId)).events).toHaveLength(
-			2,
-		);
+		expect(
+			(await persistedCompactions(daemonProject, sessionId)).parts,
+		).toHaveLength(2);
+		expect(
+			(await persistedCompactions(daemonProject, sessionId)).events,
+		).toHaveLength(2);
 		saveEvidence(mode, {
 			sessionId,
 			evidence,
@@ -876,16 +885,16 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		"/compact explain this",
 		"Please run /compact",
 	])("keeps a non-bare command as ordinary prompt text (%s)", async (text) => {
-		const relay = await createDaemonProject(recording(), {
+		const daemonProject = await createDaemonProject(recording(), {
 			defaultModel: "opencode/big-pickle",
 		});
-		harness = relay;
-		const client = await relay.connectWsClient();
+		harness = daemonProject;
+		const client = await daemonProject.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = client.getActiveSessionId();
 		await client.sendMessage(text);
 		await client.waitForTurnEnd();
-		const prompts = relay.mock.requestBodies.filter(
+		const prompts = daemonProject.mock.requestBodies.filter(
 			(request) => request.path === `/session/${sessionId}/prompt_async`,
 		);
 		expect(prompts).toHaveLength(1);
@@ -893,7 +902,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			parts: [{ type: "text", text }],
 		});
 		expect(
-			relay.mock.requestBodies.some((request) =>
+			daemonProject.mock.requestBodies.some((request) =>
 				request.path.endsWith("/summarize"),
 			),
 		).toBe(false);
@@ -904,15 +913,15 @@ describe("Integration: OpenCode compaction through the relay", () => {
 	});
 
 	it("keeps a failed submitted summarize indeterminate across an unowned Stop idle", async () => {
-		const relay = await createDaemonProject(recording(500), {
+		const daemonProject = await createDaemonProject(recording(500), {
 			defaultModel: "opencode/big-pickle",
 		});
-		harness = relay;
-		const client = await relay.connectWsClient();
+		harness = daemonProject;
+		const client = await daemonProject.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = client.getActiveSessionId();
 		if (!sessionId) throw new Error("No OpenCode session was created");
-		seedNativeUserTurn(relay, sessionId, "big-pickle");
+		seedNativeUserTurn(daemonProject, sessionId, "big-pickle");
 		client.clearReceived();
 		await client.sendMessage("/compact");
 		const notice = await client.waitForTranscriptMessage(
@@ -921,7 +930,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 					(part) => part.type === "compaction" && part["failed"] === true,
 				) === true,
 		);
-		const stored = await persistedCompactions(relay, sessionId);
+		const stored = await persistedCompactions(daemonProject, sessionId);
 		expect(stored.events).toHaveLength(1);
 		expect(stored.parts).toHaveLength(1);
 		expect(JSON.parse(stored.events[0]?.data ?? "null")).toMatchObject({
@@ -936,7 +945,9 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				JOIN provider_command_outbox command ON command.run_id = run.id
 				WHERE run.session_id = ${sessionId} AND command.effect_type = 'send_turn'`;
 				}).pipe(
-					Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
+					Effect.provide(
+						SqliteClient.layer({ filename: daemonProject.eventsDbPath }),
+					),
 				),
 			);
 		await expect.poll(state).toEqual([
@@ -965,10 +976,12 @@ describe("Integration: OpenCode compaction through the relay", () => {
 							WHERE session_id = ${sessionId} AND type IN ('run.started', 'turn.completed', 'turn.interrupted', 'turn.error')`,
 					};
 				}).pipe(
-					Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
+					Effect.provide(
+						SqliteClient.layer({ filename: daemonProject.eventsDbPath }),
+					),
 				),
 			);
-		relay.mock.setExactResponse(
+		daemonProject.mock.setExactResponse(
 			"POST",
 			`/session/${sessionId}/abort`,
 			200,
@@ -986,7 +999,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			});
 		await expect
 			.poll(() =>
-				relay.mock.diagnostics.some(
+				daemonProject.mock.diagnostics.some(
 					(request) =>
 						request.event === "request" &&
 						request.detail?.split("?")[0] ===
@@ -1001,7 +1014,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			.toEqual(["completed"]);
 		// Native idle has no intake identity: it cannot settle a submitted send
 		// whose user echo never arrived, even after the abort was acknowledged.
-		relay.mock.injectSSEEvents([
+		daemonProject.mock.injectSSEEvents([
 			{
 				type: "session.status",
 				properties: { sessionID: sessionId, status: { type: "idle" } },
@@ -1040,28 +1053,28 @@ describe("Integration: OpenCode compaction through the relay", () => {
 	});
 
 	it("translates delta-first progress and a provider compaction error", async () => {
-		const relay = await createDaemonProject(recording(), {
+		const daemonProject = await createDaemonProject(recording(), {
 			defaultModel: "opencode/big-pickle",
 		});
-		harness = relay;
-		const client = await relay.connectWsClient();
+		harness = daemonProject;
+		const client = await daemonProject.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = client.getActiveSessionId();
 		if (!sessionId) throw new Error("No OpenCode session was created");
-		seedNativeUserTurn(relay, sessionId, "big-pickle");
+		seedNativeUserTurn(daemonProject, sessionId, "big-pickle");
 		let finishSummarize = () => {};
-		relay.mock.summarizeHold = new Promise<void>((resolve) => {
+		daemonProject.mock.summarizeHold = new Promise<void>((resolve) => {
 			finishSummarize = resolve;
 		});
 		await client.sendMessage("/compact");
 		await expect
 			.poll(() =>
-				relay.mock.requestBodies.some(
+				daemonProject.mock.requestBodies.some(
 					(request) => request.path === `/session/${sessionId}/summarize`,
 				),
 			)
 			.toBe(true);
-		relay.mock.injectSSEEvents([
+		daemonProject.mock.injectSSEEvents([
 			{
 				type: "session.status",
 				properties: { sessionID: sessionId, status: { type: "busy" } },
@@ -1119,7 +1132,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 					(part) => part.type === "compaction" && part["failed"] === true,
 				) === true,
 		);
-		const stored = await persistedCompactions(relay, sessionId);
+		const stored = await persistedCompactions(daemonProject, sessionId);
 		const echo = await client.waitForTranscriptMessage(
 			(message) =>
 				message.id === "msg_failed_compact" && message.inputId !== undefined,

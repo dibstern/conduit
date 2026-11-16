@@ -6,7 +6,7 @@
 import type { Page } from "@playwright/test";
 import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 const SESSION_ID = "sess-pwa";
 
@@ -52,14 +52,14 @@ test.describe("PWA background/resume", () => {
 
 	test("prompts a stale tab to reload after a daemon upgrade", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		const ws = await mockRelayWebSocket(page, {
+		const ws = await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
 
-		await page.goto(new URL(`/s/${SESSION_ID}`, relayUrl).href);
+		await page.goto(new URL(`/s/${SESSION_ID}`, appUrl).href);
 		await page.locator("#layout").waitFor({ state: "attached" });
 		await page
 			.locator("#connect-overlay")
@@ -84,14 +84,14 @@ test.describe("PWA background/resume", () => {
 
 	test("keeps handling relay messages after a background/foreground cycle", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		const ws = await mockRelayWebSocket(page, {
+		const ws = await mockDaemonWebSocket(page, {
 			initMessages,
 			responses: new Map(),
 		});
 
-		await page.goto(new URL(`/s/${SESSION_ID}`, relayUrl).href);
+		await page.goto(new URL(`/s/${SESSION_ID}`, appUrl).href);
 		await page
 			.locator("#connect-overlay")
 			.waitFor({ state: "hidden", timeout: 15_000 });

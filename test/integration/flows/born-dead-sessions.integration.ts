@@ -59,9 +59,9 @@ describe("born-dead sessions through the relay", () => {
 
 	it("keeps a live parent and child when the parent's deletion event names another session", async () => {
 		harness = await createDaemonProject();
-		const relay = harness;
-		const run = relay.run;
-		const database = new Database(relay.eventsDbPath, { readonly: true });
+		const project = harness;
+		const run = project.run;
+		const database = new Database(project.eventsDbPath, { readonly: true });
 		db = database;
 		const sourceId = "foreign-marker-source";
 		const childId = "foreign-marker-child";
@@ -159,7 +159,7 @@ describe("born-dead sessions through the relay", () => {
 				},
 			),
 		);
-		await relay.drainEventRetention();
+		await project.drainEventRetention();
 		const projectedRows = database
 			.prepare(
 				"SELECT id, parent_id, title FROM sessions WHERE id IN (?, ?) ORDER BY id",
@@ -180,7 +180,7 @@ describe("born-dead sessions through the relay", () => {
 				"SELECT m.id, part.text FROM messages m JOIN message_parts part ON part.message_id = m.id WHERE m.session_id = ?",
 			)
 			.all(childId);
-		const parity = await relay.checkReplayParity();
+		const parity = await project.checkReplayParity();
 		evidence["foreign-named-deletion"] = {
 			writer: "ProviderRuntimeIngestion.ingestBatch",
 			sourceId,
@@ -231,17 +231,17 @@ describe("born-dead sessions through the relay", () => {
 		{ name: "recreate-payload-id", reference: "sessionId", during: false },
 	] as const)("$name", async ({ name, reference, during }) => {
 		harness = await createDaemonProject();
-		const relay = harness;
-		const database = new Database(relay.eventsDbPath, { readonly: true });
+		const project = harness;
+		const database = new Database(project.eventsDbPath, { readonly: true });
 		db = database;
-		const client = await relay.connectWsClient();
+		const client = await project.connectWsClient();
 		await client.waitForInitialState();
 		const parent = await client.createSession("Born dead source", {
 			providerId: "opencode",
 		});
 		const parentId = String(parent["id"]);
 		const childId = reference === "sessionId" ? parentId : `ses_${name}`;
-		const run = relay.run;
+		const run = project.run;
 		const { commit, ingestion, retention, sql } = await run(
 			Effect.gen(function* () {
 				return {
@@ -371,7 +371,7 @@ describe("born-dead sessions through the relay", () => {
 			dead: await run(isSessionDeleted(childId)),
 		};
 		expect(projectedRows).toEqual({ sessions: [], providers: [], dead: true });
-		const beforeDrainParity = await relay.checkReplayParity();
+		const beforeDrainParity = await project.checkReplayParity();
 		expect(beforeDrainParity.diffs).toEqual([]);
 		expect(beforeDrainParity.danglingPartPointers).toEqual([]);
 		if (reference === "sessionId") {
@@ -391,7 +391,7 @@ describe("born-dead sessions through the relay", () => {
 				).toEqual([{ type: "session.deleted" }]);
 			});
 		}
-		const afterDrainParity = await relay.checkReplayParity();
+		const afterDrainParity = await project.checkReplayParity();
 		expect(afterDrainParity.diffs).toEqual([]);
 		expect(afterDrainParity.danglingPartPointers).toEqual([]);
 		evidence[name] = {
@@ -411,9 +411,9 @@ describe("born-dead sessions through the relay", () => {
 		"batch-cascade",
 	] as const)("refuses %s without committing any events", async (scenario) => {
 		harness = await createDaemonProject();
-		const relay = harness;
-		const run = relay.run;
-		const database = new Database(relay.eventsDbPath, { readonly: true });
+		const project = harness;
+		const run = project.run;
+		const database = new Database(project.eventsDbPath, { readonly: true });
 		db = database;
 		const eventsBefore = () =>
 			database.prepare("SELECT event_id FROM events ORDER BY sequence").all();
@@ -486,7 +486,7 @@ describe("born-dead sessions through the relay", () => {
 			)
 			.all();
 		expect(rows).toHaveLength(3);
-		const parity = await relay.checkReplayParity();
+		const parity = await project.checkReplayParity();
 		expect(parity.diffs).toEqual([]);
 		expect(parity.danglingPartPointers).toEqual([]);
 		evidence[scenario] = {
@@ -498,7 +498,7 @@ describe("born-dead sessions through the relay", () => {
 			projectedRows: rows,
 			refusal: result,
 			parity,
-			drainReport: await relay.drainEventRetention(),
+			drainReport: await project.drainEventRetention(),
 		};
 	});
 });

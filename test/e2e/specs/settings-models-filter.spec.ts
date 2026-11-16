@@ -3,9 +3,9 @@ import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import type { ProviderInfo } from "../../../src/lib/frontend/types.js";
 import { defaultInstances } from "../fixtures/mockup-state.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 const providers: ProviderInfo[] = [
 	{
@@ -50,7 +50,7 @@ test.use({ recording: "chat-simple", viewport: { width: 1440, height: 900 } });
 
 test("filters models and agents, clears no matches and resets groups on reopen", async ({
 	page,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	let hiddenModels = ["anthropic/claude-haiku-3-5"];
 	let hiddenAgents = ["claude/review"];
@@ -78,7 +78,7 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 			},
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -107,9 +107,9 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 		],
 		responses: new Map(),
 	});
-	await gotoRelay(
+	await gotoApp(
 		page,
-		new URL("/s/settings-models?p=e2e-replay", relayUrl).toString(),
+		new URL("/s/settings-models?p=e2e-replay", appUrl).toString(),
 	);
 	const requestsBeforeOpen = rpc.getRequests().length;
 	await openModels(page);
@@ -284,7 +284,7 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 
 test("keeps OpenCode visibility groups after the current Claude account catalog loads", async ({
 	page,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	const claudeProvider: ProviderInfo = {
 		id: "claude",
@@ -315,7 +315,7 @@ test("keeps OpenCode visibility groups after the current Claude account catalog 
 			}),
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -344,9 +344,9 @@ test("keeps OpenCode visibility groups after the current Claude account catalog 
 		],
 		responses: new Map(),
 	});
-	await gotoRelay(
+	await gotoApp(
 		page,
-		new URL("/s/claude-models?p=e2e-replay", relayUrl).toString(),
+		new URL("/s/claude-models?p=e2e-replay", appUrl).toString(),
 	);
 	await openModels(page);
 	await rpc.waitForRequest(
@@ -398,7 +398,7 @@ test("keeps OpenCode visibility groups after the current Claude account catalog 
 for (const driver of ["opencode", "claude"] as const) {
 	test(`loads visibility models for the current non-default ${driver} account`, async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
 		const accountId = `${driver}-secondary`;
 		const providerId = driver === "opencode" ? "anthropic" : "claude";
@@ -457,7 +457,7 @@ for (const driver of ["opencode", "claude"] as const) {
 				},
 			],
 		});
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: [
 				{
 					type: "project_list",
@@ -486,9 +486,9 @@ for (const driver of ["opencode", "claude"] as const) {
 			],
 			responses: new Map(),
 		});
-		await gotoRelay(
+		await gotoApp(
 			page,
-			new URL("/s/account-models?p=e2e-replay", relayUrl).toString(),
+			new URL("/s/account-models?p=e2e-replay", appUrl).toString(),
 		);
 		await openModels(page);
 

@@ -36,7 +36,7 @@ const initial = {
 	},
 	// Live hashes carry run-specific payloads, so only their equality is stable.
 	coldStartImportedLegacySources: false,
-	removedRelayDisposed: false,
+	removedProjectClosed: false,
 	removedHistoryRetained: false,
 	postRestartSessionOwnedByB: false,
 	storeUnchangedByRestart: false,
@@ -391,7 +391,7 @@ cutoverTest(
 			await expect(
 				harness.connect(undefined, undefined, slugA),
 			).rejects.toThrow();
-			evidence.removedRelayDisposed = true;
+			evidence.removedProjectClosed = true;
 			readStore((db) => {
 				expect(
 					db
@@ -524,7 +524,7 @@ test("a failed import blocks its project until restart and retained history reap
 			projectBReason: null as string | null,
 			projectAAvailable: false,
 			sessionListReportsReason: false,
-			relayRefused: false,
+			projectRefused: false,
 			sessionCreationRefused: false,
 			mainFolderChangeRefused: false,
 			projectBRows: null as number | null,
@@ -669,7 +669,7 @@ test("a failed import blocks its project until restart and retained history reap
 		await expect(
 			harness.connect(undefined, undefined, slugB),
 		).rejects.toThrow();
-		evidence.unavailable.relayRefused = true;
+		evidence.unavailable.projectRefused = true;
 		await expect(
 			Effect.runPromise(
 				reader.rpc.CreateSession({

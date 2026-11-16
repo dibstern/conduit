@@ -393,7 +393,7 @@ describe("daemon shared RPC routing", () => {
 						lastUsed: 1,
 					}),
 				);
-				const relays = new Map<
+				const runtimes = new Map<
 					string,
 					ManagedRuntime.ManagedRuntime<unknown, unknown>
 				>();
@@ -424,7 +424,7 @@ describe("daemon shared RPC routing", () => {
 							),
 							(runtime) => runtime.disposeEffect,
 						);
-						relays.set(slug, runtime);
+						runtimes.set(slug, runtime);
 						return runtime;
 					}),
 				);
@@ -511,9 +511,9 @@ describe("daemon shared RPC routing", () => {
 					}
 				}
 				// A disposed project runtime fails context acquisition without killing other requests.
-				const firstRelay = relays.get("project-a");
-				if (!firstRelay) throw new Error("Project A was not started");
-				yield* firstRelay.disposeEffect;
+				const firstGeneration = runtimes.get("project-a");
+				if (!firstGeneration) throw new Error("Project A was not started");
+				yield* firstGeneration.disposeEffect;
 				const disposed = yield* Effect.result(
 					client.GetCommands({ projectSlug: "project-a" }),
 				);

@@ -15,7 +15,7 @@ const artifactDirectory =
 // Explicit resume gets a fresh attempt, never the stopped reservation.
 it("an empty Stop resumes an unused input in a fresh cohort without native abort", async () => {
 	const recording = loadOpenCodeRecording("chat-simple");
-	const relay = await createDaemonProject(
+	const project = await createDaemonProject(
 		{
 			...recording,
 			interactions: recording.interactions.filter(
@@ -24,9 +24,9 @@ it("an empty Stop resumes an unused input in a fresh cohort without native abort
 		},
 		{ defaultModel: "opencode/big-pickle" },
 	);
-	const db = new Database(relay.eventsDbPath);
+	const db = new Database(project.eventsDbPath);
 	try {
-		const client = await relay.connectWsClient();
+		const client = await project.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = String(
 			(
@@ -66,7 +66,7 @@ it("an empty Stop resumes an unused input in a fresh cohort without native abort
 		const originalRun = outbox().run_id;
 		await client.cancelSession(sessionId);
 		expect(
-			relay.mock.diagnostics.some(
+			project.mock.diagnostics.some(
 				(entry) =>
 					entry.event === "request" &&
 					entry.detail?.startsWith(`POST /session/${sessionId}/abort`),
@@ -83,7 +83,7 @@ it("an empty Stop resumes an unused input in a fresh cohort without native abort
 			attempt_count: 0,
 		});
 		expect(
-			relay.mock.requestBodies.filter((entry) =>
+			project.mock.requestBodies.filter((entry) =>
 				entry.path.endsWith("/prompt_async"),
 			),
 		).toHaveLength(0);
@@ -104,16 +104,16 @@ it("an empty Stop resumes an unused input in a fresh cohort without native abort
 		expect(freshRun).not.toBe(originalRun);
 		await vi.waitFor(() =>
 			expect(
-				relay.mock.requestBodies.filter(
+				project.mock.requestBodies.filter(
 					(entry) => entry.path === `/session/${sessionId}/prompt_async`,
 				),
 			).toHaveLength(1),
 		);
-		const submitted = relay.mock.requestBodies.find(
+		const submitted = project.mock.requestBodies.find(
 			(entry) => entry.path === `/session/${sessionId}/prompt_async`,
 		);
 		const body = JSON.parse(submitted?.body ?? "null") as { messageID: string };
-		relay.mock.injectSSEEvents([
+		project.mock.injectSSEEvents([
 			{
 				type: "session.status",
 				properties: { sessionID: sessionId, status: { type: "busy" } },
@@ -163,7 +163,7 @@ it("an empty Stop resumes an unused input in a fresh cohort without native abort
 				.prepare("SELECT status FROM command_receipts WHERE command_id = ?")
 				.get(inputId),
 		};
-		relay.mock.injectSSEEvents([
+		project.mock.injectSSEEvents([
 			{
 				type: "session.status",
 				properties: { sessionID: sessionId, status: { type: "idle" } },
@@ -203,7 +203,7 @@ it("an empty Stop resumes an unused input in a fresh cohort without native abort
 							"SELECT status, started_at FROM provider_runs WHERE id = ?",
 						)
 						.get(originalRun),
-					modelRequests: relay.mock.requestBodies.filter((entry) =>
+					modelRequests: project.mock.requestBodies.filter((entry) =>
 						entry.path.endsWith("/prompt_async"),
 					).length,
 				},
@@ -235,8 +235,8 @@ it("an empty Stop resumes an unused input in a fresh cohort without native abort
 							"SELECT sequence, type, data FROM events ORDER BY sequence DESC LIMIT 20",
 						)
 						.all(),
-					requests: relay.mock.requestBodies,
-					diagnostics: relay.mock.diagnostics.slice(-15),
+					requests: project.mock.requestBodies,
+					diagnostics: project.mock.diagnostics.slice(-15),
 				},
 				null,
 				2,
@@ -245,13 +245,13 @@ it("an empty Stop resumes an unused input in a fresh cohort without native abort
 		throw error;
 	} finally {
 		db.close();
-		await relay.stop();
+		await project.stop();
 	}
 }, 30_000);
 
 it("a captured Stop holds a resumed input until native abort settles", async () => {
 	const recording = loadOpenCodeRecording("chat-simple");
-	const relay = await createDaemonProject(
+	const project = await createDaemonProject(
 		{
 			...recording,
 			interactions: recording.interactions.filter(
@@ -260,12 +260,12 @@ it("a captured Stop holds a resumed input until native abort settles", async () 
 		},
 		{ defaultModel: "opencode/big-pickle" },
 	);
-	const db = new Database(relay.eventsDbPath);
+	const db = new Database(project.eventsDbPath);
 	let releaseAbort = () => {};
 	let stopping: Promise<void> | undefined;
 	let resuming: Promise<unknown> | undefined;
 	try {
-		const client = await relay.connectWsClient();
+		const client = await project.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = String(
 			(await client.createSession("Captured Stop", { providerId: "opencode" }))[
@@ -280,7 +280,7 @@ it("a captured Stop holds a resumed input until native abort settles", async () 
 		});
 		await vi.waitFor(() =>
 			expect(
-				relay.mock.requestBodies.filter((entry) =>
+				project.mock.requestBodies.filter((entry) =>
 					entry.path.endsWith("/prompt_async"),
 				),
 			).toHaveLength(1),
@@ -291,11 +291,11 @@ it("a captured Stop holds a resumed input until native abort settles", async () 
 			)
 			.get(activeInputId) as { run_id: string };
 		const activeBody = JSON.parse(
-			relay.mock.requestBodies.find((entry) =>
+			project.mock.requestBodies.find((entry) =>
 				entry.path.endsWith("/prompt_async"),
 			)?.body ?? "null",
 		) as { messageID: string };
-		relay.mock.injectSSEEvents([
+		project.mock.injectSSEEvents([
 			{
 				type: "message.updated",
 				properties: {
@@ -322,10 +322,10 @@ it("a captured Stop holds a resumed input until native abort settles", async () 
 			sessionId,
 			commandId: inputId,
 		});
-		relay.mock.abortHold = new Promise<void>((resolve) => {
+		project.mock.abortHold = new Promise<void>((resolve) => {
 			releaseAbort = resolve;
 		});
-		relay.mock.setExactResponse(
+		project.mock.setExactResponse(
 			"POST",
 			`/session/${sessionId}/abort`,
 			200,
@@ -335,7 +335,7 @@ it("a captured Stop holds a resumed input until native abort settles", async () 
 		void stopping.catch(() => {});
 		await vi.waitFor(() =>
 			expect(
-				relay.mock.diagnostics.some(
+				project.mock.diagnostics.some(
 					(entry) =>
 						entry.event === "request" &&
 						entry.detail?.startsWith(`POST /session/${sessionId}/abort`),
@@ -354,13 +354,13 @@ it("a captured Stop holds a resumed input until native abort settles", async () 
 			input: db
 				.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
 				.get(inputId),
-			modelRequests: relay.mock.requestBodies.filter((entry) =>
+			modelRequests: project.mock.requestBodies.filter((entry) =>
 				entry.path.endsWith("/prompt_async"),
 			).length,
 		};
 		expect(whileHeld).toEqual({ input: { state: "queued" }, modelRequests: 1 });
 		releaseAbort();
-		relay.mock.injectSSEEvents([
+		project.mock.injectSSEEvents([
 			{
 				type: "session.status",
 				properties: { sessionID: sessionId, status: { type: "idle" } },
@@ -371,7 +371,7 @@ it("a captured Stop holds a resumed input until native abort settles", async () 
 		await vi.waitFor(
 			() =>
 				expect(
-					relay.mock.requestBodies.filter((entry) =>
+					project.mock.requestBodies.filter((entry) =>
 						entry.path.endsWith("/prompt_async"),
 					),
 				).toHaveLength(2),
@@ -400,7 +400,7 @@ it("a captured Stop holds a resumed input until native abort settles", async () 
 					whileHeld,
 					capturedRunId: active.run_id,
 					resumed,
-					nativeCalls: relay.mock.requestBodies,
+					nativeCalls: project.mock.requestBodies,
 				},
 				null,
 				2,
@@ -411,6 +411,6 @@ it("a captured Stop holds a resumed input until native abort settles", async () 
 		await stopping?.catch(() => {});
 		await resuming?.catch(() => {});
 		db.close();
-		await relay.stop();
+		await project.stop();
 	}
 }, 30_000);

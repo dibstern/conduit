@@ -7,7 +7,7 @@ import {
 	waitForFonts,
 	waitForIcons,
 } from "../../../test/e2e/helpers/visual-helpers.js";
-import { mockRelayWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
 import { mainUiTurn1, sidebarInit } from "../fixtures/media-state.js";
 import type { SceneDefinition } from "../scene-runner.js";
 
@@ -20,7 +20,7 @@ export const sidebarScene: SceneDefinition = {
 	},
 
 	async run({ page, previewUrl, phase, assert }) {
-		let relay: Awaited<ReturnType<typeof mockRelayWebSocket>>;
+		let project: Awaited<ReturnType<typeof mockDaemonWebSocket>>;
 		await phase("setup-ws-mock", async () => {
 			await mockWsRpc(page, {
 				handlers: {
@@ -31,12 +31,12 @@ export const sidebarScene: SceneDefinition = {
 						nextCursor: null,
 					}),
 					"input.submit": async () => {
-						await relay.sendMessages(mainUiTurn1);
+						await project.sendMessages(mainUiTurn1);
 						return { ok: true };
 					},
 				},
 			});
-			relay = await mockRelayWebSocket(page, {
+			project = await mockDaemonWebSocket(page, {
 				initMessages: sidebarInit,
 				responses: new Map(),
 			});

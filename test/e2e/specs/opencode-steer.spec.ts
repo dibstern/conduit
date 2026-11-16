@@ -57,13 +57,13 @@ test.describe("OpenCode steering", () => {
 
 	test("a busy OpenCode session hides Steer and the server refuses one", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
 		test.setTimeout(90_000);
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		const sessionId = new URL(page.url()).pathname.split("/").at(-1);
 		if (!sessionId) throw new Error("Session route is missing");
 
@@ -95,7 +95,7 @@ test.describe("OpenCode steering", () => {
 			).pipe(
 				Effect.provide(RpcClient.layerProtocolSocket()),
 				Effect.provide(
-					Socket.layerWebSocket(`ws://127.0.0.1:${harness.relayPort}/rpc`),
+					Socket.layerWebSocket(`ws://127.0.0.1:${harness.appPort}/rpc`),
 				),
 				Effect.provide(Socket.layerWebSocketConstructorGlobal),
 				Effect.provide(RpcSerialization.layerJson),

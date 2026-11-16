@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { createSession, type ReplayHarness } from "../helpers/e2e-harness.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { settleSheet } from "../helpers/sheet-drag.js";
 
 test.use({
@@ -97,8 +97,8 @@ async function tapExposed(action: Locator, edge: "left" | "right") {
 	});
 }
 
-async function setUp(page: Page, relayUrl: string, harness: ReplayHarness) {
-	await gotoRelay(page, relayUrl);
+async function setUp(page: Page, appUrl: string, harness: ReplayHarness) {
+	await gotoApp(page, appUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
 	// Unread is relative to a turn end (ADR-0004, Scope; conduit-test-hk9m.3),
@@ -115,8 +115,8 @@ async function setUp(page: Page, relayUrl: string, harness: ReplayHarness) {
 	await expect(recorded.getByTestId("session-unread-dot")).toHaveCount(0);
 	// This standalone relay has no daemon account feed for the draft composer.
 	// Seed the other session through RPC, then leave the gesture target unselected.
-	const otherId = await createSession(harness.relayPort, "opencode");
-	await gotoRelay(page, new URL(`/s/${otherId}`, relayUrl).toString());
+	const otherId = await createSession(harness.appPort, "opencode");
+	await gotoApp(page, new URL(`/s/${otherId}`, appUrl).toString());
 	await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
 	// Status groups can reorder the new session while its final updates arrive.
 	// Keep exercising the completed, read session rather than picking by position:
@@ -128,10 +128,10 @@ async function setUp(page: Page, relayUrl: string, harness: ReplayHarness) {
 
 test("desktop: hover and Tab reach the row's commands, and the menu returns focus", async ({
 	page,
-	relayUrl,
+	appUrl,
 	harness,
 }) => {
-	const { row, title } = await setUp(page, relayUrl, harness);
+	const { row, title } = await setUp(page, appUrl, harness);
 	const settled = page
 		.getByRole("status")
 		.filter({ hasText: `Moved “${title}” to Settled` });
@@ -193,10 +193,10 @@ test("desktop: hover and Tab reach the row's commands, and the menu returns focu
 
 test("desktop: a settled row un-settles from the shelf by menu and by hover", async ({
 	page,
-	relayUrl,
+	appUrl,
 	harness,
 }) => {
-	const { row } = await setUp(page, relayUrl, harness);
+	const { row } = await setUp(page, appUrl, harness);
 	const id = await row.getAttribute("data-session-id");
 	const shelfRow = page.locator(
 		`#settled-shelf-rows [data-session-id="${id}"]`,
@@ -232,13 +232,13 @@ test.describe("phone", () => {
 
 	test("phone: a full swipe right on a settled row un-settles it", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
-		const { row } = await setUp(page, relayUrl, harness);
+		const { row } = await setUp(page, appUrl, harness);
 		const id = await row.getAttribute("data-session-id");
 		await page.setViewportSize({ width: 375, height: 740 });
-		await gotoRelay(page, new URL("/", page.url()).toString());
+		await gotoApp(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 		const shelfRow = page.locator(
 			`#settled-shelf-rows [data-session-id="${id}"]`,
@@ -264,12 +264,12 @@ test.describe("phone", () => {
 
 	test("phone: swipe settles and snoozes, holds on a short swipe, and long press opens the sheet", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
-		const { row, title } = await setUp(page, relayUrl, harness);
+		const { row, title } = await setUp(page, appUrl, harness);
 		await page.setViewportSize({ width: 375, height: 740 });
-		await gotoRelay(page, new URL("/", page.url()).toString());
+		await gotoApp(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 		const onList = (url: URL) => url.pathname === "/";
 		const action = page.getByTestId("session-swipe-action");
@@ -354,14 +354,14 @@ test.describe("phone", () => {
 
 	test("phone: long press docks the action sheet, pins, and dismisses on scrim", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
-		const { row, title } = await setUp(page, relayUrl, harness);
+		const { row, title } = await setUp(page, appUrl, harness);
 		// Short enough that the docked sheet rises under the first row, so the
 		// finger lifts over an item: the case the touchend guard exists for.
 		await page.setViewportSize({ width: 393, height: 540 });
-		await gotoRelay(page, new URL("/", page.url()).toString());
+		await gotoApp(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 		const project = (
 			await row.locator(".session-item-context span:last-child").innerText()
@@ -428,10 +428,10 @@ test.describe("phone", () => {
 
 	test("phone: the right tray marks unread and then offers Read", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
-		const { row, title } = await setUp(page, relayUrl, harness);
+		const { row, title } = await setUp(page, appUrl, harness);
 		// Hold the write at the socket: the dot must not wait for the server.
 		const held: (() => void)[] = [];
 		await page.routeWebSocket(/\/(ws|rpc)(\?|$)/, (ws) => {
@@ -446,7 +446,7 @@ test.describe("phone", () => {
 			});
 		});
 		await page.setViewportSize({ width: 375, height: 740 });
-		await gotoRelay(page, new URL("/", page.url()).toString());
+		await gotoApp(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 
 		await drag(row, [0.4]);
@@ -474,17 +474,17 @@ test.describe("phone", () => {
 
 	test("phone: a row that cannot settle holds only Unread after a full swipe", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
-		const { row } = await setUp(page, relayUrl, harness);
+		const { row } = await setUp(page, appUrl, harness);
 		await row.click({ button: "right" });
 		await page.getByTestId("session-ctx-pin").click();
 		await expect(
 			page.getByRole("status").filter({ hasText: "Pinned" }),
 		).toBeVisible();
 		await page.setViewportSize({ width: 375, height: 740 });
-		await gotoRelay(page, new URL("/", page.url()).toString());
+		await gotoApp(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 		await longPress(page, row);
 		await expect(page.getByTestId("session-ctx-unpin")).toBeVisible();
@@ -500,10 +500,10 @@ test.describe("phone", () => {
 
 	test("phone: overflow sheet shares sidebar commands and works without the list mounted", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
-		await gotoRelay(page, new URL("/", relayUrl).toString());
+		await gotoApp(page, new URL("/", appUrl).toString());
 		const row = page.locator("#session-list .session-item").first();
 		await expect(row).toBeVisible();
 		await longPress(page, row);
@@ -517,7 +517,7 @@ test.describe("phone", () => {
 			);
 		await page.keyboard.press("Escape");
 		const sessionId = await row.getAttribute("data-session-id");
-		await gotoRelay(page, new URL(`/s/${sessionId}`, relayUrl).toString());
+		await gotoApp(page, new URL(`/s/${sessionId}`, appUrl).toString());
 		await expect(page.locator("#sidebar")).toBeHidden();
 		const trigger = page.getByTestId("session-bar-island-overflow");
 		await trigger.click();

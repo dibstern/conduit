@@ -594,11 +594,11 @@ describe("OpenCode rewind through the relay", () => {
 		);
 		const second = await harness.connectWsClient();
 		await second.switchSession(sessionId);
-		return { relay: harness, client, second, sessionId };
+		return { daemonProject: harness, client, second, sessionId };
 	}
 
-	function wire(relay: DaemonProject, sessionId: string) {
-		return relay.mock.requestBodies.filter(
+	function wire(daemonProject: DaemonProject, sessionId: string) {
+		return daemonProject.mock.requestBodies.filter(
 			(request) =>
 				request.path.startsWith(`/session/${sessionId}/`) &&
 				(request.method === "DELETE" ||
@@ -606,9 +606,9 @@ describe("OpenCode rewind through the relay", () => {
 		);
 	}
 
-	async function nativeIds(relay: DaemonProject, sessionId: string) {
+	async function nativeIds(daemonProject: DaemonProject, sessionId: string) {
 		const response = await fetch(
-			`${relay.mock.url}/session/${sessionId}/message`,
+			`${daemonProject.mock.url}/session/${sessionId}/message`,
 		);
 		const messages = (await response.json()) as Array<{ info: { id: string } }>;
 		return messages.map(({ info }) => info.id);
@@ -623,8 +623,8 @@ describe("OpenCode rewind through the relay", () => {
 	}
 
 	it("hides and restores across tabs locally, then deletes the tail before prompting the same session", async () => {
-		const { relay, client, second, sessionId } = await fixture();
-		const before = relay.mock.diagnostics.length;
+		const { daemonProject, client, second, sessionId } = await fixture();
+		const before = daemonProject.mock.diagnostics.length;
 		await rewind(client, sessionId);
 		await vi.waitFor(() => {
 			for (const tab of [client, second])
@@ -636,18 +636,18 @@ describe("OpenCode rewind through the relay", () => {
 				expect(detailState(tab, sessionId)).toEqual({ ids: seededIds });
 		});
 		expect(
-			relay.mock.diagnostics
+			daemonProject.mock.diagnostics
 				.slice(before)
 				.filter(({ event }) => event === "request"),
 		).toEqual([]);
 		await rewind(client, sessionId);
 		const commitsBeforeDeletion: number[] = [];
-		const emit = relay.mock.emitTestEvent.bind(relay.mock);
-		vi.spyOn(relay.mock, "emitTestEvent").mockImplementation(
+		const emit = daemonProject.mock.emitTestEvent.bind(daemonProject.mock);
+		vi.spyOn(daemonProject.mock, "emitTestEvent").mockImplementation(
 			(type, properties) => {
 				if (type === "message.removed")
 					commitsBeforeDeletion.push(
-						persistedRewinds(relay, sessionId).events.filter(
+						persistedRewinds(daemonProject, sessionId).events.filter(
 							({ type }) => type === "session.rewind_committed",
 						).length,
 					);
@@ -657,7 +657,9 @@ describe("OpenCode rewind through the relay", () => {
 		await client.sendMessage("Commit the rewind", { sessionId });
 		await client.waitForTurnEnd(sessionId);
 		expect(
-			wire(relay, sessionId).map(({ method, path }) => `${method} ${path}`),
+			wire(daemonProject, sessionId).map(
+				({ method, path }) => `${method} ${path}`,
+			),
 		).toEqual([
 			`DELETE /session/${sessionId}/message/d-hidden-assistant`,
 			`DELETE /session/${sessionId}/message/c-cut-user`,
@@ -665,7 +667,7 @@ describe("OpenCode rewind through the relay", () => {
 		]);
 		// 82tn.52: the send first copies the session whole, so the dropped tail stays in
 		// OpenCode for a later branch switch, then truncates the same session in place.
-		const sent = relay.mock.diagnostics
+		const sent = daemonProject.mock.diagnostics
 			.slice(before)
 			.flatMap(({ event, detail }) =>
 				event === "request" && detail ? [detail.split("?")[0]] : [],
@@ -677,11 +679,11 @@ describe("OpenCode rewind through the relay", () => {
 			sent.indexOf(`DELETE /session/${sessionId}/message/d-hidden-assistant`),
 		);
 		expect(commitsBeforeDeletion).toEqual([0, 0]);
-		const native = await nativeIds(relay, sessionId);
+		const native = await nativeIds(daemonProject, sessionId);
 		expect(native).toEqual(expect.arrayContaining(keptIds));
 		for (const id of hiddenIds) expect(native).not.toContain(id);
-		const committed = persistedRewinds(relay, sessionId);
-		expect(await owedCut(relay, sessionId)).toBeNull();
+		const committed = persistedRewinds(daemonProject, sessionId);
+		expect(await owedCut(daemonProject, sessionId)).toBeNull();
 		expect(
 			committed.events.filter(
 				({ type }) => type === "session.rewind_committed",
@@ -709,9 +711,9 @@ describe("OpenCode rewind through the relay", () => {
 	});
 
 	it("keeps the cut owed and fails the send when deleting the cut fails (82tn.51)", async () => {
-		const { relay, client, sessionId } = await fixture();
+		const { daemonProject, client, sessionId } = await fixture();
 		await rewind(client, sessionId);
-		relay.mock.setExactResponse(
+		daemonProject.mock.setExactResponse(
 			"DELETE",
 			`/session/${sessionId}/message/c-cut-user`,
 			500,
@@ -719,29 +721,29 @@ describe("OpenCode rewind through the relay", () => {
 		);
 		await client.sendMessage("Must fail", { sessionId });
 		await client.waitForTurnEnd(sessionId);
-		const owed = persistedRewinds(relay, sessionId);
+		const owed = persistedRewinds(daemonProject, sessionId);
 		expect(
 			owed.events.some(
 				({ type, data }) =>
 					type === "turn.error" && data.includes('"code":"SEND_FAILED"'),
 			),
 		).toBe(true);
-		expect(await owedCut(relay, sessionId)).toBe("c-cut-user");
+		expect(await owedCut(daemonProject, sessionId)).toBe("c-cut-user");
 		expect(
 			owed.events.filter(({ type }) => type === "session.rewind_committed"),
 		).toEqual([]);
-		expect(wire(relay, sessionId).some(({ method }) => method === "POST")).toBe(
-			false,
-		);
+		expect(
+			wire(daemonProject, sessionId).some(({ method }) => method === "POST"),
+		).toBe(false);
 		evidence["owed"] = owed;
 	});
 
 	it("converges after partial truncation and commits the cut exactly once on resend", async () => {
 		const ids = [...seededIds, "e-middle-user", "f-last-assistant"];
-		const { relay, client, sessionId } = await fixture(ids);
+		const { daemonProject, client, sessionId } = await fixture(ids);
 		await rewind(client, sessionId);
 		const failedPath = `/session/${sessionId}/message/e-middle-user`;
-		relay.mock.setExactResponse("DELETE", failedPath, 500, {
+		daemonProject.mock.setExactResponse("DELETE", failedPath, 500, {
 			error: "interrupted delete",
 		});
 		await client.sendMessage("Interrupted turn", {
@@ -750,32 +752,34 @@ describe("OpenCode rewind through the relay", () => {
 		});
 		await client.waitForTurnEnd(sessionId);
 		expect(
-			persistedRewinds(relay, sessionId).events.some(
+			persistedRewinds(daemonProject, sessionId).events.some(
 				({ type, data }) =>
 					type === "turn.error" && data.includes('"code":"SEND_FAILED"'),
 			),
 		).toBe(true);
-		expect(await nativeIds(relay, sessionId)).not.toContain("f-last-assistant");
-		expect(await owedCut(relay, sessionId)).toBe("c-cut-user");
-		relay.mock.setExactResponse("DELETE", failedPath, 200, true);
+		expect(await nativeIds(daemonProject, sessionId)).not.toContain(
+			"f-last-assistant",
+		);
+		expect(await owedCut(daemonProject, sessionId)).toBe("c-cut-user");
+		daemonProject.mock.setExactResponse("DELETE", failedPath, 200, true);
 		await client.sendMessage("Second turn survives", {
 			sessionId,
 			commandId: "retry-second",
 		});
 		await client.waitForTurnEnd(sessionId);
-		const native = await nativeIds(relay, sessionId);
+		const native = await nativeIds(daemonProject, sessionId);
 		expect(native).toEqual(expect.arrayContaining(keptIds));
 		for (const id of ids.slice(2)) expect(native).not.toContain(id);
 		expect(
-			wire(relay, sessionId).filter(({ path }) =>
+			wire(daemonProject, sessionId).filter(({ path }) =>
 				path.endsWith("/f-last-assistant"),
 			),
 		).toHaveLength(1);
 		expect(
-			wire(relay, sessionId).filter(({ method }) => method === "POST"),
+			wire(daemonProject, sessionId).filter(({ method }) => method === "POST"),
 		).toHaveLength(1);
-		const state = persistedRewinds(relay, sessionId);
-		expect(await owedCut(relay, sessionId)).toBeNull();
+		const state = persistedRewinds(daemonProject, sessionId);
+		expect(await owedCut(daemonProject, sessionId)).toBeNull();
 		expect(
 			state.events.filter(({ type }) => type === "session.rewind_committed"),
 		).toHaveLength(1);
@@ -792,7 +796,7 @@ describe("OpenCode rewind through the relay", () => {
 	});
 
 	it("truncates once for two rapid sends and preserves the second native turn", async () => {
-		const { relay, client, second, sessionId } = await fixture();
+		const { daemonProject, client, second, sessionId } = await fixture();
 		await rewind(client, sessionId);
 		await Promise.all([
 			client.sendMessage("First rapid turn", {
@@ -811,19 +815,21 @@ describe("OpenCode rewind through the relay", () => {
 				sessionId,
 			);
 		expect(
-			wire(relay, sessionId).filter(({ method }) => method === "DELETE"),
+			wire(daemonProject, sessionId).filter(
+				({ method }) => method === "DELETE",
+			),
 		).toHaveLength(2);
 		const history = await client.loadMoreHistory(sessionId);
-		const native = await nativeIds(relay, sessionId);
+		const native = await nativeIds(daemonProject, sessionId);
 		expect(native).toHaveLength(6);
 		expect(history.messages.map(({ id }) => id).sort()).toEqual(native.sort());
 		expect(
-			wire(relay, sessionId)
+			wire(daemonProject, sessionId)
 				.filter(({ method }) => method === "DELETE")
 				.map(({ path }) => path.split("/").at(-1)),
 		).toEqual([...hiddenIds].reverse());
 		expect(
-			persistedRewinds(relay, sessionId).events.filter(
+			persistedRewinds(daemonProject, sessionId).events.filter(
 				({ type }) => type === "session.rewind_committed",
 			),
 		).toHaveLength(1);
@@ -831,22 +837,22 @@ describe("OpenCode rewind through the relay", () => {
 
 	it("orders native messages by creation time before id when a kept conduit id sorts last", async () => {
 		const ids = ["msg_conduit_z-kept-user", "b-kept-assistant", ...hiddenIds];
-		const { relay, client, sessionId } = await fixture(ids, true);
+		const { daemonProject, client, sessionId } = await fixture(ids, true);
 		await rewind(client, sessionId);
 		await client.sendMessage("Clock ordered turn", { sessionId });
 		await client.waitForTurnEnd(sessionId);
 		expect(
-			wire(relay, sessionId)
+			wire(daemonProject, sessionId)
 				.filter(({ method }) => method === "DELETE")
 				.map(({ path }) => path.split("/").at(-1)),
 		).toEqual([...hiddenIds].reverse());
-		expect(await nativeIds(relay, sessionId)).toContain(ids[0]);
+		expect(await nativeIds(daemonProject, sessionId)).toContain(ids[0]);
 	});
 
 	it("fails closed when the rewind anchor is absent from native history", async () => {
-		const { relay, client, sessionId } = await fixture();
+		const { daemonProject, client, sessionId } = await fixture();
 		await rewind(client, sessionId);
-		relay.mock.setExactResponse(
+		daemonProject.mock.setExactResponse(
 			"GET",
 			`/session/${sessionId}/message`,
 			200,
@@ -854,24 +860,24 @@ describe("OpenCode rewind through the relay", () => {
 		);
 		await client.sendMessage("Cross provider cut", { sessionId });
 		await client.waitForTurnEnd(sessionId);
-		const owed = persistedRewinds(relay, sessionId);
+		const owed = persistedRewinds(daemonProject, sessionId);
 		expect(
 			owed.events.some(
 				({ type, data }) =>
 					type === "turn.error" && data.includes('"code":"SEND_FAILED"'),
 			),
 		).toBe(true);
-		expect(await owedCut(relay, sessionId)).toBe("c-cut-user");
+		expect(await owedCut(daemonProject, sessionId)).toBe("c-cut-user");
 		expect(
 			owed.events.filter(({ type }) => type === "session.rewind_committed"),
 		).toEqual([]);
-		expect(wire(relay, sessionId)).toEqual([]);
+		expect(wire(daemonProject, sessionId)).toEqual([]);
 	});
 
 	it("commits only on removal of the cut itself, never another tail message", async () => {
-		const { relay, client, sessionId } = await fixture();
+		const { daemonProject, client, sessionId } = await fixture();
 		await rewind(client, sessionId);
-		await relay.run(
+		await daemonProject.run(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				expect(
@@ -883,24 +889,24 @@ describe("OpenCode rewind through the relay", () => {
 				).toBe("session.rewind_committed");
 			}),
 		);
-		relay.mock.emitTestEvent("message.removed", {
+		daemonProject.mock.emitTestEvent("message.removed", {
 			sessionID: sessionId,
 			messageID: "d-hidden-assistant",
 		});
 		// 82tn.51: the cut left the Head when the rewind landed, so the tail's removal is ignored
 		// and only the cut's own removal confirms the provider has it.
 		expect(
-			persistedRewinds(relay, sessionId).messages.map(({ id }) => id),
+			persistedRewinds(daemonProject, sessionId).messages.map(({ id }) => id),
 		).not.toContain("d-hidden-assistant");
-		relay.mock.emitTestEvent("message.removed", {
+		daemonProject.mock.emitTestEvent("message.removed", {
 			sessionID: sessionId,
 			messageID: "c-cut-user",
 		});
 		await vi.waitFor(async () =>
-			expect(await owedCut(relay, sessionId)).toBeNull(),
+			expect(await owedCut(daemonProject, sessionId)).toBeNull(),
 		);
 		expect(
-			persistedRewinds(relay, sessionId).events.filter(
+			persistedRewinds(daemonProject, sessionId).events.filter(
 				({ type }) => type === "session.rewind_committed",
 			),
 		).toHaveLength(1);

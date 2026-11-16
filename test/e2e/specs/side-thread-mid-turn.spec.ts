@@ -68,7 +68,7 @@ test.describe("Claude Side Thread started mid-turn", () => {
 
 	test("forks at the last completed turn while the parent's turn runs on", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
 		test.setTimeout(90_000);
@@ -77,7 +77,7 @@ test.describe("Claude Side Thread started mid-turn", () => {
 		const db = harness.eventsDbPath;
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		const parentId = new URL(page.url()).pathname.split("/").at(-1);
 		if (!parentId) throw new Error("Parent session route is missing");
 
@@ -197,7 +197,7 @@ test.describe("OpenCode Side Thread started mid-turn", () => {
 
 	test("forks before the in-flight prompt while the parent's tool runs", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 		mockServer,
 	}) => {
@@ -205,7 +205,7 @@ test.describe("OpenCode Side Thread started mid-turn", () => {
 		const db = harness.eventsDbPath;
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		const parentId = new URL(page.url()).pathname.split("/").at(-1);
 		if (!parentId) throw new Error("Parent session route is missing");
 

@@ -483,20 +483,20 @@ describe("Claude durable interaction resolution", () => {
 		await f.persistence.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const relayScope = yield* Scope.make();
-					yield* Effect.addFinalizer((exit) => Scope.close(relayScope, exit));
+					const projectScope = yield* Scope.make();
+					yield* Effect.addFinalizer((exit) => Scope.close(projectScope, exit));
 					const started = yield* Deferred.make<string>();
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: detachedRunnerFactory(started),
 
 						capabilitiesService,
-					}).pipe(Scope.provide(relayScope));
+					}).pipe(Scope.provide(projectScope));
 					if (shutdownPath === "engine") {
 						const engine = new OrchestrationEngine({
 							registry: new ProviderRegistry([runtime]),
 						});
 						yield* Effect.addFinalizer(() => engine.shutdownEffect()).pipe(
-							Scope.provide(relayScope),
+							Scope.provide(projectScope),
 						);
 					}
 					yield* Effect.forkChild(
@@ -534,7 +534,7 @@ describe("Claude durable interaction resolution", () => {
 								},
 					);
 					yield* awaitPendingApproval(f.readQuery);
-					yield* Scope.close(relayScope, Exit.void);
+					yield* Scope.close(projectScope, Exit.void);
 				}),
 			),
 		);

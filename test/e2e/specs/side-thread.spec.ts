@@ -32,12 +32,12 @@ const askRules = [
 ];
 
 async function rpc<A>(
-	relayUrl: string,
+	appUrl: string,
 	call: (
 		client: RpcClient.FromGroup<typeof WsRpcGroup, unknown>,
 	) => Effect.Effect<A, unknown>,
 ): Promise<A> {
-	const url = new URL("/rpc", relayUrl);
+	const url = new URL("/rpc", appUrl);
 	url.protocol = "ws:";
 	const previousWebSocket = globalThis.WebSocket;
 	globalThis.WebSocket =
@@ -95,8 +95,8 @@ function transcript(dbPath: string, sessionId: string) {
 	}
 }
 
-async function parentSettings(relayUrl: string, sessionId: string) {
-	return rpc(relayUrl, (client) =>
+async function parentSettings(appUrl: string, sessionId: string) {
+	return rpc(appUrl, (client) =>
 		Effect.gen(function* () {
 			const models = yield* client.GetModels({ sessionId });
 			const agents = yield* client.GetAgents({ sessionId });
@@ -116,14 +116,14 @@ test.describe("OpenCode Side Threads", () => {
 	for (const command of ["btw", "side"]) {
 		test(`$${command} asks in a saved hidden fork and leaves its parent untouched`, async ({
 			page,
-			relayUrl,
+			appUrl,
 			harness,
 			mockServer,
 		}, testInfo) => {
 			test.setTimeout(90_000);
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			const parentId = new URL(page.url()).pathname.split("/").at(-1);
 			if (!parentId) throw new Error("Parent session route is missing");
 
@@ -175,7 +175,7 @@ test.describe("OpenCode Side Threads", () => {
 			const parentAssistantText = await assistantBodies.allTextContents();
 
 			// Choose non-default overrides, so clearing them cannot pass unnoticed.
-			await rpc(relayUrl, (client) =>
+			await rpc(appUrl, (client) =>
 				Effect.gen(function* () {
 					const catalog = yield* client.GetModels({
 						sessionId: parentId,
@@ -200,7 +200,7 @@ test.describe("OpenCode Side Threads", () => {
 					});
 				}),
 			);
-			const settingsBefore = await parentSettings(relayUrl, parentId);
+			const settingsBefore = await parentSettings(appUrl, parentId);
 			expect(settingsBefore.permissionMode).toBe("full");
 			expect(settingsBefore.agent).toBe("plan");
 			expect(settingsBefore.model?.model).not.toBe("big-pickle");
@@ -280,8 +280,8 @@ test.describe("OpenCode Side Threads", () => {
 			await expect(
 				page.locator(`#session-list [data-session-id="${parentId}"]`),
 			).toHaveCount(1);
-			expect(await parentSettings(relayUrl, parentId)).toEqual(settingsBefore);
-			const sideSettings = await rpc(relayUrl, (client) =>
+			expect(await parentSettings(appUrl, parentId)).toEqual(settingsBefore);
+			const sideSettings = await rpc(appUrl, (client) =>
 				client.GetModels({
 					sessionId: sideId,
 				}),
@@ -382,7 +382,7 @@ test.describe("OpenCode Side Threads", () => {
 				).toHaveCount(0);
 			}
 			const eventsBeforeNested = sessionEvents(harness.eventsDbPath);
-			const nested = await rpc(relayUrl, (client) =>
+			const nested = await rpc(appUrl, (client) =>
 				Effect.result(
 					client.StartSideThread({
 						sessionId: sideId,
@@ -426,7 +426,7 @@ test.describe("OpenCode Side Threads", () => {
 			await page.getByTestId("picker-agent-plan").click();
 			await expect(agentRow).toContainText("Plan");
 			await expect
-				.poll(() => parentSettings(relayUrl, sideId))
+				.poll(() => parentSettings(appUrl, sideId))
 				.toMatchObject({ permissionMode: "ask", agent: "plan" });
 			await agentRow.click();
 			await page.getByTestId("picker-agent-build").click();
@@ -437,7 +437,7 @@ test.describe("OpenCode Side Threads", () => {
 				"Permissions: Ask before edits. Open options",
 			);
 			await expect
-				.poll(() => parentSettings(relayUrl, sideId))
+				.poll(() => parentSettings(appUrl, sideId))
 				.toMatchObject({ permissionMode: "ask", agent: "build" });
 			await app.sendMessage(followUpPrompt);
 			await expect(chat.assistantMessages.last()).toContainText("ok, raised");
@@ -509,7 +509,7 @@ test.describe("OpenCode Side Threads", () => {
 			expect(transcript(harness.eventsDbPath, parentId)).toEqual(
 				parentTranscript,
 			);
-			expect(await parentSettings(relayUrl, parentId)).toEqual(settingsBefore);
+			expect(await parentSettings(appUrl, parentId)).toEqual(settingsBefore);
 			const parentScreenshot = testInfo.outputPath(
 				`${command}-unchanged-parent.png`,
 			);
@@ -523,12 +523,12 @@ test.describe("OpenCode Side Threads", () => {
 
 	test("a missing parent is a typed failure before any event is written", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
-		await new AppPage(page).goto(relayUrl);
+		await new AppPage(page).goto(appUrl);
 		const before = sessionEvents(harness.eventsDbPath);
-		const result = await rpc(relayUrl, (client) =>
+		const result = await rpc(appUrl, (client) =>
 			Effect.result(
 				client.StartSideThread({
 					sessionId: "missing-side-thread-parent",
@@ -572,12 +572,12 @@ test.describe("Claude Side Threads", () => {
 
 			test("asks in a hidden Ask-mode fork and leaves its parent untouched", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				const app = new AppPage(page);
 				const chat = new ChatPage(page);
-				await app.goto(relayUrl);
+				await app.goto(appUrl);
 				const parentId = new URL(page.url()).pathname.split("/").at(-1);
 				if (!parentId) throw new Error("Parent session route is missing");
 
@@ -601,13 +601,13 @@ test.describe("Claude Side Threads", () => {
 					)
 					.toBeTruthy();
 				// A non-default mode, so a leak from the Side Thread cannot pass.
-				await rpc(relayUrl, (client) =>
+				await rpc(appUrl, (client) =>
 					client.SwitchPermissionMode({
 						sessionId: parentId,
 						mode: "full",
 					}),
 				);
-				const settingsBefore = await rpc(relayUrl, (client) =>
+				const settingsBefore = await rpc(appUrl, (client) =>
 					client.GetModels({ sessionId: parentId }),
 				).then(({ active, permissionMode }) => ({ active, permissionMode }));
 				expect(settingsBefore.permissionMode).toBe("full");
@@ -640,7 +640,7 @@ test.describe("Claude Side Threads", () => {
 				await expect(
 					page.locator(`#session-list [data-session-id="${sideId}"]`),
 				).toHaveCount(0);
-				const sideSettings = await rpc(relayUrl, (client) =>
+				const sideSettings = await rpc(appUrl, (client) =>
 					client.GetModels({ sessionId: sideId }),
 				);
 				expect(sideSettings.permissionMode).toBe("ask");
@@ -714,7 +714,7 @@ test.describe("Claude Side Threads", () => {
 					parentTranscript,
 				);
 				expect(
-					await rpc(relayUrl, (client) =>
+					await rpc(appUrl, (client) =>
 						client.GetModels({ sessionId: parentId }),
 					).then(({ active, permissionMode }) => ({ active, permissionMode })),
 				).toEqual(settingsBefore);
@@ -730,11 +730,11 @@ test.describe("Claude Side Threads", () => {
 
 		test("keeps the question in the composer and writes nothing", async ({
 			page,
-			relayUrl,
+			appUrl,
 			harness,
 		}) => {
 			const app = new AppPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			const parentId = new URL(page.url()).pathname.split("/").at(-1);
 			const before = sessionEvents(harness.eventsDbPath);
 			const text = `$btw ${question}`;
@@ -762,12 +762,12 @@ test.describe("Claude Side Threads", () => {
 
 		test("shows the Side Thread working, live and after a reload", async ({
 			page,
-			relayUrl,
+			appUrl,
 			harness,
 		}) => {
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			const parentId = new URL(page.url()).pathname.split("/").at(-1);
 			await app.sendMessage(parentPrompt);
 			await expect(chat.assistantMessages).toHaveText([/pong/i]);
@@ -820,14 +820,10 @@ test.describe("Claude Side Threads", () => {
 			},
 		});
 
-		test("shows the Side Thread working", async ({
-			page,
-			relayUrl,
-			harness,
-		}) => {
+		test("shows the Side Thread working", async ({ page, appUrl, harness }) => {
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			const parentId = new URL(page.url()).pathname.split("/").at(-1);
 			await app.sendMessage(parentPrompt);
 			await expect(chat.assistantMessages).toHaveText([/pong/i]);

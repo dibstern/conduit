@@ -584,7 +584,7 @@ describe("ClaudeEventTranslator", () => {
 					Date.now(),
 				],
 			);
-			const relaySink = createProjectEventSink({
+			const projectSink = createProjectEventSink({
 				sessionId: "sess-thinking-snapshot",
 				persist: {
 					persistEvent: (event) =>
@@ -595,15 +595,15 @@ describe("ClaudeEventTranslator", () => {
 						),
 				},
 			});
-			const relayTranslator = new ClaudeEventTranslator({
-				getSink: () => relaySink,
+			const projectTranslator = new ClaudeEventTranslator({
+				getSink: () => projectSink,
 			});
-			const relayCtx = makeCtx({
+			const projectCtx = makeCtx({
 				sessionId: "sess-thinking-snapshot",
-				eventSink: relaySink,
+				eventSink: projectSink,
 			});
 
-			await runTranslate(relayTranslator, relayCtx, {
+			await runTranslate(projectTranslator, projectCtx, {
 				type: "assistant",
 				message: {
 					id: "msg-thinking-snapshot",
@@ -664,7 +664,7 @@ describe("ClaudeEventTranslator", () => {
 					Date.now(),
 				],
 			);
-			const relaySink = createProjectEventSink({
+			const projectSink = createProjectEventSink({
 				sessionId: "sess-context-window",
 				persist: {
 					persistEvent: (event) =>
@@ -675,16 +675,16 @@ describe("ClaudeEventTranslator", () => {
 						),
 				},
 			});
-			const relayTranslator = new ClaudeEventTranslator({
-				getSink: () => relaySink,
+			const projectTranslator = new ClaudeEventTranslator({
+				getSink: () => projectSink,
 			});
-			const relayCtx = makeCtx({
+			const projectCtx = makeCtx({
 				sessionId: "sess-context-window",
-				eventSink: relaySink,
+				eventSink: projectSink,
 				currentApiModelId: "claude-sonnet-4[1m]",
 			});
 
-			await runTranslate(relayTranslator, relayCtx, {
+			await runTranslate(projectTranslator, projectCtx, {
 				type: "assistant",
 				message: {
 					id: "msg-context-window",
@@ -705,7 +705,7 @@ describe("ClaudeEventTranslator", () => {
 				uuid: "00000000-0000-0000-0000-000000000207",
 				session_id: "sdk-sess-context-window",
 			} as unknown as SDKMessage);
-			await runTranslate(relayTranslator, relayCtx, {
+			await runTranslate(projectTranslator, projectCtx, {
 				type: "result",
 				subtype: "success",
 				duration_ms: 1200,

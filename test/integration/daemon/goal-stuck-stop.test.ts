@@ -54,7 +54,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 	vi.spyOn(PushNotificationManager.prototype, "sendToAll").mockRejectedValue(
 		new Error("Expected per-recipient delivery"),
 	);
-	const relay = await createDaemonProject("chat-simple", {
+	const project = await createDaemonProject("chat-simple", {
 		projectDir: root,
 		slug: "goal-stuck-test",
 		defaultModel: null,
@@ -111,7 +111,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 			},
 		},
 	});
-	const run = relay.run;
+	const run = project.run;
 	const goalPushes = () => pushes.filter((push) => push.type === "goal_stuck");
 	const stops = () =>
 		run(
@@ -322,7 +322,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 		);
 		closed = true;
 		emit(undefined);
-		await relay.stop();
+		await project.stop();
 		vi.restoreAllMocks();
 		rmSync(root, { recursive: true, force: true, maxRetries: 3 });
 	}

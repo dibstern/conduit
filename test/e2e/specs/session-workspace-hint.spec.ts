@@ -2,7 +2,7 @@ import type { Page, TestInfo } from "@playwright/test";
 import { openSessionPanel } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", screenshot: "off" });
 
@@ -19,7 +19,7 @@ const projectSlug = "e2e-replay";
 const main = "/workspace/conduit";
 const hintPath = "/workspace/conduit-hint";
 
-async function openHint(page: Page, relayBaseUrl: string) {
+async function openHint(page: Page, appBaseUrl: string) {
 	const projects = [
 		{ slug: projectSlug, title: "Workspace project", folders: [main] as const },
 	];
@@ -55,14 +55,14 @@ async function openHint(page: Page, relayBaseUrl: string) {
 	});
 	rpc.setShellRows([session]);
 	rpc.setFamilyRows([session]);
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: projectSlug },
 			{ type: "shell_snapshot", roots: true, sessions: [session] },
 		],
 		responses: new Map(),
 	});
-	await page.goto(`${relayBaseUrl}/s/${session.id}`);
+	await page.goto(`${appBaseUrl}/s/${session.id}`);
 	return { rpc, session };
 }
 
@@ -77,7 +77,7 @@ test("desktop hint acceptance uses the existing workspace move", async ({
 	harness,
 }, testInfo) => {
 	await page.setViewportSize({ width: 1440, height: 900 });
-	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
+	const { rpc, session } = await openHint(page, harness.appBaseUrl);
 	const checkout = page.getByTestId("composer-checkout");
 	await expect(
 		checkout.getByTestId("workspace-notice-indicator"),
@@ -123,7 +123,7 @@ test("desktop dismissal targets the current hint and follows shell row updates",
 	harness,
 }, testInfo) => {
 	await page.setViewportSize({ width: 1440, height: 900 });
-	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
+	const { rpc, session } = await openHint(page, harness.appBaseUrl);
 	const changedPath = "/workspace/conduit-other";
 	const checkout = page.getByTestId("composer-checkout");
 	const hint = checkout.getByTestId("workspace-notice-indicator");
@@ -163,7 +163,7 @@ test("phone hint is an accessible chip icon with both actions in the Session pan
 	harness,
 }, testInfo) => {
 	await page.setViewportSize({ width: 390, height: 844 });
-	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
+	const { rpc, session } = await openHint(page, harness.appBaseUrl);
 	const checkout = page.getByTestId("composer-checkout");
 	const hint = checkout.getByTestId("workspace-notice-indicator");
 	await expect(hint).toBeVisible();

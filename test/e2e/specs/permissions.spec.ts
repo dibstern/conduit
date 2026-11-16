@@ -17,11 +17,11 @@ test.describe("Permissions", () => {
 
 	test("permission card appears when agent uses a tool", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		const perm = new PermissionPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Send a prompt that triggers an external_directory permission
 		await app.sendMessage(
@@ -38,11 +38,11 @@ test.describe("Permissions", () => {
 
 	test("permission card structure has expected elements", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		const perm = new PermissionPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Trigger a permission request
 		await app.sendMessage(
@@ -63,7 +63,7 @@ test.describe("Permissions", () => {
 
 	test("Always Allow appends session rules before replying once to OpenCode", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 		mockServer,
 	}) => {
@@ -88,7 +88,7 @@ test.describe("Permissions", () => {
 			throw new Error("Recorded permission request has no always patterns");
 		}
 
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.sendMessage(
 			"Create a file called /tmp/e2e-test-diff.txt with the text 'hello world'",
 		);

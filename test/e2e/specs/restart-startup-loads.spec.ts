@@ -29,7 +29,7 @@ test.use({ claudeReplay: { turns: [] } });
 
 test("an open tab reloads startup data after the control socket reconnects", async ({
 	page,
-	relayUrl,
+	appUrl,
 	harness,
 }, testInfo) => {
 	await page.addInitScript(() => {
@@ -137,7 +137,7 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 		});
 	});
 
-	await new AppPage(page).goto(relayUrl);
+	await new AppPage(page).goto(appUrl);
 	await expect
 		.poll(() => startupLoads.filter((tag) => initialAnswered.has(tag)), {
 			timeout: 20_000,

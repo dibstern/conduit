@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 import { initMessages } from "../fixtures/mockup-state.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 const SESSION_A = "sess-mockup-001";
@@ -58,7 +58,7 @@ test("a late agent list from the previous session leaves the new session's agent
 			}),
 		},
 	});
-	const ws = await mockRelayWebSocket(page, {
+	const ws = await mockDaemonWebSocket(page, {
 		initMessages,
 		responses: new Map(),
 		initDelay: 0,

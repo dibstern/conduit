@@ -4,7 +4,7 @@ import type {
 } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 // Failure modes: folder status collapses to primary; branches or dirty flags
 // cross rows; one git folder changes the existing popover; settings omit repo
@@ -116,14 +116,14 @@ for (const scenario of [
 				GetProjects: () => ({ projects: [project], current: slug }),
 			},
 		});
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: [
 				{ type: "project_list", projects: [project], current: slug },
 				{ type: "shell_snapshot", roots: true, sessions: [session] },
 			],
 			responses: new Map(),
 		});
-		await page.goto(`${harness.relayBaseUrl}/s/${session.id}`);
+		await page.goto(`${harness.appBaseUrl}/s/${session.id}`);
 		const pill = page.getByTestId("composer-checkout");
 		await expect(pill).toContainText(gitPrimary ? "feature/web" : "notes");
 		await expect(pill.locator("[data-icon]")).toHaveAttribute(

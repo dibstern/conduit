@@ -5,7 +5,7 @@ import type { ProjectInfo } from "../../../src/lib/shared-types.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 // Failure cases: setup disappears before the first turn or on reload; streamed
 // updates create duplicate blocks; failure hides its exit code or output;
@@ -80,7 +80,7 @@ async function openSession(
 			},
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects: [project], current: slug },
 			{ type: "shell_snapshot", roots: true, sessions: [session] },
@@ -148,7 +148,7 @@ test("setup streams in one block before a turn and survives reload", async ({
 	page,
 	harness,
 }) => {
-	const rpc = await openSession(page, harness.relayBaseUrl, {
+	const rpc = await openSession(page, harness.appBaseUrl, {
 		source: "daemon",
 		status: "running",
 	});
@@ -203,7 +203,7 @@ for (const outcome of [
 		harness,
 	}) => {
 		const { label, output, ...setup } = outcome;
-		const rpc = await openSession(page, harness.relayBaseUrl);
+		const rpc = await openSession(page, harness.appBaseUrl);
 		rpc.setDetailRows(sessionId, [
 			...setupRows({ source: "file", ...setup }, output),
 		]);
@@ -220,7 +220,7 @@ test("ProjectDialog edits and explicitly clears the stored setup script", async 
 	page,
 	harness,
 }) => {
-	const rpc = await openSession(page, harness.relayBaseUrl);
+	const rpc = await openSession(page, harness.appBaseUrl);
 	let dialog = await openEdit(page);
 	const field = dialog.getByRole("textbox", {
 		name: "Setup script",

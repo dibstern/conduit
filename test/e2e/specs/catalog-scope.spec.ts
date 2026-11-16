@@ -5,7 +5,7 @@ import type { GetModelsResponse } from "../../../src/lib/contracts/ws-rpc.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 const alphaSession = "catalog-alpha";
@@ -176,7 +176,7 @@ async function setup(page: Page) {
 			},
 		],
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: "e2e-replay" },
 			{ type: "shell_snapshot", roots: true, sessions },
@@ -260,7 +260,7 @@ test("switching draft projects never displays an old project's in-flight catalog
 			}
 		};
 	});
-	await page.goto(`${harness.relayBaseUrl}/new?project=e2e-replay`);
+	await page.goto(`${harness.appBaseUrl}/new?project=e2e-replay`);
 	await rpc.waitForRequest(
 		(request) =>
 			request.tag === "GetCommands" &&
@@ -342,7 +342,7 @@ test("fast session switches keep the model list matched to the displayed session
 	harness,
 }, testInfo) => {
 	const { rpc, hold } = await setup(page);
-	await page.goto(`${harness.relayBaseUrl}/s/${alphaSession}`);
+	await page.goto(`${harness.appBaseUrl}/s/${alphaSession}`);
 	await expect(page.locator("#input")).toHaveValue(
 		`Prompt for ${alphaSession}`,
 	);
@@ -412,7 +412,7 @@ test("a new draft's model, agent and command lists match its project", async ({
 		if (message.type() === "error") pageErrors.push(message.text());
 	});
 	try {
-		await page.goto(`${harness.relayBaseUrl}/new?project=beta`);
+		await page.goto(`${harness.appBaseUrl}/new?project=beta`);
 		await expect(page).toHaveURL(/project=beta/);
 		await rpc.waitForRequest(
 			(request) =>

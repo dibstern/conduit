@@ -15,7 +15,7 @@ import {
 	sendMockDaemonList,
 	sendMockProjects,
 } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
 type Page = import("@playwright/test").Page;
 type ProjectManagementControl = WsMockControl & { rpc: RpcMockControl };
@@ -168,7 +168,7 @@ async function setupWithProjectManagement(
 		},
 	});
 	rpc.setShellRows(sessions);
-	const control = await mockRelayWebSocket(page, {
+	const control = await mockDaemonWebSocket(page, {
 		initMessages: singleInstanceInitMessages.filter(
 			(message) => message.type !== "shell_snapshot",
 		),

@@ -159,7 +159,7 @@ describe("DaemonHandleTag", () => {
 			mkdirSync(projectDir);
 			const lifecycleContext = makeDaemonLifecycleContext("/tmp/relay.sock");
 			lifecycleContext.clientCount = 7;
-			const relayHealthBySlug = new Map([
+			const projectHealthBySlug = new Map([
 				[
 					"existing",
 					{
@@ -203,9 +203,9 @@ describe("DaemonHandleTag", () => {
 				forProject: () => Effect.die("unused"),
 				generation: () => Effect.die("unused"),
 				open: (slug) =>
-					Effect.succeed(openedProject(slug, relayHealthBySlug.get(slug))),
+					Effect.succeed(openedProject(slug, projectHealthBySlug.get(slug))),
 				opened: (slug) => {
-					const sse = relayHealthBySlug.get(slug);
+					const sse = projectHealthBySlug.get(slug);
 					return Effect.succeed(
 						sse === undefined
 							? Option.none()
@@ -299,11 +299,11 @@ describe("DaemonHandleTag", () => {
 				expect(
 					initialStatus.projects.find((project) => project.slug === "existing")
 						?.sse,
-				).toEqual(relayHealthBySlug.get("existing"));
+				).toEqual(projectHealthBySlug.get("existing"));
 				expect(
 					initialStatus.projects.find((project) => project.slug === "second")
 						?.sse,
-				).toEqual(relayHealthBySlug.get("second"));
+				).toEqual(projectHealthBySlug.get("second"));
 				expect(
 					initialStatus.projects.find((project) => project.slug === "uncached"),
 				).not.toHaveProperty("sse");

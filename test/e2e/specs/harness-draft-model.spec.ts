@@ -177,7 +177,7 @@ async function editRpc(
 	await page.routeWebSocket(/\/rpc$/, (ws) => {
 		const server = ws.connectToServer();
 		const requests = new Map<string, RpcFrame>();
-		const relay =
+		const daemonProject =
 			(send: (message: string | Buffer) => void) =>
 			async (message: string | Buffer) => {
 				if (typeof message !== "string") return send(message);
@@ -192,8 +192,8 @@ async function editRpc(
 				);
 				if (edited !== null) send(JSON.stringify(edited));
 			};
-		ws.onMessage(relay((message) => server.send(message)));
-		server.onMessage(relay((message) => ws.send(message)));
+		ws.onMessage(daemonProject((message) => server.send(message)));
+		server.onMessage(daemonProject((message) => ws.send(message)));
 	});
 }
 

@@ -15,7 +15,7 @@
 import { expect, test } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 type Page = import("@playwright/test").Page;
 
@@ -107,7 +107,7 @@ test.describe("Notification → Session Navigation", () => {
 				ViewSession: () => ({ ok: true }),
 			},
 		});
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,
@@ -184,7 +184,7 @@ test.describe("Notification → Session Navigation", () => {
 				ViewSession: () => ({ ok: true }),
 			},
 		});
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,
@@ -230,7 +230,7 @@ test.describe("Notification → Session Navigation", () => {
 				ViewSession: () => ({ ok: true }),
 			},
 		});
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: twoSessionInit,
 			responses: new Map(),
 			initDelay: 0,

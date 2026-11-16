@@ -67,7 +67,7 @@ function manifestIconPlugin(): Plugin {
 	};
 }
 
-const relayProxy = {
+const daemonProxy = {
 	target: process.env.CONDUIT_DEV_SERVER ?? "http://localhost:2633",
 	secure: false,
 };
@@ -122,20 +122,20 @@ const config = defineConfig({
 	preview: { proxy: {} },
 	server: {
 		host: "127.0.0.1",
-		// Dev server proxies WS and API to the relay server. dev:all points this
+		// Dev server proxies WS and API to the daemon. dev:all points this
 		// at the server it drives, which may serve HTTPS with a local cert.
 		proxy: {
-			"/rpc": { ...relayProxy, ws: true },
-			"/api": relayProxy,
+			"/rpc": { ...daemonProxy, ws: true },
+			"/api": daemonProxy,
 			// Regex key: Vite treats keys starting with ^ as RegExp.
-			"^/p/[^/]+/api/": relayProxy,
+			"^/p/[^/]+/api/": daemonProxy,
 			// Only the PIN POST goes to the server; its GET page is the built SPA,
 			// whose hashed /assets the dev server cannot serve.
 			"/auth": {
-				...relayProxy,
+				...daemonProxy,
 				bypass: (req) => (req.method === "GET" ? "/index.html" : undefined),
 			},
-			"/health": relayProxy,
+			"/health": daemonProxy,
 		},
 	},
 });

@@ -1,5 +1,5 @@
 import type { Locator } from "@playwright/test";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({
@@ -22,9 +22,9 @@ async function sectionBefore(row: Locator) {
 
 test("settle, undo, search, pin and reload preserve triage and shelf preference", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
 	// The recording holds one session; triage needs a second to move around.

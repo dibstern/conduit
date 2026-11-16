@@ -8,7 +8,7 @@
 import { DatabaseSync } from "node:sqlite";
 import type { Page } from "@playwright/test";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 type Provider = "opencode" | "claude";
@@ -116,7 +116,7 @@ async function wokenUntilOpened(
 		}),
 	);
 	const sessionId = decodeURIComponent(harness.projectUrl.slice("/s/".length));
-	await gotoRelay(page, harness.relayBaseUrl + harness.projectUrl);
+	await gotoApp(page, harness.appBaseUrl + harness.projectUrl);
 	await expect(row(page, sessionId)).toBeVisible();
 	// Read before it is snoozed: nothing but the wake can show the badge. A
 	// pick of a session that has not woken does not touch its snooze. The

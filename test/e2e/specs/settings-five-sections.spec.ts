@@ -3,10 +3,10 @@ import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { dualDriverProviders } from "../fixtures/mockup-state.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { closeSettings } from "../helpers/settings.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 const sections = [
 	["general", "General", "[data-testid=settings-composer-controls-icons]"],
@@ -50,7 +50,7 @@ for (const [viewportName, viewport] of [
 
 		test("visits every section with computer grouping, scroll and focus preserved", async ({
 			page,
-			relayUrl,
+			appUrl,
 		}, testInfo) => {
 			const now = Date.now();
 			const instances = [
@@ -126,7 +126,7 @@ for (const [viewportName, viewport] of [
 					}),
 				},
 			});
-			await mockRelayWebSocket(page, {
+			await mockDaemonWebSocket(page, {
 				initMessages: [
 					{
 						type: "project_list",
@@ -158,9 +158,9 @@ for (const [viewportName, viewport] of [
 			});
 			rpc.setDaemonList("SubscribeInstances", { instances });
 			rpc.setUsageReadings(readings);
-			await gotoRelay(
+			await gotoApp(
 				page,
-				new URL("/s/settings-shell?p=e2e-replay", relayUrl).toString(),
+				new URL("/s/settings-shell?p=e2e-replay", appUrl).toString(),
 			);
 			await openSettingsPanel(page);
 

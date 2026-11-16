@@ -9,7 +9,7 @@ import type {
 } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, rowActivity } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -70,7 +70,7 @@ for (const scenario of [
 		all: 0,
 	},
 ]) {
-	test(scenario.name, async ({ page, relayUrl }, testInfo) => {
+	test(scenario.name, async ({ page, appUrl }, testInfo) => {
 		const sessionId = "sess-surfacing-counts";
 		const start = Date.now() - 60_000;
 		const parts: HistoryMessagePart[] = scenario.probabilities.flatMap(
@@ -131,7 +131,7 @@ for (const scenario of [
 				GetCategorySet: () => DEFAULT_CATEGORY_SET,
 			},
 		});
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: [
 				{
 					type: "mock_transcript_snapshot",
@@ -160,7 +160,7 @@ for (const scenario of [
 			],
 			responses: new Map(),
 		});
-		await page.goto(new URL(`/s/${sessionId}`, relayUrl).href);
+		await page.goto(new URL(`/s/${sessionId}`, appUrl).href);
 		const levels = page.getByTestId("surfacing-level");
 		await expect(levels).toBeVisible();
 		await expect(

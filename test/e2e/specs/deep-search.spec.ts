@@ -3,7 +3,7 @@ import { Effect, Exit, Scope } from "effect";
 import { isRecord } from "../../../src/lib/utils.js";
 import { serveRpc } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({
@@ -93,10 +93,10 @@ async function mockDaemonSearch(page: Page) {
 
 test("searches recent and settled sessions, then opens one without unsettling it", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
 	const daemonSearch = await mockDaemonSearch(page);
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
 	await new SidebarPage(page).createNewSession();
@@ -168,10 +168,10 @@ test("searches recent and settled sessions, then opens one without unsettling it
 
 test("no match, Escape, and repeated shortcut leave sidebar state intact", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
 	const daemonSearch = await mockDaemonSearch(page);
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
 	const title = (
@@ -216,10 +216,10 @@ test("no match, Escape, and repeated shortcut leave sidebar state intact", async
 		.toEqual(before);
 });
 
-test("palette fits a phone viewport", async ({ page, relayUrl }) => {
+test("palette fits a phone viewport", async ({ page, appUrl }) => {
 	await mockDaemonSearch(page);
 	await page.setViewportSize({ width: 393, height: 852 });
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	await page.keyboard.press("ControlOrMeta+k");
 	const palette = page.getByTestId("deep-search");
 	await expect(palette).toBeVisible();
@@ -232,7 +232,7 @@ test("palette fits a phone viewport", async ({ page, relayUrl }) => {
 
 test("query results page by cursor without loading the whole match set", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
 	const daemonSearch = await mockDaemonSearch(page);
 	for (let index = 0; index < 25; index++) {
@@ -243,7 +243,7 @@ test("query results page by cursor without loading the whole match set", async (
 			updatedAt: Date.now() - index,
 		});
 	}
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	await page.keyboard.press("ControlOrMeta+k");
 	await page.getByTestId("deep-search-input").fill("Batch session");
 	await expect(page.getByTestId("deep-search-result")).toHaveCount(20);

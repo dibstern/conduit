@@ -166,7 +166,7 @@ const makeDaemonRouterLayer = (
 	staticDir: string,
 	options: {
 		readonly projects: ReadonlyArray<readonly [string, ProjectState]>;
-		readonly relaySnapshots?: ReadonlyMap<string, OpenedProjectStatus>;
+		readonly projectSnapshots?: ReadonlyMap<string, OpenedProjectStatus>;
 		readonly persistedSessionCounts?: ReadonlyMap<string, number>;
 		readonly caCertDer?: Buffer;
 		readonly pushManager?: {
@@ -210,7 +210,7 @@ const makeDaemonRouterLayer = (
 				open: () =>
 					Effect.die("daemon project listing must not start projects"),
 				opened: (slug: string) => {
-					const status = options.relaySnapshots?.get(slug);
+					const status = options.projectSnapshots?.get(slug);
 					return Effect.succeed(
 						status ? Option.some(openedWithStatus(status)) : Option.none(),
 					);
@@ -332,7 +332,7 @@ describe("makeDaemonHttpRouterLive", () => {
 							},
 						],
 					],
-					relaySnapshots: new Map([
+					projectSnapshots: new Map([
 						[
 							"alpha",
 							{

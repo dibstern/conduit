@@ -137,12 +137,12 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 			"opencode",
 		);
 		await browser.view(sessionId);
-		const relayHealth = async () =>
+		const projectHealth = async () =>
 			(await browser.daemonStatus()).projects.find(
 				({ slug }) => slug === "process-test",
 			)?.sse;
 		await vi.waitFor(async () => {
-			expect((await relayHealth())?.connected).toBe(true);
+			expect((await projectHealth())?.connected).toBe(true);
 		});
 		const cursor = browser.frames.length;
 		const lostAt = Date.now();
@@ -151,11 +151,11 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		// Main emits no message during a quiet managed outage, so SSEStreamLive
 		// keeps its last delivered connected=true health even after transport EOF.
 		await vi.waitFor(
-			async () => expect((await relayHealth())?.connected).toBe(false),
+			async () => expect((await projectHealth())?.connected).toBe(false),
 			{ timeout: 3_000, interval: 25 },
 		);
 		evidence["disconnectedLatencyMs"] = Date.now() - lostAt;
-		evidence["relayHealth"] = await relayHealth();
+		evidence["projectHealth"] = await projectHealth();
 		await vi.waitFor(
 			() => {
 				expect(
@@ -180,7 +180,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		expect((await browser.instanceStatus(instanceId)).instance?.status).toBe(
 			"healthy",
 		);
-		expect((await relayHealth())?.connected).toBe(false);
+		expect((await projectHealth())?.connected).toBe(false);
 	}, 120_000);
 
 	it("clears a retry-only shell indicator on managed stop while its persisted status stays idle", async () => {

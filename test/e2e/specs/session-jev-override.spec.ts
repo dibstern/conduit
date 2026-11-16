@@ -3,14 +3,14 @@ import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/m
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
 for (const enabled of [true, false]) {
 	test(`Jev override follows the session DTO with global ${enabled ? "on" : "off"}`, async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
 		const sessionId = "sess-jev-override";
 		const start = Date.now() - 60_000;
@@ -80,7 +80,7 @@ for (const enabled of [true, false]) {
 				},
 			},
 		});
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: [
 				{
 					type: "mock_transcript_snapshot",
@@ -92,7 +92,7 @@ for (const enabled of [true, false]) {
 			],
 			responses: new Map(),
 		});
-		await page.goto(new URL(`/s/${sessionId}`, relayUrl).href);
+		await page.goto(new URL(`/s/${sessionId}`, appUrl).href);
 		const turn = page.locator(".turn-activity");
 		await expect(turn).toHaveCount(1);
 		const card = page.getByTestId("surfacing-card");
@@ -192,7 +192,7 @@ for (const key of [
 ] as const) {
 	test(`Jev override is unavailable for ${key.source === "none" ? "missing" : "rejected"} key`, async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await mockWsRpc(page, {
 			stubs: {
@@ -205,7 +205,7 @@ for (const key of [
 				GetCategorySet: () => DEFAULT_CATEGORY_SET,
 			},
 		});
-		await page.goto(relayUrl);
+		await page.goto(appUrl);
 		await page.getByTestId("session-bar-overflow").click();
 		await expect(page.getByTestId("session-ctx-jev")).toHaveCount(0);
 	});

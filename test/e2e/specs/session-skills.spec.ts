@@ -47,12 +47,12 @@ test.describe("Session skills chip", () => {
 
 	test("counts typed and agent-loaded skills and jumps to the Skill step", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}, testInfo) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.sendMessage("/release-notes");
 		await expect(chat.userMessages.locator(".skill-pill")).toHaveText(
 			"/release-notes",

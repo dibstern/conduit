@@ -152,7 +152,7 @@ const start = async (scenario: string) => {
 	const register = (slug: string) =>
 		daemon.runPromise(addWithoutOpening(project(slug), { silent: true }));
 	/** Open the project, as a tab or a folder change does; `stop` closes it. */
-	const relay = async (slug: string): Promise<Opened> => ({
+	const daemonProject = async (slug: string): Promise<Opened> => ({
 		slug,
 		context: await daemon.runPromise(
 			Effect.flatMap(ProjectServices, (projects) => projects.open(slug)),
@@ -239,7 +239,7 @@ const start = async (scenario: string) => {
 		configDir,
 		folder: (slug: string) => project(slug).folders[0],
 		register,
-		relay,
+		daemonProject,
 		stop,
 		run,
 		snapshot,
@@ -256,12 +256,12 @@ describe("daemon-owned session manager state", () => {
 		const daemon = await start("rebuild-keeps-state");
 		await daemon.register("alpha");
 		await daemon.register("beta");
-		const alpha = await daemon.relay("alpha");
-		const beta = await daemon.relay("beta");
+		const alpha = await daemon.daemonProject("alpha");
+		const beta = await daemon.daemonProject("beta");
 		await daemon.seed(alpha, 7);
 		await daemon.seed(beta, 3);
 		await daemon.stop(alpha);
-		const rebuilt = await daemon.relay("alpha");
+		const rebuilt = await daemon.daemonProject("alpha");
 		const observed = {
 			alphaAfterRebuild: await daemon.snapshot(rebuilt),
 			beta: await daemon.snapshot(beta),
@@ -284,7 +284,7 @@ describe("daemon-owned session manager state", () => {
 	it("drops a project's manager state when the project is removed", async () => {
 		const daemon = await start("remove-drops-state");
 		await daemon.register("alpha");
-		const alpha = await daemon.relay("alpha");
+		const alpha = await daemon.daemonProject("alpha");
 		await daemon.seed(alpha, 7);
 		await daemon.stop(alpha);
 		await daemon.daemon.runPromise(
@@ -292,7 +292,7 @@ describe("daemon-owned session manager state", () => {
 				owners.close({ kind: "project", projectId: "alpha" }, "remove"),
 			),
 		);
-		const readded = await daemon.relay("alpha");
+		const readded = await daemon.daemonProject("alpha");
 		const observed = { alphaAfterRemove: await daemon.snapshot(readded) };
 		evidence.observed = observed;
 		expect(observed).toEqual({
@@ -303,7 +303,7 @@ describe("daemon-owned session manager state", () => {
 	it("runs one delete when two relays of a project delete the same session", async () => {
 		const daemon = await start("one-delete-across-relays");
 		await daemon.register("alpha");
-		const first = await daemon.relay("alpha");
+		const first = await daemon.daemonProject("alpha");
 		await daemon.run(
 			first,
 			Effect.flatMap(makeCommitAndSignal, (commit) =>
@@ -316,7 +316,7 @@ describe("daemon-owned session manager state", () => {
 				]),
 			),
 		);
-		const second = await daemon.relay("alpha");
+		const second = await daemon.daemonProject("alpha");
 		const remove = (target: Opened) =>
 			daemon.run(
 				target,
@@ -334,7 +334,7 @@ describe("daemon-owned session manager state", () => {
 	it("keeps a deleted session's late activity and parent edge out of the manager state", async () => {
 		const daemon = await start("delete-fences-late-writes");
 		await daemon.register("alpha");
-		const alpha = await daemon.relay("alpha");
+		const alpha = await daemon.daemonProject("alpha");
 		await daemon.sessions(alpha, { id: "root" }, { id: "late" });
 		await daemon.manager(alpha, (service) =>
 			service.recordMessageActivity("late", 1_000),
@@ -360,7 +360,7 @@ describe("daemon-owned session manager state", () => {
 	it("closes a deleted session's scope only after the delete commits and its provider cleanup ran", async () => {
 		const daemon = await start("delete-closes-after-cleanup");
 		await daemon.register("alpha");
-		const alpha = await daemon.relay("alpha");
+		const alpha = await daemon.daemonProject("alpha");
 		await daemon.sessions(alpha, { id: "ending" });
 		// Provider cleanup for a Claude session removes its runner send journal.
 		const sends = join(
@@ -407,8 +407,8 @@ describe("daemon-owned session manager state", () => {
 		const daemon = await start("hold-fails-closed");
 		await daemon.register("alpha");
 		await daemon.register("beta");
-		const alpha = await daemon.relay("alpha");
-		await daemon.sessions(await daemon.relay("beta"), { id: "stray" });
+		const alpha = await daemon.daemonProject("alpha");
+		await daemon.sessions(await daemon.daemonProject("beta"), { id: "stray" });
 		// beta leaves the registry (its owner scope stays), so its session's scope cannot open.
 		await daemon.daemon.runPromise(
 			Effect.flatMap(ProjectRegistryTag, (registry) =>
@@ -437,7 +437,7 @@ describe("daemon-owned session manager state", () => {
 	it("closes every session a delete removes and none a declined delete keeps", async () => {
 		const daemon = await start("delete-closes-lineage");
 		await daemon.register("alpha");
-		const alpha = await daemon.relay("alpha");
+		const alpha = await daemon.daemonProject("alpha");
 		await daemon.sessions(
 			alpha,
 			{ id: "root" },
@@ -474,8 +474,8 @@ describe("daemon-owned session manager state", () => {
 		const daemon = await start("one-daemon-manager");
 		await daemon.register("alpha");
 		await daemon.register("beta");
-		const alpha = await daemon.relay("alpha");
-		const beta = await daemon.relay("beta");
+		const alpha = await daemon.daemonProject("alpha");
+		const beta = await daemon.daemonProject("beta");
 		await daemon.sessions(alpha, { id: "a1" });
 		await daemon.sessions(beta, { id: "b1" });
 		const owned = await daemon.daemon.runPromise(SessionManagerServiceTag);
@@ -501,7 +501,7 @@ describe("daemon-owned session manager state", () => {
 			),
 		);
 		await daemon.stop(alpha);
-		const rebuilt = await daemon.relay("alpha");
+		const rebuilt = await daemon.daemonProject("alpha");
 		const observed = {
 			sameInstance,
 			listed,

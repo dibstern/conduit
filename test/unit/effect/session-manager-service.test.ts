@@ -272,7 +272,7 @@ function makeNamedOpenCodeDaemonConfig(): DaemonConfig {
 	};
 }
 
-function makeRelayConfig(configDir: string): ProjectServicesConfig {
+function makeProjectServicesConfig(configDir: string): ProjectServicesConfig {
 	return {
 		projectDir: "/tmp/project",
 		slug: "project",
@@ -1286,7 +1286,7 @@ describe("SessionManagerService", () => {
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
 					Layer.succeed(LoggerTag)(makeMockLogger()),
-					Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
+					Layer.succeed(ConfigTag)(makeProjectServicesConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
@@ -1522,7 +1522,7 @@ describe("SessionManagerService", () => {
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
 					Layer.succeed(LoggerTag)(logger),
-					Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
+					Layer.succeed(ConfigTag)(makeProjectServicesConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
@@ -1837,7 +1837,7 @@ describe("SessionManagerService", () => {
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
 					Layer.succeed(LoggerTag)(makeMockLogger()),
-					Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
+					Layer.succeed(ConfigTag)(makeProjectServicesConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
@@ -1944,7 +1944,7 @@ describe("SessionManagerService", () => {
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
 					Layer.succeed(LoggerTag)(makeMockLogger()),
-					Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
+					Layer.succeed(ConfigTag)(makeProjectServicesConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
@@ -2022,7 +2022,7 @@ describe("SessionManagerService", () => {
 					makeOpenCodeInstancesStub({ opencode: api }),
 				),
 				Layer.succeed(LoggerTag)(makeMockLogger()),
-				Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
+				Layer.succeed(ConfigTag)(makeProjectServicesConfig(tmpDir)),
 				makeSessionManagerStateLive(),
 				DaemonEventBusLive,
 				makePersistenceEffectLayer(dbFile, "test-project"),
@@ -2235,7 +2235,7 @@ describe("SessionManagerService", () => {
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
 					Layer.succeed(LoggerTag)(makeMockLogger()),
-					Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
+					Layer.succeed(ConfigTag)(makeProjectServicesConfig(tmpDir)),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
 					persistenceLayer,
@@ -2322,7 +2322,7 @@ describe("SessionManagerService", () => {
 							makeOpenCodeInstancesStub({ opencode: api }),
 						),
 						Layer.succeed(LoggerTag)(makeMockLogger()),
-						Layer.succeed(ConfigTag)(makeRelayConfig(tmpDir)),
+						Layer.succeed(ConfigTag)(makeProjectServicesConfig(tmpDir)),
 						makeSessionManagerStateLive(),
 						DaemonEventBusLive,
 						makePersistenceEffectLayer(dbFile, "test-project"),

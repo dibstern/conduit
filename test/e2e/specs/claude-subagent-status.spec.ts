@@ -67,11 +67,11 @@ test.describe("Claude subagent child status", () => {
 
 	const startHeldSubagent = async (
 		page: import("@playwright/test").Page,
-		relayUrl: string,
+		appUrl: string,
 		dbPath: string,
 	) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.sendMessage("Ask a subagent to summarise package.json");
 		await expect(page).toHaveURL(/\/s\/[^/?]+/);
 		const parentId = new URL(page.url()).pathname.split("/").at(-1);
@@ -85,14 +85,14 @@ test.describe("Claude subagent child status", () => {
 
 	test("is busy while the Task runs and idle once it completes", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}, testInfo) => {
 		test.setTimeout(90_000);
 		const replayer = harness.claudeReplayer;
 		if (!replayer) throw new Error("Claude replay lane is not wired");
 		const db = harness.eventsDbPath;
-		const parentId = await startHeldSubagent(page, relayUrl, db);
+		const parentId = await startHeldSubagent(page, appUrl, db);
 		const whileRunning = childStatuses(db, parentId);
 
 		replayer.release();
@@ -115,12 +115,12 @@ test.describe("Claude subagent child status", () => {
 
 	test("settles to idle when the parent turn is interrupted", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}, testInfo) => {
 		test.setTimeout(90_000);
 		const db = harness.eventsDbPath;
-		const parentId = await startHeldSubagent(page, relayUrl, db);
+		const parentId = await startHeldSubagent(page, appUrl, db);
 		const whileRunning = childStatuses(db, parentId);
 
 		// Stop ignores clicks for 1.5s after a send from idle (double-tap guard).
@@ -158,13 +158,13 @@ test.describe("Claude subagent child status on a failed parent turn", () => {
 
 	test("settles to idle when the parent turn errors mid-Task", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}, testInfo) => {
 		test.setTimeout(90_000);
 		const db = harness.eventsDbPath;
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.sendMessage("Ask a subagent to summarise package.json");
 		await expect(page).toHaveURL(/\/s\/[^/?]+/);
 		const parentId = new URL(page.url()).pathname.split("/").at(-1);

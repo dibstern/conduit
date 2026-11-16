@@ -11,7 +11,7 @@ import type { GetModelsResponse } from "../../../src/lib/contracts/ws-rpc.js";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
 type Page = import("@playwright/test").Page;
 
@@ -122,7 +122,7 @@ const unboundInit: MockMessage[] = [
 ];
 
 interface PermissionModeHarness {
-	readonly relay: WsMockControl;
+	readonly project: WsMockControl;
 	readonly rpc: RpcMockControl;
 	/** Server-side mode store (sessionId → mode), like OverridesState. */
 	readonly serverModes: Map<
@@ -139,7 +139,7 @@ async function setup(
 		string,
 		NonNullable<GetModelsResponse["permissionMode"]>
 	>();
-	const relay = await mockRelayWebSocket(page, {
+	const project = await mockDaemonWebSocket(page, {
 		initMessages: [
 			...initMessages,
 			{
@@ -224,9 +224,9 @@ async function setup(
 			(message) => message.type === "model_info",
 		);
 		if (modelInfo)
-			relay.sendMessage({ ...modelInfo, sessionId: "sess-pm-001" });
+			project.sendMessage({ ...modelInfo, sessionId: "sess-pm-001" });
 	}
-	return { relay, rpc, serverModes };
+	return { project, rpc, serverModes };
 }
 
 const pill = (page: Page) =>

@@ -1,8 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({
@@ -13,7 +13,7 @@ test.use({
 
 test("browse paging keeps older priorities visible and promotes a live pin without refetching", async ({
 	page,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	const now = Date.now();
 	const row = (id: string, updatedAt: number) => ({
@@ -72,7 +72,7 @@ test("browse paging keeps older priorities visible and promotes a live pin witho
 		...serverStatus,
 		sessionsRevision: 0,
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -89,7 +89,7 @@ test("browse paging keeps older priorities visible and promotes a live pin witho
 		],
 		responses: new Map(),
 	});
-	await page.goto(relayUrl);
+	await page.goto(appUrl);
 	for (const priority of priorities)
 		await expect(
 			page.locator(`#session-list [data-session-id="${priority.id}"]`),
@@ -158,9 +158,9 @@ test("browse paging keeps older priorities visible and promotes a live pin witho
 
 test("status filter and grouping survive reload and follow browser history", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
 	await expect(rows.first()).toHaveClass(/(?:^|\s)active(?:\s|$)/);

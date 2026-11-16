@@ -23,9 +23,9 @@ async function openMoreActions(page: import("@playwright/test").Page) {
 }
 
 test.describe("Debug Panel — URL Activation", () => {
-	test("?feats=debug activates the debug panel", async ({ page, relayUrl }) => {
+	test("?feats=debug activates the debug panel", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(`${relayUrl}?feats=debug`);
+		await app.goto(`${appUrl}?feats=debug`);
 
 		// Debug panel should be visible
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible({ timeout: 5_000 });
@@ -38,9 +38,9 @@ test.describe("Debug Panel — URL Activation", () => {
 		await expect(page.locator(DEBUG_BTN)).toBeVisible();
 	});
 
-	test("debug flag persists to localStorage", async ({ page, relayUrl }) => {
+	test("debug flag persists to localStorage", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(`${relayUrl}?feats=debug`);
+		await app.goto(`${appUrl}?feats=debug`);
 
 		// Wait for panel to confirm initialization completed
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible({ timeout: 5_000 });
@@ -56,9 +56,9 @@ test.describe("Debug Panel — URL Activation", () => {
 });
 
 test.describe("Debug Panel — Keyboard Shortcut", () => {
-	test("Ctrl+Shift+D toggles the debug feature", async ({ page, relayUrl }) => {
+	test("Ctrl+Shift+D toggles the debug feature", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Panel should not be visible initially
 		await expect(page.locator(DEBUG_PANEL)).not.toBeAttached();
@@ -90,11 +90,11 @@ test.describe("Debug Panel — Keyboard Shortcut", () => {
 test.describe("Debug Panel — Settings Advanced", () => {
 	test("phone settings can reveal the debug panel from the session list", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
 		const app = new AppPage(page);
-		await app.goto(`${relayUrl}?feats=debug`);
+		await app.goto(`${appUrl}?feats=debug`);
 		await page.locator(CLOSE_BTN).click();
 		await app.sessionBarBack.click();
 		await expect(page.locator("#session-list")).toBeVisible();
@@ -111,9 +111,9 @@ test.describe("Debug Panel — Settings Advanced", () => {
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible();
 	});
 
-	test("Settings Advanced toggles the feature", async ({ page, relayUrl }) => {
+	test("Settings Advanced toggles the feature", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Open settings
 		await openMoreActions(page);
@@ -143,10 +143,10 @@ test.describe("Debug Panel — Settings Advanced", () => {
 
 	test("Settings toggle reflects URL-activated state", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(`${relayUrl}?feats=debug`);
+		await app.goto(`${appUrl}?feats=debug`);
 
 		// Wait for panel to confirm feature is active
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible({ timeout: 5_000 });
@@ -166,9 +166,9 @@ test.describe("Debug Panel — Settings Advanced", () => {
 });
 
 test.describe("Debug Panel — Desktop Overflow", () => {
-	test("Debug panel action toggles visibility", async ({ page, relayUrl }) => {
+	test("Debug panel action toggles visibility", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(`${relayUrl}?feats=debug`);
+		await app.goto(`${appUrl}?feats=debug`);
 
 		// Panel starts visible (auto-shown on activation)
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible({ timeout: 5_000 });
@@ -197,9 +197,9 @@ test.describe("Debug Panel — Desktop Overflow", () => {
 });
 
 test.describe("Debug Panel — Panel Content", () => {
-	test("panel shows status and event log", async ({ page, relayUrl }) => {
+	test("panel shows status and event log", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(`${relayUrl}?feats=debug`);
+		await app.goto(`${appUrl}?feats=debug`);
 
 		const panel = page.locator(DEBUG_PANEL);
 		await expect(panel).toBeVisible({ timeout: 5_000 });
@@ -222,9 +222,9 @@ test.describe("Debug Panel — Panel Content", () => {
 		expect(hasNoEvents).toBe(false);
 	});
 
-	test("clear button resets the event log", async ({ page, relayUrl }) => {
+	test("clear button resets the event log", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(`${relayUrl}?feats=debug`);
+		await app.goto(`${appUrl}?feats=debug`);
 
 		const panel = page.locator(DEBUG_PANEL);
 		await expect(panel).toBeVisible({ timeout: 5_000 });
@@ -242,10 +242,10 @@ test.describe("Debug Panel — Panel Content", () => {
 
 	test("msgs:all toggle reveals additional messages", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(`${relayUrl}?feats=debug`);
+		await app.goto(`${appUrl}?feats=debug`);
 
 		const panel = page.locator(DEBUG_PANEL);
 		await expect(panel).toBeVisible({ timeout: 5_000 });
@@ -310,10 +310,10 @@ test.describe("Debug Panel — Panel Content", () => {
 test.describe("Debug Panel — Console API", () => {
 	test("window.__wsDebug() returns a valid snapshot", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// __wsDebug is always registered, even without the debug flag
 		const snapshot = await page.evaluate(() => {
@@ -332,10 +332,10 @@ test.describe("Debug Panel — Console API", () => {
 
 	test("snapshot contains connection events after connect", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Wait for connection to establish
 		await app.waitForConnected();

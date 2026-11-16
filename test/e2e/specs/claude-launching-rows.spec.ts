@@ -20,7 +20,7 @@ import { writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { Page, TestInfo } from "@playwright/test";
 import { expect, test } from "../helpers/process-harness-fixture.js";
-import { gotoRelay } from "../helpers/replay-fixture.js";
+import { gotoApp } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -141,14 +141,14 @@ test.describe("Claude launching rows", () => {
 		}, testInfo) => {
 			test.setTimeout(120_000);
 			const sessionId = await (await harness.connect()).createSession();
-			const relayUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
+			const appUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
 			const replayer = harness.claudeReplayer;
 			if (!replayer) throw new Error("no Claude replayer");
 			const steps = recorder(page, testInfo);
 			try {
-				await app.goto(relayUrl);
+				await app.goto(appUrl);
 				await app.sendMessage("Launch the background work");
 				await expect
 					.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
@@ -241,10 +241,7 @@ test.describe("Claude launching rows", () => {
 				await harness.terminate();
 				await harness.restart();
 				// The restarted daemon listens on a new port.
-				await gotoRelay(
-					page,
-					`${harness.baseUrl}/s/${sessionId}?p=process-test`,
-				);
+				await gotoApp(page, `${harness.baseUrl}/s/${sessionId}?p=process-test`);
 				await app.sendMessage("Reply with only: ok, still here.");
 				await expect
 					.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
@@ -282,7 +279,7 @@ test.describe("Claude launching rows", () => {
 		}, testInfo) => {
 			test.setTimeout(120_000);
 			const sessionId = await (await harness.connect()).createSession();
-			const relayUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
+			const appUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
 			const replayer = harness.claudeReplayer;
@@ -305,7 +302,7 @@ test.describe("Claude launching rows", () => {
 				}
 			};
 			try {
-				await app.goto(relayUrl);
+				await app.goto(appUrl);
 				await app.sendMessage("Launch the background work");
 				await expect
 					.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
@@ -332,10 +329,7 @@ test.describe("Claude launching rows", () => {
 				await harness.terminate();
 				await harness.restart();
 				// The restarted daemon listens on a new port.
-				await gotoRelay(
-					page,
-					`${harness.baseUrl}/s/${sessionId}?p=process-test`,
-				);
+				await gotoApp(page, `${harness.baseUrl}/s/${sessionId}?p=process-test`);
 				await app.sendMessage("Reply with only: ok, still here.");
 				await expect
 					.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
@@ -403,14 +397,14 @@ test.describe("Claude launching rows", () => {
 		}, testInfo) => {
 			test.setTimeout(120_000);
 			const sessionId = await (await harness.connect()).createSession();
-			const relayUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
+			const appUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
 			const replayer = harness.claudeReplayer;
 			if (!replayer) throw new Error("no Claude replayer");
 			const steps = recorder(page, testInfo);
 			try {
-				await app.goto(relayUrl);
+				await app.goto(appUrl);
 				await app.sendMessage("Run agent F in the foreground");
 				await replayer.held();
 				// The live turn starts collapsed; its steps render once it is open.

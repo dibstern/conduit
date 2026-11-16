@@ -7,8 +7,8 @@
 //   test.describe("My Tests", () => {
 //     test.use({ recording: "chat-simple" });
 //
-//     test("does something", async ({ page, relayUrl }) => {
-//       await page.goto(relayUrl);
+//     test("does something", async ({ page, appUrl }) => {
+//       await page.goto(appUrl);
 //       // ...
 //     });
 //   });
@@ -36,7 +36,7 @@ interface ReplayOptions {
 /** Fixtures provided to tests */
 interface ReplayFixtures {
 	/** The full URL to navigate to (relay base URL + project path) */
-	relayUrl: string;
+	appUrl: string;
 	/** The mock OpenCode server (for assertions or mid-test inspection) */
 	mockServer: MockOpenCodeServer;
 	/** The full replay harness (for advanced use) */
@@ -82,8 +82,8 @@ export const test = base.extend<ReplayFixtures & ReplayOptions>({
 		}
 	},
 
-	relayUrl: async ({ harness }, use) => {
-		await use(harness.relayBaseUrl + harness.projectUrl);
+	appUrl: async ({ harness }, use) => {
+		await use(harness.appBaseUrl + harness.projectUrl);
 	},
 
 	mockServer: async ({ harness }, use) => {
@@ -92,7 +92,7 @@ export const test = base.extend<ReplayFixtures & ReplayOptions>({
 
 	// Override Playwright's baseURL to point at the relay
 	baseURL: async ({ harness }, use) => {
-		await use(harness.relayBaseUrl);
+		await use(harness.appBaseUrl);
 	},
 });
 
@@ -102,8 +102,8 @@ export { expect } from "@playwright/test";
  * Navigate to the relay project URL and wait for the WebSocket to connect.
  * Convenience wrapper matching the old `app.goto(PROJECT_URL)` pattern.
  */
-export async function gotoRelay(page: Page, relayUrl: string): Promise<void> {
-	await page.goto(relayUrl);
+export async function gotoApp(page: Page, appUrl: string): Promise<void> {
+	await page.goto(appUrl);
 	// Wait for Svelte SPA to mount — layout appears on initial render.
 	// Without this, the overlay waitFor({ state: 'hidden' }) can pass
 	// immediately because Playwright treats "not attached" as "hidden",

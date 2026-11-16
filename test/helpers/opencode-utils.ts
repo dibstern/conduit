@@ -16,11 +16,11 @@ export async function isOpenCodeRunning(url?: string): Promise<boolean> {
 }
 
 export async function switchModelViaWs(
-	relayPort: number,
+	appPort: number,
 	modelId: string,
 	providerId: string,
 ): Promise<void> {
-	const client = new TestWsClient(`ws://127.0.0.1:${relayPort}/rpc?p=e2e`);
+	const client = new TestWsClient(`ws://127.0.0.1:${appPort}/rpc?p=e2e`);
 	try {
 		await client.waitForOpen();
 		await client.waitForInitialState();

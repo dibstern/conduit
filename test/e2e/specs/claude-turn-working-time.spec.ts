@@ -79,7 +79,7 @@ test.describe("Claude turn working time", () => {
 
 	test("excludes the held wake-up gap and totals the turn's tokens", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}, testInfo) => {
 		const parentId = decodeURIComponent(harness.projectUrl.slice("/s/".length));
@@ -225,7 +225,7 @@ test.describe("Claude turn working time", () => {
 					JSON.stringify({ controls: "words" }),
 				);
 			});
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			const sentAt = performance.now();
 			await app.sendMessage("Launch the background work");
 			await replayer.held();

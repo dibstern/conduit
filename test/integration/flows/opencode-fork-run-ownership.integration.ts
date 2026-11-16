@@ -222,7 +222,7 @@ it.each([
 	const parentId = replay.projectUrl.split("/").at(-1);
 	if (!parentId) throw new Error("Replay source is missing");
 	const client = new TestWsClient(
-		`ws://127.0.0.1:${replay.relayPort}/rpc?p=e2e-replay`,
+		`ws://127.0.0.1:${replay.appPort}/rpc?p=e2e-replay`,
 		parentId,
 	);
 	replayClient = client;

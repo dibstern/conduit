@@ -7,9 +7,9 @@ import { AppPage } from "../page-objects/app.page.js";
 test.use({ recording: "chat-simple" });
 
 test.describe("E2E Smoke Test", () => {
-	test("page loads and connects to relay", async ({ page, relayUrl }) => {
+	test("page loads and connects to relay", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Page title
 		await expect(page).toHaveTitle("Conduit");
@@ -23,7 +23,7 @@ test.describe("E2E Smoke Test", () => {
 
 	test("opens a replay session URL without an error toast", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
 		// The browser marks the session's project itself (82tn.13). Opening the
@@ -48,7 +48,7 @@ test.describe("E2E Smoke Test", () => {
 			});
 		});
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await expect(
 			page.locator(
@@ -74,7 +74,7 @@ test.describe("E2E Smoke Test", () => {
 
 	test("returns an unknown session URL to the session list", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const unknownId = "unknown-session-vik1-34";
 		const receivedFrames: Record<string, unknown>[] = [];
@@ -86,12 +86,12 @@ test.describe("E2E Smoke Test", () => {
 			});
 		});
 		const app = new AppPage(page);
-		await app.goto(new URL(`/s/${unknownId}`, relayUrl).href);
+		await app.goto(new URL(`/s/${unknownId}`, appUrl).href);
 
 		await expect(
 			page.getByText("Session not found. That session no longer exists."),
 		).toBeVisible();
-		await expect(page).toHaveURL(new URL("/", relayUrl).href);
+		await expect(page).toHaveURL(new URL("/", appUrl).href);
 		await expect(page.getByText("Failed to open session")).toHaveCount(0);
 		await expect(
 			page.locator(
@@ -107,9 +107,9 @@ test.describe("E2E Smoke Test", () => {
 		).toEqual([]);
 	});
 
-	test("input area is visible and functional", async ({ page, relayUrl }) => {
+	test("input area is visible and functional", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Textarea is visible and enabled
 		await expect(app.input).toBeVisible();
@@ -126,9 +126,9 @@ test.describe("E2E Smoke Test", () => {
 		await expect(app.sendBtn).toBeEnabled();
 	});
 
-	test("session list is populated on connect", async ({ page, relayUrl }) => {
+	test("session list is populated on connect", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Session list should have at least one session
 		const sessionItems = page.locator("#session-list .session-item");
@@ -137,9 +137,9 @@ test.describe("E2E Smoke Test", () => {
 		expect(count).toBeGreaterThan(0);
 	});
 
-	test("merged bar controls are present", async ({ page, relayUrl }) => {
+	test("merged bar controls are present", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await expect(page.getByTestId("session-bar-title")).toBeVisible();
 		await expect(app.checkout).toBeVisible();

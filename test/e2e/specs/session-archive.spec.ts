@@ -5,7 +5,7 @@ import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
@@ -37,7 +37,7 @@ function browse(
 			Effect.provide(
 				RpcClient.layerProtocolSocket().pipe(
 					Layer.provide(
-						Socket.layerWebSocket(`ws://127.0.0.1:${harness.relayPort}/rpc`),
+						Socket.layerWebSocket(`ws://127.0.0.1:${harness.appPort}/rpc`),
 					),
 					Layer.provide(Socket.layerWebSocketConstructorGlobal),
 					Layer.provide(RpcSerialization.layerJson),
@@ -51,13 +51,13 @@ function browse(
 test("manual archive leaves both sidebars, requires search opt-in and restores on send", async ({
 	page,
 	context,
-	relayUrl,
+	appUrl,
 	harness,
 }, testInfo) => {
 	const id = decodeURIComponent(harness.projectUrl.slice(3));
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	const other = await context.newPage();
-	await gotoRelay(other, relayUrl);
+	await gotoApp(other, appUrl);
 	await expect(row(page, id)).toBeVisible();
 	await expect(row(other, id)).toBeVisible();
 	const title = (
@@ -106,11 +106,11 @@ test("manual archive leaves both sidebars, requires search opt-in and restores o
 
 test("archived sessions are opt-in search results and can be restored in Settings", async ({
 	page,
-	relayUrl,
+	appUrl,
 	harness,
 }, testInfo) => {
 	const id = decodeURIComponent(harness.projectUrl.slice(3));
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	const sidebar = new SidebarPage(page);
 	await expect(row(page, id)).toBeVisible();
 	const title = (
@@ -184,11 +184,11 @@ test("archived sessions are opt-in search results and can be restored in Setting
 
 test("the sweep archives old settled sessions once and leaves restored activity alone", async ({
 	page,
-	relayUrl,
+	appUrl,
 	harness,
 }, testInfo) => {
 	const id = decodeURIComponent(harness.projectUrl.slice(3));
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	await expect(row(page, id)).toBeVisible();
 	const title = (
 		await row(page, id).locator(".session-title-inner").innerText()

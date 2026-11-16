@@ -1,4 +1,4 @@
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 
 test.use({ recording: "chat-simple", screenshot: "off" });
 
@@ -25,9 +25,9 @@ for (const mode of [
 
 		test("option digits select views without changing the draft", async ({
 			page,
-			relayUrl,
+			appUrl,
 		}) => {
-			await gotoRelay(page, relayUrl);
+			await gotoApp(page, appUrl);
 			const input = page.locator("#input");
 			await input.fill("draft stays put");
 			await page.keyboard.press("Alt+2");
@@ -75,9 +75,9 @@ for (const mode of [
 
 		test("settle shortcuts toggle the open session, and the header unpins before it settles", async ({
 			page,
-			relayUrl,
+			appUrl,
 		}, testInfo) => {
-			await gotoRelay(page, relayUrl);
+			await gotoApp(page, appUrl);
 			const sessionId = await page
 				.locator("#session-list .session-item.active")
 				.getAttribute("data-session-id");
@@ -133,9 +133,9 @@ for (const mode of [
 
 		test("transcript commands target the open session while composer letters remain text", async ({
 			page,
-			relayUrl,
+			appUrl,
 		}) => {
-			await gotoRelay(page, relayUrl);
+			await gotoApp(page, appUrl);
 			const messages = page.locator("#messages");
 			await messages.focus();
 			await page.keyboard.press("z");
@@ -169,9 +169,9 @@ for (const mode of [
 
 		test("plain commands still act on the focused list row", async ({
 			page,
-			relayUrl,
+			appUrl,
 		}) => {
-			await gotoRelay(page, new URL("/", relayUrl).toString());
+			await gotoApp(page, new URL("/", appUrl).toString());
 			const firstRow = page.locator("#session-list .session-item").first();
 			await expect(firstRow).toBeVisible();
 			const sessionId = await firstRow.getAttribute("data-session-id");

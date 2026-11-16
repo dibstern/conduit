@@ -13,7 +13,7 @@ import {
 	modelExecutionProviders,
 } from "../fixtures/mockup-state.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ viewport: { width: 390, height: 844 }, isMobile: false });
 
@@ -22,7 +22,7 @@ const mockup = modelExecutionMockups["drifted-model"];
 test("@drift-layout drift indicator never covers the composer controls on mobile", async ({
 	page,
 }) => {
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: mockup.initMessages,
 		responses: new Map(),
 	});

@@ -20,7 +20,7 @@ import { writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { Page, TestInfo } from "@playwright/test";
 import { expect, test } from "../helpers/process-harness-fixture.js";
-import { gotoRelay } from "../helpers/replay-fixture.js";
+import { gotoApp } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -141,7 +141,7 @@ test.describe("Claude running tasks", () => {
 	}, testInfo) => {
 		test.setTimeout(120_000);
 		const sessionId = await (await harness.connect()).createSession();
-		const relayUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
+		const appUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 		const replayer = harness.claudeReplayer;
@@ -160,7 +160,7 @@ test.describe("Claude running tasks", () => {
 			`#session-list [data-session-id="${sessionId}"]`,
 		);
 		try {
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			await app.sendMessage("Launch the background work");
 			await expect
 				.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
@@ -226,7 +226,7 @@ test.describe("Claude running tasks", () => {
 					db.close();
 				}
 			})();
-			await gotoRelay(
+			await gotoApp(
 				page,
 				`${harness.baseUrl}/s/${encodeURIComponent(childId)}?p=process-test`,
 			);
@@ -247,7 +247,7 @@ test.describe("Claude running tasks", () => {
 				)
 				.toBe(2);
 			await steps.record("child-session");
-			await gotoRelay(page, relayUrl);
+			await gotoApp(page, appUrl);
 			await openStepLogs(page);
 			await expect(pill).toHaveText(/^\s*5\s+running\s*$/);
 

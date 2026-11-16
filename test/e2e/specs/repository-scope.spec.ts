@@ -8,7 +8,7 @@ import type {
 } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 const primary = "e2e-replay";
@@ -132,7 +132,7 @@ async function openList(
 			],
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [{ type: "project_list", projects, current: primary }],
 		responses: new Map(),
 	});
@@ -229,7 +229,7 @@ for (const viewport of [
 			page,
 			harness,
 		}) => {
-			const { rpc, sessions } = await openList(page, harness.relayBaseUrl);
+			const { rpc, sessions } = await openList(page, harness.appBaseUrl);
 			await expect(rows(page)).toHaveCount(5);
 			await chooseProject(page, primary);
 			await expect(page.getByTestId("session-scope-chip")).toHaveText(
@@ -269,7 +269,7 @@ for (const viewport of [
 			page,
 			harness,
 		}) => {
-			const { rpc } = await openList(page, harness.relayBaseUrl);
+			const { rpc } = await openList(page, harness.appBaseUrl);
 			await page.getByTestId("session-scope-chip").click();
 			await expect(page.getByRole("menuitemradio")).toHaveCount(4);
 			await expect(
@@ -292,7 +292,7 @@ for (const viewport of [
 		}) => {
 			const { removeScopedProject, sessions } = await openList(
 				page,
-				harness.relayBaseUrl,
+				harness.appBaseUrl,
 				{ scope: secondary },
 			);
 			await expect(rows(page)).toHaveCount(2);
@@ -315,7 +315,7 @@ for (const viewport of [
 			page,
 			harness,
 		}) => {
-			const { rpc } = await openList(page, harness.relayBaseUrl);
+			const { rpc } = await openList(page, harness.appBaseUrl);
 			await chooseProject(page);
 			await expect(rows(page)).toHaveCount(2);
 			const before = listRequests(rpc).length;
@@ -343,7 +343,7 @@ for (const viewport of [
 			page,
 			harness,
 		}) => {
-			const { rpc, sessions } = await openList(page, harness.relayBaseUrl, {
+			const { rpc, sessions } = await openList(page, harness.appBaseUrl, {
 				paged: true,
 			});
 			await chooseProject(page);

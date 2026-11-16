@@ -24,7 +24,7 @@ function rpc<A, E>(
 		Effect.scoped(Effect.flatMap(makeClient, call)).pipe(
 			Effect.provide(RpcClient.layerProtocolSocket()),
 			Effect.provide(
-				Socket.layerWebSocket(`ws://127.0.0.1:${harness.relayPort}/rpc`),
+				Socket.layerWebSocket(`ws://127.0.0.1:${harness.appPort}/rpc`),
 			),
 			Effect.provide(Socket.layerWebSocketConstructorGlobal),
 			Effect.provide(RpcSerialization.layerJson),

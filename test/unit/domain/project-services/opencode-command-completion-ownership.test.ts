@@ -897,11 +897,11 @@ for (const confirmedStop of [false, true]) {
 			'pending', 0, 1, 1)`;
 				yield* sql`INSERT INTO command_receipts (command_id, session_id, project_key, status, created_at, updated_at)
 			VALUES ('a', 's', 'test-project', 'side_effect_requested', 1, 1)`;
-				const relayTimeout = vi.fn(() => Effect.void);
+				const projectTimeout = vi.fn(() => Effect.void);
 				yield* startProcessingTimeout(
 					"s",
 					PROCESSING_TIMEOUT_DURATION,
-					relayTimeout,
+					projectTimeout,
 				);
 				const send = yield* Effect.forkChild(reactor.runCommand("a"));
 				yield* Effect.promise(() =>
@@ -960,7 +960,7 @@ for (const confirmedStop of [false, true]) {
 					yield* sql`SELECT status, started_at FROM provider_runs`,
 				).toEqual([{ status: "pending", started_at: null }]);
 				yield* TestClock.adjust("121 seconds");
-				expect(relayTimeout).not.toHaveBeenCalled();
+				expect(projectTimeout).not.toHaveBeenCalled();
 				expect(client.session.abort).not.toHaveBeenCalled();
 				expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
 					{ status: "pending" },

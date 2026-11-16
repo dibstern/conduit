@@ -1,41 +1,41 @@
 /*
  * 82tn.16 (S5, slice 4): each project's ingestion side (pending interactions,
  * alert ledger, provider runtime ingestion, OpenCode ingress, translator) is
- * built once per project in its owner scope, not by each relay. Failure modes
+ * built once per project in its owner scope, not by each generation. Failure modes
  * (audit.md rows 79-87), written before the code:
- * 79/80 a project no relay has opened, or added while running, has no
+ * 79/80 a project nothing has opened, or added while running, has no
  *    ingestion to land a provider event in;
  * 82 after a restart a cold project keeps the last process's OpenCode history
- *    proof, because only a relay start cleared it;
+ *    proof, because only a project start cleared it;
  * 83 two projects sharing a folder share a translator's sessionless parts or
  *    write each other's rows;
- * 86 a relay replaced while registered forgets a pending permission;
+ * 86 a project reopened while registered forgets a pending permission;
  * 87 a viewed session's turn end raises a cross-session alert, because the
- *    check read the relay's own client list.
+ *    check read the deleted relay's own client list.
  * Rows 81 (removal), 84 (reconnect) and 85 (store isolation) are covered by
  * project-services.test.ts, daemon-session-manager.test.ts and row 83 here.
  *
  * Slice 5 (rows 88-97): project settings and session titles are built once
  * per project too:
- * 88/89 a project no relay has opened, or added while running, has none;
- * 90 a relay replaced while registered drops a title in flight and the
- *    discovered model catalogs with the old relay;
+ * 88/89 a project nothing has opened, or added while running, has none;
+ * 90 a project reopened while registered drops a title in flight and the
+ *    discovered model catalogs with the old generation;
  * 91 two projects sharing a folder share settings or titles.
  * Rows 92-95 are covered by project-services.test.ts (removal, reconnect) and
  * row 91 here (store isolation). The turn service and inbox stay with the
- * relay: they hold the project's folders from when they were built.
+ * generation: they hold the project's folders from when they were built.
  *
  * Slice 7 (rows 99-101): tool details, directory listing and agent liveness
  * are built once per project:
- * 99 a project no relay has opened, or added while running, has none;
- * 100 a relay replaced while registered builds its own;
+ * 99 a project nothing has opened, or added while running, has none;
+ * 100 a project reopened while registered builds its own;
  * 101 two projects sharing a folder share one tool-details reader.
  * Store isolation is row 76 (the reader reads the project's bound store).
  *
  * Lane 16o (rows 103-107): the turn service and inbox are built once per
  * project, and each turn reads the project's folders when it runs:
- * 103 a project no relay has opened, or added while running, has neither;
- * 104 a relay replaced while registered builds its own, so its drain dies
+ * 103 a project nothing has opened, or added while running, has neither;
+ * 104 a project reopened while registered builds its own, so its drain dies
  *    with it;
  * 105 two projects sharing a folder share one inbox;
  * 107 a removed project's turn service is still served.
@@ -232,7 +232,7 @@ const start = (scenario: string) => {
 		running.add(daemon as ManagedRuntime.ManagedRuntime<unknown, unknown>);
 		const register = (slug: string) =>
 			daemon.runPromise(addWithoutOpening(project(slug), { silent: true }));
-		/** Run `use` in the project's daemon-built context; no relay starts. */
+		/** Run `use` in the project's daemon-built context; the project does not open. */
 		const inProject = <A, E, R>(slug: string, use: Effect.Effect<A, E, R>) =>
 			daemon.runPromise(
 				Effect.flatMap(ProjectServices, (projects) =>
@@ -243,7 +243,7 @@ const start = (scenario: string) => {
 				),
 			);
 		/** Open the project, as a tab or a folder change does; `stop` closes it. */
-		const relay = async (slug: string) => {
+		const open = async (slug: string) => {
 			const context = await daemon.runPromise(
 				Effect.flatMap(ProjectServices, (projects) => projects.open(slug)),
 			);
@@ -263,13 +263,13 @@ const start = (scenario: string) => {
 			running.delete(daemon as ManagedRuntime.ManagedRuntime<unknown, unknown>);
 			await daemon.dispose();
 		};
-		return { daemon, register, inProject, relay, sql, stop };
+		return { daemon, register, inProject, open, sql, stop };
 	};
 	return { boot };
 };
 
 describe("82tn.16: each project's ingestion side lives with the project", () => {
-	it("ingests a project's provider events with no relay open", async () => {
+	it("ingests a project's provider events with the project closed", async () => {
 		const daemon = start("cold").boot();
 		await daemon.register("alpha");
 		await daemon.inProject(
@@ -325,10 +325,10 @@ describe("82tn.16: each project's ingestion side lives with the project", () => 
 		});
 	});
 
-	it("keeps a pending permission across a relay replaced while registered", async () => {
-		const daemon = start("relay-replaced").boot();
+	it("keeps a pending permission across a project reopened while registered", async () => {
+		const daemon = start("reopened").boot();
 		await daemon.register("alpha");
-		const first = await daemon.relay("alpha");
+		const first = await daemon.open("alpha");
 		await first.run(
 			Effect.flatMap(PendingInteractionServiceTag, (pending) =>
 				pending.recordPermissionRequest({
@@ -340,25 +340,25 @@ describe("82tn.16: each project's ingestion side lives with the project", () => 
 			),
 		);
 		await first.stop();
-		const second = await daemon.relay("alpha");
+		const second = await daemon.open("alpha");
 		const pending = Effect.flatMap(PendingInteractionServiceTag, (service) =>
 			service
 				.listPendingPermissions()
 				.pipe(Effect.map((rows) => rows.map(({ requestId }) => requestId))),
 		);
 		const observed = {
-			relay: await second.run(pending),
+			reopened: await second.run(pending),
 			project: await daemon.inProject("alpha", pending),
 		};
 		await second.stop();
 		evidence.observed = observed;
-		expect(observed).toEqual({ relay: ["perm-1"], project: ["perm-1"] });
+		expect(observed).toEqual({ reopened: ["perm-1"], project: ["perm-1"] });
 	});
 
 	it("raises no alert for a viewed session's turn end", async () => {
 		const daemon = start("viewed").boot();
 		await daemon.register("alpha");
-		const relay = await daemon.relay("alpha");
+		const opened = await daemon.open("alpha");
 		const alerts = await daemon.daemon.runPromise(
 			Effect.gen(function* () {
 				const subscribed = yield* PubSub.subscribe(yield* AlertsTag);
@@ -366,14 +366,14 @@ describe("82tn.16: each project's ingestion side lives with the project", () => 
 				const activity = yield* SessionActivityTag;
 				yield* activity.view("viewed");
 				yield* Effect.promise(() =>
-					relay.run(Effect.andThen(turn("viewed"), turn("unviewed"))),
+					opened.run(Effect.andThen(turn("viewed"), turn("unviewed"))),
 				);
 				return [
 					...(yield* PubSub.takeUpTo(subscribed, Number.POSITIVE_INFINITY)),
 				].map((alert) => ("sessionId" in alert ? alert.sessionId : alert));
 			}).pipe(Effect.scoped),
 		);
-		await relay.stop();
+		await opened.stop();
 		evidence.observed = { alerts };
 		expect(alerts).toEqual(["unviewed"]);
 	});
@@ -382,13 +382,13 @@ describe("82tn.16: each project's ingestion side lives with the project", () => 
 		const harness = start("restart");
 		const first = harness.boot();
 		await first.register("alpha");
-		const relay = await first.relay("alpha");
-		await relay.run(
+		const opened = await first.open("alpha");
+		await opened.run(
 			Effect.flatMap(ProviderRuntimeIngestionTag, (ingestion) =>
 				ingestion.ingest(created("s1")),
 			),
 		);
-		await relay.stop();
+		await opened.stop();
 		await first.sql(
 			(sql) => sql`UPDATE sessions SET history_complete = 1 WHERE id = 's1'`,
 		);
@@ -413,15 +413,15 @@ const titleParts = Effect.all({
 });
 
 /** The same parts as the opened project's context holds them. */
-const relayParts = <A, R>(
-	relay: {
+const projectParts = <A, R>(
+	opened: {
 		readonly run: <A, E, R>(use: Effect.Effect<A, E, R>) => Promise<A>;
 	},
 	parts: Effect.Effect<A, never, R>,
-) => relay.run(parts);
+) => opened.run(parts);
 
 describe("82tn.16: each project's settings and titles live with the project", () => {
-	it("serves a project's settings and titles with no relay open", async () => {
+	it("serves a project's settings and titles with the project closed", async () => {
 		const daemon = start("titles-cold").boot();
 		await daemon.register("alpha");
 		const parts = await daemon.inProject("alpha", titleParts);
@@ -433,15 +433,15 @@ describe("82tn.16: each project's settings and titles live with the project", ()
 		expect(observed).toEqual({ settings: true, titles: true });
 	});
 
-	it("keeps one settings and title service across a relay replaced while registered", async () => {
-		const daemon = start("titles-relay-replaced").boot();
+	it("keeps one settings and title service across a project reopened while registered", async () => {
+		const daemon = start("titles-reopened").boot();
 		await daemon.register("alpha");
 		const project = await daemon.inProject("alpha", titleParts);
-		const first = await daemon.relay("alpha");
-		const firstParts = await relayParts(first, titleParts);
+		const first = await daemon.open("alpha");
+		const firstParts = await projectParts(first, titleParts);
 		await first.stop();
-		const second = await daemon.relay("alpha");
-		const secondParts = await relayParts(second, titleParts);
+		const second = await daemon.open("alpha");
+		const secondParts = await projectParts(second, titleParts);
 		await second.stop();
 		const same = (parts: typeof project) =>
 			parts.settings === project.settings && parts.titles === project.titles;
@@ -476,7 +476,7 @@ const readerParts = Effect.all({
 });
 
 describe("82tn.16: each project's tool details, directory listing and agent liveness live with the project", () => {
-	it("serves them with no relay open", async () => {
+	it("serves them with the project closed", async () => {
 		const daemon = start("readers-cold").boot();
 		await daemon.register("alpha");
 		const observed = await daemon.inProject(
@@ -493,21 +493,21 @@ describe("82tn.16: each project's tool details, directory listing and agent live
 		expect(observed).toEqual({ details: [], live: false });
 	});
 
-	it("keeps one of each across a relay replaced while registered", async () => {
-		const daemon = start("readers-relay-replaced").boot();
+	it("keeps one of each across a project reopened while registered", async () => {
+		const daemon = start("readers-reopened").boot();
 		await daemon.register("alpha");
 		const project = await daemon.inProject("alpha", readerParts);
-		const inRelay = async () => {
-			const relay = await daemon.relay("alpha");
-			const parts = await relayParts(relay, readerParts);
-			await relay.stop();
+		const inOpened = async () => {
+			const opened = await daemon.open("alpha");
+			const parts = await projectParts(opened, readerParts);
+			await opened.stop();
 			return (
 				parts.tools === project.tools &&
 				parts.directories === project.directories &&
 				parts.liveness === project.liveness
 			);
 		};
-		const observed = { first: await inRelay(), second: await inRelay() };
+		const observed = { first: await inOpened(), second: await inOpened() };
 		evidence.observed = observed;
 		expect(observed).toEqual({ first: true, second: true });
 	});
@@ -531,7 +531,7 @@ const turnParts = Effect.all({
 });
 
 describe("82tn.16: each project's turns and inbox live with the project", () => {
-	it("serves a project's turns and inbox with no relay open", async () => {
+	it("serves a project's turns and inbox with the project closed", async () => {
 		const daemon = start("turns-cold").boot();
 		await daemon.register("alpha");
 		const observed = await daemon.inProject(
@@ -548,17 +548,17 @@ describe("82tn.16: each project's turns and inbox live with the project", () => 
 		});
 	});
 
-	it("keeps one turn service and inbox across a relay replaced while registered", async () => {
-		const daemon = start("turns-relay-replaced").boot();
+	it("keeps one turn service and inbox across a project reopened while registered", async () => {
+		const daemon = start("turns-reopened").boot();
 		await daemon.register("alpha");
 		const project = await daemon.inProject("alpha", turnParts);
-		const inRelay = async () => {
-			const relay = await daemon.relay("alpha");
-			const parts = await relayParts(relay, turnParts);
-			await relay.stop();
+		const inOpened = async () => {
+			const opened = await daemon.open("alpha");
+			const parts = await projectParts(opened, turnParts);
+			await opened.stop();
 			return parts.turns === project.turns && parts.inbox === project.inbox;
 		};
-		const observed = { first: await inRelay(), second: await inRelay() };
+		const observed = { first: await inOpened(), second: await inOpened() };
 		evidence.observed = observed;
 		expect(observed).toEqual({ first: true, second: true });
 	});
@@ -596,7 +596,7 @@ describe("82tn.16: each project's turns and inbox live with the project", () => 
 });
 
 describe("82tn.16: each project's terminals live with the project", () => {
-	it("serves a project's terminals with no relay open", async () => {
+	it("serves a project's terminals with the project closed", async () => {
 		const daemon = start("terminals-cold").boot();
 		await daemon.register("alpha");
 		const snapshot = await daemon.inProject(
@@ -607,17 +607,17 @@ describe("82tn.16: each project's terminals live with the project", () => {
 		expect(evidence.observed).toEqual({ snapshot: [] });
 	});
 
-	it("keeps one terminal service across a relay replaced while registered", async () => {
-		const daemon = start("terminals-relay-replaced").boot();
+	it("keeps one terminal service across a project reopened while registered", async () => {
+		const daemon = start("terminals-reopened").boot();
 		await daemon.register("alpha");
 		const project = await daemon.inProject("alpha", OpenCodeTerminalServiceTag);
-		const inRelay = async () => {
-			const relay = await daemon.relay("alpha");
-			const terminal = await relayParts(relay, OpenCodeTerminalServiceTag);
-			await relay.stop();
+		const inOpened = async () => {
+			const opened = await daemon.open("alpha");
+			const terminal = await projectParts(opened, OpenCodeTerminalServiceTag);
+			await opened.stop();
 			return terminal === project;
 		};
-		const observed = { first: await inRelay(), second: await inRelay() };
+		const observed = { first: await inOpened(), second: await inOpened() };
 		evidence.observed = observed;
 		expect(observed).toEqual({ first: true, second: true });
 	});
@@ -645,18 +645,18 @@ describe("82tn.16: each project's terminals live with the project", () => {
 });
 
 describe("82tn.16: one send limiter for the daemon", () => {
-	it("keeps a tab's send window across a relay replaced while registered", async () => {
-		const daemon = start("send-limit-relay-replaced").boot();
+	it("keeps a tab's send window across a project reopened while registered", async () => {
+		const daemon = start("send-limit-reopened").boot();
 		await daemon.register("alpha");
 		const send = Effect.flatMap(RateLimiterTag, (limiter) =>
 			Effect.map(limiter.checkLimit("tab-1"), ({ allowed }) => allowed),
 		);
 		const sendsIn = async (count: number) => {
-			const relay = await daemon.relay("alpha");
+			const opened = await daemon.open("alpha");
 			const allowed: boolean[] = [];
 			for (let sent = 0; sent < count; sent++)
-				allowed.push(await relayParts(relay, send));
-			await relay.stop();
+				allowed.push(await projectParts(opened, send));
+			await opened.stop();
 			return allowed;
 		};
 		const observed = { first: await sendsIn(5), second: await sendsIn(1) };
@@ -669,7 +669,7 @@ describe("82tn.16: one send limiter for the daemon", () => {
 });
 
 describe("82tn.16: workspace hint dismissals live with the daemon", () => {
-	it("keeps a dismissal made with no relay open for the relay opened after", async () => {
+	it("keeps a dismissal made with the project closed for the project opened after", async () => {
 		const daemon = start("hint-dismissal-cold").boot();
 		await daemon.register("alpha");
 		await daemon.inProject(
@@ -678,18 +678,18 @@ describe("82tn.16: workspace hint dismissals live with the daemon", () => {
 				dismissals.set("session-1", 3);
 			}),
 		);
-		const relay = await daemon.relay("alpha");
+		const opened = await daemon.open("alpha");
 		const observed = {
-			relaySees: await relayParts(
-				relay,
+			openedSees: await projectParts(
+				opened,
 				Effect.map(SessionWorkspaceHintStateTag, (dismissals) =>
 					dismissals.get("session-1"),
 				),
 			),
 		};
-		await relay.stop();
+		await opened.stop();
 		evidence.observed = observed;
-		expect(observed).toEqual({ relaySees: 3 });
+		expect(observed).toEqual({ openedSees: 3 });
 	});
 });
 
@@ -698,7 +698,7 @@ describe("82tn.16: each project's OpenCode file and catalog readers live with th
 		files: OpenCodeFileServiceTag,
 		settings: OpenCodeSettingsServiceTag,
 	});
-	it("serves them with no relay open, and a replaced relay reads the same ones", async () => {
+	it("serves them with the project closed, and a reopened project reads the same ones", async () => {
 		const daemon = start("opencode-readers").boot();
 		await daemon.register("alpha");
 		const cold = await daemon.inProject("alpha", readers);
@@ -707,21 +707,21 @@ describe("82tn.16: each project's OpenCode file and catalog readers live with th
 			cold.settings.listCatalog({ startIfStopped: false }),
 		);
 		const sameIn = async () => {
-			const relay = await daemon.relay("alpha");
-			const held = await relayParts(relay, readers);
-			await relay.stop();
+			const opened = await daemon.open("alpha");
+			const held = await projectParts(opened, readers);
+			await opened.stop();
 			return held.files === cold.files && held.settings === cold.settings;
 		};
 		const observed = {
 			catalog,
-			firstRelay: await sameIn(),
-			replacedRelay: await sameIn(),
+			firstGeneration: await sameIn(),
+			reopenedGeneration: await sameIn(),
 		};
 		evidence.observed = observed;
 		expect(observed).toEqual({
 			catalog: { commands: [], skills: [] },
-			firstRelay: true,
-			replacedRelay: true,
+			firstGeneration: true,
+			reopenedGeneration: true,
 		});
 	});
 });
@@ -731,31 +731,31 @@ describe("82tn.16: each project's recaps and goal summaries live with the projec
 		recaps: RecapServiceTag,
 		goals: GoalSummaryServiceTag,
 	});
-	it("serves them with no relay open, a replaced relay reads the same ones, and a re-added project gets fresh ones", async () => {
+	it("serves them with the project closed, a reopened project reads the same ones, and a re-added project gets fresh ones", async () => {
 		const daemon = start("recap-goal-summary").boot();
 		await daemon.register("alpha");
 		const cold = await daemon.inProject("alpha", summaries);
 		const sameIn = async () => {
-			const relay = await daemon.relay("alpha");
-			const held = await relayParts(relay, summaries);
-			await relay.stop();
+			const opened = await daemon.open("alpha");
+			const held = await projectParts(opened, summaries);
+			await opened.stop();
 			return held.recaps === cold.recaps && held.goals === cold.goals;
 		};
-		const firstRelay = await sameIn();
-		const replacedRelay = await sameIn();
+		const firstGeneration = await sameIn();
+		const reopenedGeneration = await sameIn();
 		await daemon.daemon.runPromise(remove("alpha"));
 		await daemon.register("alpha");
 		const readded = await daemon.inProject("alpha", summaries);
 		const observed = {
-			firstRelay,
-			replacedRelay,
+			firstGeneration,
+			reopenedGeneration,
 			readdedIsFresh:
 				readded.recaps !== cold.recaps && readded.goals !== cold.goals,
 		};
 		evidence.observed = observed;
 		expect(observed).toEqual({
-			firstRelay: true,
-			replacedRelay: true,
+			firstGeneration: true,
+			reopenedGeneration: true,
 			readdedIsFresh: true,
 		});
 	});
@@ -794,8 +794,8 @@ const openTab = Effect.gen(function* () {
  * (apps/server/src/orchestration-v2/CommandOutputHub.ts:170-191).
  */
 describe("82tn.16: the daemon records which tabs view which session", () => {
-	it("keeps a tab's pick across a relay replaced while registered", async () => {
-		const daemon = start("pick-relay-replaced").boot();
+	it("keeps a tab's pick across a project reopened while registered", async () => {
+		const daemon = start("pick-reopened").boot();
 		await daemon.register("alpha");
 		await daemon.inProject("alpha", turn("viewed"));
 		const observed = await daemon.daemon.runPromise(
@@ -922,36 +922,36 @@ describe("82tn.16: the daemon records which tabs view which session", () => {
  * (apps/server/src/orchestration-v2/CommandOutputHub.ts:170-191).
  */
 describe("82tn.16: one message poller per project", () => {
-	it("keeps one poller across a relay replaced while registered, and a removed project's stops", async () => {
-		const daemon = start("poller-relay-replaced").boot();
+	it("keeps one poller across a project reopened while registered, and a removed project's stops", async () => {
+		const daemon = start("poller-reopened").boot();
 		await daemon.register("alpha");
 		const cold = await daemon.inProject("alpha", PollerManagerTag);
 		cold.startPolling("s1");
 		const sameIn = async () => {
-			const relay = await daemon.relay("alpha");
-			const held = await relayParts(relay, PollerManagerTag);
-			await relay.stop();
+			const opened = await daemon.open("alpha");
+			const held = await projectParts(opened, PollerManagerTag);
+			await opened.stop();
 			return held === cold;
 		};
-		const firstRelay = await sameIn();
-		const replacedRelay = await sameIn();
-		const pollingWithNoRelay = cold.isPolling("s1");
+		const firstGeneration = await sameIn();
+		const reopenedGeneration = await sameIn();
+		const pollingWithNoProject = cold.isPolling("s1");
 		await daemon.daemon.runPromise(remove("alpha"));
 		const pollingAfterRemove = cold.isPolling("s1");
 		await daemon.register("alpha");
 		const readded = await daemon.inProject("alpha", PollerManagerTag);
 		const observed = {
-			firstRelay,
-			replacedRelay,
-			pollingWithNoRelay,
+			firstGeneration,
+			reopenedGeneration,
+			pollingWithNoProject,
 			pollingAfterRemove,
 			readdedIsFresh: readded !== cold,
 		};
 		evidence.observed = observed;
 		expect(observed).toEqual({
-			firstRelay: true,
-			replacedRelay: true,
-			pollingWithNoRelay: true,
+			firstGeneration: true,
+			reopenedGeneration: true,
+			pollingWithNoProject: true,
 			pollingAfterRemove: false,
 			readdedIsFresh: true,
 		});
@@ -1006,13 +1006,13 @@ describe("82tn.16: one message poller per project", () => {
 
 /**
  * Lane 16p (audit.md rows 136-140): a project's RPCs run on the daemon's
- * project context, never a relay's, as t3code serves every RPC from one server
+ * project context, never a generation's, as t3code serves every RPC from one server
  * runtime and each command names its thread
  * (apps/server/src/orchestration-v2/Orchestrator.ts:1910).
  */
 describe("82tn.16: a project's RPCs run on the daemon's project context", () => {
-	it("keeps a tab's detail stream across a relay replaced while registered", async () => {
-		const daemon = start("rpc-stream-relay-replaced").boot();
+	it("keeps a tab's detail stream across a project reopened while registered", async () => {
+		const daemon = start("rpc-stream-reopened").boot();
 		await daemon.register("alpha");
 		await daemon.inProject("alpha", turn("viewed"));
 		const observed = await daemon.daemon.runPromise(
@@ -1053,7 +1053,7 @@ describe("82tn.16: a project's RPCs run on the daemon's project context", () => 
 	});
 
 	it("serves each project from its own context, with its own stream and poller", async () => {
-		const daemon = start("rpc-context-no-relay").boot();
+		const daemon = start("rpc-context-closed").boot();
 		await daemon.register("alpha");
 		await daemon.register("beta");
 		const alphaPoller = await daemon.inProject("alpha", PollerManagerTag);

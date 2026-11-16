@@ -127,7 +127,7 @@ export interface WsMockOptions {
 	messageDelay?: number;
 }
 
-export interface MockRelayProtocolContext {
+export interface MockDaemonProtocolContext {
 	activeSessionId: string | null;
 }
 
@@ -150,15 +150,15 @@ const SESSION_SCOPED_MESSAGE_TYPES = new Set([
 	"user_message",
 ]);
 
-export function createMockRelayProtocolContext(
+export function createMockDaemonProtocolContext(
 	activeSessionId: string | null = null,
-): MockRelayProtocolContext {
+): MockDaemonProtocolContext {
 	return { activeSessionId };
 }
 
-export function normalizeMockRelayMessage(
+export function normalizeMockDaemonMessage(
 	msg: MockMessage,
-	context: MockRelayProtocolContext,
+	context: MockDaemonProtocolContext,
 ): MockMessage {
 	const normalized: MockMessage = { ...msg };
 	const explicitSessionId =
@@ -174,11 +174,11 @@ export function normalizeMockRelayMessage(
 	return normalized;
 }
 
-export function normalizeMockRelayMessages(
+export function normalizeMockDaemonMessages(
 	messages: MockMessage[],
-	context: MockRelayProtocolContext,
+	context: MockDaemonProtocolContext,
 ): MockMessage[] {
-	return messages.map((msg) => normalizeMockRelayMessage(msg, context));
+	return messages.map((msg) => normalizeMockDaemonMessage(msg, context));
 }
 
 /**
@@ -187,7 +187,7 @@ export function normalizeMockRelayMessages(
  *
  * Returns a control object to await specific states.
  */
-export async function mockRelayWebSocket(
+export async function mockDaemonWebSocket(
 	page: Page,
 	options: WsMockOptions,
 ): Promise<WsMockControl> {
@@ -221,11 +221,11 @@ export async function mockRelayWebSocket(
 		if (typeof text !== "string") return;
 		const response = options.responses.get(text);
 		if (!response) return;
-		const context = createMockRelayProtocolContext(
+		const context = createMockDaemonProtocolContext(
 			typeof payload["sessionId"] === "string" ? payload["sessionId"] : null,
 		);
 		void control.sendMessages(
-			normalizeMockRelayMessages(response, context),
+			normalizeMockDaemonMessages(response, context),
 			options.messageDelay ?? 0,
 		);
 	};
@@ -233,13 +233,13 @@ export async function mockRelayWebSocket(
 	return control;
 }
 
-/** Control object returned by mockRelayWebSocket */
+/** Control object returned by mockDaemonWebSocket */
 export class WsMockControl {
 	constructor(
 		private readonly page: Page,
 		private readonly rpcControl: RpcMockControl,
 	) {}
-	private readonly context = createMockRelayProtocolContext();
+	private readonly context = createMockDaemonProtocolContext();
 
 	/** RPC sockets opened so far; each page load opens a new one. */
 	get connections(): number {
@@ -328,7 +328,7 @@ export class WsMockControl {
 						? row["lastTurnEndVersion"]
 						: 0) + 1,
 			}));
-		const normalized = normalizeMockRelayMessage(msg, this.context);
+		const normalized = normalizeMockDaemonMessage(msg, this.context);
 		if (projectLegacyRelayMessage(this.page, normalized)) return;
 		// Retired relay types without an RPC projection have no browser consumer.
 		return;

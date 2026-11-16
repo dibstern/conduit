@@ -56,8 +56,8 @@ export interface E2EHarness {
 	/** OpenCode client for the harness project's folder. */
 	client: OpenCodeAPI;
 	opencodeUrl: string;
-	relayPort: number;
-	relayBaseUrl: string;
+	appPort: number;
+	appBaseUrl: string;
 	model: string;
 	provider: string;
 	stop(): Promise<void>;
@@ -103,8 +103,8 @@ export async function createE2EHarness(opts?: {
 		project,
 		client,
 		opencodeUrl,
-		relayPort: project.port,
-		relayBaseUrl: project.baseUrl,
+		appPort: project.port,
+		appBaseUrl: project.baseUrl,
 		model: E2E_MODEL,
 		provider: E2E_PROVIDER,
 		async stop(): Promise<void> {
@@ -132,8 +132,8 @@ export interface ReplayHarness {
 	/** The daemon project; a restart replaces it. */
 	readonly project: DaemonProject;
 	mock: MockOpenCodeServer;
-	relayPort: number;
-	relayBaseUrl: string;
+	appPort: number;
+	appBaseUrl: string;
 	/** The replay session's route (e.g. "/s/ses_abc"); `/` opens no session.
 	 *  With a Claude replay plan, the route of a fresh Claude session instead. */
 	projectUrl: string;
@@ -154,7 +154,7 @@ const CLAUDE_TRACE_MODEL = "claude-fable-5";
 
 /** Create a replay session over the typed WS RPC. */
 export async function createSession(
-	relayPort: number,
+	appPort: number,
 	providerId: "claude" | "opencode",
 	instanceId?: string,
 	title?: string,
@@ -198,7 +198,7 @@ export async function createSession(
 			}),
 		).pipe(
 			Effect.provide(RpcClient.layerProtocolSocket()),
-			Effect.provide(Socket.layerWebSocket(`ws://127.0.0.1:${relayPort}/rpc`)),
+			Effect.provide(Socket.layerWebSocket(`ws://127.0.0.1:${appPort}/rpc`)),
 			Effect.provide(Socket.layerWebSocketConstructorGlobal),
 			Effect.provide(RpcSerialization.layerJson),
 		),
@@ -300,11 +300,11 @@ export async function createReplayHarness(
 	let stoppedProject: DaemonProject | undefined;
 	let mockStopped = false;
 
-	const relayPort = project.port;
+	const appPort = project.port;
 	// Daemon startup makes no OpenCode requests, so create the replay session
 	// explicitly. For OpenCode this replays the recording's POST /session.
 	const sessionId = await createSession(
-		relayPort,
+		appPort,
 		claudeReplayer ? "claude" : "opencode",
 		claudeInstanceId,
 	);
@@ -322,15 +322,15 @@ export async function createReplayHarness(
 			return project;
 		},
 		mock,
-		relayPort,
-		relayBaseUrl: project.baseUrl,
+		appPort,
+		appBaseUrl: project.baseUrl,
 		projectUrl: `/s/${encodeURIComponent(sessionId)}`,
 		...(claudeReplayer ? { claudeReplayer } : {}),
 		eventsDbPath,
 		async restart(whileStopped?: () => void): Promise<void> {
 			await project.stop();
 			whileStopped?.();
-			project = await start(relayPort);
+			project = await start(appPort);
 		},
 		async stop(): Promise<void> {
 			try {

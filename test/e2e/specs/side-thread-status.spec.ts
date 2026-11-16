@@ -114,9 +114,9 @@ async function completedParent(
 	app: AppPage,
 	chat: ChatPage,
 	harness: ReplayHarness,
-	relayUrl: string,
+	appUrl: string,
 ) {
-	await app.goto(relayUrl);
+	await app.goto(appUrl);
 	const parentId = sessionId(app.page);
 	await app.sendMessage(parentPrompt);
 	await chat.waitForAssistantMessage();
@@ -171,12 +171,12 @@ test.describe("OpenCode Side Thread status", () => {
 		page,
 		harness,
 		mockServer,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
 		const pushes = watchPushes(page);
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		const parentId = await completedParent(app, chat, harness, relayUrl);
+		const parentId = await completedParent(app, chat, harness, appUrl);
 		const release = mockServer.holdNextPrompt();
 		try {
 			await app.sendMessage(`$btw ${question}`);
@@ -256,12 +256,12 @@ test.describe("OpenCode Side Thread status", () => {
 		page,
 		harness,
 		mockServer,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
 		const pushes = watchPushes(page);
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		const parentId = await completedParent(app, chat, harness, relayUrl);
+		const parentId = await completedParent(app, chat, harness, appUrl);
 		await app.sendMessage(`$side ${question}`);
 		await expect(page).not.toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
 		const sideId = sessionId(page);
@@ -281,7 +281,7 @@ test.describe("OpenCode Side Thread status", () => {
 						)?.["status"],
 				)
 				.toBe("busy");
-			await app.goto(`${harness.relayBaseUrl}/s/${sideId}`);
+			await app.goto(`${harness.appBaseUrl}/s/${sideId}`);
 			await expect(page.getByTestId("parent-session-status")).toHaveText(
 				"Working",
 			);
@@ -346,7 +346,7 @@ test.describe("OpenCode child family idle", () => {
 		page,
 		harness,
 		mockServer,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
 		const pushes = watchPushes(page);
 		const family: Envelope<SessionInfo>[] = [];
@@ -388,7 +388,7 @@ test.describe("OpenCode child family idle", () => {
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		const parentId = await completedParent(app, chat, harness, relayUrl);
+		const parentId = await completedParent(app, chat, harness, appUrl);
 		const childId = "ses_family_idle_child";
 		const messageId = "msg_family_idle_completed";
 		const answer = "Child completed before idle.";
@@ -441,7 +441,7 @@ test.describe("OpenCode child family idle", () => {
 				),
 			)
 			.toMatchObject({ status: "busy", parent_id: parentId });
-		await app.goto(`${harness.relayBaseUrl}/s/${childId}`);
+		await app.goto(`${harness.appBaseUrl}/s/${childId}`);
 		await expect(chat.stopBtn).toBeVisible();
 		mockServer.injectSSEEvents([
 			{
@@ -488,7 +488,7 @@ test.describe("OpenCode child family idle", () => {
 		const familyBeforeOpen = family.length;
 		const shellBeforeOpen = shell.length;
 		const detailBeforeOpen = pushes.detail.length;
-		await app.goto(`${harness.relayBaseUrl}/s/${childId}`);
+		await app.goto(`${harness.appBaseUrl}/s/${childId}`);
 		await expect
 			.poll(() =>
 				family
@@ -619,12 +619,12 @@ for (const attention of ["permission", "question"] as const) {
 			page,
 			harness,
 			mockServer,
-			relayUrl,
+			appUrl,
 		}, testInfo) => {
 			const pushes = watchPushes(page);
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			const parentId = await completedParent(app, chat, harness, relayUrl);
+			const parentId = await completedParent(app, chat, harness, appUrl);
 			const release = mockServer.holdNextPrompt(`${attention}.asked`);
 			try {
 				await app.sendMessage(

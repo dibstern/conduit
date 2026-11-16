@@ -1,6 +1,6 @@
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 const sessionId = "rail-session";
 const projectSlug = "e2e-replay";
@@ -84,7 +84,7 @@ for (const width of [1100, 390]) {
 					],
 				},
 			});
-			await mockRelayWebSocket(page, {
+			await mockDaemonWebSocket(page, {
 				initMessages: [
 					{
 						type: "project_list",
@@ -123,7 +123,7 @@ for (const width of [1100, 390]) {
 				],
 				responses: new Map(),
 			});
-			await page.goto(`${harness.relayBaseUrl}/s/${sessionId}`);
+			await page.goto(`${harness.appBaseUrl}/s/${sessionId}`);
 			const rail = page.getByRole("slider", { name: "User messages" });
 			const scroller = page.locator("#messages");
 			await expect(rail).toBeVisible();
@@ -286,7 +286,7 @@ for (const width of [1100, 390]) {
 			await expect(rail).toHaveCount(0);
 			await expect(page.getByTestId("message-rail-preview")).toHaveCount(0);
 
-			await page.goto(`${harness.relayBaseUrl}/s/rail-fork`);
+			await page.goto(`${harness.appBaseUrl}/s/rail-fork`);
 			await expect(rail).toHaveAttribute("aria-valuemax", "60");
 			await rail.focus();
 			await page.keyboard.press("Home");

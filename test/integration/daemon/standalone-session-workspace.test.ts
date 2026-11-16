@@ -62,13 +62,13 @@ describe("daemon project SessionWorkspace composition", () => {
 					),
 				),
 			);
-		const relay = await createDaemonProject("chat-simple", {
+		const project = await createDaemonProject("chat-simple", {
 			slug: "standalone",
 			projectDir,
 		});
 		const evidence: Record<string, unknown> = { borrowed: true };
 		try {
-			const service = await relay.run(WorktreeServiceTag);
+			const service = await project.run(WorktreeServiceTag);
 			expect([...constructed]).toEqual([service]);
 			expect(construct).toHaveBeenCalledOnce();
 			const rename = vi.spyOn(service, "renameBranch");
@@ -78,7 +78,7 @@ describe("daemon project SessionWorkspace composition", () => {
 					{ path: projectDir, projectSlug: "standalone", sessionId },
 				]),
 			);
-			await relay.run(
+			await project.run(
 				Effect.gen(function* () {
 					const commit = yield* makeCommitAndSignal;
 					yield* commit([
@@ -97,7 +97,7 @@ describe("daemon project SessionWorkspace composition", () => {
 					]);
 				}),
 			);
-			const workspace = await relay.run(SessionWorkspaceTag);
+			const workspace = await project.run(SessionWorkspaceTag);
 			evidence["before"] = created;
 			// Run the retained service without a caller context or worktree fallback.
 			await Effect.runPromise(
@@ -107,7 +107,7 @@ describe("daemon project SessionWorkspace composition", () => {
 				created.ownership,
 				"renamed-standalone",
 			);
-			const ownership = await relay.run(
+			const ownership = await project.run(
 				readSessionWorktreeOwnership(sessionId, false),
 			);
 			expect(ownership).toEqual(
@@ -130,7 +130,7 @@ describe("daemon project SessionWorkspace composition", () => {
 			evidence["error"] = String(error);
 			throw error;
 		} finally {
-			await relay.stop();
+			await project.stop();
 			vi.restoreAllMocks();
 			evidence["worktreeInstances"] = constructed.size;
 			mkdirSync("test-results", { recursive: true });

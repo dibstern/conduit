@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { inspectTouchTarget } from "../../../src/lib/frontend/stories/touch-target.js";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 async function markCurrentUnreadFromOverflow(page: Page): Promise<void> {
@@ -38,10 +38,10 @@ async function finishTurn(harness: ReplayHarness, firstRow: Locator) {
 
 test("context menu, focused row and transcript toggle read state with undo", async ({
 	page,
-	relayUrl,
+	appUrl,
 	harness,
 }) => {
-	await gotoRelay(page, new URL("/", relayUrl).toString());
+	await gotoApp(page, new URL("/", appUrl).toString());
 	const row = await finishTurn(
 		harness,
 		page.locator("#session-list .session-item").first(),
@@ -89,15 +89,15 @@ test("context menu, focused row and transcript toggle read state with undo", asy
 // the user asked for a dot, so it gets one until the next pick (hk9m.7).
 test("marking unread before any turn end shows a dot until the next pick", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	await gotoRelay(page, new URL("/", relayUrl).toString());
+	await gotoApp(page, new URL("/", appUrl).toString());
 	const row = page.locator("#session-list .session-item").first();
 	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-mark-unread").click();
 	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
-	await gotoRelay(page, new URL("/", relayUrl).toString());
+	await gotoApp(page, new URL("/", appUrl).toString());
 	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 	await row.locator(".session-item-title").click();
 	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
@@ -105,10 +105,10 @@ test("marking unread before any turn end shows a dot until the next pick", async
 
 test("settling and un-settling preserve unread while the menu hides the action", async ({
 	page,
-	relayUrl,
+	appUrl,
 	harness,
 }) => {
-	await gotoRelay(page, new URL("/", relayUrl).toString());
+	await gotoApp(page, new URL("/", appUrl).toString());
 	const row = await finishTurn(
 		harness,
 		page.locator("#session-list .session-item").first(),
@@ -118,7 +118,7 @@ test("settling and un-settling preserve unread while the menu hides the action",
 	await page.getByTestId("session-ctx-mark-unread").click();
 	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 	// The mark is persisted, not client state: a fresh load of the list keeps it.
-	await gotoRelay(page, new URL("/", relayUrl).toString());
+	await gotoApp(page, new URL("/", appUrl).toString());
 	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
@@ -149,10 +149,10 @@ test("settling and un-settling preserve unread while the menu hides the action",
 
 test("desktop unread chip survives reload, has one keyboard-accessible read action, and ends on another session", async ({
 	page,
-	relayUrl,
+	appUrl,
 	harness,
 }) => {
-	await gotoRelay(page, new URL("/", relayUrl).toString());
+	await gotoApp(page, new URL("/", appUrl).toString());
 	const sidebar = new SidebarPage(page);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
@@ -195,7 +195,7 @@ test("desktop unread chip survives reload, has one keyboard-accessible read acti
 	expect(target.missing, JSON.stringify(target.failures)).toBe(0);
 
 	const observer = await page.context().newPage();
-	await gotoRelay(observer, new URL("/", relayUrl).toString());
+	await gotoApp(observer, new URL("/", appUrl).toString());
 	const observerRow = observer.locator(
 		`#session-list [data-session-id="${firstId}"]`,
 	);
@@ -234,10 +234,10 @@ test.describe("phone", () => {
 
 	test("overflow sheet and composer shortcut return to the list with undo", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
-		await gotoRelay(page, new URL("/", relayUrl).toString());
+		await gotoApp(page, new URL("/", appUrl).toString());
 		const row = await finishTurn(
 			harness,
 			page.locator("#session-list .session-item").first(),
@@ -267,10 +267,10 @@ test.describe("phone", () => {
 
 	test("marking unread never shows the desktop chip", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
-		await gotoRelay(page, new URL("/", relayUrl).toString());
+		await gotoApp(page, new URL("/", appUrl).toString());
 		const row = await finishTurn(
 			harness,
 			page.locator("#session-list .session-item").first(),

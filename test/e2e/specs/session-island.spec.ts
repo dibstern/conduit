@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { settleSheet } from "../helpers/sheet-drag.js";
 
 test.use({ recording: "chat-simple" });
@@ -51,9 +51,9 @@ test.describe("phone session island", () => {
 
 	test("scrolling changes presentation without moving the reading position", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await addProbeMessages(page);
 		await pinToBottom(page);
 		const bar = page.getByTestId("session-bar");
@@ -84,9 +84,9 @@ test.describe("phone session island", () => {
 
 	test("back returns to Sessions and the chevron forces the full bar open", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await addProbeMessages(page);
 		await pinToBottom(page);
 		await page.getByTestId("session-bar-expand").tap();
@@ -105,12 +105,12 @@ test.describe("phone session island", () => {
 
 	test("touch sheets, modal layering, focus modality and dismissal", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await page.addInitScript(() =>
 			localStorage.setItem("feature-flags", '["debug"]'),
 		);
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await page
 			.locator(".debug-panel")
 			.getByRole("button", { name: "Close panel" })
@@ -248,9 +248,9 @@ test.describe("phone session island", () => {
 
 	test("phone chrome clears banners and preserves a detached transcript across views", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await page.locator("#session-chrome").evaluate((chrome) => {
 			const banner = document.createElement("div");
 			banner.className = "banner";
@@ -307,9 +307,9 @@ test.describe("phone session island", () => {
 
 	test("terminal uses the full bar and full viewport width", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await page.getByTestId("session-bar-island-overflow").tap();
 		await page.getByTestId("overflow-view-terminal").click();
 		await expect(page.getByTestId("session-bar")).toHaveAttribute(
@@ -327,9 +327,9 @@ test.describe("phone session island", () => {
 
 	test("dialog backdrops stay dark in both themes", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await addProbeMessages(page);
 		await pinToBottom(page);
 		for (const theme of ["dark", "light"]) {
@@ -376,9 +376,9 @@ test.describe("session island across viewport changes", () => {
 
 	test("bottom pin survives resizing from desktop to phone", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await addProbeMessages(page);
 		await page.locator("#messages").evaluate((scroller) => {
 			scroller.scrollTop = scroller.scrollHeight;
@@ -422,8 +422,8 @@ test.describe("desktop session bar", () => {
 		isMobile: false,
 	});
 
-	test("never becomes an island at the bottom", async ({ page, relayUrl }) => {
-		await gotoRelay(page, relayUrl);
+	test("never becomes an island at the bottom", async ({ page, appUrl }) => {
+		await gotoApp(page, appUrl);
 		await addProbeMessages(page);
 		await page.locator("#messages").evaluate((scroller) => {
 			scroller.scrollTop = scroller.scrollHeight;

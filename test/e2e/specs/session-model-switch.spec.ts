@@ -14,13 +14,13 @@ test.describe("Claude session model on session switch", () => {
 
 	test("the model chip names the session's model", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
 		const app = new AppPage(page);
 		const sidebar = new SidebarPage(page);
 		const trigger = page.getByTestId("model-picker-trigger");
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.sendMessage("One");
 		await new ChatPage(page).waitForStreamingComplete();
 		const sessionId = new URL(page.url()).pathname.split("/").at(-1) ?? "";

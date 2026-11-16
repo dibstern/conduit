@@ -7,7 +7,7 @@ import {
 	waitForFonts,
 	waitForIcons,
 } from "../../../test/e2e/helpers/visual-helpers.js";
-import { mockRelayWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
 import { mainUiInit, mainUiTurn1 } from "../fixtures/media-state.js";
 import type { SceneDefinition } from "../scene-runner.js";
 
@@ -33,7 +33,7 @@ export const mainUiScene: SceneDefinition = {
 					}),
 				},
 			});
-			await mockRelayWebSocket(page, {
+			await mockDaemonWebSocket(page, {
 				initMessages: mainUiInit,
 				responses: new Map([
 					[

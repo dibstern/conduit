@@ -39,22 +39,22 @@ describe("EventSink Effect boundary", () => {
 
 	it("does not reintroduce runtime bridges for Claude EventSink persistence", () => {
 		const prompt = source("src/lib/handlers/prompt.ts");
-		const relayEventSink = source("src/lib/provider/project-event-sink.ts");
+		const projectEventSink = source("src/lib/provider/project-event-sink.ts");
 
 		expect(prompt).not.toMatch(/Effect\.runPromise\([^)]*persistEvent/);
 		expect(prompt).not.toMatch(/persistEvent:\s*\([^)]*\)\s*=>/);
-		expect(relayEventSink).not.toMatch(/Effect\.run(?:Promise|Sync)/);
-		expect(relayEventSink).not.toMatch(/runEffect/);
+		expect(projectEventSink).not.toMatch(/Effect\.run(?:Promise|Sync)/);
+		expect(projectEventSink).not.toMatch(/runEffect/);
 	});
 
 	it("keeps missing pending interaction failures typed", () => {
-		const relayEventSink = source("src/lib/provider/project-event-sink.ts");
+		const projectEventSink = source("src/lib/provider/project-event-sink.ts");
 
-		expect(relayEventSink).toContain("MissingPendingInteractions");
-		expect(relayEventSink).not.toMatch(
+		expect(projectEventSink).toContain("MissingPendingInteractions");
+		expect(projectEventSink).not.toMatch(
 			/throw new Error\([^)]*pendingInteractions/,
 		);
-		expect(relayEventSink).not.toContain(
+		expect(projectEventSink).not.toContain(
 			"EventSink requires pendingInteractions for permission/question requests",
 		);
 	});

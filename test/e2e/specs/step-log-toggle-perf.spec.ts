@@ -11,7 +11,7 @@ import { writeFileSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import type { MockMessage } from "../fixtures/mockup-state.js";
 import { expect, test } from "../helpers/replay-fixture.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -298,13 +298,13 @@ test.describe("Step log toggle performance", () => {
 
 	test(`hiding and then showing a ${STEPS}-step log keeps its rows`, async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		const wsMock = await mockRelayWebSocket(page, {
+		const wsMock = await mockDaemonWebSocket(page, {
 			initMessages: initMessages(),
 			responses: new Map(),
 		});
-		await page.goto(new URL(`/s/${SESSION}`, relayUrl).href);
+		await page.goto(new URL(`/s/${SESSION}`, appUrl).href);
 		await page
 			.locator("#connect-overlay")
 			.waitFor({ state: "hidden", timeout: 15_000 });

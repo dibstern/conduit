@@ -14,7 +14,7 @@ import {
 	sendMockShellRowPatch,
 } from "../helpers/rpc-mock.js";
 import { settleSheet } from "../helpers/sheet-drag.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({
 	recording: "chat-simple",
@@ -29,7 +29,7 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
 
 async function openCheckout(
 	page: Page,
-	relayBaseUrl: string,
+	appBaseUrl: string,
 	options: {
 		provider?: string;
 		supportsWorktree?: boolean | undefined;
@@ -173,7 +173,7 @@ async function openCheckout(
 				}
 			: {}),
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: "e2e-replay" },
 			{ type: "shell_snapshot", roots: true, sessions },
@@ -181,7 +181,7 @@ async function openCheckout(
 		responses: new Map(),
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
-	await page.goto(`${relayBaseUrl}/s/header-session`);
+	await page.goto(`${appBaseUrl}/s/header-session`);
 	const trigger = page.getByTestId("composer-checkout");
 	await expect(trigger).toBeVisible();
 	if ((page.viewportSize()?.width ?? 1440) < 768) {
@@ -211,7 +211,7 @@ for (const mode of [
 			harness,
 		}, testInfo) => {
 			const directory = "/workspace/conduit/";
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				directory,
 				git: {
 					branch: "main",
@@ -289,7 +289,7 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				git: { branch: "fix/draft-menus", worktree: "conduit-wt-draft" },
 			});
 			if (!mode.hasTouch)
@@ -319,7 +319,7 @@ for (const mode of [
 				ahead: 0,
 				behind: 0,
 			};
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				provider: "claude",
 				supportsWorktree: true,
 				status: "busy",
@@ -457,7 +457,7 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				directory: "/workspace/ai-notes",
 			});
 			await expect(trigger).toHaveText("ai-notes");
@@ -481,7 +481,7 @@ for (const mode of [
 			const moved = "/workspace/conduit-one";
 			const other = "/workspace/conduit-two";
 			const moves: string[] = [];
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				provider: "claude",
 				git: { branch: "main" },
 				sessionGit: {
@@ -535,7 +535,7 @@ for (const mode of [
 				page,
 				harness,
 			}) => {
-				await openCheckout(page, harness.relayBaseUrl, {
+				await openCheckout(page, harness.appBaseUrl, {
 					provider: supportsWorktree === false ? "opencode" : "claude",
 					supportsWorktree,
 					git: { branch: "main" },
@@ -554,7 +554,7 @@ for (const mode of [
 		}, testInfo) => {
 			const directory = "/workspace/conduit-alias/packages/app";
 			const canonicalDirectory = "/real/conduit/packages/app";
-			await openCheckout(page, harness.relayBaseUrl, {
+			await openCheckout(page, harness.appBaseUrl, {
 				provider: "claude",
 				directory,
 				canonicalDirectory,
@@ -579,7 +579,7 @@ for (const mode of [
 			harness,
 		}) => {
 			const path = "/workspace/removed";
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				provider: "claude",
 				git: { branch: "main" },
 				worktrees: [{ path, branch: "feature/removed", main: false }],
@@ -604,7 +604,7 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				directory:
 					"/workspace/spm-architecture-deepening-with-a-very-long-project-name",
 				git: { branch: "docs/architecture-deepening-design", dirty: true },
@@ -656,7 +656,7 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				git: { head: "a1b2c3d" },
 			});
 			await expect(trigger).toHaveAttribute("title", "conduit / a1b2c3d");
@@ -676,7 +676,7 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				git: {
 					branch: "feat/x",
 					ahead: 3,
@@ -704,7 +704,7 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				git: { branch: "feat/x", merged: true },
 			});
 			if (mode.hasTouch)
@@ -722,7 +722,7 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				git: {
 					branch: "main",
 					dirty: true,
@@ -793,7 +793,7 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				git: { branch: "main" },
 				sessionGit: { branch: "session-checkout", dirty: true },
 			});
@@ -809,7 +809,7 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			await openCheckout(page, harness.relayBaseUrl, {
+			await openCheckout(page, harness.appBaseUrl, {
 				git: { branch: "main" },
 				skills: true,
 			});
@@ -850,7 +850,7 @@ for (const mode of [
 				page,
 				harness,
 			}, testInfo) => {
-				await openCheckout(page, harness.relayBaseUrl, {
+				await openCheckout(page, harness.appBaseUrl, {
 					git: { branch: "main" },
 					viewActivity: true,
 				});

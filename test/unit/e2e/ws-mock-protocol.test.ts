@@ -5,9 +5,9 @@ import {
 	sendMockProjectSetting,
 } from "../../e2e/helpers/rpc-mock.js";
 import {
-	createMockRelayProtocolContext,
-	normalizeMockRelayMessage,
-	normalizeMockRelayMessages,
+	createMockDaemonProtocolContext,
+	normalizeMockDaemonMessage,
+	normalizeMockDaemonMessages,
 	WsMockControl,
 } from "../../e2e/helpers/ws-mock.js";
 
@@ -18,9 +18,9 @@ vi.mock("../../e2e/helpers/rpc-mock.js", async (importOriginal) => ({
 
 describe("E2E WebSocket mock protocol normalizer", () => {
 	it("adds sessionId to session-scoped init and live messages", () => {
-		const context = createMockRelayProtocolContext("sess-a");
+		const context = createMockDaemonProtocolContext("sess-a");
 
-		const normalized = normalizeMockRelayMessages(
+		const normalized = normalizeMockDaemonMessages(
 			[
 				{ type: "thinking_stop" },
 				{ type: "user_message", text: "hello" },
@@ -39,9 +39,9 @@ describe("E2E WebSocket mock protocol normalizer", () => {
 	});
 
 	it("uses an explicit sessionId for session-scoped events", () => {
-		const context = createMockRelayProtocolContext();
+		const context = createMockDaemonProtocolContext();
 		expect(
-			normalizeMockRelayMessage(
+			normalizeMockDaemonMessage(
 				{ type: "user_message", text: "question", sessionId: "sess-history" },
 				context,
 			),
@@ -53,10 +53,10 @@ describe("E2E WebSocket mock protocol normalizer", () => {
 	});
 
 	it("preserves explicit sessionId for cross-session events", () => {
-		const context = createMockRelayProtocolContext("sess-current");
+		const context = createMockDaemonProtocolContext("sess-current");
 
 		expect(
-			normalizeMockRelayMessage(
+			normalizeMockDaemonMessage(
 				{
 					type: "done",
 					sessionId: "sess-other",

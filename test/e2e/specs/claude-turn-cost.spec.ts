@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/claude-agent-sdk.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -36,7 +36,7 @@ test.describe("Claude turn cost", () => {
 
 	test("shows and stores each turn's spend across wake-ups and a restart", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}, testInfo) => {
 		test.setTimeout(120_000);
@@ -105,7 +105,7 @@ test.describe("Claude turn cost", () => {
 			});
 		};
 		try {
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			await app.sendMessage("Launch the background work");
 			await replayer.held();
 			await expect.poll(() => stored().results.length).toBe(1);
@@ -140,7 +140,7 @@ test.describe("Claude turn cost", () => {
 			await record("wake-ups-finished");
 
 			await harness.restart();
-			await gotoRelay(page, relayUrl);
+			await gotoApp(page, appUrl);
 			await chat.expandTurnActivity();
 			await expect(shownCosts.last()).toHaveText("$0.4128");
 			await app.sendMessage("Reply with only: ok, still here.");
@@ -153,7 +153,7 @@ test.describe("Claude turn cost", () => {
 			await record("resumed-result");
 
 			// Check the persisted transcript on a fresh browser load as well as live.
-			await gotoRelay(page, relayUrl);
+			await gotoApp(page, appUrl);
 			await chat.expandTurnActivity();
 			await expect(shownCosts).toHaveText(["$0.4128", "$0.0070"]);
 			await record("reloaded");

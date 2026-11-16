@@ -7,7 +7,7 @@
 import { DatabaseSync } from "node:sqlite";
 import type { Page } from "@playwright/test";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 
 test.use({
 	recording: "chat-simple",
@@ -116,10 +116,10 @@ const cases: {
 for (const { state, turnEnded, dot } of cases)
 	test(`${state} on main ${turnEnded ? "after a turn end" : "with no turn end"} ${dot ? "keeps its dot" : "stays without a dot"}`, async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
-		await gotoRelay(page, new URL("/", relayUrl).toString());
+		await gotoApp(page, new URL("/", appUrl).toString());
 		const sessionId = await page
 			.locator("#session-list .session-item")
 			.first()
@@ -136,7 +136,7 @@ for (const { state, turnEnded, dot } of cases)
 		} else expect(turnEndCount(harness, sessionId)).toBe(0);
 
 		await upgrade(page, harness, sessionId, state);
-		await gotoRelay(page, new URL("/", relayUrl).toString());
+		await gotoApp(page, new URL("/", appUrl).toString());
 		await expect(row).toBeVisible();
 		await expect(row.getByTestId("session-unread-dot")).toHaveCount(
 			dot ? 1 : 0,

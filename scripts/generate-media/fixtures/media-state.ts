@@ -1,7 +1,7 @@
 // Type-safe WebSocket mock messages for all 5 README media scenes.
 //
 // Each export corresponds to a scene module (Tasks 3–6) and provides the
-// canned message arrays consumed by mockRelayWebSocket().
+// canned message arrays consumed by mockDaemonWebSocket().
 
 import type {
 	BrowserMessage,

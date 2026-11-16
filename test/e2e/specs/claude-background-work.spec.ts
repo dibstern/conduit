@@ -21,7 +21,7 @@ import { DatabaseSync } from "node:sqlite";
 import { Effect } from "effect";
 import { responseChunks } from "../../helpers/fake-claude-process-sdk.js";
 import { test as processTest } from "../helpers/process-harness-fixture.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -105,7 +105,7 @@ processTest.describe("Claude background work", () => {
 			try {
 				const app = new AppPage(page);
 				await app.goto(`${harness.baseUrl}/s/${sessionId}?p=process-test`);
-				await gotoRelay(sidebar, `${harness.baseUrl}/?p=process-test`);
+				await gotoApp(sidebar, `${harness.baseUrl}/?p=process-test`);
 				await expect(row).not.toHaveClass(/(?:^|\s)active(?:\s|$)/);
 				await app.sendMessage("Run sleep 8 in the background");
 
@@ -351,7 +351,7 @@ test.describe("Claude background shell ending between turns", () => {
 
 	test("leaves the finished turn finished, so the next message sends", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}, testInfo) => {
 		const sessionId = decodeURIComponent(
@@ -386,7 +386,7 @@ test.describe("Claude background shell ending between turns", () => {
 		const report: Record<string, ReturnType<typeof ledger>> = {};
 		try {
 			const app = new AppPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			await app.sendMessage("Run sleep 8 in the background");
 			await expect
 				.poll(() => ledger().toolsStartedAfterTurnEnd)

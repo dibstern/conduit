@@ -12,10 +12,10 @@ test.use({ recording: "chat-simple" });
 
 async function receiveStreamedAssistantResponse({
 	page,
-	relayUrl,
+	appUrl,
 }: {
 	page: Page;
-	relayUrl: string;
+	appUrl: string;
 }): Promise<void> {
 	const viewport = page.viewportSize();
 	const isDesktop = viewport ? viewport.width >= 1440 : false;
@@ -23,7 +23,7 @@ async function receiveStreamedAssistantResponse({
 
 	const app = new AppPage(page);
 	const chat = new ChatPage(page);
-	await app.goto(relayUrl);
+	await app.goto(appUrl);
 
 	await app.sendMessage("Ping");
 
@@ -40,13 +40,13 @@ async function receiveStreamedAssistantResponse({
 test.describe("Chat Flow", () => {
 	test.describe.configure({ timeout: 30_000 });
 
-	test("send message and see user bubble", async ({ page, relayUrl }) => {
+	test("send message and see user bubble", async ({ page, appUrl }) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
 		test.skip(!isDesktop, "Chat tests run on desktop viewport only");
 
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		const chat = new ChatPage(page);
 
@@ -80,7 +80,7 @@ test.describe("Chat Flow", () => {
 
 	test("assistant response renders in markdown container", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const viewport = page.viewportSize();
 		const isDesktop = viewport ? viewport.width >= 1440 : false;
@@ -88,7 +88,7 @@ test.describe("Chat Flow", () => {
 
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await app.sendMessage("Hello");
 
@@ -110,14 +110,14 @@ test.describe("Chat Flow", () => {
 	test.describe("Code Blocks", () => {
 		test.use({ recording: "chat-code-block" });
 
-		test("code blocks have copy button", async ({ page, relayUrl }) => {
+		test("code blocks have copy button", async ({ page, appUrl }) => {
 			const viewport = page.viewportSize();
 			const isDesktop = viewport ? viewport.width >= 1440 : false;
 			test.skip(!isDesktop, "Chat tests run on desktop viewport only");
 
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 
 			await app.sendMessage("Show me code");
 

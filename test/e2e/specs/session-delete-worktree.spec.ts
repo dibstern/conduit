@@ -15,7 +15,7 @@ import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -136,7 +136,7 @@ async function setup(
 			}),
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: "e2e-replay" },
 			{
@@ -222,7 +222,7 @@ test("a pending inspection cannot replace another deletion confirmation", async 
 	const inspectionDelay = new Promise<void>((resolve) => {
 		releaseInspection = resolve;
 	});
-	const rpc = await setup(page, harness.relayBaseUrl, clean, {
+	const rpc = await setup(page, harness.appBaseUrl, clean, {
 		inspectionDelay,
 	});
 	const row = page.locator('#session-list [data-session-id="delete-session"]');
@@ -261,7 +261,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await setup(page, harness.relayBaseUrl, {
+			const rpc = await setup(page, harness.appBaseUrl, {
 				...clean,
 				onDelete: "remove",
 			});
@@ -290,7 +290,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await setup(page, harness.relayBaseUrl, clean, {
+			const rpc = await setup(page, harness.appBaseUrl, clean, {
 				globalOnDelete: true,
 				projectOff: true,
 			});
@@ -313,7 +313,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await setup(page, harness.relayBaseUrl, clean);
+			const rpc = await setup(page, harness.appBaseUrl, clean);
 			const prompt = await openDelete(page, mode.mobile);
 			await expect(prompt).toContainText(folder);
 			await expect(prompt).toContainText(worktree);
@@ -344,7 +344,7 @@ for (const mode of [
 				page,
 				harness,
 			}) => {
-				const rpc = await setup(page, harness.relayBaseUrl, {
+				const rpc = await setup(page, harness.appBaseUrl, {
 					worktrees: [
 						{ folder, path: worktree, reasons: [reason], inUse: false },
 					],
@@ -376,7 +376,7 @@ for (const mode of [
 			const warning = `${worktree}: kept because it has uncommitted changes`;
 			const rpc = await setup(
 				page,
-				harness.relayBaseUrl,
+				harness.appBaseUrl,
 				{
 					worktrees: [
 						{
@@ -431,7 +431,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await setup(page, harness.relayBaseUrl, clean, {
+			const rpc = await setup(page, harness.appBaseUrl, clean, {
 				foreign: true,
 			});
 			const prompt = await openDelete(page, mode.mobile);
@@ -464,7 +464,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await setup(page, harness.relayBaseUrl, {
+			const rpc = await setup(page, harness.appBaseUrl, {
 				worktrees: [{ folder, path: worktree, reasons: [], inUse: true }],
 				removeWorktrees: false,
 				onDelete: "ask",
@@ -496,7 +496,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await setup(page, harness.relayBaseUrl, {
+			const rpc = await setup(page, harness.appBaseUrl, {
 				worktrees: [],
 				removeWorktrees: false,
 				onDelete: "ask",
@@ -520,7 +520,7 @@ for (const mode of [
 		});
 
 		test("cancel never sends DeleteSession", async ({ page, harness }) => {
-			const rpc = await setup(page, harness.relayBaseUrl, clean);
+			const rpc = await setup(page, harness.appBaseUrl, clean);
 			await openDelete(page, mode.mobile);
 			await page.getByTestId("confirm-modal-cancel").click();
 			await expect(page.locator("#confirm-modal")).not.toBeVisible();
@@ -535,7 +535,7 @@ for (const mode of [
 		}) => {
 			const automaticWorktree =
 				"/conduit/worktrees/e2e-replay/local-session/app";
-			const rpc = await setup(page, harness.relayBaseUrl, clean, {
+			const rpc = await setup(page, harness.appBaseUrl, clean, {
 				bulk: true,
 				foreign: true,
 				localInspection: {
@@ -585,7 +585,7 @@ for (const mode of [
 		}) => {
 			const rpc = await setup(
 				page,
-				harness.relayBaseUrl,
+				harness.appBaseUrl,
 				{ ...clean, onDelete: "remove" },
 				{
 					bulk: true,
@@ -622,7 +622,7 @@ for (const mode of [
 		}) => {
 			const rpc = await setup(
 				page,
-				harness.relayBaseUrl,
+				harness.appBaseUrl,
 				{
 					worktrees: [
 						{
@@ -680,7 +680,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await setup(page, harness.relayBaseUrl, clean, {
+			const rpc = await setup(page, harness.appBaseUrl, clean, {
 				failInspection: true,
 			});
 			if (mode.mobile) {

@@ -4,12 +4,12 @@
 // you are typing on is inside the visible window.
 import { expect, test } from "@playwright/test";
 import { initMessages } from "../fixtures/mockup-state.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 type Page = import("@playwright/test").Page;
 
 async function openComposer(page: Page, baseURL: string | undefined) {
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages,
 		responses: new Map(),
 		initDelay: 0,

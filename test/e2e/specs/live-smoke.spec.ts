@@ -36,7 +36,7 @@ test.describe("Live Smoke", () => {
 		const chat = new ChatPage(page);
 		// Standalone relays do not provide the daemon's draft placement RPCs.
 		const sessionId = await createSession(
-			harness.relayPort,
+			harness.appPort,
 			"opencode",
 			undefined,
 			undefined,
@@ -44,7 +44,7 @@ test.describe("Live Smoke", () => {
 		);
 		harness.trackSession(sessionId);
 
-		await app.goto(`${harness.relayBaseUrl}/s/${sessionId}?p=e2e-test`);
+		await app.goto(`${harness.appBaseUrl}/s/${sessionId}?p=e2e-test`);
 
 		// Send a simple prompt
 		await app.sendMessage("Reply with just the word pong");

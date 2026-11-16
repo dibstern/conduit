@@ -107,7 +107,7 @@ test.describe("Claude replay lane", () => {
 
 		test("yields three turn ends", async ({
 			page,
-			relayUrl,
+			appUrl,
 			harness,
 			claudeReplay,
 		}, testInfo) => {
@@ -119,7 +119,7 @@ test.describe("Claude replay lane", () => {
 			const sends = recordSends(page);
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 
 			for (const [index, text] of prompts.entries()) {
 				await app.sendMessage(text);
@@ -211,7 +211,7 @@ test.describe("Claude replay lane", () => {
 		test("each browser's send is placed once, tagged with its own input id", async ({
 			page,
 			browser,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			const sessionId = decodeURIComponent(
@@ -250,7 +250,7 @@ test.describe("Claude replay lane", () => {
 							firstSubmitSucceeded = true;
 					});
 				});
-				for (const app of apps) await app.goto(relayUrl);
+				for (const app of apps) await app.goto(appUrl);
 
 				// Clean mirrors accept shared draft clears (35934e94). Observe the
 				// first send's clear before composing the second identical input.
@@ -312,7 +312,7 @@ test.describe("Claude replay lane", () => {
 
 		test("both inputs are answered in order, each tagged with its command id", async ({
 			page,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			const sessionId = decodeURIComponent(
@@ -321,7 +321,7 @@ test.describe("Claude replay lane", () => {
 			const sends = recordSends(page);
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 
 			await app.sendMessage("First");
 			await chat.waitForToolBlock();
@@ -375,7 +375,7 @@ test.describe("Claude replay lane", () => {
 
 		test("each queued input is handed off only after the turn before it ends", async ({
 			page,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			const sessionId = decodeURIComponent(
@@ -394,7 +394,7 @@ test.describe("Claude replay lane", () => {
 			const sends = recordSends(page);
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 
 			await app.sendMessage("Alpha");
 			await expect(chat.stopBtn).toBeVisible();
@@ -533,7 +533,7 @@ test.describe("Claude replay lane", () => {
 		test("shows inputs queued mid-turn until each starts, across reloads and browsers", async ({
 			page,
 			browser,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			test.setTimeout(120_000);
@@ -569,7 +569,7 @@ test.describe("Claude replay lane", () => {
 			const sends = recordSends(page);
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 
 			// An idle send is placed at once: its message shows long before the
 			// reply, and it never passes through the tray.
@@ -611,7 +611,7 @@ test.describe("Claude replay lane", () => {
 			});
 			try {
 				const other = await context.newPage();
-				await new AppPage(other).goto(relayUrl);
+				await new AppPage(other).goto(appUrl);
 				await expect(trayTexts(other)).toHaveText(queued);
 				// Every check above ran while Alpha's turn was still going.
 				const completedAfterSecondBrowser = turnsCompleted();
@@ -721,7 +721,7 @@ test.describe("Claude replay lane", () => {
 			test("Remove and Edit drop queued rows on every client and send neither", async ({
 				page,
 				browser,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(90_000);
@@ -729,13 +729,13 @@ test.describe("Claude replay lane", () => {
 				const sends = recordSends(page);
 				const app = new AppPage(page);
 				const chat = new ChatPage(page);
-				await app.goto(relayUrl);
+				await app.goto(appUrl);
 				const context = await browser.newContext({
 					viewport: page.viewportSize(),
 				});
 				try {
 					const other = await context.newPage();
-					await new AppPage(other).goto(relayUrl);
+					await new AppPage(other).goto(appUrl);
 
 					await app.sendMessage("Alpha");
 					await expect(chat.stopBtn).toBeVisible();
@@ -791,7 +791,7 @@ test.describe("Claude replay lane", () => {
 
 			test("Stop with a queue pauses it; Resume sends the oldest and the rest drains", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(90_000);
@@ -800,7 +800,7 @@ test.describe("Claude replay lane", () => {
 				const sends = recordSends(page);
 				const app = new AppPage(page);
 				const chat = new ChatPage(page);
-				await app.goto(relayUrl);
+				await app.goto(appUrl);
 
 				await app.sendMessage("Alpha");
 				await expect(chat.stopBtn).toBeVisible();
@@ -875,7 +875,7 @@ test.describe("Claude replay lane", () => {
 
 			test("pauses the queue until Resume", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
@@ -884,7 +884,7 @@ test.describe("Claude replay lane", () => {
 				const sends = recordSends(page);
 				const app = new AppPage(page);
 				const chat = new ChatPage(page);
-				await app.goto(relayUrl);
+				await app.goto(appUrl);
 
 				await app.sendMessage("Alpha");
 				await expect(chat.stopBtn).toBeVisible();
@@ -928,7 +928,7 @@ test.describe("Claude replay lane", () => {
 
 			test("Remove and Edit say it started, leave the composer alone and send it once", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
@@ -953,7 +953,7 @@ test.describe("Claude replay lane", () => {
 				});
 				const app = new AppPage(page);
 				const chat = new ChatPage(page);
-				await app.goto(relayUrl);
+				await app.goto(appUrl);
 
 				await app.sendMessage("Alpha");
 				await expect(chat.stopBtn).toBeVisible();
@@ -1010,7 +1010,7 @@ test.describe("Claude replay lane", () => {
 
 			test("closes the turn and pauses the queue it leaves behind", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(90_000);
@@ -1019,7 +1019,7 @@ test.describe("Claude replay lane", () => {
 				const sends = recordSends(page);
 				const app = new AppPage(page);
 				const chat = new ChatPage(page);
-				await app.goto(relayUrl);
+				await app.goto(appUrl);
 
 				await app.sendMessage("Alpha");
 				await expect(chat.stopBtn).toBeVisible();
@@ -1142,8 +1142,8 @@ test.describe("Claude replay lane", () => {
 		 *  over the typed RPC. */
 		async function open(
 			page: Page,
-			relayUrl: string,
-			harness: { projectUrl: string; relayPort: number; eventsDbPath: string },
+			appUrl: string,
+			harness: { projectUrl: string; appPort: number; eventsDbPath: string },
 		) {
 			const sessionId = decodeURIComponent(
 				harness.projectUrl.slice("/s/".length),
@@ -1154,7 +1154,7 @@ test.describe("Claude replay lane", () => {
 					Effect.scoped(Effect.flatMap(makeWsRpcClient, call)).pipe(
 						Effect.provide(RpcClient.layerProtocolSocket()),
 						Effect.provide(
-							Socket.layerWebSocket(`ws://127.0.0.1:${harness.relayPort}/rpc`),
+							Socket.layerWebSocket(`ws://127.0.0.1:${harness.appPort}/rpc`),
 						),
 						Effect.provide(Socket.layerWebSocketConstructorGlobal),
 						Effect.provide(RpcSerialization.layerJson),
@@ -1163,7 +1163,7 @@ test.describe("Claude replay lane", () => {
 			const sends = recordSends(page);
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			return {
 				sessionId,
 				dbPath: harness.eventsDbPath,
@@ -1203,18 +1203,18 @@ test.describe("Claude replay lane", () => {
 			test("an interruption from another tab ends working and finalizes once in the starter tab", async ({
 				page,
 				browser,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				const context = await browser.newContext({
 					viewport: page.viewportSize(),
 				});
 				try {
 					const other = await context.newPage();
 					const otherChat = new ChatPage(other);
-					await new AppPage(other).goto(relayUrl);
+					await new AppPage(other).goto(appUrl);
 					await s.app.sendMessage("Alpha");
 					await expect
 						.poll(() => countEvents(s.dbPath, "message.created"))
@@ -1280,11 +1280,11 @@ test.describe("Claude replay lane", () => {
 			test("Alpha starts and Bravo steers from another tab; working ends in both tabs", async ({
 				page,
 				browser,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				const context = await browser.newContext({
 					viewport: page.viewportSize(),
 				});
@@ -1292,7 +1292,7 @@ test.describe("Claude replay lane", () => {
 					const other = await context.newPage();
 					const otherSends = recordSends(other);
 					const otherChat = new ChatPage(other);
-					await new AppPage(other).goto(relayUrl);
+					await new AppPage(other).goto(appUrl);
 					await s.app.sendMessage("Alpha");
 					await s.chat.waitForToolBlock();
 					await expect(otherChat.stopBtn).toBeVisible();
@@ -1346,11 +1346,11 @@ test.describe("Claude replay lane", () => {
 
 			test("joins at the tool boundary: one result, two turns, one turn end", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				const { inputId: b, response } = await s.submit("Bravo", "steer");
@@ -1445,11 +1445,11 @@ test.describe("Claude replay lane", () => {
 
 			test("⌘/Ctrl+Enter steers from the composer; the transcript labels it after the tool", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				await page.locator("#input").fill("Bravo");
@@ -1511,11 +1511,11 @@ test.describe("Claude replay lane", () => {
 
 			test("runs as its own turn after the first: two results, two turn ends", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				await s.app.sendMessage("Alpha");
 				// Alpha is replying (no tool, so no boundary to read the steer at).
 				await expect(s.chat.assistantMessages).toHaveCount(1);
@@ -1575,11 +1575,11 @@ test.describe("Claude replay lane", () => {
 
 			test("both join: one result answers all three inputs", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				const bravo = await s.submit("Bravo", "steer");
@@ -1655,11 +1655,11 @@ test.describe("Claude replay lane", () => {
 
 			test("interrupts the running turn, still answers the steer and pauses the queue", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				const { inputId: b, response } = await s.submit("Bravo", "steer");
@@ -1742,11 +1742,11 @@ test.describe("Claude replay lane", () => {
 
 			test("promotes the queued row to a steer", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				const { inputId: b, response } = await s.submit("Bravo", "queue");
@@ -1800,16 +1800,16 @@ test.describe("Claude replay lane", () => {
 
 			async function steerFromTray(
 				page: Page,
-				relayUrl: string,
+				appUrl: string,
 				harness: {
 					projectUrl: string;
-					relayPort: number;
+					appPort: number;
 					eventsDbPath: string;
 				},
 				testInfo: TestInfo,
 			) {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				await page.locator("#input").fill("Bravo");
@@ -1868,10 +1868,10 @@ test.describe("Claude replay lane", () => {
 
 			test("the queued row's Steer promotes it from the tray", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
-				await steerFromTray(page, relayUrl, harness, testInfo);
+				await steerFromTray(page, appUrl, harness, testInfo);
 			});
 
 			// A named account (a second Claude login) is a provider instance whose id
@@ -1887,10 +1887,10 @@ test.describe("Claude replay lane", () => {
 
 				test("the queued row's Steer promotes it from the tray", async ({
 					page,
-					relayUrl,
+					appUrl,
 					harness,
 				}, testInfo) => {
-					const s = await steerFromTray(page, relayUrl, harness, testInfo);
+					const s = await steerFromTray(page, appUrl, harness, testInfo);
 					expect(sessionProvider(s.dbPath, s.sessionId)).toBe("work-claude");
 				});
 			});
@@ -1906,11 +1906,11 @@ test.describe("Claude replay lane", () => {
 
 			test("an idle session's send is not steered", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				const idle = () =>
 					queryDb<{ status: string }>(
 						s.dbPath,
@@ -1989,11 +1989,11 @@ test.describe("Claude replay lane", () => {
 
 			test("is refused with its reason and admits nothing", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				await s.app.sendMessage("Alpha");
 				await expect(s.chat.stopBtn).toBeVisible();
 				await expect.poll(() => countEvents(s.dbPath, "run.started")).toBe(1);
@@ -2041,11 +2041,11 @@ test.describe("Claude replay lane", () => {
 
 			test("a model mismatch leaves the draft in the composer with the reason", async ({
 				page,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				test.setTimeout(60_000);
-				const s = await open(page, relayUrl, harness);
+				const s = await open(page, appUrl, harness);
 				await s.app.sendMessage("Alpha");
 				await expect(s.chat.stopBtn).toBeVisible();
 				await expect.poll(() => countEvents(s.dbPath, "run.started")).toBe(1);
@@ -2086,12 +2086,12 @@ test.describe("Claude replay lane", () => {
 
 		test("copies history and replays a new turn in the fork", async ({
 			page,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			await app.sendMessage("Parent turn");
 			await expect(chat.assistantMessages).toHaveText([/pong/i]);
 			await chat.waitForStreamingComplete();
@@ -2211,10 +2211,10 @@ test.describe("Claude replay lane", () => {
 	test.describe("sub-agent trace", () => {
 		test.use({ claudeReplay: { turns: ["subagent-task-turn"] } });
 
-		test("replays a Task sub-agent turn", async ({ page, relayUrl }) => {
+		test("replays a Task sub-agent turn", async ({ page, appUrl }) => {
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 
 			await app.sendMessage("Ask a subagent to summarise package.json");
 			await chat.waitForAssistantMessage();

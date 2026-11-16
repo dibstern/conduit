@@ -2185,7 +2185,7 @@ describe("ProviderTurnService", () => {
 							Layer.provideMerge(Layer.merge(parts, owners)),
 						),
 					);
-					const relay = (scope: Scope.Scope) =>
+					const daemonProject = (scope: Scope.Scope) =>
 						Layer.buildWithScope(attachProviderTurnsLive, scope).pipe(
 							Effect.provide(context),
 							Effect.map((built) => Context.get(built, ProviderTurnServiceTag)),
@@ -2207,7 +2207,7 @@ describe("ProviderTurnService", () => {
 								}),
 							),
 						);
-					return { context, log, scopes, relay, accepted, delivering };
+					return { context, log, scopes, daemonProject, accepted, delivering };
 				});
 			const stop = (commandId: string) => ({
 				clientId: "client-1",
@@ -2220,12 +2220,12 @@ describe("ProviderTurnService", () => {
 				() =>
 					Effect.scoped(
 						Effect.gen(function* () {
-							const { relay, accepted, delivering } = yield* daemon([
+							const { daemonProject, accepted, delivering } = yield* daemon([
 								"session-1",
 							]);
 							const first = yield* Scope.make();
-							const a = yield* relay(first);
-							const b = yield* relay(yield* Effect.scope);
+							const a = yield* daemonProject(first);
+							const b = yield* daemonProject(yield* Effect.scope);
 							const lifted = yield* Effect.forkChild(
 								Stream.runHead(yield* b.fenceLifts),
 							);
@@ -2249,9 +2249,9 @@ describe("ProviderTurnService", () => {
 				() =>
 					Effect.scoped(
 						Effect.gen(function* () {
-							const { relay, accepted, delivering, scopes, log } =
+							const { daemonProject, accepted, delivering, scopes, log } =
 								yield* daemon(["session-1"]);
-							const service = yield* relay(yield* Effect.scope);
+							const service = yield* daemonProject(yield* Effect.scope);
 							yield* service.beginStop(stop("cmd-deleted"));
 							yield* Deferred.await(delivering);
 							const session = scopes.sessions.get("session-1");
@@ -2268,8 +2268,8 @@ describe("ProviderTurnService", () => {
 				() =>
 					Effect.scoped(
 						Effect.gen(function* () {
-							const { relay, delivering } = yield* daemon([]);
-							const service = yield* relay(yield* Effect.scope);
+							const { daemonProject, delivering } = yield* daemon([]);
+							const service = yield* daemonProject(yield* Effect.scope);
 							const lifted = yield* Effect.forkChild(
 								Stream.runHead(yield* service.fenceLifts),
 							);
@@ -2290,17 +2290,16 @@ describe("ProviderTurnService", () => {
 				() =>
 					Effect.scoped(
 						Effect.gen(function* () {
-							const { context, relay, accepted, scopes } = yield* daemon([
-								"session-1",
-							]);
+							const { context, daemonProject, accepted, scopes } =
+								yield* daemon(["session-1"]);
 							yield* Effect.gen(function* () {
 								yield* seedSession;
 								yield* seedClaimedRun("active-input", 1);
 								yield* seedCapturedStop("recovered-stop");
 							}).pipe(Effect.provide(context));
-							const a = yield* relay(yield* Effect.scope);
+							const a = yield* daemonProject(yield* Effect.scope);
 							expect(a.turnFences("session-1").stopping).toBe(true);
-							const b = yield* relay(yield* Effect.scope);
+							const b = yield* daemonProject(yield* Effect.scope);
 							expect(b.turnFences("session-1").stopping).toBe(true);
 							expect(accepted.count).toBe(1);
 							// The project is removed and added again: its next relay recovers.
@@ -2308,7 +2307,7 @@ describe("ProviderTurnService", () => {
 								yield* Scope.close(scope, Exit.void);
 							scopes.project = yield* Scope.make();
 							scopes.sessions.set("session-1", yield* Scope.make());
-							const c = yield* relay(yield* Effect.scope);
+							const c = yield* daemonProject(yield* Effect.scope);
 							expect(c.turnFences("session-1").stopping).toBe(true);
 							expect(accepted.count).toBe(2);
 						}),
@@ -2318,8 +2317,8 @@ describe("ProviderTurnService", () => {
 			it.effect("projects share no fences or lifts", () =>
 				Effect.scoped(
 					Effect.gen(function* () {
-						const { context, relay, delivering } = yield* daemon([]);
-						const p = yield* relay(yield* Effect.scope);
+						const { context, daemonProject, delivering } = yield* daemon([]);
+						const p = yield* daemonProject(yield* Effect.scope);
 						const q = yield* Context.get(context, ProviderTurns).forProject(
 							"other-project",
 							context,

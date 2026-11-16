@@ -5,7 +5,7 @@ import { Socket } from "effect/socket";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { chooseSettingsOption } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -13,11 +13,11 @@ import { ChatPage } from "../page-objects/chat.page.js";
 const IDLE_WINDOW_MS = 3 * 86_400_000;
 
 /** A typed WS RPC client on the relay, open until `close`. */
-async function connectRpc(relayPort: number) {
+async function connectRpc(appPort: number) {
 	const scope = Effect.runSync(Scope.make());
 	const protocol = RpcClient.layerProtocolSocket().pipe(
 		Layer.provide(
-			Socket.layerWebSocket(`ws://127.0.0.1:${relayPort}/rpc`).pipe(
+			Socket.layerWebSocket(`ws://127.0.0.1:${appPort}/rpc`).pipe(
 				Layer.provide(Socket.layerWebSocketConstructorGlobal),
 			),
 		),
@@ -64,9 +64,9 @@ function lastActivityAt(harness: ReplayHarness, sessionId: string): number {
 
 test("auto-settle toggle and idle window survive reload", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
-	await gotoRelay(page, relayUrl);
+	await gotoApp(page, appUrl);
 	const row = page.locator("#session-list .session-item").first();
 	await expect(row).toBeVisible();
 	await row.click({ button: "right" });
@@ -102,17 +102,17 @@ test("auto-settle toggle and idle window survive reload", async ({
 
 test("the auto-settle outlook reads the same with or without a viewer", async ({
 	page,
-	relayUrl,
+	appUrl,
 	harness,
 }) => {
 	const app = new AppPage(page);
-	await app.goto(relayUrl);
+	await app.goto(appUrl);
 	await app.sendMessage("Ping");
 	const chat = new ChatPage(page);
 	await chat.waitForAssistantMessage();
 	await chat.waitForStreamingComplete();
 	const sessionId = harness.projectUrl.replace(/^\/s\//, "");
-	const { client, close } = await connectRpc(harness.relayPort);
+	const { client, close } = await connectRpc(harness.appPort);
 	try {
 		const read = () =>
 			Effect.runPromise(client.GetSessionAutoSettleOutlook({ sessionId }));
@@ -196,12 +196,12 @@ test.describe("forked session", () => {
 
 	test("a fork is a root session, so it settles like its source", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		for (const word of ["alpha", "beta"]) {
 			await app.sendMessage(
 				word === "alpha"
@@ -212,7 +212,7 @@ test.describe("forked session", () => {
 			await chat.waitForStreamingComplete();
 		}
 		const sessionId = harness.projectUrl.replace(/^\/s\//, "");
-		const { client, close } = await connectRpc(harness.relayPort);
+		const { client, close } = await connectRpc(harness.appPort);
 		try {
 			const fork = await Effect.runPromise(
 				client.ForkSession({ sessionId, originId: "e2e-auto-settle-fork" }),
@@ -243,9 +243,9 @@ test.describe("phone session state chip", () => {
 
 	test("settlement, auto-settle and un-settle stay in sync with the list", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await gotoRelay(page, new URL("/", relayUrl).toString());
+		await gotoApp(page, new URL("/", appUrl).toString());
 		const row = page.locator("#session-list .session-item").first();
 		await expect(row).toBeVisible();
 		const id = await row.getAttribute("data-session-id");
@@ -287,8 +287,8 @@ test.describe("phone session state chip", () => {
 		await expect(liveRow).toBeVisible();
 	});
 
-	test("snooze time and Wake now", async ({ page, relayUrl }) => {
-		await gotoRelay(page, new URL("/", relayUrl).toString());
+	test("snooze time and Wake now", async ({ page, appUrl }) => {
+		await gotoApp(page, new URL("/", appUrl).toString());
 		const row = page.locator("#session-list .session-item").first();
 		await expect(row).toBeVisible();
 		const id = await row.getAttribute("data-session-id");

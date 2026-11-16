@@ -1,9 +1,9 @@
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { dualDriverProviders } from "../fixtures/mockup-state.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 for (const [viewportName, viewport] of [
 	["desktop", { width: 1440, height: 900 }],
@@ -14,7 +14,7 @@ for (const [viewportName, viewport] of [
 
 		test("orders the groups and keeps debug in collapsed Advanced", async ({
 			page,
-			relayUrl,
+			appUrl,
 		}, testInfo) => {
 			await page.addInitScript(() => {
 				localStorage.setItem("feature-flags", "[]");
@@ -28,7 +28,7 @@ for (const [viewportName, viewport] of [
 					GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 				},
 			});
-			await mockRelayWebSocket(page, {
+			await mockDaemonWebSocket(page, {
 				initMessages: [
 					{
 						type: "project_list",
@@ -57,9 +57,9 @@ for (const [viewportName, viewport] of [
 				],
 				responses: new Map(),
 			});
-			await gotoRelay(
+			await gotoApp(
 				page,
-				new URL("/s/settings-general?p=e2e-replay", relayUrl).toString(),
+				new URL("/s/settings-general?p=e2e-replay", appUrl).toString(),
 			);
 			const listSettings = page.getByTestId("list-bar-settings");
 			if (await listSettings.isVisible()) {

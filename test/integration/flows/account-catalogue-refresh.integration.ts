@@ -121,7 +121,7 @@ const clients = (pendingOriginal?: Deferred.Deferred<ProviderCapabilities>) =>
 						: capabilities(account.id);
 				}),
 		});
-		const relay = yield* Layer.build(
+		const daemonProject = yield* Layer.build(
 			makeTestHandlerLayer({
 				accountDirectory: directory,
 				orchestrationEngine: engine,
@@ -134,7 +134,7 @@ const clients = (pendingOriginal?: Deferred.Deferred<ProviderCapabilities>) =>
 		);
 		const project = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 			Effect.provide(WsRpcServerLayer),
-			Effect.provide(relay),
+			Effect.provide(daemonProject),
 		);
 		const handlers = yield* DaemonWsRpcHandlersTag;
 		const daemon = yield* RpcTest.makeClient(WsRpcGroup).pipe(

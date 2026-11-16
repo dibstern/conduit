@@ -44,7 +44,7 @@ console.log("verified");
 		});
 		try {
 			const sessionId = await createSession(
-				harness.relayPort,
+				harness.appPort,
 				"opencode",
 				undefined,
 				undefined,
@@ -95,7 +95,7 @@ console.log("verified");
 				});
 			});
 			const app = new AppPage(page);
-			await app.goto(`${harness.relayBaseUrl}/s/${sessionId}`);
+			await app.goto(`${harness.appBaseUrl}/s/${sessionId}`);
 			await app.sendMessage(
 				"Follow these steps exactly. First say 'Should I widen the change?' in a plain text message, then run the Bash command pwd. Next say 'Changing scope could break callers.' in a plain text message, then run the Bash command node surfacing-gate.mjs. The gate is part of the rendering test and will be released by the test. Finally say 'Finished the review.' Do not combine the tool calls. Do not edit files.",
 			);

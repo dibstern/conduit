@@ -1,6 +1,6 @@
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", viewport: { width: 1440, height: 900 } });
 
@@ -90,14 +90,14 @@ for (const multiple of [true, false]) {
 					GetProjects: () => ({ projects, current: projectSlug }),
 				},
 			});
-			await mockRelayWebSocket(page, {
+			await mockDaemonWebSocket(page, {
 				initMessages: [
 					{ type: "project_list", projects, current: projectSlug },
 					{ type: "shell_snapshot", roots: true, sessions: [session] },
 				],
 				responses: new Map(),
 			});
-			await page.goto(`${harness.relayBaseUrl}/s/folders-session`);
+			await page.goto(`${harness.appBaseUrl}/s/folders-session`);
 			await expect(page.getByTestId("session-bar-title")).toHaveText(
 				"Folders session",
 			);

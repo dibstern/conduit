@@ -18,7 +18,7 @@ import {
 } from "../../../src/lib/contracts/worktree.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", screenshot: "off" });
 
@@ -39,7 +39,7 @@ const branch = "conduit/missing-session";
 
 async function openMissingSession(
 	page: Page,
-	relayBaseUrl: string,
+	appBaseUrl: string,
 	workspaceMissing: WorkspaceMissing = {
 		path: worktree,
 		branch,
@@ -87,14 +87,14 @@ async function openMissingSession(
 	});
 	rpc.setShellRows([session]);
 	rpc.setFamilyRows([session]);
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: projectSlug },
 			{ type: "shell_snapshot", roots: true, sessions: [session] },
 		],
 		responses: new Map(),
 	});
-	await page.goto(`${relayBaseUrl}/s/${session.id}`);
+	await page.goto(`${appBaseUrl}/s/${session.id}`);
 	return { rpc, session };
 }
 
@@ -122,7 +122,7 @@ for (const viewport of [
 			if (!first) throw new Error("No missing folder in fixture");
 			const { rpc, session } = await openMissingSession(
 				page,
-				harness.relayBaseUrl,
+				harness.appBaseUrl,
 				{
 					path: first.path,
 					branch,
@@ -236,7 +236,7 @@ for (const viewport of [
 			await page.setViewportSize(viewport);
 			const { rpc, session } = await openMissingSession(
 				page,
-				harness.relayBaseUrl,
+				harness.appBaseUrl,
 			);
 			const identity = page.getByTestId("composer-checkout");
 			const notice = page.getByTestId("workspace-notice-indicator");
@@ -314,7 +314,7 @@ test("a deleted branch offers only Continue in main folder", async ({
 	harness,
 }, testInfo) => {
 	await page.setViewportSize({ width: 1440, height: 900 });
-	await openMissingSession(page, harness.relayBaseUrl, {
+	await openMissingSession(page, harness.appBaseUrl, {
 		path: worktree,
 		branch,
 		canRecreate: false,
@@ -358,7 +358,7 @@ for (const failure of [
 		harness,
 	}, testInfo) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
-		const { rpc } = await openMissingSession(page, harness.relayBaseUrl);
+		const { rpc } = await openMissingSession(page, harness.appBaseUrl);
 		rpc.setStubs({
 			[failure.tag]: () => {
 				throw failure.error;

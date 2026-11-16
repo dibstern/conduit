@@ -1904,81 +1904,6 @@ describe("Effect runtime boundary grep", () => {
 		expect(hits).toEqual([]);
 	});
 
-	it("does not require callers to assemble the daemon relay factory", () => {
-		const daemonLayersPath = "src/lib/domain/daemon/Layers/daemon-layers.ts";
-		const daemonLayers = readFileSync(
-			join(REPO_ROOT, daemonLayersPath),
-			"utf8",
-		);
-		const optionsStart = daemonLayers.indexOf(
-			"export interface DaemonLiveOptions",
-		);
-		const makeDaemonStart = daemonLayers.indexOf(
-			"export const makeDaemonLive",
-			optionsStart,
-		);
-		expect(optionsStart).toBeGreaterThanOrEqual(0);
-		expect(makeDaemonStart).toBeGreaterThan(optionsStart);
-		const optionsSource = daemonLayers.slice(optionsStart, makeDaemonStart);
-
-		const daemonMainPath = "src/lib/domain/daemon/Layers/daemon-main.ts";
-		const daemonMain = readFileSync(join(REPO_ROOT, daemonMainPath), "utf8");
-		const daemonLiveOptions = daemonMain.match(
-			/const daemonLiveOptions: DaemonLiveOptions = \{[\s\S]*?\n\t\};/,
-		)?.[0];
-
-		const hits = [
-			...optionsSource.split("\n").flatMap((line, index) =>
-				/\brelayFactory:\s*RelayFactory\b/.test(line)
-					? [
-							{
-								path: daemonLayersPath,
-								line:
-									daemonLayers.slice(0, optionsStart).split("\n").length +
-									index,
-								source: line.trim(),
-								reason:
-									"DaemonLiveOptions should derive RelayCache from RelayFactoryTag inside the Layer graph",
-							},
-						]
-					: [],
-			),
-			...daemonLayers.split("\n").flatMap((line, index) =>
-				/makeRelayCacheLayer\(options\.relayFactory\)/.test(line)
-					? [
-							{
-								path: daemonLayersPath,
-								line: index + 1,
-								source: line.trim(),
-								reason:
-									"RelayCache construction should not consume a caller-injected factory",
-							},
-						]
-					: [],
-			),
-			...(daemonLiveOptions ?? "").split("\n").flatMap((line, index) =>
-				/\brelayFactory:\s*\(/.test(line)
-					? [
-							{
-								path: daemonMainPath,
-								line:
-									daemonMain.indexOf(daemonLiveOptions ?? "") < 0
-										? index + 1
-										: daemonMain
-												.slice(0, daemonMain.indexOf(daemonLiveOptions ?? ""))
-												.split("\n").length + index,
-								source: line.trim(),
-								reason:
-									"daemon-main should not bridge legacy registry relay creation into DaemonLiveOptions",
-							},
-						]
-					: [],
-			),
-		];
-
-		expect(hits).toEqual([]);
-	});
-
 	it("does not dispatch daemon IPC requests through Runtime.runPromise", () => {
 		const path = "src/lib/domain/daemon/Layers/daemon-layers.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
@@ -2601,31 +2526,31 @@ describe("Effect runtime boundary grep", () => {
 			},
 			{
 				pattern:
-					/(?:relayManagedRuntime|Effect)\.runSync(?:Exit)?(?:With)?\s*\((?:[^;]*?\)\s*\()?\s*StatusPollerTag\s*\)/,
+					/Effect\.runSync(?:Exit)?(?:With)?\s*\((?:[^;]*?\)\s*\()?\s*StatusPollerTag\s*\)/,
 				reason:
 					"relay startup should acquire StatusPollerTag inside the startup Effect acquisition",
 			},
 			{
 				pattern:
-					/const pollerManager = await (?:relayManagedRuntime|Effect)\.runPromise(?:Exit)?(?:With)?/,
+					/const pollerManager = await Effect\.runPromise(?:Exit)?(?:With)?/,
 				reason:
 					"relay startup should acquire PollerManagerTag inside the startup Effect acquisition",
 			},
 			{
 				pattern:
-					/(?:relayManagedRuntime|Effect)\.runSync(?:Exit)?(?:With)?\s*\((?:[^;]*?\)\s*\()?\s*OpenCodeAPITag\s*\)/,
+					/Effect\.runSync(?:Exit)?(?:With)?\s*\((?:[^;]*?\)\s*\()?\s*OpenCodeAPITag\s*\)/,
 				reason:
 					"relay startup should acquire OpenCodeAPITag inside the startup Effect acquisition",
 			},
 			{
 				pattern:
-					/(?:relayManagedRuntime|Effect)\.runSync(?:Exit)?(?:With)?\s*\((?:[^;]*?\)\s*\()?\s*WebSocketHandlerTag\s*\)/,
+					/Effect\.runSync(?:Exit)?(?:With)?\s*\((?:[^;]*?\)\s*\()?\s*WebSocketHandlerTag\s*\)/,
 				reason:
 					"relay startup should acquire WebSocketHandlerTag inside the startup Effect acquisition",
 			},
 			{
 				pattern:
-					/const startupHandles = await (?:relayManagedRuntime|Effect)\.runPromise(?:Exit)?(?:With)?/,
+					/const startupHandles = await Effect\.runPromise(?:Exit)?(?:With)?/,
 				reason:
 					"relay startup should not split API/WebSocket acquisition into a separate runtime bridge",
 			},
@@ -2674,9 +2599,12 @@ describe("Effect runtime boundary grep", () => {
 		const hookPath =
 			"src/lib/domain/project-services/Services/opencode-runtime-ingress-service.ts";
 		const hookSource = readFileSync(join(REPO_ROOT, hookPath), "utf8");
-		const relayPath =
+		const ingestionPath =
 			"src/lib/domain/project-services/Layers/project-ingestion-layer.ts";
-		const relaySource = readFileSync(join(REPO_ROOT, relayPath), "utf8");
+		const ingestionSource = readFileSync(
+			join(REPO_ROOT, ingestionPath),
+			"utf8",
+		);
 		const retiredBridgePatterns = [
 			{
 				path: hookPath,
@@ -2694,15 +2622,15 @@ describe("Effect runtime boundary grep", () => {
 					"EffectOpenCodeRuntimeIngress must not own async runtime bridge calls",
 			},
 			{
-				path: relayPath,
-				source: relaySource,
+				path: ingestionPath,
+				source: ingestionSource,
 				pattern: /\bEffectOpenCodeRuntimeIngress\(\{\s*runtime:/gs,
 				reason:
 					"relay-stack must not construct a separate persistence runtime for OpenCode runtime ingress",
 			},
 			{
-				path: relayPath,
-				source: relaySource,
+				path: ingestionPath,
+				source: ingestionSource,
 				pattern: /\beffectPersistenceRuntime\b/g,
 				reason:
 					"OpenCode runtime ingress persistence should be owned by the relay runtime Layer graph",
@@ -2837,13 +2765,13 @@ describe("Effect runtime boundary grep", () => {
 			},
 			{
 				pattern:
-					/recordPermissionRequest:\s*\([^)]*\)\s*=>\s*(?:relayManagedRuntime|Effect)\.runSync(?:Exit)?(?:With)?/s,
+					/recordPermissionRequest:\s*\([^)]*\)\s*=>\s*Effect\.runSync(?:Exit)?(?:With)?/s,
 				reason:
 					"permission recording should not use a sync runtime bridge in relay-stack",
 			},
 			{
 				pattern:
-					/markPermissionReplied:\s*\([^)]*\)\s*=>\s*(?:relayManagedRuntime|Effect)\.runSync(?:Exit)?(?:With)?/s,
+					/markPermissionReplied:\s*\([^)]*\)\s*=>\s*Effect\.runSync(?:Exit)?(?:With)?/s,
 				reason:
 					"permission reply tracking should not use a sync runtime bridge in relay-stack",
 			},
@@ -2943,7 +2871,7 @@ describe("Effect runtime boundary grep", () => {
 			},
 			{
 				pattern:
-					/(?:relayManagedRuntime|Effect|Runtime)\.run(?:Fork|Callback)(?:With)?\s*\((?:[^;]*?\)\s*\()?\s*(?:clear|reset)ProcessingTimeout/,
+					/(?:Effect|Runtime)\.run(?:Fork|Callback)(?:With)?\s*\((?:[^;]*?\)\s*\()?\s*(?:clear|reset)ProcessingTimeout/,
 				reason: "processing timeout mutation must stay inside Effect programs",
 			},
 		] as const;
@@ -3079,8 +3007,7 @@ describe("Effect runtime boundary grep", () => {
 			);
 		const retiredBridgePatterns = [
 			{
-				pattern:
-					/\b(?:relayManagedRuntime|Effect|Runtime)\.run(?:Fork|Callback)(?:With)?\s*\(/,
+				pattern: /\b(?:Effect|Runtime)\.run(?:Fork|Callback)(?:With)?\s*\(/,
 				reason:
 					"WebSocket callback registration should be owned by the relay WebSocket callback wiring effect",
 			},

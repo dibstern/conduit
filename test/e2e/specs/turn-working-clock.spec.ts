@@ -6,7 +6,7 @@
 import { writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { Page } from "@playwright/test";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -83,11 +83,11 @@ test.describe("Turn working clock", () => {
 
 	test("the live turn clock keeps its time through a reload", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await page.mouse.move(0, 0);
 		await app.sendMessage("Read the extra folder");
 
@@ -95,7 +95,7 @@ test.describe("Turn working clock", () => {
 		await page.screenshot({ path: testInfo.outputPath("live-clocks.png") });
 
 		// A reload mid-turn must not restart either clock at 0:00.
-		await gotoRelay(page, page.url());
+		await gotoApp(page, page.url());
 		await expect(page.locator("#connect-overlay")).toBeHidden({
 			timeout: 30_000,
 		});
@@ -130,12 +130,12 @@ test.describe("Turn working clock", () => {
 
 	test("the settled working time reads the same after a relay restart", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}, testInfo) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.sendMessage("Read the extra folder");
 		await chat.waitForStreamingComplete();
 		const header = page
@@ -148,7 +148,7 @@ test.describe("Turn working clock", () => {
 		const before = workedSeconds(await header.innerText());
 
 		await harness.restart();
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await expect(page.locator("#connect-overlay")).toBeHidden({
 			timeout: 30_000,
 		});
@@ -166,11 +166,11 @@ test.describe("Turn working clock", () => {
 		);
 	});
 
-	test("Stop ends the clock for good", async ({ page, relayUrl }, testInfo) => {
+	test("Stop ends the clock for good", async ({ page, appUrl }, testInfo) => {
 		await page.clock.install();
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		const sentAt = Date.now();
 		await app.sendMessage("Read the extra folder");
 		await sampleLiveClock(page, 2);
@@ -194,7 +194,7 @@ test.describe("Turn working clock", () => {
 		await page.clock.fastForward(3_000);
 		expect(workedSeconds(await header.innerText())).toBe(settled);
 
-		await gotoRelay(page, page.url());
+		await gotoApp(page, page.url());
 		await expect(page.locator("#connect-overlay")).toBeHidden({
 			timeout: 30_000,
 		});
@@ -219,12 +219,12 @@ test.describe("Turn working clock", () => {
 
 		test("waiting in the queue is not work, and Stop ends the queued prompt", async ({
 			page,
-			relayUrl,
+			appUrl,
 		}, testInfo) => {
 			await page.clock.install();
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			await page.mouse.move(0, 0);
 			const sentA = Date.now();
 			await app.sendMessage("Read the extra folder");
@@ -280,7 +280,7 @@ test.describe("Turn working clock", () => {
 
 			// History agrees: both turns settled, and the running one is the
 			// prompt the live head times from.
-			await gotoRelay(page, page.url());
+			await gotoApp(page, page.url());
 			await expect(page.locator("#connect-overlay")).toBeHidden({
 				timeout: 30_000,
 			});
@@ -314,7 +314,7 @@ test.describe("Turn working clock", () => {
 
 		test("the next prompt still ends idle, even reloaded the moment it finishes", async ({
 			page,
-			relayUrl,
+			appUrl,
 		}, testInfo) => {
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
@@ -324,7 +324,7 @@ test.describe("Turn working clock", () => {
 				await expect(page.getByTestId("pending-input-row")).toHaveCount(0);
 				await page.screenshot({ path: testInfo.outputPath(`${label}.png`) });
 			};
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			await app.sendMessage("Read the extra folder");
 			await expect(page.getByTestId("turn-live-elapsed")).toBeVisible({
 				timeout: 30_000,
@@ -348,7 +348,7 @@ test.describe("Turn working clock", () => {
 			const finishedAt = Date.now();
 			// Claude stores idle a moment after the turn's done. A client that
 			// connects in between must still end up idle.
-			await gotoRelay(page, page.url());
+			await gotoApp(page, page.url());
 			await expect(page.locator("#connect-overlay")).toBeHidden({
 				timeout: 30_000,
 			});
@@ -361,11 +361,11 @@ test.describe("Turn working clock", () => {
 		});
 		test("Stop stays on through the whole of the next prompt", async ({
 			page,
-			relayUrl,
+			appUrl,
 		}, testInfo) => {
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			await app.sendMessage("Read the extra folder");
 			await expect(page.getByTestId("turn-live-elapsed")).toBeVisible({
 				timeout: 30_000,
@@ -417,12 +417,12 @@ test.describe("Turn working clock", () => {
 
 		test("an open permission prompt pauses the clock, through a reload", async ({
 			page,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
-			await app.goto(relayUrl);
+			await app.goto(appUrl);
 			const sentAt = Date.now();
 			await app.sendMessage("Read the extra folder");
 
@@ -465,7 +465,7 @@ test.describe("Turn working clock", () => {
 			await expect(heads).toHaveCount(0);
 
 			// The open wait comes from the server, so a reload still waits.
-			await gotoRelay(page, page.url());
+			await gotoApp(page, page.url());
 			await expect(page.locator("#connect-overlay")).toBeHidden({
 				timeout: 30_000,
 			});

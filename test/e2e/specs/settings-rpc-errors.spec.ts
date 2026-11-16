@@ -15,7 +15,7 @@ import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { MOCK_SERVER_STATUS, mockWsRpc } from "../helpers/rpc-mock.js";
 import { chooseSettingsOption } from "../helpers/settings.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -43,7 +43,7 @@ async function openSettings(page: Page, baseUrl: string, stubs: StubTable) {
 			...stubs,
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -99,7 +99,7 @@ test("Claude settings trust rejection restores the value and shows its declared 
 	harness,
 }, testInfo) => {
 	const message = "This setting is managed by your organisation.";
-	const rpc = await openSettings(page, harness.relayBaseUrl, {
+	const rpc = await openSettings(page, harness.appBaseUrl, {
 		SetClaudeSettings: () => {
 			throw new ClaudeSettingsTrustBoundaryError({
 				key: "autoCompactEnabled",
@@ -142,7 +142,7 @@ for (const failure of [
 		page,
 		harness,
 	}, testInfo) => {
-		const rpc = await openSettings(page, harness.relayBaseUrl, {
+		const rpc = await openSettings(page, harness.appBaseUrl, {
 			ResolveClaudeSettings: () => {
 				throw failure;
 			},
@@ -171,7 +171,7 @@ for (const reason of ["wrong_pin", "locked_out"] as const) {
 		page,
 		harness,
 	}, testInfo) => {
-		await openSettings(page, harness.relayBaseUrl, {
+		await openSettings(page, harness.appBaseUrl, {
 			SetPin: () => {
 				throw new SetPinRejected({ reason, retryAfterSeconds: 125 });
 			},
@@ -200,7 +200,7 @@ test("refused log-level change restores the selected level and shows the server 
 	page,
 	harness,
 }, testInfo) => {
-	await openSettings(page, harness.relayBaseUrl, {
+	await openSettings(page, harness.appBaseUrl, {
 		SetLogLevel: () => {
 			throw new WsRpcError({ message: "The server refused this log level." });
 		},
@@ -232,7 +232,7 @@ for (const failFirst of [false, true]) {
 		};
 		let release: (() => void) | undefined;
 		const writes: boolean[] = [];
-		const rpc = await openSettings(page, harness.relayBaseUrl, {
+		const rpc = await openSettings(page, harness.appBaseUrl, {
 			GetUsageLimitsSetting: () => ({ usageLimits: saved }),
 			SetUsageLimitsSetting: ({ usageLimits }) => {
 				writes.push(usageLimits.autoResume);

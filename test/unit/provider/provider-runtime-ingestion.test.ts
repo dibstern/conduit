@@ -547,24 +547,24 @@ describe("ProviderRuntimeIngestion", () => {
 			name: "publishes to both sinks by default",
 			options: undefined,
 			expectedBusCalls: 1,
-			expectedRelayCalls: 1,
+			expectedBrowserCalls: 1,
 		},
 		{
 			name: "publishes only to the bus when relay publishing is disabled",
 			options: { publishToBrowser: false },
 			expectedBusCalls: 1,
-			expectedRelayCalls: 0,
+			expectedBrowserCalls: 0,
 		},
 		{
 			name: "publishes only to the relay when bus publishing is disabled",
 			options: { publishToBus: false },
 			expectedBusCalls: 0,
-			expectedRelayCalls: 1,
+			expectedBrowserCalls: 1,
 		},
-	])("$name", async ({ options, expectedBusCalls, expectedRelayCalls }) => {
+	])("$name", async ({ options, expectedBusCalls, expectedBrowserCalls }) => {
 		const harness = makeHarness({ existingSession: true });
 		const busPublish = vi.fn(() => Effect.void);
-		const relayPublish = vi.fn(() => Effect.void);
+		const browserPublish = vi.fn(() => Effect.void);
 		const busLayer = Layer.succeed(SessionEventBusTag)({
 			publish: busPublish,
 			publishAdvance: () => Effect.void,
@@ -572,7 +572,7 @@ describe("ProviderRuntimeIngestion", () => {
 			subscribeAdvances: () => Effect.succeed(Stream.empty),
 		} satisfies SessionEventBus);
 		const layer = makeTestProviderRuntimeIngestionLive({
-			browserPublisher: { publish: relayPublish },
+			browserPublisher: { publish: browserPublish },
 		}).pipe(Layer.provide(harness.depsLayer), Layer.provideMerge(busLayer));
 
 		await Effect.runPromise(
@@ -596,7 +596,7 @@ describe("ProviderRuntimeIngestion", () => {
 		);
 
 		expect(busPublish).toHaveBeenCalledTimes(expectedBusCalls);
-		expect(relayPublish).toHaveBeenCalledTimes(expectedRelayCalls);
+		expect(browserPublish).toHaveBeenCalledTimes(expectedBrowserCalls);
 	});
 
 	it("single stored events fail ingestion and do not publish when projectBatch fails", async () => {
@@ -610,7 +610,7 @@ describe("ProviderRuntimeIngestion", () => {
 				),
 		});
 		const busPublish = vi.fn(() => Effect.void);
-		const relayPublish = vi.fn(() => Effect.void);
+		const browserPublish = vi.fn(() => Effect.void);
 		const busLayer = Layer.succeed(SessionEventBusTag)({
 			publish: busPublish,
 			publishAdvance: () => Effect.void,
@@ -618,7 +618,7 @@ describe("ProviderRuntimeIngestion", () => {
 			subscribeAdvances: () => Effect.succeed(Stream.empty),
 		} satisfies SessionEventBus);
 		const layer = makeTestProviderRuntimeIngestionLive({
-			browserPublisher: { publish: relayPublish },
+			browserPublisher: { publish: browserPublish },
 		}).pipe(Layer.provide(harness.depsLayer), Layer.provideMerge(busLayer));
 
 		const result = await Effect.runPromise(
@@ -654,7 +654,7 @@ describe("ProviderRuntimeIngestion", () => {
 		);
 		expect(harness.projectEvent).not.toHaveBeenCalled();
 		expect(busPublish).not.toHaveBeenCalled();
-		expect(relayPublish).not.toHaveBeenCalled();
+		expect(browserPublish).not.toHaveBeenCalled();
 	});
 
 	it("an interrupt cannot split ingestion projection from its bus signal", async () => {

@@ -7,7 +7,7 @@ import {
 	waitForFonts,
 	waitForIcons,
 } from "../../../test/e2e/helpers/visual-helpers.js";
-import { mockRelayWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
 import {
 	approvalInit,
 	approvalPermission,
@@ -27,7 +27,7 @@ export const approvalScene: SceneDefinition = {
 	},
 
 	async run({ page, previewUrl, phase, assert }) {
-		let wsMock: Awaited<ReturnType<typeof mockRelayWebSocket>>;
+		let wsMock: Awaited<ReturnType<typeof mockDaemonWebSocket>>;
 
 		await phase("setup-ws-mock", async () => {
 			await mockWsRpc(page, {
@@ -40,7 +40,7 @@ export const approvalScene: SceneDefinition = {
 					}),
 				},
 			});
-			wsMock = await mockRelayWebSocket(page, {
+			wsMock = await mockDaemonWebSocket(page, {
 				initMessages: approvalInit,
 				responses: new Map([
 					["Help me build the landing page with a hero section", mainUiTurn1],

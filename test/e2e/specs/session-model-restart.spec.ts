@@ -5,7 +5,7 @@
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { saveGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -38,13 +38,13 @@ test.describe("Claude session model across a relay restart", () => {
 
 	test("the model chip still names the session's model", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 		const trigger = page.getByTestId("model-picker-trigger");
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.sendMessage("One");
 		await turnsCompleted(harness.eventsDbPath, 1);
 		await chat.waitForStreamingComplete();
@@ -58,7 +58,7 @@ test.describe("Claude session model across a relay restart", () => {
 				dirname(harness.eventsDbPath),
 			),
 		);
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await expect(page.locator("#connect-overlay")).toBeHidden({
 			timeout: 30_000,
 		});
@@ -112,14 +112,14 @@ test.describe("Claude session effort and context window across a relay restart",
 
 	test("the composer still shows the session's effort and window", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 		const trigger = page.getByTestId("model-picker-trigger");
 		const effort = page.getByTestId("variant-badge");
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.sendMessage("One");
 		await turnsCompleted(harness.eventsDbPath, 1);
 		await chat.waitForStreamingComplete();
@@ -145,7 +145,7 @@ test.describe("Claude session effort and context window across a relay restart",
 				dirname(harness.eventsDbPath),
 			),
 		);
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await expect(page.locator("#connect-overlay")).toBeHidden({
 			timeout: 30_000,
 		});
@@ -183,12 +183,12 @@ test.describe("Claude session model with a renamed catalog id", () => {
 	// catalog model, or the chip loses its name and the effort control.
 	test("a stored id with a stale [1m] marker still names the model", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
 		const app = new AppPage(page);
 		const trigger = page.getByTestId("model-picker-trigger");
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.sendMessage("One");
 		await turnsCompleted(harness.eventsDbPath, 1);
 		await new ChatPage(page).waitForStreamingComplete();
@@ -202,7 +202,7 @@ test.describe("Claude session model with a renamed catalog id", () => {
 				db.close();
 			}
 		});
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await expect(page.locator("#connect-overlay")).toBeHidden({
 			timeout: 30_000,
 		});
@@ -214,11 +214,11 @@ test.describe("Claude session model with a renamed catalog id", () => {
 	// connect-time snapshot and never re-asks for the model list.
 	test("an open tab keeps the effort control when it reconnects", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		await app.sendMessage("One");
 		await turnsCompleted(harness.eventsDbPath, 1);
 		await new ChatPage(page).waitForStreamingComplete();

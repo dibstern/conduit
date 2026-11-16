@@ -493,12 +493,12 @@ describe("Claude pending steer recovery through the process seam", () => {
 // and pending-tray query. The handoff facts stand in for a provider's decline.
 it("returns a declined steer to the front and ignores duplicate or obsolete recovery", async () => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-declined-steer-"));
-	const relay = await createDaemonProject("chat-simple", {
+	const project = await createDaemonProject("chat-simple", {
 		projectDir: root,
 		slug: "declined-steer",
 	});
 	try {
-		const proof = await relay.run(
+		const proof = await project.run(
 			Effect.gen(function* () {
 				const persistService = yield* Effect.serviceOption(
 					ClaudeEventPersistEffectTag,
@@ -558,7 +558,7 @@ it("returns a declined steer to the front and ignores duplicate or obsolete reco
 				const duplicate = yield* read.readPendingInputs(sessionId, {
 					through: Number.MAX_SAFE_INTEGER,
 				});
-				const db = new Database(relay.eventsDbPath, { readonly: true });
+				const db = new Database(project.eventsDbPath, { readonly: true });
 				let requeued: { data: string };
 				try {
 					requeued = db
@@ -602,7 +602,7 @@ it("returns a declined steer to the front and ignores duplicate or obsolete reco
 						{ metadata: { source: "inbox-reset" } },
 					),
 				);
-				const failedHandoff = new Database(relay.eventsDbPath, {
+				const failedHandoff = new Database(project.eventsDbPath, {
 					readonly: true,
 				});
 				let sentSequence: number;
@@ -694,7 +694,7 @@ it("returns a declined steer to the front and ignores duplicate or obsolete reco
 			),
 		);
 	} finally {
-		await relay.stop();
+		await project.stop();
 		rmSync(root, { recursive: true, force: true });
 	}
 }, 45_000);

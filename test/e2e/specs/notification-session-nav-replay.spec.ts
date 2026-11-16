@@ -13,9 +13,9 @@ import { DatabaseSync } from "node:sqlite";
 import type { OpenCodeRecording } from "../fixtures/recorded/types.js";
 import { createSession } from "../helpers/e2e-harness.js";
 import { loadOpenCodeRecording } from "../helpers/recorded-loader.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 /** Extract the session ID used in prompt_async calls from a recording. */
 function findTargetSessionId(recording: OpenCodeRecording): string | undefined {
@@ -73,7 +73,7 @@ test.describe("Notification → session navigation (replay)", () => {
 					ResolveSession: () => ({ projectSlug: project }),
 				},
 			});
-			await mockRelayWebSocket(page, {
+			await mockDaemonWebSocket(page, {
 				initMessages: [
 					{
 						type: "project_list",
@@ -99,7 +99,7 @@ test.describe("Notification → session navigation (replay)", () => {
 				],
 				responses: new Map(),
 			});
-			await page.goto(`${harness.relayBaseUrl}/s/${parent}`);
+			await page.goto(`${harness.appBaseUrl}/s/${parent}`);
 			await expect(page.locator("#input")).toHaveValue(`Shown ${parent}`);
 			const documentNavigations: string[] = [];
 			page.on("request", (request) => {
@@ -121,7 +121,7 @@ test.describe("Notification → session navigation (replay)", () => {
 				},
 				{ sessionId: target, slug: project },
 			);
-			await expect(page).toHaveURL(`${harness.relayBaseUrl}/s/${target}`);
+			await expect(page).toHaveURL(`${harness.appBaseUrl}/s/${target}`);
 			await expect(page.locator("#input")).toHaveValue(`Shown ${target}`);
 			const viewed = rpc
 				.getRequests()
@@ -133,7 +133,7 @@ test.describe("Notification → session navigation (replay)", () => {
 			expect(viewed).toHaveLength(1);
 			expect(documentNavigations).toEqual([]);
 			await page.goBack();
-			await expect(page).toHaveURL(`${harness.relayBaseUrl}/s/${parent}`);
+			await expect(page).toHaveURL(`${harness.appBaseUrl}/s/${parent}`);
 			await testInfo.attach("notification-back-to-parent", {
 				body: await page.screenshot(),
 				contentType: "image/png",
@@ -177,7 +177,7 @@ test.describe("Notification → session navigation (replay)", () => {
 				],
 			},
 		});
-		await mockRelayWebSocket(page, {
+		await mockDaemonWebSocket(page, {
 			initMessages: [
 				{
 					type: "project_list",
@@ -200,7 +200,7 @@ test.describe("Notification → session navigation (replay)", () => {
 			],
 			responses: new Map(),
 		});
-		await page.goto(`${harness.relayBaseUrl}/s/notification-parent`);
+		await page.goto(`${harness.appBaseUrl}/s/notification-parent`);
 		await expect(page.locator("#input")).toHaveValue(
 			"Shown notification-parent",
 		);
@@ -218,9 +218,7 @@ test.describe("Notification → session navigation (replay)", () => {
 		await page.evaluate(() =>
 			window.dispatchEvent(new Event("click-test-notification")),
 		);
-		await expect(page).toHaveURL(
-			`${harness.relayBaseUrl}/s/notification-target`,
-		);
+		await expect(page).toHaveURL(`${harness.appBaseUrl}/s/notification-target`);
 		await expect(page.locator("#input")).toHaveValue(
 			"Shown notification-target",
 		);
@@ -237,7 +235,7 @@ test.describe("Notification → session navigation (replay)", () => {
 
 	test("an alert fires for unwatched session error", async ({
 		page,
-		relayUrl,
+		appUrl,
 		mockServer,
 		harness,
 	}, testInfo) => {
@@ -296,7 +294,7 @@ test.describe("Notification → session navigation (replay)", () => {
 			});
 		});
 
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 
 		// Wait for initial session data to render before injecting the event.
 		await expect(
@@ -313,7 +311,7 @@ test.describe("Notification → session navigation (replay)", () => {
 		// { type: "done", error, ... } relay message, which is notification-worthy.
 		// Since no browser client is viewing this session, the pipeline
 		// drops the message and publishes an alert instead.
-		const TARGET = await createSession(harness.relayPort, "opencode");
+		const TARGET = await createSession(harness.appPort, "opencode");
 		expect(page.url()).not.toContain(`/s/${TARGET}`);
 		mockServer.injectSSEEvents([
 			{
@@ -397,10 +395,7 @@ test.describe("Notification → session navigation (replay)", () => {
 			time: { created: Date.now(), updated: Date.now() },
 		});
 		mockServer.setMessagePages("ses_notification_completions", [], []);
-		const completionSession = await createSession(
-			harness.relayPort,
-			"opencode",
-		);
+		const completionSession = await createSession(harness.appPort, "opencode");
 		expect(completionSession).not.toBe(TARGET);
 		const completed = (
 			messageId: string,
@@ -548,7 +543,7 @@ test.describe("Notification → session navigation (replay)", () => {
 
 	test("no alert when session HAS viewers", async ({
 		page,
-		relayUrl,
+		appUrl,
 		mockServer,
 	}) => {
 		const receivedFrames: string[] = [];
@@ -570,7 +565,7 @@ test.describe("Notification → session navigation (replay)", () => {
 			}
 		};
 
-		await gotoRelay(page, relayUrl);
+		await gotoApp(page, appUrl);
 		await expect(
 			page.locator("#session-list [data-session-id]").first(),
 		).toBeVisible();

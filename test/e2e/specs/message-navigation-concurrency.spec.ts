@@ -10,7 +10,7 @@ import type {
 import { makeRpcStream } from "../../helpers/rpc-wire.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, sendMockFamily } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 const sessionId = "claude-subagent-navigation";
 const rootId = "navigation-parent";
@@ -177,7 +177,7 @@ test("same-session panes navigate independently and discard superseded targets",
 		backgroundTasks: root.backgroundTasks,
 		messageCount: 240,
 	};
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -197,7 +197,7 @@ test("same-session panes navigate independently and discard superseded targets",
 	sendMockFamily(page, [root, child]);
 	const errors: string[] = [];
 	page.on("pageerror", (error) => errors.push(error.message));
-	await page.goto(`${harness.relayBaseUrl}/s/${sessionId}`);
+	await page.goto(`${harness.appBaseUrl}/s/${sessionId}`);
 	const main = page.locator("#messages");
 	const mainRail = main
 		.locator("..")
@@ -406,7 +406,7 @@ test("skill links reveal unloaded parts before and after the current window", as
 		updatedAt: createdAt,
 		messageCount: 240,
 	};
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -424,7 +424,7 @@ test("skill links reveal unloaded parts before and after the current window", as
 		responses: new Map(),
 	});
 	sendMockFamily(page, [session]);
-	await page.goto(`${harness.relayBaseUrl}/s/${sessionId}`);
+	await page.goto(`${harness.appBaseUrl}/s/${sessionId}`);
 	await expect(page.locator("#messages .msg-user").last()).toContainText(
 		"Prompt 120:",
 	);

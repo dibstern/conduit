@@ -1,7 +1,7 @@
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -146,7 +146,7 @@ test("settings, commands and skill documents follow a workspace change and sessi
 			},
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: "e2e-replay" },
 			{ type: "shell_snapshot", roots: true, sessions },
@@ -182,7 +182,7 @@ test("settings, commands and skill documents follow a workspace change and sessi
 	}
 
 	try {
-		await page.goto(`${harness.relayBaseUrl}/s/moved-session`);
+		await page.goto(`${harness.appBaseUrl}/s/moved-session`);
 		await expect(page.getByTestId("session-bar-title")).toHaveText(
 			"Moved session",
 		);
@@ -260,7 +260,7 @@ test("settings, commands and skill documents follow a workspace change and sessi
 				tag === "GetCommands" && payload["sessionId"] === undefined,
 		);
 
-		await page.goto(`${harness.relayBaseUrl}/s/main-session`);
+		await page.goto(`${harness.appBaseUrl}/s/main-session`);
 		await expect(page.getByTestId("session-bar-title")).toHaveText(
 			"Main session",
 		);
@@ -268,7 +268,7 @@ test("settings, commands and skill documents follow a workspace change and sessi
 		await page.getByTestId("settings-close-btn").click();
 		await openSkillDoc(main);
 		await page.keyboard.press("Escape");
-		await page.goto(`${harness.relayBaseUrl}/new?project=e2e-replay`);
+		await page.goto(`${harness.appBaseUrl}/new?project=e2e-replay`);
 		await openSettings(main);
 		await rpc.waitForRequest(
 			({ tag, payload }) =>

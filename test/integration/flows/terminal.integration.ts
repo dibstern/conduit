@@ -123,7 +123,7 @@ function signal(harness: DaemonProject, type: PtyEvent["type"], pty: PtyInfo) {
 const listCount = (harness: DaemonProject) =>
 	harness.mock.diagnostics.filter(({ event }) => event === "pty_list").length;
 
-async function relayServices(harness: DaemonProject) {
+async function projectServices(harness: DaemonProject) {
 	return {
 		manager: await harness.run(PtyManagerTag),
 		instances: await harness.run(OpenCodeInstancesTag),
@@ -143,7 +143,7 @@ describe("Integration: Terminal (PTY)", () => {
 
 	it("cancelled SubscribePtys cannot attach a phantom after an empty reconcile", async () => {
 		const isolated = await createDaemonProject();
-		const { manager, instances } = await relayServices(isolated);
+		const { manager, instances } = await projectServices(isolated);
 		let release!: () => void;
 		const held = new Promise<void>((resolve) => {
 			release = resolve;
@@ -299,7 +299,7 @@ describe("Integration: Terminal (PTY)", () => {
 					),
 			).toHaveLength(1);
 
-			const { manager } = await relayServices(harness);
+			const { manager } = await projectServices(harness);
 			const scrollback = manager.getScrollback(info.id);
 			harness.mock.rejectedPtyConnections.add(info.id);
 			manager.getSession(info.id)?.upstream?.terminate();
@@ -359,7 +359,7 @@ describe("Integration: Terminal (PTY)", () => {
 		const client = await connect(harness);
 		await client.createPty();
 		const id = await waitForCreated(client);
-		const { manager } = await relayServices(harness);
+		const { manager } = await projectServices(harness);
 		const local = (await client.listPtys()).ptys.find((pty) => pty.id === id);
 		expect(local).toBeDefined();
 		if (!local) throw new Error("Missing local terminal");
@@ -399,7 +399,7 @@ describe("Integration: Terminal (PTY)", () => {
 	it("does not attach after relay stop while provider acquisition is pending", async () => {
 		const isolated = await createDaemonProject();
 		await connect(isolated);
-		const { manager, instances } = await relayServices(isolated);
+		const { manager, instances } = await projectServices(isolated);
 		const pty = await createExternalPty(isolated);
 		let release!: () => void;
 		const held = new Promise<void>((resolve) => {
@@ -450,7 +450,7 @@ describe("Integration: Terminal (PTY)", () => {
 		// terminals; no browser has connected to this project.
 		const isolated = await createDaemonProject();
 		try {
-			const { manager } = await relayServices(isolated);
+			const { manager } = await projectServices(isolated);
 			const pty = await createExternalPty(isolated);
 			const lists = listCount(isolated);
 			const reconciled = new Promise<void>((resolve) => {
@@ -469,7 +469,7 @@ describe("Integration: Terminal (PTY)", () => {
 
 	it("does not start a stopped instance in response to a lifecycle signal", async () => {
 		const client = await connect(harness);
-		const { manager, instances } = await relayServices(harness);
+		const { manager, instances } = await projectServices(harness);
 		const pty = await createExternalPty(harness);
 		const cached = await createExternalPty(harness);
 		manager.registerSession(cached.id, undefined, "opencode", cached);

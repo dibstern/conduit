@@ -83,7 +83,7 @@ export default defineConfig({
 
 	use: {
 		// No baseURL — each test gets a dynamic relay URL via the replay fixture.
-		// Tests use `relayUrl` fixture or `page.goto(harness.relayBaseUrl + path)`.
+		// Tests use `appUrl` fixture or `page.goto(harness.appBaseUrl + path)`.
 		trace: "on-first-retry",
 		screenshot: "only-on-failure",
 		video: "off",

@@ -30,12 +30,12 @@ const sessionIdOf = (page: Page) =>
 /** A parent with one answered Side Thread; leaves the page on the Side Thread. */
 async function parentWithSideThread(
 	page: Page,
-	relayUrl: string,
+	appUrl: string,
 	dbPath: string,
 ) {
 	const app = new AppPage(page);
 	const chat = new ChatPage(page);
-	await app.goto(relayUrl);
+	await app.goto(appUrl);
 	const parentId = sessionIdOf(page);
 	await app.sendMessage(parentPrompt);
 	await chat.waitForAssistantMessage();
@@ -71,11 +71,11 @@ test.describe("Side Threads list", () => {
 	test("a second client sees the Side Thread arrive, and a follow-up from the list lands in it across a reload", async ({
 		page,
 		browser,
-		relayUrl,
+		appUrl,
 		harness,
 	}, testInfo) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		const context = await browser.newContext({ viewport: page.viewportSize() });
 		const other = await context.newPage();
 		try {
@@ -86,7 +86,7 @@ test.describe("Side Threads list", () => {
 
 			const { chat, parentId, sideId } = await parentWithSideThread(
 				page,
-				relayUrl,
+				appUrl,
 				harness.eventsDbPath,
 			);
 
@@ -160,13 +160,13 @@ test.describe("Side Threads list", () => {
 
 	test("deleting from the list removes the Side Thread and leaves the parent", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 		mockServer,
 	}, testInfo) => {
 		const { chat, parentId, sideId } = await parentWithSideThread(
 			page,
-			relayUrl,
+			appUrl,
 			harness.eventsDbPath,
 		);
 		await chat.sideThreadParentCrumb.click();
@@ -202,12 +202,12 @@ test.describe("Side Threads list", () => {
 
 	test("deleting the parent removes its Side Threads", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}, testInfo) => {
 		const { chat, parentId, sideId } = await parentWithSideThread(
 			page,
-			relayUrl,
+			appUrl,
 			harness.eventsDbPath,
 		);
 		await chat.sideThreadParentCrumb.click();

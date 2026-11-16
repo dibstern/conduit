@@ -29,7 +29,7 @@ import { ChatPage } from "../page-objects/chat.page.js";
 
 // Session ownership determines the relay on the daemon /rpc endpoint.
 async function callRpc<A>(
-	relayUrl: string,
+	appUrl: string,
 	call: (
 		client: RpcClient.FromGroup<
 			typeof WsRpcGroup,
@@ -37,7 +37,7 @@ async function callRpc<A>(
 		>,
 	) => Effect.Effect<A, unknown>,
 ): Promise<A> {
-	const url = new URL(relayUrl);
+	const url = new URL(appUrl);
 	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
 	url.pathname = "/rpc";
 	url.search = "";
@@ -69,7 +69,7 @@ async function setupForkSession(
 	page: import("@playwright/test").Page,
 	app: AppPage,
 	chat: ChatPage,
-	relayUrl: string,
+	appUrl: string,
 ): Promise<{ sourceId: string; forkId: string }> {
 	const viewedSessions = new Set<string>();
 	page.on("websocket", (socket) => {
@@ -120,7 +120,7 @@ async function setupForkSession(
 				}),
 		);
 	}
-	await app.goto(relayUrl);
+	await app.goto(appUrl);
 	const sessionId = new URL(page.url()).pathname.split("/").at(-1);
 	if (!sessionId) throw new Error("Missing source session route");
 	await waitForView(sessionId);
@@ -138,7 +138,7 @@ async function setupForkSession(
 	await chat.waitForStreamingComplete();
 
 	// Fork: whole-session fork (no messageId)
-	const forkedSessionId = await callRpc(relayUrl, (client) =>
+	const forkedSessionId = await callRpc(appUrl, (client) =>
 		client
 			.ForkSession({ sessionId, originId: crypto.randomUUID() })
 			.pipe(Effect.map((result) => result.sessionId)),
@@ -171,12 +171,12 @@ test.describe("Fork Session Rendering", () => {
 
 	test("fork creates collapsible prior context and divider", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 
-		await setupForkSession(page, app, chat, relayUrl);
+		await setupForkSession(page, app, chat, appUrl);
 
 		// Fork context block should be visible (collapsed by default)
 		const contextBlock = page.locator(".fork-context-block");
@@ -200,12 +200,12 @@ test.describe("Fork Session Rendering", () => {
 
 	test("expanding prior context shows inherited messages", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 
-		await setupForkSession(page, app, chat, relayUrl);
+		await setupForkSession(page, app, chat, appUrl);
 
 		// Click the toggle to expand
 		const toggle = page.locator(".fork-context-toggle");
@@ -221,14 +221,11 @@ test.describe("Fork Session Rendering", () => {
 		expect(count).toBeGreaterThanOrEqual(1);
 	});
 
-	test("fork is listed in the sidebar", async ({
-		page,
-		relayUrl,
-	}, testInfo) => {
+	test("fork is listed in the sidebar", async ({ page, appUrl }, testInfo) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 
-		await setupForkSession(page, app, chat, relayUrl);
+		await setupForkSession(page, app, chat, appUrl);
 
 		const forkId = decodeURIComponent(
 			new URL(page.url()).pathname.split("/").at(-1) ?? "",
@@ -256,7 +253,7 @@ test.describe("Fork Session Rendering", () => {
 
 	test("deleting the source keeps the fork", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
@@ -265,9 +262,9 @@ test.describe("Fork Session Rendering", () => {
 			page,
 			app,
 			chat,
-			relayUrl,
+			appUrl,
 		);
-		await callRpc(relayUrl, (client) =>
+		await callRpc(appUrl, (client) =>
 			client.DeleteSession({
 				sessionId: sourceId,
 				originId: crypto.randomUUID(),
@@ -310,11 +307,11 @@ test.describe("Fork Session Rendering", () => {
 		}
 	});
 
-	test("SubagentBackBar hidden for user forks", async ({ page, relayUrl }) => {
+	test("SubagentBackBar hidden for user forks", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 
-		await setupForkSession(page, app, chat, relayUrl);
+		await setupForkSession(page, app, chat, appUrl);
 
 		// SubagentBackBar should NOT be visible for user forks
 		// (it only shows for subagent sessions with parentID but no forkMessageId)
@@ -323,12 +320,12 @@ test.describe("Fork Session Rendering", () => {
 
 	test("new messages appear after fork divider, not in inherited block", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 
-		await setupForkSession(page, app, chat, relayUrl);
+		await setupForkSession(page, app, chat, appUrl);
 
 		// Wait for assistant response to the third prompt to complete.
 		// This proves the response rendered below the fork divider.
@@ -386,12 +383,12 @@ test.describe("Fork Session Rendering", () => {
 
 	test("inherited messages contain visible assistant text when expanded", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 
-		await setupForkSession(page, app, chat, relayUrl);
+		await setupForkSession(page, app, chat, appUrl);
 
 		// Expand the prior conversation block
 		const toggle = page.locator(".fork-context-toggle");

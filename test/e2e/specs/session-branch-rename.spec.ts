@@ -14,7 +14,7 @@ import { WorktreeBranchRenameError } from "../../../src/lib/contracts/worktree.j
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -108,7 +108,7 @@ async function openSession(
 	rpc.setShellRows([session]);
 	rpc.setFamilyRows([session]);
 	controls.set(page, rpc);
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: projectSlug },
 			{ type: "shell_snapshot", roots: true, sessions: [session] },
@@ -223,7 +223,7 @@ for (const mode of [
 				page,
 				harness,
 			}) => {
-				const rpc = await openSession(page, harness.relayBaseUrl);
+				const rpc = await openSession(page, harness.appBaseUrl);
 				const dialog = await openRename(page);
 				await dialog
 					.getByRole("textbox", { name: "Branch name" })
@@ -271,7 +271,7 @@ for (const mode of [
 				page,
 				harness,
 			}) => {
-				const rpc = await openSession(page, harness.relayBaseUrl, {
+				const rpc = await openSession(page, harness.appBaseUrl, {
 					ownership,
 				});
 				await press(await checkout(page));
@@ -290,7 +290,7 @@ for (const mode of [
 				page,
 				harness,
 			}) => {
-				const rpc = await openSession(page, harness.relayBaseUrl, {
+				const rpc = await openSession(page, harness.appBaseUrl, {
 					error: new WorktreeBranchRenameError({
 						folder: failure.folder,
 						reason: failure.reason,
@@ -341,7 +341,7 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openSession(page, harness.relayBaseUrl);
+			const rpc = await openSession(page, harness.appBaseUrl);
 			const dialog = await openRename(page);
 			await dialog
 				.getByRole("textbox", { name: "Branch name" })

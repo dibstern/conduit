@@ -26,7 +26,7 @@ import type { Browser, Page, TestInfo, WebSocketRoute } from "@playwright/test";
 import { createSession, type ReplayHarness } from "../helpers/e2e-harness.js";
 import {
 	expect,
-	gotoRelay,
+	gotoApp,
 	test as replayTest,
 } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -190,7 +190,7 @@ class Report {
 
 // B's sockets go through a pass-through proxy, so the test can drop them and
 // make the client reconnect the way a network blip would.
-async function openWindows(page: Page, browser: Browser, relayUrl: string) {
+async function openWindows(page: Page, browser: Browser, appUrl: string) {
 	const context = await browser.newContext({ viewport: page.viewportSize() });
 	const B = await context.newPage();
 	const sockets: { close(): Promise<void> }[] = [];
@@ -198,10 +198,10 @@ async function openWindows(page: Page, browser: Browser, relayUrl: string) {
 		ws.connectToServer();
 		sockets.push(ws);
 	});
-	await gotoRelay(page, relayUrl);
-	await gotoRelay(B, relayUrl);
+	await gotoApp(page, appUrl);
+	await gotoApp(B, appUrl);
 	const sessionId = decodeURIComponent(
-		new URL(relayUrl).pathname.slice("/s/".length),
+		new URL(appUrl).pathname.slice("/s/".length),
 	);
 	for (const window of [page, B])
 		await expect(row(window, sessionId)).toHaveClass(/(?:^|\s)active(?:\s|$)/);
@@ -292,19 +292,19 @@ async function dotLifecycle(
 	{
 		page,
 		browser,
-		relayUrl,
+		appUrl,
 		harness,
 	}: {
 		page: Page;
 		browser: Browser;
-		relayUrl: string;
+		appUrl: string;
 		harness: ReplayHarness;
 	},
 	testInfo: TestInfo,
 ) {
 	const sessionId = decodeURIComponent(harness.projectUrl.slice("/s/".length));
 	const report = new Report(provider, harness);
-	const { windows, dropSockets } = await openWindows(page, browser, relayUrl);
+	const { windows, dropSockets } = await openWindows(page, browser, appUrl);
 
 	await test.step("turn end shows the dot in both windows", async () => {
 		await endTurn(provider, windows, harness, sessionId, "First turn");
@@ -314,7 +314,7 @@ async function dotLifecycle(
 	});
 
 	await test.step("reload and reconnect keep it", async () => {
-		await gotoRelay(windows.A, relayUrl);
+		await gotoApp(windows.A, appUrl);
 		await dropSockets();
 		await expect(windows.B.locator("#connect-overlay")).toBeHidden();
 		await expectDot(windows, sessionId, true);
@@ -360,7 +360,7 @@ async function dotLifecycle(
 interface Fixtures {
 	readonly page: Page;
 	readonly browser: Browser;
-	readonly relayUrl: string;
+	readonly appUrl: string;
 	readonly harness: ReplayHarness;
 }
 
@@ -378,7 +378,7 @@ const transcript = (page: Page) => page.locator("#messages");
 
 async function openInteraction(
 	provider: Provider,
-	{ page, browser, relayUrl, harness }: Fixtures,
+	{ page, browser, appUrl, harness }: Fixtures,
 ): Promise<Interaction> {
 	let sent = 0;
 	page.on("websocket", (ws) =>
@@ -388,7 +388,7 @@ async function openInteraction(
 		}),
 	);
 	await page.clock.install();
-	const { windows } = await openWindows(page, browser, relayUrl);
+	const { windows } = await openWindows(page, browser, appUrl);
 	await page.mouse.move(0, 0);
 	return {
 		provider,
@@ -698,7 +698,7 @@ async function markUnreadHolds(
 	// events streamed in a Claude run would reach nobody (conduit-test-e0np).
 	let otherSession = "ses_e2e_other";
 	if (provider === "claude")
-		otherSession = await createSession(ctx.harness.relayPort, "claude");
+		otherSession = await createSession(ctx.harness.appPort, "claude");
 	else {
 		// A session's first streamed event seeds its row, and a user message
 		// ends no turn.
@@ -934,12 +934,12 @@ test.describe("Session unread dot", () => {
 		test("turn end, pick, reload, reconnect and restart across two windows", async ({
 			page,
 			browser,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			await dotLifecycle(
 				"opencode",
-				{ page, browser, relayUrl, harness },
+				{ page, browser, appUrl, harness },
 				testInfo,
 			);
 		});
@@ -947,12 +947,12 @@ test.describe("Session unread dot", () => {
 		test("watching keeps the dot; a click or typing clears it", async ({
 			page,
 			browser,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			await clickAndTyping(
 				"opencode",
-				{ page, browser, relayUrl, harness },
+				{ page, browser, appUrl, harness },
 				testInfo,
 			);
 		});
@@ -960,12 +960,12 @@ test.describe("Session unread dot", () => {
 		test("window focus keeps the dot; tabbing in or scrolling clears it", async ({
 			page,
 			browser,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			await focusAndScroll(
 				"opencode",
-				{ page, browser, relayUrl, harness },
+				{ page, browser, appUrl, harness },
 				testInfo,
 			);
 		});
@@ -973,12 +973,12 @@ test.describe("Session unread dot", () => {
 		test("a resting pointer clears the dot; a pass, a hidden page, an off-screen or scrolled-up view do not", async ({
 			page,
 			browser,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			await dwellAndViewport(
 				"opencode",
-				{ page, browser, relayUrl, harness },
+				{ page, browser, appUrl, harness },
 				testInfo,
 			);
 		});
@@ -986,12 +986,12 @@ test.describe("Session unread dot", () => {
 		test("a marked-unread dot holds against touches until A switches away and back", async ({
 			page,
 			browser,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			await markUnreadHolds(
 				"opencode",
-				{ page, browser, relayUrl, harness },
+				{ page, browser, appUrl, harness },
 				testInfo,
 			);
 		});
@@ -999,12 +999,12 @@ test.describe("Session unread dot", () => {
 		test("a report that lands late leaves the next turn end unread", async ({
 			page,
 			browser,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			await heldReport(
 				"opencode",
-				{ page, browser, relayUrl, harness },
+				{ page, browser, appUrl, harness },
 				testInfo,
 			);
 		});
@@ -1012,12 +1012,12 @@ test.describe("Session unread dot", () => {
 		test("a report lost to a dropped connection is sent on reconnect if still unread", async ({
 			page,
 			browser,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			await droppedReport(
 				"opencode",
-				{ page, browser, relayUrl, harness },
+				{ page, browser, appUrl, harness },
 				testInfo,
 			);
 		});
@@ -1025,7 +1025,7 @@ test.describe("Session unread dot", () => {
 		test("a sub-agent never gets a dot", async ({
 			page,
 			browser,
-			relayUrl,
+			appUrl,
 			harness,
 		}, testInfo) => {
 			const parentId = decodeURIComponent(
@@ -1033,7 +1033,7 @@ test.describe("Session unread dot", () => {
 			);
 			const childId = "ses_e2e_subagent";
 			const report = new Report("opencode", harness);
-			const { windows } = await openWindows(page, browser, relayUrl);
+			const { windows } = await openWindows(page, browser, appUrl);
 			const now = Date.now();
 			// OpenCode announces a sub-agent with session.created carrying
 			// parentID, then streams its turn like any other session.
@@ -1085,7 +1085,7 @@ test.describe("Session unread dot", () => {
 		test("an unread fork is its own row, not its source's", async ({
 			page,
 			browser,
-			relayUrl,
+			appUrl,
 			harness,
 			projectDir,
 		}, testInfo) => {
@@ -1101,7 +1101,7 @@ test.describe("Session unread dot", () => {
 				time: { created: now, updated: now },
 			});
 			const report = new Report("opencode", harness);
-			const { windows } = await openWindows(page, browser, relayUrl);
+			const { windows } = await openWindows(page, browser, appUrl);
 			const expectUnreadCount = async (count: number) => {
 				for (const window of [windows.A, windows.B])
 					await expect(unreadCount(window)).toHaveText(String(count));
@@ -1187,12 +1187,12 @@ test.describe("Session unread dot", () => {
 			test("turn end, pick, reload, reconnect and restart across two windows", async ({
 				page,
 				browser,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				await dotLifecycle(
 					"claude",
-					{ page, browser, relayUrl, harness },
+					{ page, browser, appUrl, harness },
 					testInfo,
 				);
 			});
@@ -1208,12 +1208,12 @@ test.describe("Session unread dot", () => {
 			test("watching keeps the dot; a click or typing clears it", async ({
 				page,
 				browser,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				await clickAndTyping(
 					"claude",
-					{ page, browser, relayUrl, harness },
+					{ page, browser, appUrl, harness },
 					testInfo,
 				);
 			});
@@ -1221,12 +1221,12 @@ test.describe("Session unread dot", () => {
 			test("window focus keeps the dot; tabbing in or scrolling clears it", async ({
 				page,
 				browser,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				await focusAndScroll(
 					"claude",
-					{ page, browser, relayUrl, harness },
+					{ page, browser, appUrl, harness },
 					testInfo,
 				);
 			});
@@ -1234,12 +1234,12 @@ test.describe("Session unread dot", () => {
 			test("a resting pointer clears the dot; a pass, a hidden page, an off-screen or scrolled-up view do not", async ({
 				page,
 				browser,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				await dwellAndViewport(
 					"claude",
-					{ page, browser, relayUrl, harness },
+					{ page, browser, appUrl, harness },
 					testInfo,
 				);
 			});
@@ -1247,12 +1247,12 @@ test.describe("Session unread dot", () => {
 			test("a marked-unread dot holds against touches until A switches away and back", async ({
 				page,
 				browser,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				await markUnreadHolds(
 					"claude",
-					{ page, browser, relayUrl, harness },
+					{ page, browser, appUrl, harness },
 					testInfo,
 				);
 			});
@@ -1268,12 +1268,12 @@ test.describe("Session unread dot", () => {
 			test("a report that lands late leaves the next turn end unread", async ({
 				page,
 				browser,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				await heldReport(
 					"claude",
-					{ page, browser, relayUrl, harness },
+					{ page, browser, appUrl, harness },
 					testInfo,
 				);
 			});
@@ -1281,12 +1281,12 @@ test.describe("Session unread dot", () => {
 			test("a report lost to a dropped connection is sent on reconnect if still unread", async ({
 				page,
 				browser,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				await droppedReport(
 					"claude",
-					{ page, browser, relayUrl, harness },
+					{ page, browser, appUrl, harness },
 					testInfo,
 				);
 			});
@@ -1298,14 +1298,14 @@ test.describe("Session unread dot", () => {
 			test("a sub-agent never gets a dot", async ({
 				page,
 				browser,
-				relayUrl,
+				appUrl,
 				harness,
 			}, testInfo) => {
 				const parentId = decodeURIComponent(
 					harness.projectUrl.slice("/s/".length),
 				);
 				const report = new Report("claude", harness);
-				const { windows } = await openWindows(page, browser, relayUrl);
+				const { windows } = await openWindows(page, browser, appUrl);
 				await endTurn(
 					"claude",
 					windows,

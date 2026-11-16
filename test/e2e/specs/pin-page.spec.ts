@@ -8,9 +8,9 @@ import { PinPage } from "../page-objects/pin.page.js";
 test.use({ recording: "chat-simple" });
 
 test.describe("PIN Page", () => {
-	test("no PIN page shown when PIN is not set", async ({ page, relayUrl }) => {
+	test("no PIN page shown when PIN is not set", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Without a PIN, the main app should load directly
 		// (no PIN input should be visible)
@@ -25,22 +25,22 @@ test.describe("PIN Page", () => {
 
 	test("main page loads without auth cookie when PIN is not set", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		// Clear all cookies first
 		await page.context().clearCookies();
 
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Without PIN set, even without cookies the app should load fine
 		await expect(app.connectOverlay).toBeHidden({ timeout: 15_000 });
 		await expect(app.input).toBeVisible();
 	});
 
-	test("page title is correct on main app", async ({ page, relayUrl }) => {
+	test("page title is correct on main app", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await expect(page).toHaveTitle("Conduit");
 	});

@@ -418,7 +418,7 @@ describe("wireMonitoring shutdown", () => {
 			sendToAll,
 		};
 		try {
-			for (let relay = 0; relay < 2; relay++) {
+			for (let project = 0; project < 2; project++) {
 				const harness = await createEffectHarness(
 					() => Effect.void,
 					pushManager,
@@ -434,7 +434,7 @@ describe("wireMonitoring shutdown", () => {
 						{ sessionId: "root", status },
 						{ ...owner, eventId: EventId.make(`root-${status}`), createdAt: 5 },
 					);
-					if (relay === 0)
+					if (project === 0)
 						await harness.runtime.runPromise(
 							Effect.gen(function* () {
 								const commit = yield* makeCommitAndSignal;

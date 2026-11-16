@@ -1,15 +1,15 @@
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { dualDriverProviders } from "../fixtures/mockup-state.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", viewport: { width: 1440, height: 900 } });
 
 test("Claude Attribution collapses, expands and saves an edited part", async ({
 	page,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	const inheritedAttribution = {
 		commit: "Inherited commit attribution",
@@ -44,7 +44,7 @@ test("Claude Attribution collapses, expands and saves an edited part", async ({
 			}),
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -89,9 +89,9 @@ test("Claude Attribution collapses, expands and saves an edited part", async ({
 			},
 		],
 	});
-	await gotoRelay(
+	await gotoApp(
 		page,
-		new URL("/s/settings-attribution?p=e2e-replay", relayUrl).toString(),
+		new URL("/s/settings-attribution?p=e2e-replay", appUrl).toString(),
 	);
 	const listSettings = page.getByTestId("list-bar-settings");
 	if (await listSettings.isVisible()) {

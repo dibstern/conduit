@@ -7,7 +7,7 @@ import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { chooseSettingsOption } from "../helpers/settings.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 // Failure cases, written before implementation: a lower default replaces a
 // higher one; invalid files hide their warning; worktree defaults bypass Git or
@@ -148,7 +148,7 @@ async function openDraft(
 			},
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: slug },
 			{ type: "shell_snapshot", roots: true, sessions: [] },
@@ -255,7 +255,7 @@ for (const viewport of [
 				harness,
 			}) => {
 				if (mode === "worktree") await page.clock.install();
-				const rpc = await openDraft(page, harness.relayBaseUrl, {
+				const rpc = await openDraft(page, harness.appBaseUrl, {
 					resolve: () => ({ mode, source: "file" }),
 				});
 				await expect(page.getByTestId("draft-start-chip")).toHaveText(
@@ -295,7 +295,7 @@ for (const viewport of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			const input = page.locator("#input");
 			await input.focus();
 			const warm = await rpc.waitForRequest(
@@ -371,7 +371,7 @@ for (const viewport of [
 				const pending = new Promise<Resolution>((resolve) => {
 					deliver = resolve;
 				});
-				const rpc = await openDraft(page, harness.relayBaseUrl, {
+				const rpc = await openDraft(page, harness.appBaseUrl, {
 					resolve: () => pending,
 				});
 				if (chooseLocal) {
@@ -418,7 +418,7 @@ for (const viewport of [
 				deliverCurrent = resolve;
 			});
 			let returned = false;
-			const rpc = await openDraft(page, harness.relayBaseUrl, {
+			const rpc = await openDraft(page, harness.appBaseUrl, {
 				resolve: (project) =>
 					project === slug
 						? returned
@@ -467,7 +467,7 @@ for (const viewport of [
 			page,
 			harness,
 		}) => {
-			await openDraft(page, harness.relayBaseUrl, {
+			await openDraft(page, harness.appBaseUrl, {
 				resolve: () => ({
 					mode: "local",
 					source: "global",
@@ -486,7 +486,7 @@ for (const viewport of [
 				page,
 				harness,
 			}) => {
-				await openDraft(page, harness.relayBaseUrl, {
+				await openDraft(page, harness.appBaseUrl, {
 					git: limitation !== "git",
 					supportsNewWorktree: limitation !== "provider",
 					resolve: () => ({ mode: "worktree", source: "file" }),
@@ -513,7 +513,7 @@ for (const viewport of [
 			const pending = new Promise<Resolution>((resolve) => {
 				deliver = resolve;
 			});
-			await openDraft(page, harness.relayBaseUrl, { resolve: () => pending });
+			await openDraft(page, harness.appBaseUrl, { resolve: () => pending });
 			await press(page.getByTestId("draft-start-chip"));
 			await press(
 				page.getByRole("menuitemradio", { name: "Current checkout" }),
@@ -538,7 +538,7 @@ for (const viewport of [
 			const pending = new Promise<Resolution>((resolve) => {
 				deliver = resolve;
 			});
-			const rpc = await openDraft(page, harness.relayBaseUrl, {
+			const rpc = await openDraft(page, harness.appBaseUrl, {
 				resolve: (project) =>
 					project === slug ? pending : { mode: "worktree", source: "project" },
 			});
@@ -575,7 +575,7 @@ for (const viewport of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl, {
+			const rpc = await openDraft(page, harness.appBaseUrl, {
 				resolve: () => ({ mode: "worktree", source: "file" }),
 			});
 			await expect(page.getByTestId("draft-start-chip")).toHaveText(
@@ -610,7 +610,7 @@ for (const viewport of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			await expect(page.getByTestId("draft-start-chip")).toHaveText("main");
 			const before = rpc
 				.getRequests()
@@ -640,7 +640,7 @@ for (const viewport of [
 			).toHaveAttribute("data-value", "worktree");
 			await expect(page.getByTestId("draft-start-chip")).toHaveText("main");
 			await page.keyboard.press("Escape");
-			await page.goto(`${harness.relayBaseUrl}/new?project=${slug}`);
+			await page.goto(`${harness.appBaseUrl}/new?project=${slug}`);
 			await expect(page.getByTestId("draft-start-chip")).toHaveText(
 				"New worktree",
 			);
@@ -654,7 +654,7 @@ for (const viewport of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl, {
+			const rpc = await openDraft(page, harness.appBaseUrl, {
 				sessionMode: "local",
 			});
 			let dialog = await openEdit(page);
@@ -714,7 +714,7 @@ for (const viewport of [
 			page,
 			harness,
 		}) => {
-			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const rpc = await openDraft(page, harness.appBaseUrl);
 			const back = page.getByTestId("session-bar-back");
 			if (await back.isVisible()) await press(back);
 			await press(page.getByTestId("session-scope-chip"));

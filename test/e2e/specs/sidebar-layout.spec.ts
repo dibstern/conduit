@@ -8,15 +8,12 @@ import { createSession } from "../helpers/e2e-harness.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { settleSheet } from "../helpers/sheet-drag.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 test.use({ recording: "chat-simple" });
 
-test("shell feed adds and removes sidebar roots", async ({
-	page,
-	relayUrl,
-}) => {
+test("shell feed adds and removes sidebar roots", async ({ page, appUrl }) => {
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			ListDaemonSessions: () => ({
@@ -34,7 +31,7 @@ test("shell feed adds and removes sidebar roots", async ({
 			],
 		},
 	});
-	const relay = await mockRelayWebSocket(page, {
+	const project = await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -50,7 +47,7 @@ test("shell feed adds and removes sidebar roots", async ({
 		],
 		responses: new Map(),
 	});
-	await page.goto(relayUrl);
+	await page.goto(appUrl);
 	await rpc.waitForRequest((request) => request.tag === "SubscribeShell");
 	rpc.sendChunk("SubscribeShell", [
 		{
@@ -73,7 +70,7 @@ test("shell feed adds and removes sidebar roots", async ({
 	await page
 		.locator('#session-list [data-session-id="feed-root"] .session-item-title')
 		.click();
-	relay.sendMessage({
+	project.sendMessage({
 		type: "mock_transcript_snapshot",
 		id: "feed-root",
 		sessionId: "feed-root",
@@ -93,7 +90,7 @@ test("shell feed adds and removes sidebar roots", async ({
 
 test("shell feed warns after a failed grace period and clears on recovery", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
 	let subscriptions = 0;
 	const rpc = await mockWsRpc(page, {
@@ -115,7 +112,7 @@ test("shell feed warns after a failed grace period and clears on recovery", asyn
 					: [],
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -131,7 +128,7 @@ test("shell feed warns after a failed grace period and clears on recovery", asyn
 		],
 		responses: new Map(),
 	});
-	await page.goto(relayUrl);
+	await page.goto(appUrl);
 	await rpc.waitForRequest((request) => request.tag === "SubscribeShell");
 	rpc.failStream("SubscribeShell", "feed unavailable");
 	const warning = page.getByTestId("session-list-stale");
@@ -150,7 +147,7 @@ test("shell feed warns after a failed grace period and clears on recovery", asyn
 
 test("same-project reconnect keeps a visible stale warning until shell sync", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
 	let subscriptions = 0;
 	const rpc = await mockWsRpc(page, {
@@ -172,7 +169,7 @@ test("same-project reconnect keeps a visible stale warning until shell sync", as
 					: [],
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -188,7 +185,7 @@ test("same-project reconnect keeps a visible stale warning until shell sync", as
 		],
 		responses: new Map(),
 	});
-	await page.goto(relayUrl);
+	await page.goto(appUrl);
 	await rpc.waitForRequest((request) => request.tag === "SubscribeShell");
 	rpc.failStream("SubscribeShell", "feed unavailable");
 	const warning = page.getByTestId("session-list-stale");
@@ -204,7 +201,7 @@ test("same-project reconnect keeps a visible stale warning until shell sync", as
 
 test("a promptly resynchronized shell feed does not show the stale line", async ({
 	page,
-	relayUrl,
+	appUrl,
 }) => {
 	await page.clock.install();
 	let subscriptions = 0;
@@ -240,7 +237,7 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 			],
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{
 				type: "project_list",
@@ -256,7 +253,7 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 		],
 		responses: new Map(),
 	});
-	await page.goto(relayUrl);
+	await page.goto(appUrl);
 	await rpc.waitForRequest((request) => request.tag === "SubscribeShell");
 	rpc.closeStreamSocket("SubscribeShell");
 	await expect
@@ -280,10 +277,10 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 	test("desktop views rail toggles terminal and files beside chat", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		const rail = page.getByTestId("views-rail");
 		const terminal = page.getByTestId("views-rail-terminal");
 		const files = page.getByTestId("views-rail-files");
@@ -339,9 +336,9 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 	test("desktop panes survive the phone breakpoint and terminal wins on phones", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await new AppPage(page).goto(relayUrl);
+		await new AppPage(page).goto(appUrl);
 		const files = page.getByTestId("views-rail-files");
 		await files.click();
 		await page.setViewportSize({ width: 393, height: 852 });
@@ -370,9 +367,9 @@ test.describe("Sidebar Layout — Desktop", () => {
 		await expect.poll(terminalHeight).toBeLessThan(900 / 2);
 	});
 
-	test("desktop: sidebar is visible by default", async ({ page, relayUrl }) => {
+	test("desktop: sidebar is visible by default", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Sidebar should be visible
 		await expect(app.sidebar).toBeVisible();
@@ -383,17 +380,17 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 	test("desktop: sidebar chrome shows loaded groups and project identity", async ({
 		page,
-		relayUrl,
+		appUrl,
 		harness,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 		const rows = page.locator("#session-list .session-item");
 		await expect(rows.first()).toBeVisible();
 		await expect(app.sidebar).toHaveCSS("width", "300px");
 		await expect(page.locator("#sidebar-footer")).toHaveCount(0);
 		// The standalone replay relay has no daemon account feed for drafts.
-		await createSession(harness.relayPort, "opencode");
+		await createSession(harness.appPort, "opencode");
 		await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
 		await expect(rows.first()).toHaveCSS("margin-bottom", "0px");
 
@@ -447,10 +444,10 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 	test("desktop: sidebar toggle collapses and expands", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Sidebar starts visible
 		await expect(app.sidebar).toBeVisible();
@@ -471,10 +468,10 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 	test("session header shows title, status and Share", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await expect(page.getByTestId("session-bar-title")).toBeVisible();
 		await expect(app.checkout).toBeVisible();
@@ -494,9 +491,9 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 	test("desktop overflow lists global actions and Escape restores focus", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await new AppPage(page).goto(`${relayUrl}?feats=debug`);
+		await new AppPage(page).goto(`${appUrl}?feats=debug`);
 		const more = page.getByTestId("session-bar-overflow");
 		await expect(page.getByTestId("session-bar")).toHaveAttribute(
 			"data-compact",
@@ -520,9 +517,9 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 	test("open desktop menus close when the viewport becomes a phone", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await new AppPage(page).goto(relayUrl);
+		await new AppPage(page).goto(appUrl);
 		await page.getByTestId("session-bar-overflow").click();
 		await expect(page.getByTestId("session-bar-overflow-menu")).toBeVisible();
 		await page.setViewportSize({ width: 393, height: 852 });
@@ -535,9 +532,9 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 	test("desktop bar renders without an open session", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await new AppPage(page).goto(new URL("/", relayUrl).toString());
+		await new AppPage(page).goto(new URL("/", appUrl).toString());
 		const bar = page.getByTestId("session-bar");
 		await expect(bar).toBeVisible();
 		await expect(bar).toHaveAttribute("data-compact", "false");
@@ -552,10 +549,10 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 	test("long title fits the narrow desktop bar without overlap", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await page.setViewportSize({ width: 800, height: 900 });
-		await new AppPage(page).goto(relayUrl);
+		await new AppPage(page).goto(appUrl);
 		await page.getByTestId("session-bar-overflow").click();
 		await page.getByTestId("session-ctx-rename").click();
 		const longTitle =
@@ -603,9 +600,9 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("phone file preview returns to the Files view", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await new AppPage(page).goto(relayUrl);
+		await new AppPage(page).goto(appUrl);
 		const overflowButton = page.getByTestId("session-bar-island-overflow");
 		await overflowButton.click();
 		await page.getByTestId("overflow-view-files").click();
@@ -629,10 +626,10 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("mobile: expanded and collapsed overflow menus drop below the header", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
-		await new AppPage(page).goto(relayUrl);
+		await new AppPage(page).goto(appUrl);
 		const bar = page.getByTestId("session-bar");
 		const overflowButton = page.getByTestId("session-bar-island-overflow");
 		const menu = page.getByTestId("session-bar-island-menu");
@@ -761,10 +758,10 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("mobile: overflow settles, renames, and opens chrome actions", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
-		await new AppPage(page).goto(relayUrl);
+		await new AppPage(page).goto(appUrl);
 		const sessionId = await page
 			.locator("#session-list .session-item.active")
 			.getAttribute("data-session-id");
@@ -809,10 +806,10 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("mobile: debug flag adds the overflow Debug action", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
-		const url = new URL(relayUrl);
+		const url = new URL(appUrl);
 		url.searchParams.set("feats", "debug");
 		await new AppPage(page).goto(url.toString());
 		const panel = page.locator(".debug-panel");
@@ -828,10 +825,10 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("mobile: session views switch without losing transcript or files position", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
-		await new AppPage(page).goto(relayUrl);
+		await new AppPage(page).goto(appUrl);
 		const overflowButton = page.getByTestId("session-bar-island-overflow");
 		const sheet = page.getByTestId("session-bar-island-menu");
 		await expect(page.getByTestId("session-bar-views-button")).toHaveCount(0);
@@ -934,10 +931,10 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("mobile: long-title two-row bar switches views at 390px", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await page.setViewportSize({ width: 390, height: 844 });
-		await new AppPage(page).goto(relayUrl);
+		await new AppPage(page).goto(appUrl);
 		const bar = page.getByTestId("session-bar");
 		const overflowButton = page.getByTestId("session-bar-island-overflow");
 		const sheet = page.getByTestId("session-bar-island-menu");
@@ -1008,10 +1005,10 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("mobile: visible list and projects controls have 44px touch targets", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
-		await new AppPage(page).goto(new URL("/", relayUrl).toString());
+		await new AppPage(page).goto(new URL("/", appUrl).toString());
 		await expect(
 			page.locator("#session-list .session-item").first(),
 		).toBeVisible();
@@ -1173,9 +1170,9 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("mobile: list bar titles the list once, with its unsettled count", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}, testInfo) => {
-		await new AppPage(page).goto(new URL("/", relayUrl).toString());
+		await new AppPage(page).goto(new URL("/", appUrl).toString());
 		await expect(
 			page.locator("#session-list .session-item").first(),
 		).toBeVisible();
@@ -1222,9 +1219,9 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("mobile: focusing search suggests the project scopes and their tokens", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
-		await new AppPage(page).goto(new URL("/", relayUrl).toString());
+		await new AppPage(page).goto(new URL("/", appUrl).toString());
 		const search = page.getByRole("textbox", { name: "Search sessions" });
 		const suggestions = page.getByTestId("session-scope-suggestions");
 
@@ -1261,11 +1258,11 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("mobile: root route shows the session list full screen", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		// The harness URL opens a session; the list is the root route.
-		await app.goto(new URL("/", relayUrl).toString());
+		await app.goto(new URL("/", appUrl).toString());
 
 		await expect(page).toHaveURL((url) => url.pathname === "/");
 		await expect(app.layout).toHaveClass(/layout-compact/);
@@ -1277,11 +1274,11 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("mobile: selecting a session shows the session route", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		// The harness URL opens a session; the list is the root route.
-		await app.goto(new URL("/", relayUrl).toString());
+		await app.goto(new URL("/", appUrl).toString());
 		const session = page.locator("#session-list .session-item").first();
 		await expect(session).toBeVisible({ timeout: 10_000 });
 
@@ -1295,11 +1292,11 @@ test.describe("Sidebar Layout — Mobile", () => {
 
 	test("mobile: back returns to the list with its scroll position", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		// The harness URL opens a session; the list is the root route.
-		await app.goto(new URL("/", relayUrl).toString());
+		await app.goto(new URL("/", appUrl).toString());
 		const session = page.locator("#session-list .session-item").first();
 		await expect(session).toBeVisible({ timeout: 10_000 });
 

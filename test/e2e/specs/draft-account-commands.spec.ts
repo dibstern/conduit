@@ -1,6 +1,6 @@
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -58,7 +58,7 @@ test("a draft offers and highlights its own account's skills", async ({
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: "e2e-replay" },
 			{ type: "shell_snapshot", roots: true, sessions: [] },
@@ -67,7 +67,7 @@ test("a draft offers and highlights its own account's skills", async ({
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
 
-	await page.goto(`${harness.relayBaseUrl}/new?project=e2e-replay`);
+	await page.goto(`${harness.appBaseUrl}/new?project=e2e-replay`);
 	const input = page.locator("#input");
 	await input.fill("Please fix that /");
 	await expect(page.locator("#command-menu")).toContainText("/personal-skill");

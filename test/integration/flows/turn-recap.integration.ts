@@ -29,7 +29,7 @@ it("a paged turn retains its stored identity through the real history RPC", asyn
 	try {
 		const { sessionId, turnId } = await seedPagedRecapTurn(harness);
 		vi.stubGlobal("WebSocket", WebSocket);
-		vi.stubGlobal("location", new URL(harness.relayBaseUrl));
+		vi.stubGlobal("location", new URL(harness.appBaseUrl));
 		const history = await rpc("LoadMoreHistory", { sessionId });
 		expect(history.hasMore).toBe(true);
 		expect(history.messages).toHaveLength(50);
@@ -69,7 +69,7 @@ it("an unknown turn terminates the real recap client feed", async () => {
 	let stop: (() => void) | undefined;
 	try {
 		vi.stubGlobal("WebSocket", WebSocket);
-		vi.stubGlobal("location", new URL(harness.relayBaseUrl));
+		vi.stubGlobal("location", new URL(harness.appBaseUrl));
 		const send = vi.spyOn(WebSocket.prototype, "send");
 		const attempts = () =>
 			send.mock.calls.flatMap(([data]) => {

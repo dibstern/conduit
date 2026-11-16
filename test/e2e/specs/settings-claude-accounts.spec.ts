@@ -16,9 +16,9 @@ import type {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, gotoApp, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
-import { mockRelayWebSocket } from "../helpers/ws-mock.js";
+import { mockDaemonWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -40,7 +40,7 @@ async function openServerSettings(page: Page): Promise<void> {
 
 test("Claude accounts can be edited and link to Usage with no project open", async ({
 	page,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	let instances: InstanceListResponse["instances"] = [
 		{
@@ -104,7 +104,7 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 			},
 		},
 	});
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects, current: null },
 			{ type: "shell_snapshot", roots: true, sessions: [] },
@@ -112,8 +112,8 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 		responses: new Map(),
 	});
 	rpc.setDaemonList("SubscribeInstances", { instances });
-	await gotoRelay(page, new URL("/", relayUrl).toString());
-	await expect(page).toHaveURL(new URL("/", relayUrl).toString());
+	await gotoApp(page, new URL("/", appUrl).toString());
+	await expect(page).toHaveURL(new URL("/", appUrl).toString());
 	await expect(
 		page.locator('.session-empty, [data-testid="project-tree-empty"]').first(),
 	).toBeVisible();
@@ -222,7 +222,7 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 
 test("deleting Claude defaults follows usage order and adding an account restores a blocked draft", async ({
 	page,
-	relayUrl,
+	appUrl,
 }, testInfo) => {
 	const usageOrder = ["bravo", "zulu", "alpha", "claude"];
 	// Failure modes: promotion keeps the removed account's model; switching keeps
@@ -466,7 +466,7 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				opencode: { status: "missing" },
 			});
 	};
-	await mockRelayWebSocket(page, {
+	await mockDaemonWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects: [project], current: "myapp" },
 			{ type: "shell_snapshot", roots: true, sessions: [] },
@@ -480,7 +480,7 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		provider: "claude",
 		variant: "high",
 	});
-	await gotoRelay(page, new URL("/?p=myapp", relayUrl).toString());
+	await gotoApp(page, new URL("/?p=myapp", appUrl).toString());
 	const composerPick = page
 		.locator(
 			'[data-testid="composer-word-model"]:visible, [data-testid="model-picker-trigger"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',

@@ -79,17 +79,17 @@ describe.skipIf(process.platform === "win32")(
 				const oldSocketBytes = Buffer.byteLength(
 					join(normalDirectory, "0".repeat(12)),
 				);
-				const relaySocketBytes = Buffer.byteLength(
+				const daemonSocketBytes = Buffer.byteLength(
 					join(harness.configDir, "relay.sock"),
 				);
 				evidence["paths"] = {
 					configDir: harness.configDir,
 					oldSocketBytes,
-					relaySocketBytes,
+					daemonSocketBytes,
 				};
 				expect(Buffer.byteLength(harness.configDir)).toBe(85);
 				expect(oldSocketBytes).toBeGreaterThanOrEqual(104);
-				expect(relaySocketBytes).toBeLessThan(104);
+				expect(daemonSocketBytes).toBeLessThan(104);
 
 				let browser = await harness.connect();
 				const sessionId = await browser.createSession("Long runner socket");

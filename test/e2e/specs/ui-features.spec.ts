@@ -10,9 +10,9 @@ import { OverlayPage } from "../page-objects/overlay.page.js";
 test.use({ recording: "chat-simple" });
 
 test.describe("Connection Overlay", () => {
-	test("overlay hides after WebSocket connects", async ({ page, relayUrl }) => {
+	test("overlay hides after WebSocket connects", async ({ page, appUrl }) => {
 		// Navigate without the auto-wait in goto()
-		await page.goto(relayUrl);
+		await page.goto(appUrl);
 
 		// Overlay should eventually disappear
 		const overlay = new OverlayPage(page);
@@ -21,10 +21,10 @@ test.describe("Connection Overlay", () => {
 });
 
 test.describe("Input Area", () => {
-	test("attach button toggles attach menu", async ({ page, relayUrl }) => {
+	test("attach button toggles attach menu", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
 		const input = new InputPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Web-first assertions rather than boolean snapshots: since
 		// conduit-test-de3.35.9.3 the menu is portaled and mounted only while
@@ -42,11 +42,11 @@ test.describe("Input Area", () => {
 
 	test("attach menu has camera and photos options", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
 		const input = new InputPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await input.openAttachMenu();
 
@@ -57,12 +57,9 @@ test.describe("Input Area", () => {
 		await expect(photos).toBeVisible();
 	});
 
-	test("send button enables when text is entered", async ({
-		page,
-		relayUrl,
-	}) => {
+	test("send button enables when text is entered", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Send button is disabled when textarea is empty
 		await expect(app.sendBtn).toBeDisabled();
@@ -76,9 +73,9 @@ test.describe("Input Area", () => {
 		await expect(app.sendBtn).toBeDisabled();
 	});
 
-	test("textarea accepts multiline input", async ({ page, relayUrl }) => {
+	test("textarea accepts multiline input", async ({ page, appUrl }) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		// Fill with multiline text
 		await app.input.fill("line 1\nline 2\nline 3");
@@ -108,10 +105,10 @@ test.describe("Input Area", () => {
 test.describe("Todo Overlay", () => {
 	test("todo overlay stays unmounted until the session has items", async ({
 		page,
-		relayUrl,
+		appUrl,
 	}) => {
 		const app = new AppPage(page);
-		await app.goto(relayUrl);
+		await app.goto(appUrl);
 
 		await expect(app.todoSticky).toHaveCount(0);
 	});

@@ -130,13 +130,13 @@ const {Socket}=require(${JSON.stringify(requireFromHere.resolve("effect/socket")
 const {RpcClient,RpcSerialization}=require(${JSON.stringify(requireFromHere.resolve("effect/rpc"))});
 __setProbeOverrideForTesting(async()=>({models:[],commands:[],agents:[]}));
 test('actual replay fixture worker',async({harness})=>{
- const browser=new TestWsClient('ws://127.0.0.1:'+harness.relayPort+'/rpc?p=e2e-replay');
+ const browser=new TestWsClient('ws://127.0.0.1:'+harness.appPort+'/rpc?p=e2e-replay');
  await browser.waitForOpen();
  const originId=browser.getClientId();
  const creation=${JSON.stringify(startupState)}==='losing'?Promise.resolve():Effect.runPromise(Effect.scoped(Effect.gen(function*(){
   const client=yield* RpcClient.make(WsRpcGroup);
   yield* client.CreatePty({projectSlug:'e2e-replay',originId});
- })).pipe(Effect.provide(RpcClient.layerProtocolSocket()),Effect.provide(Socket.layerWebSocket('ws://127.0.0.1:'+harness.relayPort+'/rpc')),Effect.provide(Socket.layerWebSocketConstructorGlobal),Effect.provide(RpcSerialization.layerJson)));
+ })).pipe(Effect.provide(RpcClient.layerProtocolSocket()),Effect.provide(Socket.layerWebSocket('ws://127.0.0.1:'+harness.appPort+'/rpc')),Effect.provide(Socket.layerWebSocketConstructorGlobal),Effect.provide(RpcSerialization.layerJson)));
  const configDir=dirname(harness.eventsDbPath);
  let host;
  if (${JSON.stringify(startupState)}==='losing') {
@@ -322,7 +322,7 @@ test.afterAll(()=>writeFileSync(${JSON.stringify(releasePath)},'worker fixtures 
 			harness = await createReplayHarness("chat-simple", { projectDir });
 			const configDir = dirname(harness.eventsDbPath);
 			browser = new TestWsClient(
-				`ws://127.0.0.1:${harness.relayPort}/rpc?p=e2e-replay`,
+				`ws://127.0.0.1:${harness.appPort}/rpc?p=e2e-replay`,
 			);
 			await browser.waitForOpen();
 			await browser.subscribePtys("e2e-replay");
@@ -339,7 +339,7 @@ test.afterAll(()=>writeFileSync(${JSON.stringify(releasePath)},'worker fixtures 
 				).pipe(
 					Effect.provide(RpcClient.layerProtocolSocket()),
 					Effect.provide(
-						Socket.layerWebSocket(`ws://127.0.0.1:${harness.relayPort}/rpc`),
+						Socket.layerWebSocket(`ws://127.0.0.1:${harness.appPort}/rpc`),
 					),
 					Effect.provide(Socket.layerWebSocketConstructorGlobal),
 					Effect.provide(RpcSerialization.layerJson),
