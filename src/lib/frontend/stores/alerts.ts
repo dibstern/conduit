@@ -11,7 +11,7 @@ import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
 import type { Alert } from "../transport/ws-rpc.js";
-import type { RelayMessage } from "../types.js";
+import type { BrowserMessage } from "../types.js";
 import { findSession } from "./session.svelte.js";
 import { showToast } from "./ui.svelte.js";
 import { triggerNotifications } from "./ws-notifications.js";
@@ -37,7 +37,7 @@ export const applyAlert = (alert: Alert): void => {
 		return;
 	}
 	const failed = alert.kind === "error";
-	const syntheticMsg: RelayMessage = {
+	const syntheticMsg: BrowserMessage = {
 		type: "done",
 		code: failed ? 1 : 0,
 		alertId: alert.alertId,

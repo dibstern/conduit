@@ -2,7 +2,7 @@
 import { existsSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { BUILD_ID } from "../../../src/lib/build-id.js";
-import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { saveGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { stopDaemonAndAssertNoSurvivors } from "./daemon-survivors.js";
@@ -15,7 +15,7 @@ __setProbeOverrideForTesting(async () => ({
 	commands: [],
 	agents: [],
 }));
-saveRelaySettings({ defaultModel: "opencode/big-pickle" }, configDir);
+saveGlobalSettings({ defaultModel: "opencode/big-pickle" }, configDir);
 // The user has already answered the avatar question, so the first-run
 // dialog stays shut over the specs that are not about it. A restart keeps
 // whatever the first start saved.

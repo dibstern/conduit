@@ -14,7 +14,7 @@ import type {
 	SessionWorkspace,
 	SessionWorktreeOwnership,
 } from "../contracts/session-workspace.js";
-import { RelayError } from "../errors.js";
+import { ConduitError } from "../errors.js";
 import { sessionFolders } from "./session-workspace.js";
 
 export type CanonicalDirectory = string & Brand.Brand<"CanonicalDirectory">;
@@ -168,7 +168,7 @@ export const guardWorkspacePath = (directory: string, path = ".") =>
 	Effect.gen(function* () {
 		const target = resolve(directory, path);
 		const outside = () =>
-			new RelayError("Path is outside the selected folder", {
+			new ConduitError("Path is outside the selected folder", {
 				code: "PERMISSION_DENIED",
 			});
 		if (!containsPath(directory, target)) return yield* Effect.fail(outside());

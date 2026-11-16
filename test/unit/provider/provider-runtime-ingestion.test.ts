@@ -464,7 +464,7 @@ describe("ProviderRuntimeIngestion", () => {
 		const harness = makeHarness({ existingSession: true });
 		const published: unknown[] = [];
 		const layer = makeProviderRuntimeIngestionLive({
-			relayPublisher: {
+			browserPublisher: {
 				publish: (message) =>
 					Effect.sync(() => {
 						published.push(message);
@@ -551,7 +551,7 @@ describe("ProviderRuntimeIngestion", () => {
 		},
 		{
 			name: "publishes only to the bus when relay publishing is disabled",
-			options: { publishToRelay: false },
+			options: { publishToBrowser: false },
 			expectedBusCalls: 1,
 			expectedRelayCalls: 0,
 		},
@@ -572,7 +572,7 @@ describe("ProviderRuntimeIngestion", () => {
 			subscribeAdvances: () => Effect.succeed(Stream.empty),
 		} satisfies SessionEventBus);
 		const layer = makeProviderRuntimeIngestionLive({
-			relayPublisher: { publish: relayPublish },
+			browserPublisher: { publish: relayPublish },
 		}).pipe(Layer.provide(harness.depsLayer), Layer.provideMerge(busLayer));
 
 		await Effect.runPromise(
@@ -618,7 +618,7 @@ describe("ProviderRuntimeIngestion", () => {
 			subscribeAdvances: () => Effect.succeed(Stream.empty),
 		} satisfies SessionEventBus);
 		const layer = makeProviderRuntimeIngestionLive({
-			relayPublisher: { publish: relayPublish },
+			browserPublisher: { publish: relayPublish },
 		}).pipe(Layer.provide(harness.depsLayer), Layer.provideMerge(busLayer));
 
 		const result = await Effect.runPromise(

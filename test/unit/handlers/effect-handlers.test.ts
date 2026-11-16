@@ -10,7 +10,7 @@ import {
 	filterAgents,
 } from "../../../src/lib/domain/project-services/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/project-services/Services/alerts.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/project-services/Services/session-title-service.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
@@ -32,7 +32,7 @@ import { describe, it, layer } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
-import { loadRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { loadGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import {
@@ -104,7 +104,7 @@ import {
 	handleAskUserResponse,
 	handlePermissionResponse,
 	handleQuestionReject,
-	setDefaultPermissionModeForRelay,
+	setDefaultPermissionModeGlobally,
 } from "../../../src/lib/handlers/permissions.js";
 import {
 	cancelSessionById,
@@ -146,7 +146,7 @@ import { modelsHandlers } from "../../../src/lib/server/ws-rpc/models.js";
 import { projectsHandlers } from "../../../src/lib/server/ws-rpc/projects.js";
 import { RpcSubscriptionScopeLive } from "../../../src/lib/server/ws-rpc.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
-import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import type { ProjectServicesConfig } from "../../../src/lib/types.js";
 import {
 	makeHandlerLogger,
 	makeHandlerOpenCodeAPI,
@@ -267,7 +267,7 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 
 function projectManagementLayer(
 	client: OpenCodeAPI,
-	config: ProjectRelayConfig,
+	config: ProjectServicesConfig,
 ) {
 	const settingsLayer = openCodeSettingsLayer(client);
 	const configLayer = Layer.succeed(ConfigTag)(config);
@@ -307,8 +307,8 @@ function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
 }
 
 function mockConfig(
-	overrides?: Partial<ProjectRelayConfig>,
-): ProjectRelayConfig {
+	overrides?: Partial<ProjectServicesConfig>,
+): ProjectServicesConfig {
 	return makeMockConfig({
 		slug: "test-project",
 		projectDir: tmpdir(),
@@ -1666,7 +1666,7 @@ describe("handleForkSession", () => {
 	);
 });
 
-describe("setDefaultPermissionModeForRelay", () => {
+describe("setDefaultPermissionModeGlobally", () => {
 	it.effect(
 		"persists and updates the default without changing a session",
 		() => {
@@ -1685,13 +1685,13 @@ describe("setDefaultPermissionModeForRelay", () => {
 			return Effect.gen(function* () {
 				yield* setPermissionMode("session-1", "full");
 
-				const mode = yield* setDefaultPermissionModeForRelay({
+				const mode = yield* setDefaultPermissionModeGlobally({
 					clientId: "client-1",
 					mode: "auto",
 				});
 
 				expect(mode).toBe("auto");
-				expect(loadRelaySettings(configDir).defaultPermissionMode).toBe("auto");
+				expect(loadGlobalSettings(configDir).defaultPermissionMode).toBe("auto");
 				expect(yield* getDefaultPermissionMode()).toBe("auto");
 				expect(yield* getPermissionMode("session-1")).toBe("full");
 				expect(log.info).toHaveBeenCalledWith(
@@ -2964,7 +2964,7 @@ describe("sendMessageToSession", () => {
 						loggerLayer,
 						configLayer,
 						makeTestSessionActivityLayer(),
-						RelayStatusSnapshotLive,
+						ProjectStatusSnapshotLive,
 						makeOverridesStateLive(),
 						Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: openCodeApi })),
 						makeSessionManagerStateLive(),

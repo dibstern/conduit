@@ -55,9 +55,9 @@ import { storedSessionPick } from "../domain/project-services/Services/session-p
 export { loadModelCatalog } from "../domain/project-services/Services/model-catalog.js";
 
 import {
-	loadRelaySettings,
+	loadGlobalSettings,
 	parseDefaultModel,
-	saveRelaySettings,
+	saveGlobalSettings,
 } from "../daemon/global-settings.js";
 import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -84,19 +84,19 @@ const DISCOVERY_DRIVERS = KnownProviderDriverKindSchema.literals.filter(
 	(driver) => PROVIDER_DRIVERS[driver].catalogSource === "discovery",
 );
 
-export class RelaySettingsSaveError extends Data.TaggedError(
-	"RelaySettingsSaveError",
+export class GlobalSettingsSaveError extends Data.TaggedError(
+	"GlobalSettingsSaveError",
 )<{
 	readonly cause: unknown;
 }> {}
 
-const saveRelaySettingsEffect = (
-	settings: Parameters<typeof saveRelaySettings>[0],
+const saveGlobalSettingsEffect = (
+	settings: Parameters<typeof saveGlobalSettings>[0],
 	configDir?: string,
 ) =>
 	Effect.try({
-		try: () => saveRelaySettings(settings, configDir),
-		catch: (cause) => new RelaySettingsSaveError({ cause }),
+		try: () => saveGlobalSettings(settings, configDir),
+		catch: (cause) => new GlobalSettingsSaveError({ cause }),
 	});
 
 /** The session the tab picked last in this project. */
@@ -138,7 +138,7 @@ export const savedVariantFor = (
 			catalogModel ?? { id: model.modelID },
 		);
 		const saved =
-			loadRelaySettings(config.configDir).defaultVariants?.[
+			loadGlobalSettings(config.configDir).defaultVariants?.[
 				`${model.providerID}/${model.modelID}`
 			] ?? "";
 		const resolved = choices.resolve(saved);
@@ -505,7 +505,7 @@ export const getModelsResponse = (
 			? storedSessionPick(stored, selectedDriver)
 			: harnessDefaultPick(
 					selectedDriver,
-					loadRelaySettings(config.configDir),
+					loadGlobalSettings(config.configDir),
 					nativeDefaultModel,
 				);
 		const catalogModel = pick
@@ -761,7 +761,7 @@ export interface SetDefaultModelInput {
 	readonly model: string;
 }
 
-export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
+export const setDefaultModelGlobally = (input: SetDefaultModelInput) =>
 	Effect.gen(function* () {
 		const modelService = yield* OpenCodeModelServiceTag;
 		const log = yield* LoggerTag;
@@ -787,7 +787,7 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 		const override = { providerID: provider, modelID: model };
 		const { variant: validVariant, variants: availableVariants } =
 			yield* savedVariantFor(override, catalog);
-		yield* saveRelaySettingsEffect(
+		yield* saveGlobalSettingsEffect(
 			{
 				defaultModel: modelSpec,
 				harnessDefaults: {
@@ -822,7 +822,7 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 		};
 	});
 
-export const setHarnessDefaultForRelay = (input: {
+export const setHarnessDefaultGlobally = (input: {
 	readonly harness: Harness;
 	readonly providerId: string;
 	readonly modelId: string;
@@ -851,7 +851,7 @@ export const setHarnessDefaultForRelay = (input: {
 		);
 		if (Result.isFailure(resolved)) return yield* resolved.failure;
 		const { model, effort, contextWindow } = resolved.success;
-		yield* saveRelaySettingsEffect(
+		yield* saveGlobalSettingsEffect(
 			{
 				harnessDefaults: { [input.harness]: { ...model, contextWindow } },
 				defaultVariants: { [`${model.providerId}/${model.modelId}`]: effort },
@@ -862,9 +862,7 @@ export const setHarnessDefaultForRelay = (input: {
 		return { pick: { ...model, effort, contextWindow }, status: "ok" } as const;
 	});
 
-export const getTitleGenerationForRelay = readTitleGenerationState;
-
-export const setTitleGenerationForRelay = (
+export const setTitleGenerationGlobally = (
 	selection: TitleGenerationSelection | null,
 ) =>
 	Effect.gen(function* () {
@@ -904,7 +902,7 @@ export const setTitleGenerationForRelay = (
 					),
 				);
 		}
-		yield* saveRelaySettingsEffect(
+		yield* saveGlobalSettingsEffect(
 			{ titleGeneration: selection },
 			config.configDir,
 		);
@@ -956,7 +954,7 @@ export const switchVariantForSession = (
 		// Persist variant preference
 		if (activeModel) {
 			const modelKey = `${activeModel.providerID}/${activeModel.modelID}`;
-			yield* saveRelaySettingsEffect(
+			yield* saveGlobalSettingsEffect(
 				{ defaultVariants: { [modelKey]: variant } },
 				config.configDir,
 			);
@@ -966,7 +964,7 @@ export const switchVariantForSession = (
 		// when it uses the current default model.
 		if (
 			activeModel &&
-			loadRelaySettings(config.configDir).defaultModel ===
+			loadGlobalSettings(config.configDir).defaultModel ===
 				`${activeModel.providerID}/${activeModel.modelID}`
 		) {
 			yield* publishGlobalProjectSetting("defaultModel");

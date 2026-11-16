@@ -51,7 +51,7 @@ import type {
 	SDKPartialAssistantMessage,
 	SessionMessage,
 } from "../../../src/lib/provider/claude/types.js";
-import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../src/lib/provider/project-event-sink.js";
 import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {
 	createMockQuery,
@@ -221,7 +221,7 @@ describe("Claude subagent materialization pipeline", () => {
 							sessionMessage("assistant", "sub-assistant-1", "Auth is fine"),
 						]),
 					};
-					const relaySink = createRelayEventSink({
+					const relaySink = createProjectEventSink({
 						sessionId: parentSessionId,
 						persist: { persistEvent: appendProject },
 					});
@@ -578,7 +578,7 @@ describe("Claude subagent materialization pipeline", () => {
 							return transcript;
 						}),
 					};
-					const relaySink = createRelayEventSink({
+					const relaySink = createProjectEventSink({
 						sessionId: parentSessionId,
 						persist: { persistEvent: appendProject },
 					});

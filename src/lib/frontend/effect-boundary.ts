@@ -1,5 +1,5 @@
 // Schema validation for incoming daemon→client WebSocket messages.
-// Validates against RelayMessageSchema (the full union of relay message types).
+// Validates against BrowserMessageSchema (the full union of relay message types).
 //
 // Design:
 //   - Cached decoder: The Schema decoder is created once on first call and
@@ -8,12 +8,12 @@
 //   - Protocol correctness: Known message types that fail schema validation are
 //     rejected so bad server payloads do not enter application state.
 //
-// Uses RelayMessageSchema from shared-types.ts (daemon → client direction).
+// Uses BrowserMessageSchema from shared-types.ts (daemon → client direction).
 
 import { Schema } from "effect";
 import {
-	KNOWN_RELAY_MESSAGE_TYPES,
-	RelayMessageSchema,
+	BrowserMessageSchema,
+	KNOWN_BROWSER_MESSAGE_TYPES,
 } from "../shared-types.js";
 
 export class ProtocolDecodeError extends Error {
@@ -47,14 +47,14 @@ const getMessageType = (raw: unknown): string | undefined => {
 const getDecoder = (): ((raw: unknown) => unknown) => {
 	if (_decoder) return _decoder;
 
-	const decode = Schema.decodeUnknownResult(RelayMessageSchema);
+	const decode = Schema.decodeUnknownResult(BrowserMessageSchema);
 
 	_decoder = (raw: unknown): unknown => {
 		const result = decode(raw);
 		if (result._tag === "Success") return result.success;
 
 		const messageType = getMessageType(raw);
-		if (messageType && KNOWN_RELAY_MESSAGE_TYPES.has(messageType)) {
+		if (messageType && KNOWN_BROWSER_MESSAGE_TYPES.has(messageType)) {
 			throw new ProtocolDecodeError({
 				messageType,
 				raw,
@@ -69,7 +69,7 @@ const getDecoder = (): ((raw: unknown) => unknown) => {
 };
 
 /**
- * Validate an incoming daemon→client WebSocket message using RelayMessageSchema.
+ * Validate an incoming daemon→client WebSocket message using BrowserMessageSchema.
  *
  * Known message types are decoded and returned with schema-validated fields.
  * Unknown messages pass through unchanged. Known messages with invalid

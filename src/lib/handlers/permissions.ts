@@ -10,7 +10,7 @@ import {
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
 import { WsRpcError } from "../contracts/ws-rpc.js";
-import { saveRelaySettings } from "../daemon/global-settings.js";
+import { saveGlobalSettings } from "../daemon/global-settings.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import {
@@ -54,11 +54,11 @@ import {
 } from "../shared-types.js";
 import { sendMessageToSession } from "./prompt.js";
 
-class RelaySettingsSaveError extends Data.TaggedError(
-	"RelaySettingsSaveError",
+class GlobalSettingsSaveError extends Data.TaggedError(
+	"GlobalSettingsSaveError",
 )<{ readonly cause: unknown }> {}
 
-export const setDefaultPermissionModeForRelay = (input: {
+export const setDefaultPermissionModeGlobally = (input: {
 	readonly clientId: string;
 	readonly mode: SessionPermissionMode;
 }) =>
@@ -68,11 +68,11 @@ export const setDefaultPermissionModeForRelay = (input: {
 
 		yield* Effect.try({
 			try: () =>
-				saveRelaySettings(
+				saveGlobalSettings(
 					{ defaultPermissionMode: input.mode },
 					config.configDir,
 				),
-			catch: (cause) => new RelaySettingsSaveError({ cause }),
+			catch: (cause) => new GlobalSettingsSaveError({ cause }),
 		});
 		yield* publishGlobalProjectSetting("defaultPermissionMode");
 		log.info(

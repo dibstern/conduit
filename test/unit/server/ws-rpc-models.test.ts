@@ -29,7 +29,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeCapabilitiesService } from "../../../src/lib/provider/claude/claude-capabilities-service.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
-import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../src/lib/provider/project-event-sink.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {
@@ -339,11 +339,11 @@ describe("WsRpcServerLayer GetModels", () => {
 					);
 					yield* projectionRunner.projectEvent(stored);
 				}
-				const matchSink = createRelayEventSink({
+				const matchSink = createProjectEventSink({
 					sessionId: "match-session",
 					persist,
 				});
-				const driftSink = createRelayEventSink({
+				const driftSink = createProjectEventSink({
 					sessionId: "drift-session",
 					persist,
 				});

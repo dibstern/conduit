@@ -24,7 +24,7 @@ import type {
 	ClaudeSessionContext,
 	SDKMessage,
 } from "../../../../src/lib/provider/claude/types.js";
-import { createRelayEventSink } from "../../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../../src/lib/provider/project-event-sink.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
 import { makeEffectProjectionHarness } from "../../../helpers/effect-projection-harness.js";
 import {
@@ -584,7 +584,7 @@ describe("ClaudeEventTranslator", () => {
 					Date.now(),
 				],
 			);
-			const relaySink = createRelayEventSink({
+			const relaySink = createProjectEventSink({
 				sessionId: "sess-thinking-snapshot",
 				persist: {
 					persistEvent: (event) =>
@@ -664,7 +664,7 @@ describe("ClaudeEventTranslator", () => {
 					Date.now(),
 				],
 			);
-			const relaySink = createRelayEventSink({
+			const relaySink = createProjectEventSink({
 				sessionId: "sess-context-window",
 				persist: {
 					persistEvent: (event) =>

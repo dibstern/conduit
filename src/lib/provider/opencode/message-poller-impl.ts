@@ -12,7 +12,7 @@ import type { OpenCodeAPI } from "../../instance/opencode-api.js";
 import type { Message } from "../../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../../logger.js";
 import { tagWithSessionId } from "../../shared-types.js";
-import type { RelayMessage } from "../../types.js";
+import type { BrowserMessage } from "../../types.js";
 import {
 	buildSeedSnapshot,
 	diffAndSynthesize,
@@ -48,7 +48,7 @@ export interface MessagePollerOptions {
 
 /** Callback signature for the "events" broadcast event. */
 export type MessagePollerEventsCallback = (
-	messages: RelayMessage[],
+	messages: BrowserMessage[],
 	hasActivity?: boolean,
 ) => void;
 
@@ -205,7 +205,7 @@ export class MessagePoller {
 	 */
 	emitDone(sessionId: string): void {
 		if (sessionId !== this.activeSessionId) return;
-		const events: RelayMessage[] = [{ type: "done", sessionId, code: 0 }];
+		const events: BrowserMessage[] = [{ type: "done", sessionId, code: 0 }];
 		for (const cb of this.eventsCallbacks) {
 			cb(events);
 		}
@@ -302,7 +302,7 @@ export class MessagePoller {
 	private doDiffAndSynthesize(
 		sessionId: string,
 		messages: Message[],
-	): { events: RelayMessage[]; hasActivity: boolean } {
+	): { events: BrowserMessage[]; hasActivity: boolean } {
 		const { events, newSnapshot, hasActivity } = diffAndSynthesize(
 			this.previousSnapshot,
 			messages,
@@ -324,7 +324,7 @@ export class MessagePoller {
 
 /** Callback signature for the "events" broadcast event. */
 export type PollerManagerEventsCallback = (
-	messages: RelayMessage[],
+	messages: BrowserMessage[],
 	sessionId: string,
 	hasActivity?: boolean,
 ) => void;

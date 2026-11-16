@@ -20,7 +20,7 @@ import {
 	handleSSEEventEffect,
 	type SSEWiringDeps,
 } from "../../../src/lib/provider/opencode/sse-wiring.js";
-import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
+import type { BrowserMessage, OpenCodeEvent } from "../../../src/lib/types.js";
 import {
 	createMockSSEWiringDeps,
 	makeMockConfig,
@@ -109,7 +109,7 @@ describe("handleSSEEventEffect", () => {
 		const deps = createMockSSEWiringDeps();
 		const effectDeps = deps;
 		effectDeps satisfies SSEWiringDeps;
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "done",
 			sessionId: "session-1",
 			code: 0,
@@ -161,7 +161,7 @@ describe("handleSSEEventEffect", () => {
 		const effectDeps = deps;
 		effectDeps satisfies SSEWiringDeps;
 		const recordMessageActivity = vi.fn(() => Effect.void);
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "delta",
 			sessionId: "session-1",
 			text: "hello",

@@ -1591,13 +1591,13 @@ describe("Effect runtime boundary grep", () => {
 			{
 				path: "src/lib/domain/daemon/Layers/daemon-layers.ts",
 				pattern:
-					/Layer\.succeed\s*\(\s*WebSocketRelayRouterTag\s*(?:,|\)\s*\()/,
+					/Layer\.succeed\s*\(\s*WebSocketProjectRouterTag\s*(?:,|\)\s*\()/,
 				reason:
-					"WebSocketRelayRouterTag must be built from daemon Effect services",
+					"WebSocketProjectRouterTag must be built from daemon Effect services",
 			},
 			{
 				path: "src/lib/domain/daemon/Layers/daemon-layers.ts",
-				pattern: /\bwsRelayRouter:\s*WebSocketRelayRouter\b/,
+				pattern: /\bwsRelayRouter:\s*WebSocketProjectRouter\b/,
 				reason: "DaemonLiveOptions must not accept a prebuilt WebSocket router",
 			},
 			{
@@ -2051,7 +2051,7 @@ describe("Effect runtime boundary grep", () => {
 				path: "src/lib/types.ts",
 				pattern: /\bpersistence\?:/,
 				reason:
-					"ProjectRelayConfig should not expose a legacy persistence object",
+					"ProjectServicesConfig should not expose a legacy persistence object",
 			},
 			{
 				path: "src/lib/domain/daemon/Layers/project-startup.ts",
@@ -2151,7 +2151,7 @@ describe("Effect runtime boundary grep", () => {
 			{
 				path: "src/lib/provider/project-event-sink.ts",
 				pattern: /\bLegacyRelayEventSinkPersist\b/,
-				reason: "RelayEventSink persistence should be Effect-only",
+				reason: "EventSink persistence should be Effect-only",
 			},
 		] as const;
 
@@ -2182,7 +2182,7 @@ describe("Effect runtime boundary grep", () => {
 			},
 			{
 				pattern: /\bcreateRelayEventSink\b/,
-				reason: "RelayEventSink creation belongs to ProviderTurnService",
+				reason: "EventSink creation belongs to ProviderTurnService",
 			},
 			{
 				pattern: /\bProviderStateEffectTag\b/,
@@ -2764,7 +2764,7 @@ describe("Effect runtime boundary grep", () => {
 			/Effect\.serviceOption\(ProviderRuntimeIngestionTag\)/,
 		);
 		expect(providerTurnServiceSource).toMatch(
-			/createRelayEventSink\(\{[\s\S]*ingestion: \{\s*ingest: \(event, onPrompt\) =>\s*(?:Effect\.contextWith\(\(caller: Context\.Context<never>\) =>\s*)?ingestion\s*\.ingest\(event, onPrompt\)/,
+			/createProjectEventSink\(\{[\s\S]*ingestion: \{\s*ingest: \(event, onPrompt\) =>\s*(?:Effect\.contextWith\(\(caller: Context\.Context<never>\) =>\s*)?ingestion\s*\.ingest\(event, onPrompt\)/,
 		);
 	});
 

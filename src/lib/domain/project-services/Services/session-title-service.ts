@@ -9,7 +9,7 @@ import {
 	BUILTIN_TITLE_GENERATION,
 	type TitleGenerationSelection,
 } from "../../../contracts/title-generation.js";
-import { loadRelaySettings } from "../../../daemon/global-settings.js";
+import { loadGlobalSettings } from "../../../daemon/global-settings.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -203,7 +203,7 @@ export const makeSessionTitleServiceLive = (
 			}) =>
 				Effect.gen(function* () {
 					const selection =
-						loadRelaySettings(config.configDir).titleGeneration ??
+						loadGlobalSettings(config.configDir).titleGeneration ??
 						BUILTIN_TITLE_GENERATION;
 					const selectedAccount = yield* resolveTitleGenerationAccount(
 						selection,

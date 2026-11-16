@@ -173,7 +173,7 @@ describe("Codex native forks and conversation rewind through the daemon", () => 
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
 			logLevel: "warn",
-			relaySettings: {
+			globalSettings: {
 				harnessDefaults: {
 					codex: { providerId: "codex", modelId: MODEL, contextWindow: "" },
 				},

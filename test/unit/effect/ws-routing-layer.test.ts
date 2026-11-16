@@ -22,8 +22,8 @@ import {
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	ProjectRpcContextsTag,
-	WebSocketRelayRouterLive,
-	WebSocketRelayRouterTag,
+	WebSocketProjectRouterLive,
+	WebSocketProjectRouterTag,
 	WebSocketRoutingLive,
 	WebSocketUpgradeError,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
@@ -117,7 +117,7 @@ const makeRouterLayer = (
 	projects: ReadonlyArray<StoredProject>,
 	open: ProjectServices["Service"]["open"],
 ) =>
-	WebSocketRelayRouterLive.pipe(
+	WebSocketProjectRouterLive.pipe(
 		Layer.provideMerge(
 			Layer.mergeAll(
 				makeProjectRegistryLive(projects),
@@ -134,7 +134,7 @@ const makeRouterLayer = (
 		),
 	);
 
-describe("WebSocketRelayRouterLive", () => {
+describe("WebSocketProjectRouterLive", () => {
 	it.effect("opens the asked project and marks it ready", () => {
 		const open = vi.fn((_slug: string) =>
 			Effect.succeed(Context.empty() as Context.Context<ProjectParts>),
@@ -142,9 +142,9 @@ describe("WebSocketRelayRouterLive", () => {
 		const layer = makeRouterLayer([project], open);
 
 		return Effect.gen(function* () {
-			const router = yield* WebSocketRelayRouterTag;
-			yield* router.ensureRelayStarted("test-project");
-			yield* router.ensureRelayStarted("test-project");
+			const router = yield* WebSocketProjectRouterTag;
+			yield* router.ensureProjectOpen("test-project");
+			yield* router.ensureProjectOpen("test-project");
 
 			// ProjectServices starts a project once however often it is opened.
 			expect(open.mock.calls).toEqual([["test-project"], ["test-project"]]);
@@ -160,15 +160,15 @@ describe("WebSocketRelayRouterLive", () => {
 		const layer = makeRouterLayer([], open);
 
 		return Effect.gen(function* () {
-			const router = yield* WebSocketRelayRouterTag;
+			const router = yield* WebSocketProjectRouterTag;
 			const result = yield* Effect.result(
-				router.ensureRelayStarted("missing-project"),
+				router.ensureProjectOpen("missing-project"),
 			);
 
 			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure") {
 				expect(result.failure).toBeInstanceOf(WebSocketUpgradeError);
-				expect(result.failure.reason).toBe("relay_unavailable");
+				expect(result.failure.reason).toBe("project_open_failed");
 				expect(result.failure.slug).toBe("missing-project");
 			}
 			expect(open).not.toHaveBeenCalled();
@@ -186,16 +186,16 @@ describe("WebSocketRelayRouterLive", () => {
 		);
 
 		return Effect.gen(function* () {
-			const router = yield* WebSocketRelayRouterTag;
+			const router = yield* WebSocketProjectRouterTag;
 			const result = yield* Effect.result(
-				router.ensureRelayStarted("test-project"),
+				router.ensureProjectOpen("test-project"),
 			);
 			const entry = yield* getEntry("test-project");
 
 			expect(result._tag).toBe("Failure");
 			if (result._tag === "Failure") {
 				expect(result.failure).toBeInstanceOf(WebSocketUpgradeError);
-				expect(result.failure.reason).toBe("relay_unavailable");
+				expect(result.failure.reason).toBe("project_open_failed");
 				expect(result.failure.slug).toBe("test-project");
 			}
 			const state = Option.getOrThrow(entry);

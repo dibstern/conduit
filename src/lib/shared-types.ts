@@ -768,7 +768,7 @@ export interface ProjectInfo {
 	instanceId?: string;
 }
 
-// Schema definitions for each RelayMessage variant. Built with @effect/schema
+// Schema definitions for each BrowserMessage variant. Built with @effect/schema
 // to provide runtime validation and type derivation.
 
 // -- Helper schemas for embedded types --
@@ -915,9 +915,9 @@ const UserMessageSchema = Schema.Struct({
  *  with the same wire shape. Absence marks a daemon older than the handshake. */
 export const WS_PROTOCOL_VERSION = 8;
 
-// -- Combined RelayMessage schema union --
+// -- Combined BrowserMessage schema union --
 
-export const RelayMessageSchema = Schema.Union([
+export const BrowserMessageSchema = Schema.Union([
 	DeltaSchema,
 	ThinkingStartSchema,
 	ThinkingDeltaSchema,
@@ -930,13 +930,13 @@ export const RelayMessageSchema = Schema.Union([
 	UserMessageSchema,
 ]);
 
-export type RelayMessage = typeof RelayMessageSchema.Type;
+export type BrowserMessage = typeof BrowserMessageSchema.Type;
 
-export const RELAY_MESSAGE_TYPES: ReadonlyArray<RelayMessage["type"]> =
-	RelayMessageSchema.members.map((member) => member.fields.type.literal);
+export const BROWSER_MESSAGE_TYPES: ReadonlyArray<BrowserMessage["type"]> =
+	BrowserMessageSchema.members.map((member) => member.fields.type.literal);
 
-export const KNOWN_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set(
-	RELAY_MESSAGE_TYPES,
+export const KNOWN_BROWSER_MESSAGE_TYPES: ReadonlySet<string> = new Set(
+	BROWSER_MESSAGE_TYPES,
 );
 
 // These types let code distinguish per-session events (which always carry
@@ -955,11 +955,11 @@ export type PerSessionEventType =
 	| "message_removed";
 
 export type PerSessionEvent = Extract<
-	RelayMessage,
+	BrowserMessage,
 	{ type: PerSessionEventType; sessionId: string }
 >;
-export type GlobalRelayEvent = Exclude<
-	RelayMessage,
+export type GlobalBrowserMessage = Exclude<
+	BrowserMessage,
 	{ type: PerSessionEventType }
 >;
 
@@ -968,14 +968,14 @@ export type GlobalRelayEvent = Exclude<
 // These are tagged with sessionId before internal activity and notification handling.
 
 /**
- * A RelayMessage variant that may be missing sessionId.
+ * A BrowserMessage variant that may be missing sessionId.
  * Used as the output type of the SSE translator before post-translation tagging.
  *
- * Structurally a `RelayMessage` that also accepts objects without sessionId.
- * The `tagWithSessionId` helper converts these to proper RelayMessages.
+ * Structurally a `BrowserMessage` that also accepts objects without sessionId.
+ * The `tagWithSessionId` helper converts these to proper BrowserMessages.
  */
-export type UntaggedRelayMessage =
-	| RelayMessage
+export type UntaggedBrowserMessage =
+	| BrowserMessage
 	| (PerSessionEvent extends infer Event
 			? Event extends { sessionId: string }
 				? Omit<Event, "sessionId">
@@ -984,22 +984,22 @@ export type UntaggedRelayMessage =
 
 /**
  * Tag a per-session event with the given sessionId. Non-per-session events
- * pass through unchanged. Returns a properly typed RelayMessage.
+ * pass through unchanged. Returns a properly typed BrowserMessage.
  */
 export function tagWithSessionId(
-	msg: UntaggedRelayMessage,
+	msg: UntaggedBrowserMessage,
 	sessionId: string,
-): RelayMessage {
+): BrowserMessage {
 	// If the message already has a sessionId, return as-is
 	if (
 		"sessionId" in msg &&
 		typeof msg.sessionId === "string" &&
 		msg.sessionId
 	) {
-		return msg as RelayMessage;
+		return msg as BrowserMessage;
 	}
 	// Add sessionId to all per-session event types
-	return { ...msg, sessionId } as RelayMessage;
+	return { ...msg, sessionId } as BrowserMessage;
 }
 
 export type InstanceStatus = "starting" | "healthy" | "unhealthy" | "stopped";

@@ -8,7 +8,7 @@ import { assert, describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { resolveNotifications } from "../../../src/lib/provider/notification-policy.js";
 import { sendPushForEvent } from "../../../src/lib/provider/opencode/sse-wiring.js";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
+import type { BrowserMessage } from "../../../src/lib/shared-types.js";
 
 function createMockPushManager() {
 	return {
@@ -105,7 +105,7 @@ describe("resolveNotifications with sessionId", () => {
 				sessionId: "s1",
 				code: 0,
 				alertId: "turn-1:done",
-			} as RelayMessage,
+			} as BrowserMessage,
 			{ action: "drop", reason: "no viewers" },
 			false,
 			"sess-456",
@@ -123,7 +123,7 @@ describe("resolveNotifications with sessionId", () => {
 				sessionId: "s1",
 				code: 0,
 				alertId: "turn-1:done",
-			} as RelayMessage,
+			} as BrowserMessage,
 			{ action: "drop", reason: "no viewers" },
 			false,
 		);
@@ -140,7 +140,7 @@ describe("resolveNotifications with sessionId", () => {
 				sessionId: "s1",
 				code: 0,
 				alertId: "turn-1:done",
-			} as RelayMessage,
+			} as BrowserMessage,
 			{ action: "send", sessionId: "s1" },
 			false,
 			"sess-789",

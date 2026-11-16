@@ -55,8 +55,8 @@ import {
 	refreshGlobalDefaults,
 } from "../../project-services/Services/project-settings.js";
 import {
-	makeRelayStatusSnapshot,
-	RelayStatusSnapshotTag,
+	makeProjectStatusSnapshot,
+	ProjectStatusSnapshotTag,
 } from "../../project-services/Services/project-status-snapshot.js";
 import {
 	ProviderTurnServiceTag,
@@ -406,7 +406,7 @@ export const makeProjectServicesLive = (options: {
 									// The project's OpenCode stream and status poller, so no relay holds
 									// them (lane 16q); t3code starts its reactors once, in the server
 									// scope (apps/server/src/server.ts:540-627).
-									const snapshot = makeRelayStatusSnapshot();
+									const snapshot = makeProjectStatusSnapshot();
 									const streams = yield* Layer.build(
 										Layer.merge(
 											StatusPollerLive.pipe(
@@ -424,7 +424,7 @@ export const makeProjectServicesLive = (options: {
 													Context.mergeAll(
 														projectBase,
 														Context.pick(OpenCodeProjectStreams)(turnShared),
-														Context.make(RelayStatusSnapshotTag, snapshot),
+														Context.make(ProjectStatusSnapshotTag, snapshot),
 														Context.make(SessionManagerStateTag, manager.state),
 														Option.isSome(statusCore)
 															? Context.make(
@@ -501,7 +501,7 @@ export const makeProjectServicesLive = (options: {
 										streams,
 									).pipe(
 										Context.add(ProviderTurnServiceTag, turns),
-										Context.add(RelayStatusSnapshotTag, snapshot),
+										Context.add(ProjectStatusSnapshotTag, snapshot),
 										Context.add(OpenCodeSessionCreationGateTag, gate),
 										Context.add(TranslatorTag, createTranslator()),
 										// t3code ties output listeners to the scope that owns them

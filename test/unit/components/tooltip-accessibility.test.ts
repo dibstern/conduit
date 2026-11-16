@@ -29,8 +29,8 @@ describe("non-focusable tooltip accessibility", () => {
 	beforeEach(() => {
 		connectionState.status = "disconnected";
 		connectionState.statusText = "Disconnected";
-		connectionState.relayStatus = undefined;
-		connectionState.relayError = undefined;
+		connectionState.projectStatus = undefined;
+		connectionState.projectError = undefined;
 	});
 
 	afterEach(() => {
@@ -38,14 +38,14 @@ describe("non-focusable tooltip accessibility", () => {
 	});
 
 	it("renders the full relay error with wrapping and scrolling", () => {
-		const relayError = `ProviderError: ${"unbroken".repeat(40)}`;
-		connectionState.relayStatus = "error";
-		connectionState.relayError = relayError;
+		const projectError = `ProviderError: ${"unbroken".repeat(40)}`;
+		connectionState.projectStatus = "error";
+		connectionState.projectError = projectError;
 
 		render(ConnectOverlay);
 
-		const error = screen.getByText(relayError);
-		expect(error.textContent).toBe(relayError);
+		const error = screen.getByText(projectError);
+		expect(error.textContent).toBe(projectError);
 		expect(error.classList.contains("truncate")).toBe(false);
 		expect(error.hasAttribute("title")).toBe(false);
 		expect(error.classList.contains("break-words")).toBe(true);

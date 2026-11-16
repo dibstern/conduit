@@ -12,7 +12,7 @@ import {
 } from "../../stores/ws-listeners.js";
 import { mockFileTree } from "../../stories/mocks.js";
 import { connectedSocket } from "../../stories/sockets.js";
-import { viewRelayStatus } from "../../transport/connection-status.svelte.js";
+import { viewProjectStatus } from "../../transport/connection-status.svelte.js";
 import SidebarFilePanel from "./SidebarFilePanel.svelte";
 
 async function showDirectory(
@@ -62,10 +62,10 @@ export const Loading: Story = {
 		const restoreSocket = connectedSocket();
 		routerState.path = "/";
 		routerState.search = "?project=storybook";
-		viewRelayStatus("storybook");
+		viewProjectStatus("storybook");
 		return () => {
 			restoreSocket();
-			viewRelayStatus(null);
+			viewProjectStatus(null);
 			routerState.search = "";
 			globalThis.fetch = realFetch;
 		};

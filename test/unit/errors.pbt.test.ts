@@ -16,11 +16,11 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
 	AuthenticationError,
+	ConduitError,
 	ConfigurationError,
 	type ErrorCode,
 	OpenCodeApiError,
 	OpenCodeConnectionError,
-	RelayError,
 	redactSensitive,
 	SSEConnectionError,
 	WebSocketError,
@@ -78,11 +78,11 @@ const arbContext = fc.dictionary(
 	fc.oneof(fc.string(), fc.integer(), fc.boolean(), fc.constant(null)),
 );
 
-const arbRelayError = fc
+const arbConduitError = fc
 	.tuple(edgeCaseString, arbErrorCode, arbStatusCode, arbContext)
 	.map(
 		([message, code, statusCode, context]) =>
-			new RelayError(message, { code, statusCode, context }),
+			new ConduitError(message, { code, statusCode, context }),
 	);
 
 // Generators: subclass errors (Schema.TaggedError)
@@ -97,11 +97,11 @@ const errorSubclasses = [
 
 describe("Ticket 0.5 — Error Handling PBT", () => {
 	describe("P1: Error hierarchy (AC1)", () => {
-		it("property: all RelayError instances are instanceof Error", () => {
+		it("property: all ConduitError instances are instanceof Error", () => {
 			fc.assert(
-				fc.property(arbRelayError, (err) => {
+				fc.property(arbConduitError, (err) => {
 					expect(err).toBeInstanceOf(Error);
-					expect(err).toBeInstanceOf(RelayError);
+					expect(err).toBeInstanceOf(ConduitError);
 				}),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },
 			);
@@ -146,7 +146,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 	describe("P2: toJSON always produces valid HTTP error shape (AC2)", () => {
 		it("property: toJSON returns { error: { code, message } }", () => {
 			fc.assert(
-				fc.property(arbRelayError, (err) => {
+				fc.property(arbConduitError, (err) => {
 					const json = err.toJSON();
 					expect(json).toHaveProperty("error");
 					expect(json.error).toHaveProperty("code");
@@ -162,7 +162,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 
 		it("property: toJSON is always valid JSON (roundtrips)", () => {
 			fc.assert(
-				fc.property(arbRelayError, (err) => {
+				fc.property(arbConduitError, (err) => {
 					const json = err.toJSON();
 					const serialized = JSON.stringify(json);
 					const parsed = JSON.parse(serialized);
@@ -236,7 +236,7 @@ describe("Ticket 0.5 — Error Handling PBT", () => {
 					fc.constantFrom(...sensitiveKeys),
 					fc.string({ minLength: 1, maxLength: 50 }),
 					(key, value) => {
-						const err = new RelayError("test", {
+						const err = new ConduitError("test", {
 							code: "INTERNAL_ERROR",
 							context: { [key]: value },
 						});

@@ -2,7 +2,7 @@ import { Effect, Result } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
-import { loadRelaySettings } from "../../../daemon/global-settings.js";
+import { loadGlobalSettings } from "../../../daemon/global-settings.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -106,7 +106,7 @@ export const loadServerSessionPick = (
 			sourcePick,
 			harnessDefaultPick(
 				harness,
-				loadRelaySettings(config.configDir),
+				loadGlobalSettings(config.configDir),
 				cached?._tag === "Some" ? cached.value.nativeDefaultModel : undefined,
 			),
 			catalog,

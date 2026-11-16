@@ -12,7 +12,7 @@ import { PersistenceStore } from "../../../persistence/effect/live.js";
 import type { FolderIssue } from "../../../project-folders.js";
 import type { RunnerProcessError } from "../../../provider/runner/runner-retirement.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
-import { RelayStatusSnapshotTag } from "../../project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotTag } from "../../project-services/Services/project-status-snapshot.js";
 import { SSEStreamTag } from "../../project-services/Services/sse-stream-service.js";
 import { KeepAwakeTag } from "../Layers/keep-awake-layer.js";
 import { AccountDirectory } from "./account-directory.js";
@@ -195,7 +195,7 @@ export const DaemonHandleLive: Layer.Layer<
 					);
 					sessionCount +=
 						(opened &&
-							Context.get(opened, RelayStatusSnapshotTag).getSnapshot()
+							Context.get(opened, ProjectStatusSnapshotTag).getSnapshot()
 								.sessionCount) ??
 						config.persistedSessionCounts.get(slug) ??
 						0;

@@ -6,7 +6,7 @@ import { Effect, Layer } from "effect";
 import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { saveGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import {
 	getDefaultModel,
 	getDefaultVariant,
@@ -46,7 +46,7 @@ describe("WsRpcServerLayer SetDefaultModel", () => {
 			const configDir = mkdtempSync(
 				join(tmpdir(), "conduit-rpc-default-model-"),
 			);
-			saveRelaySettings(
+			saveGlobalSettings(
 				{ defaultVariants: { "openai/gpt-4": "fast" } },
 				configDir,
 			);

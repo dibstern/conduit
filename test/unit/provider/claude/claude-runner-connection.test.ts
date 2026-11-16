@@ -37,7 +37,7 @@ import {
 	configuredClaudeConfigDir,
 	sdkDefaultClaudeConfigDir,
 } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
-import { createRelayEventSink } from "../../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../../src/lib/provider/project-event-sink.js";
 import { makeRunnerAuthority } from "../../../../src/lib/provider/runner/runner-authority.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
@@ -833,7 +833,7 @@ it("fences a pending approval's later resolution after its ask receipt was consu
 		consumed: false,
 	};
 	await f.runtime.runPromise(f.receipts.attach("runner", "old"));
-	const sink = createRelayEventSink({
+	const sink = createProjectEventSink({
 		sessionId: "session",
 		providerId: "claude",
 		ingestion: f.ingestion,

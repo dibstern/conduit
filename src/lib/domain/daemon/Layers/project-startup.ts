@@ -24,7 +24,7 @@ import { PersistenceProjectTag } from "../../persistence/Services/persistence-se
 import { makeReadOpenCodeMessages } from "../../project-services/Layers/project-ingestion-layer.js";
 import { ContinuationTag } from "../../project-services/Services/continuation.js";
 import { OpenCodeRuntimeIngressTag } from "../../project-services/Services/opencode-runtime-ingress-service.js";
-import { RelayStatusSnapshotTag } from "../../project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotTag } from "../../project-services/Services/project-status-snapshot.js";
 import { restoreAsyncQuestionsFromStore } from "../../project-services/Services/restore-async-questions.js";
 import { restoreClaudeQuestionsFromStore } from "../../project-services/Services/restore-claude-questions.js";
 import {
@@ -84,7 +84,7 @@ export const startProject = (options: {
 		const persistenceProject = yield* PersistenceProjectTag;
 		const activity = yield* SessionActivityTag;
 		const translator = yield* TranslatorTag;
-		const statusSnapshot = yield* RelayStatusSnapshotTag;
+		const statusSnapshot = yield* ProjectStatusSnapshotTag;
 		const sseStream = yield* SSEStreamTag;
 		const statusPoller = yield* StatusPollerTag;
 		const pollerManager = yield* PollerManagerTag;

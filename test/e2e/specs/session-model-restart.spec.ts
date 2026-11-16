@@ -4,7 +4,7 @@
 
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { saveGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -53,7 +53,7 @@ test.describe("Claude session model across a relay restart", () => {
 		// The global default moves on (another session picked an OpenCode model),
 		// so only the persisted turn still knows this session ran on Fable 5.
 		await harness.restart(() =>
-			saveRelaySettings(
+			saveGlobalSettings(
 				{ defaultModel: "opencode/big-pickle" },
 				dirname(harness.eventsDbPath),
 			),
@@ -137,7 +137,7 @@ test.describe("Claude session effort and context window across a relay restart",
 
 		// Clear every saved default, so only the session's own history remains.
 		await harness.restart(() =>
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					defaultModel: "opencode/big-pickle",
 					defaultVariants: { "claude/claude-fable-5": "" },

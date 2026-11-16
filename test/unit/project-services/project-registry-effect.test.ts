@@ -25,7 +25,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	allProjects,
 	findByDirectory,
 	getEntry,
@@ -35,12 +35,12 @@ import {
 	makeProjectRegistryLive,
 	markError,
 	markReady,
+	openRegisteredProject,
 	readyEntries,
 	remove,
 	removeAll,
 	size,
 	slugs,
-	startRelay,
 	touchLastUsed,
 	updateProject,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
@@ -108,11 +108,11 @@ const FailingRelayTestLayer = Layer.fresh(
 	),
 );
 
-describe("ProjectRegistry Effect - addWithoutRelay", () => {
+describe("ProjectRegistry Effect - addWithoutOpening", () => {
 	it.effect("registers a project in Registering state", () =>
 		Effect.gen(function* () {
 			const project = makeProject("alpha");
-			yield* addWithoutRelay(project);
+			yield* addWithoutOpening(project);
 
 			const entry = yield* getEntry("alpha");
 			expect(Option.isSome(entry)).toBe(true);
@@ -126,7 +126,7 @@ describe("ProjectRegistry Effect - addWithoutRelay", () => {
 			const bus = yield* DaemonEventBusTag;
 			const sub = yield* PubSub.subscribe(bus);
 
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 
 			const msg = yield* PubSub.take(sub);
 			expect(msg._tag).toBe("InstanceAdded");
@@ -141,7 +141,7 @@ describe("ProjectRegistry Effect - addWithoutRelay", () => {
 			const bus = yield* DaemonEventBusTag;
 			const sub = yield* PubSub.subscribe(bus);
 
-			yield* addWithoutRelay(makeProject("alpha"), { silent: true });
+			yield* addWithoutOpening(makeProject("alpha"), { silent: true });
 
 			const isEmpty = (yield* PubSub.takeUpTo(sub, 1)).length === 0;
 			expect(isEmpty).toBe(true);
@@ -150,9 +150,9 @@ describe("ProjectRegistry Effect - addWithoutRelay", () => {
 
 	it.effect("fails with ProjectAlreadyExists for duplicate slug", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 
-			const result = yield* addWithoutRelay(makeProject("alpha")).pipe(
+			const result = yield* addWithoutOpening(makeProject("alpha")).pipe(
 				Effect.catchTag("ProjectAlreadyExists", (e) =>
 					Effect.succeed(`caught: ${e.slug}`),
 				),
@@ -165,7 +165,7 @@ describe("ProjectRegistry Effect - addWithoutRelay", () => {
 describe("ProjectRegistry Effect - markReady", () => {
 	it.effect("transitions to Ready state", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			yield* markReady("alpha");
 
 			const entry = yield* getEntry("alpha");
@@ -175,7 +175,7 @@ describe("ProjectRegistry Effect - markReady", () => {
 
 	it.effect("publishes once across five calls without requesting a save", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 
 			const bus = yield* DaemonEventBusTag;
 			const sub = yield* PubSub.subscribe(bus);
@@ -202,7 +202,7 @@ describe("ProjectRegistry Effect - markReady", () => {
 
 	it.effect("publishes again when an Error project becomes Ready", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			yield* markReady("alpha");
 			yield* markError("alpha", "relay failed");
 
@@ -235,7 +235,7 @@ describe("ProjectRegistry Effect - markReady", () => {
 describe("ProjectRegistry Effect - markError", () => {
 	it.effect("transitions to Error state with error message", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			yield* markError("alpha", "connection refused");
 
 			const entry = yield* getEntry("alpha");
@@ -249,7 +249,7 @@ describe("ProjectRegistry Effect - markError", () => {
 
 	it.effect("publishes InstanceStatusChanged", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 
 			const bus = yield* DaemonEventBusTag;
 			const sub = yield* PubSub.subscribe(bus);
@@ -265,7 +265,7 @@ describe("ProjectRegistry Effect - markError", () => {
 describe("ProjectRegistry Effect - remove", () => {
 	it.effect("removes a registered project", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			yield* remove("alpha");
 
 			const exists = yield* has("alpha");
@@ -275,7 +275,7 @@ describe("ProjectRegistry Effect - remove", () => {
 
 	it.effect("publishes InstanceRemoved event", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 
 			const bus = yield* DaemonEventBusTag;
 			const sub = yield* PubSub.subscribe(bus);
@@ -320,7 +320,7 @@ describe("ProjectRegistry Effect - remove", () => {
 		);
 
 		return Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			yield* remove("alpha");
 
 			expect(closedSlug).toBe("alpha");
@@ -331,7 +331,7 @@ describe("ProjectRegistry Effect - remove", () => {
 describe("ProjectRegistry Effect - updateProject", () => {
 	it.effect("updates project title", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			yield* updateProject("alpha", { title: "Alpha v2" });
 
 			const project = yield* getProject("alpha");
@@ -341,7 +341,7 @@ describe("ProjectRegistry Effect - updateProject", () => {
 
 	it.effect("publishes InstanceStatusChanged", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 
 			const bus = yield* DaemonEventBusTag;
 			const sub = yield* PubSub.subscribe(bus);
@@ -366,7 +366,7 @@ describe("ProjectRegistry Effect - updateProject", () => {
 
 	it.effect("preserves entry state (_tag) when updating project fields", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			yield* markReady("alpha");
 			yield* updateProject("alpha", { title: "Updated" });
 
@@ -419,7 +419,7 @@ describe("ProjectRegistry Effect - touchLastUsed", () => {
 		Effect.gen(function* () {
 			const oldTimestamp = 1000;
 			const project = { ...makeProject("alpha"), lastUsed: oldTimestamp };
-			yield* addWithoutRelay(project);
+			yield* addWithoutOpening(project);
 
 			yield* touchLastUsed("alpha");
 
@@ -431,7 +431,7 @@ describe("ProjectRegistry Effect - touchLastUsed", () => {
 
 	it.effect("publishes InstanceStatusChanged", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 
 			const bus = yield* DaemonEventBusTag;
 			const sub = yield* PubSub.subscribe(bus);
@@ -455,14 +455,14 @@ describe("ProjectRegistry Effect - Queries", () => {
 	it.effect("has() returns true for registered, false for unregistered", () =>
 		Effect.gen(function* () {
 			expect(yield* has("alpha")).toBe(false);
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			expect(yield* has("alpha")).toBe(true);
 		}).pipe(Effect.provide(TestLayer)),
 	);
 
 	it.effect("isReady() reflects current state", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			expect(yield* isReady("alpha")).toBe(false);
 
 			yield* markReady("alpha");
@@ -483,9 +483,9 @@ describe("ProjectRegistry Effect - Queries", () => {
 
 	it.effect("allProjects() returns all projects sorted by lastUsed desc", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay({ ...makeProject("alpha"), lastUsed: 100 });
-			yield* addWithoutRelay({ ...makeProject("beta"), lastUsed: 300 });
-			yield* addWithoutRelay({ ...makeProject("gamma"), lastUsed: 200 });
+			yield* addWithoutOpening({ ...makeProject("alpha"), lastUsed: 100 });
+			yield* addWithoutOpening({ ...makeProject("beta"), lastUsed: 300 });
+			yield* addWithoutOpening({ ...makeProject("gamma"), lastUsed: 200 });
 
 			const all = yield* allProjects;
 			expect(all.map((p) => p.slug)).toEqual(["beta", "gamma", "alpha"]);
@@ -494,8 +494,8 @@ describe("ProjectRegistry Effect - Queries", () => {
 
 	it.effect("readyEntries() returns only Ready entries", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
-			yield* addWithoutRelay(makeProject("beta"));
+			yield* addWithoutOpening(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("beta"));
 			yield* markReady("alpha");
 
 			const ready = yield* readyEntries;
@@ -507,9 +507,9 @@ describe("ProjectRegistry Effect - Queries", () => {
 
 	it.effect("slugs() returns all registered slugs", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
-			yield* addWithoutRelay(makeProject("beta"));
-			yield* addWithoutRelay(makeProject("gamma"));
+			yield* addWithoutOpening(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("beta"));
+			yield* addWithoutOpening(makeProject("gamma"));
 
 			const allSlugs = yield* slugs;
 			expect(allSlugs.sort()).toEqual(["alpha", "beta", "gamma"]);
@@ -519,9 +519,9 @@ describe("ProjectRegistry Effect - Queries", () => {
 	it.effect("size() is accurate", () =>
 		Effect.gen(function* () {
 			expect(yield* size).toBe(0);
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			expect(yield* size).toBe(1);
-			yield* addWithoutRelay(makeProject("beta"));
+			yield* addWithoutOpening(makeProject("beta"));
 			expect(yield* size).toBe(2);
 			yield* remove("alpha");
 			expect(yield* size).toBe(1);
@@ -530,7 +530,7 @@ describe("ProjectRegistry Effect - Queries", () => {
 
 	it.effect("findByDirectory() finds entry by path", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha", "/custom/path"));
+			yield* addWithoutOpening(makeProject("alpha", "/custom/path"));
 
 			const found = yield* findByDirectory("/custom/path");
 			expect(Option.isSome(found)).toBe(true);
@@ -542,13 +542,13 @@ describe("ProjectRegistry Effect - Queries", () => {
 	);
 });
 
-describe("ProjectRegistry Effect - startRelay", () => {
+describe("ProjectRegistry Effect - openRegisteredProject", () => {
 	it.effect(
 		"transitions Registering -> Ready on successful relay creation",
 		() =>
 			Effect.gen(function* () {
-				yield* addWithoutRelay(makeProject("alpha"));
-				yield* startRelay("alpha");
+				yield* addWithoutOpening(makeProject("alpha"));
+				yield* openRegisteredProject("alpha");
 
 				const entry = yield* getEntry("alpha");
 				expect(Option.getOrThrow(entry)._tag).toBe("Ready");
@@ -557,11 +557,11 @@ describe("ProjectRegistry Effect - startRelay", () => {
 
 	it.effect("transitions Error -> Registering -> Ready on retry", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			yield* markError("alpha", "first-fail");
 
 			// Use TestLayer which has NoOpProjectServicesLive (succeeds)
-			yield* startRelay("alpha");
+			yield* openRegisteredProject("alpha");
 
 			const entry = yield* getEntry("alpha");
 			expect(Option.getOrThrow(entry)._tag).toBe("Ready");
@@ -570,8 +570,8 @@ describe("ProjectRegistry Effect - startRelay", () => {
 
 	it.effect("transitions to Error state when relay creation fails", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
-			yield* startRelay("alpha");
+			yield* addWithoutOpening(makeProject("alpha"));
+			yield* openRegisteredProject("alpha");
 
 			const entry = yield* getEntry("alpha");
 			const val = Option.getOrThrow(entry);
@@ -584,7 +584,7 @@ describe("ProjectRegistry Effect - startRelay", () => {
 
 	it.effect("fails with ProjectNotFound for missing slug", () =>
 		Effect.gen(function* () {
-			const result = yield* startRelay("ghost").pipe(
+			const result = yield* openRegisteredProject("ghost").pipe(
 				Effect.catchTag("ProjectNotFound", (e) =>
 					Effect.succeed(`not-found: ${e.slug}`),
 				),
@@ -595,10 +595,10 @@ describe("ProjectRegistry Effect - startRelay", () => {
 
 	it.effect("fails with ProjectAlreadyReady for ready slug", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("alpha"));
 			yield* markReady("alpha");
 
-			const result = yield* startRelay("alpha").pipe(
+			const result = yield* openRegisteredProject("alpha").pipe(
 				Effect.catchTag("ProjectAlreadyReady", (e) =>
 					Effect.succeed(`already-ready: ${e.slug}`),
 				),
@@ -611,9 +611,9 @@ describe("ProjectRegistry Effect - startRelay", () => {
 describe("ProjectRegistry Effect - removeAll", () => {
 	it.effect("removes all projects, empties state", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
-			yield* addWithoutRelay(makeProject("beta"));
-			yield* addWithoutRelay(makeProject("gamma"));
+			yield* addWithoutOpening(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("beta"));
+			yield* addWithoutOpening(makeProject("gamma"));
 
 			yield* removeAll;
 
@@ -626,8 +626,8 @@ describe("ProjectRegistry Effect - removeAll", () => {
 
 	it.effect("publishes InstanceRemoved for each project", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
-			yield* addWithoutRelay(makeProject("beta"));
+			yield* addWithoutOpening(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("beta"));
 
 			const bus = yield* DaemonEventBusTag;
 			const sub = yield* PubSub.subscribe(bus);
@@ -682,7 +682,7 @@ describe("ProjectRegistry Effect - removeAll", () => {
 
 			yield* Effect.gen(function* () {
 				for (let index = 0; index < projectCount; index++) {
-					yield* addWithoutRelay(makeProject(`project-${index}`));
+					yield* addWithoutOpening(makeProject(`project-${index}`));
 				}
 
 				const fiber = yield* Effect.forkChild(removeAll);
@@ -710,7 +710,7 @@ describe("ProjectRegistry Effect - Multi-step lifecycle", () => {
 		() =>
 			Effect.gen(function* () {
 				const project = makeProject("alpha");
-				yield* addWithoutRelay(project);
+				yield* addWithoutOpening(project);
 				expect(yield* has("alpha")).toBe(true);
 				expect(yield* isReady("alpha")).toBe(false);
 
@@ -733,9 +733,9 @@ describe("ProjectRegistry Effect - Multi-step lifecycle", () => {
 
 	it.effect("multiple projects with different states", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(makeProject("alpha"));
-			yield* addWithoutRelay(makeProject("beta"));
-			yield* addWithoutRelay(makeProject("gamma"));
+			yield* addWithoutOpening(makeProject("alpha"));
+			yield* addWithoutOpening(makeProject("beta"));
+			yield* addWithoutOpening(makeProject("gamma"));
 
 			yield* markReady("alpha");
 			yield* markError("beta", "fail");

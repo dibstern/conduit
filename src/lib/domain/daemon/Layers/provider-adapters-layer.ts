@@ -16,7 +16,7 @@ import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { GoalActionSchema } from "../../../contracts/stored-event.js";
-import { loadRelaySettings } from "../../../daemon/global-settings.js";
+import { loadGlobalSettings } from "../../../daemon/global-settings.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type ClaudeEventPersistEffect,
@@ -51,7 +51,7 @@ import {
 	type RunnerRecoveryDependencies,
 } from "../../../provider/runner/runner-provider-instance.js";
 import { discoverRunners } from "../../../provider/runner/runner-registry.js";
-import type { ProjectRelayConfig } from "../../../types.js";
+import type { ProjectServicesConfig } from "../../../types.js";
 import { PortWatcher } from "../../persistence/Services/port-watcher.js";
 import { InputDraftsTag } from "../../project-services/Services/input-drafts.js";
 import { PendingInteractionServiceTag } from "../../project-services/Services/pending-interaction-service.js";
@@ -79,7 +79,9 @@ import { SessionActivityTag } from "../Services/session-activity.js";
 export const makeProviderAdaptersLive = (
 	configDir: string,
 	options: {
-		readonly claudeSdk?: Partial<NonNullable<ProjectRelayConfig["claudeSdk"]>>;
+		readonly claudeSdk?: Partial<
+			NonNullable<ProjectServicesConfig["claudeSdk"]>
+		>;
 		readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
 	} = {},
 ) =>
@@ -425,7 +427,7 @@ export const makeProviderAdaptersLive = (
 			const testModule = process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"];
 			if (process.env["NODE_ENV"] === "test" && process.send && testModule) {
 				const imported: {
-					readonly claudeSdk?: ProjectRelayConfig["claudeSdk"];
+					readonly claudeSdk?: ProjectServicesConfig["claudeSdk"];
 				} = yield* Effect.tryPromise({
 					try: () => import(testModule),
 					catch: (cause) =>
@@ -459,7 +461,7 @@ export const makeProviderAdaptersLive = (
 					persistUserMessage,
 					readThread,
 					claudeSettingsOverrides: () =>
-						loadRelaySettings(configDir).claudeSettings,
+						loadGlobalSettings(configDir).claudeSettings,
 					...(options.claudeRunnerFactory
 						? { runnerFactory: options.claudeRunnerFactory }
 						: {}),

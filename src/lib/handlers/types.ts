@@ -10,7 +10,7 @@ import type { Logger } from "../logger.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { OpenCodeInstance } from "../shared-types.js";
 import type { PtyManager } from "../terminal/pty-manager.js";
-import type { ProjectRelayConfig } from "../types.js";
+import type { ProjectServicesConfig } from "../types.js";
 
 /** Instance management capability group — only available in daemon mode. */
 export interface InstanceManagementDeps {
@@ -48,7 +48,7 @@ export interface ProjectManagementDeps {
 export interface HandlerDeps {
 	sessionMgr: SessionManagerShape;
 	ptyManager: PtyManager;
-	config: ProjectRelayConfig;
+	config: ProjectServicesConfig;
 	log: Logger;
 	/** Session status poller for processing state */
 	statusPoller: { isProcessing(sessionId: string): boolean };

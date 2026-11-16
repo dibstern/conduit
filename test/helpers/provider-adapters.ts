@@ -26,14 +26,14 @@ import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
 } from "../../src/lib/provider/orchestration-wiring.js";
-import type { ProjectRelayConfig } from "../../src/lib/types.js";
+import type { ProjectServicesConfig } from "../../src/lib/types.js";
 import { cursorAccountResourcesFixture } from "./cursor-account-resources-fixture.js";
 
 export interface TestAdapterOptions {
 	readonly configDir?: string;
 	readonly workspaceRoot?: string;
 	readonly projectId?: string;
-	readonly claudeSdk?: Partial<NonNullable<ProjectRelayConfig["claudeSdk"]>>;
+	readonly claudeSdk?: Partial<NonNullable<ProjectServicesConfig["claudeSdk"]>>;
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
 	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
 }

@@ -33,7 +33,7 @@ import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-lay
 import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonStoreAvailability } from "../../../src/lib/domain/daemon/Services/daemon-store-availability.js";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
@@ -118,7 +118,7 @@ const start = (scenario: string) => {
 		);
 		running.add(daemon as ManagedRuntime.ManagedRuntime<unknown, unknown>);
 		const register = (slug: string) =>
-			daemon.runPromise(addWithoutRelay(project(slug), { silent: true }));
+			daemon.runPromise(addWithoutOpening(project(slug), { silent: true }));
 		/** Write sessions in the project's context; the project is not opened. */
 		const seed = (slug: string, ...ids: ReadonlyArray<string>) =>
 			daemon.runPromise(

@@ -54,7 +54,7 @@ import type { makeSessionCompactions } from "../../../session/session-compaction
 import type { makeSessionGoals } from "../../../session/session-goals.js";
 import type { makeSessionRetries } from "../../../session/session-retries.js";
 import { QuestionApprovalSchema } from "../../../shared-types.js";
-import type { RelayMessage } from "../../../types.js";
+import type { BrowserMessage } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
 import type { UsageService } from "../../daemon/Services/usage.js";
 import { ContinuationLive, ContinuationTag } from "./continuation.js";
@@ -102,7 +102,7 @@ export interface ProviderRuntimeIngestion {
 		options?: {
 			readonly sessionPicks?: ReadonlyMap<string, TurnSettings>;
 			readonly publishToBus?: boolean;
-			readonly publishToRelay?: boolean;
+			readonly publishToBrowser?: boolean;
 			/** Runs inside the append transaction, before any projection. */
 			readonly beforeProject?: Effect.Effect<void, SqlError>;
 			readonly beforeCommit?: Effect.Effect<void, SqlError>;
@@ -131,9 +131,9 @@ export class ProviderRuntimeIngestionTag extends Context.Service<
 	ProviderRuntimeIngestion
 >()("ProviderRuntimeIngestion") {}
 
-export interface ProviderRuntimeRelayPublisher {
+export interface ProviderRuntimeBrowserPublisher {
 	readonly publish: (
-		message: Extract<RelayMessage, { type: "done" }>,
+		message: Extract<BrowserMessage, { type: "done" }>,
 	) => Effect.Effect<void>;
 }
 
@@ -152,7 +152,7 @@ export interface ProviderRuntimeIngestionLiveOptions {
 		| undefined,
 		EventStoreError
 	>;
-	readonly relayPublisher?: ProviderRuntimeRelayPublisher;
+	readonly browserPublisher?: ProviderRuntimeBrowserPublisher;
 	readonly usage?: Pick<UsageService, "turnEnded">;
 	readonly compactions?: Pick<
 		ReturnType<typeof makeSessionCompactions>,
@@ -860,18 +860,18 @@ export const makeProviderRuntimeIngestionLive = (
 							);
 
 							if (
-								options.relayPublisher &&
-								ingestOptions.publishToRelay !== false
+								options.browserPublisher &&
+								ingestOptions.publishToBrowser !== false
 							) {
 								yield* guardCurrentWrite(
-									publishRelayMessages(
+									publishBrowserMessages(
 										// A wake has no Run of its own, so its turn_ended is its only end (82tn.32.30).
 										domainEvents.filter(
 											(event) =>
 												endedRunEvents.has(event.eventId) ||
 												event.type === "evidence.turn_ended",
 										),
-										options.relayPublisher,
+										options.browserPublisher,
 									),
 								);
 							}
@@ -896,9 +896,9 @@ export const makeProviderRuntimeIngestionLive = (
 
 export const ProviderRuntimeIngestionLive = makeProviderRuntimeIngestionLive();
 
-function publishRelayMessages(
+function publishBrowserMessages(
 	events: readonly CanonicalEvent[],
-	publisher: ProviderRuntimeRelayPublisher,
+	publisher: ProviderRuntimeBrowserPublisher,
 ): Effect.Effect<void> {
 	return Effect.forEach(
 		events,

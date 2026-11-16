@@ -70,7 +70,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
@@ -231,7 +231,7 @@ const start = (scenario: string) => {
 		);
 		running.add(daemon as ManagedRuntime.ManagedRuntime<unknown, unknown>);
 		const register = (slug: string) =>
-			daemon.runPromise(addWithoutRelay(project(slug), { silent: true }));
+			daemon.runPromise(addWithoutOpening(project(slug), { silent: true }));
 		/** Run `use` in the project's daemon-built context; no relay starts. */
 		const inProject = <A, E, R>(slug: string, use: Effect.Effect<A, E, R>) =>
 			daemon.runPromise(

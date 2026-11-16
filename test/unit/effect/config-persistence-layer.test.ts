@@ -37,7 +37,7 @@ import {
 	makeInstanceManagerStateLive,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	makeProjectRegistryLive,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -308,7 +308,7 @@ describe("ConfigPersistenceLive", () => {
 				);
 
 				const config = yield* Effect.gen(function* () {
-					yield* addWithoutRelay(
+					yield* addWithoutOpening(
 						{
 							slug: "alpha",
 							folders: ["/tmp/alpha"],

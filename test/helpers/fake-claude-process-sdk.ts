@@ -30,7 +30,7 @@ import type {
 	SDKMessage,
 	SDKUserMessage,
 } from "../../src/lib/provider/claude/types.js";
-import type { ProjectRelayConfig } from "../../src/lib/types.js";
+import type { ProjectServicesConfig } from "../../src/lib/types.js";
 import {
 	provisionalRejectedLimit,
 	provisionalUsageLimitTurn,
@@ -3226,7 +3226,7 @@ function query(params: {
 	}) as unknown as Query;
 }
 
-export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
+export const claudeSdk: NonNullable<ProjectServicesConfig["claudeSdk"]> = {
 	query,
 	fork: {
 		transcriptExists: async (sessionId, options) =>

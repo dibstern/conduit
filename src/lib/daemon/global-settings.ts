@@ -24,7 +24,7 @@ import {
 	SessionPermissionModeSchema,
 } from "../shared-types.js";
 
-export interface RelaySettings {
+export interface GlobalSettings {
 	defaultModel?: string;
 	titleGeneration?: TitleGenerationSelection;
 	harnessDefaults?: Partial<
@@ -66,11 +66,11 @@ const isSessionMode = Schema.is(SessionModeSchema);
  * Load relay settings from the config directory.
  * Returns empty object if file doesn't exist or is corrupt.
  */
-export function loadRelaySettings(configDir?: string): RelaySettings {
+export function loadGlobalSettings(configDir?: string): GlobalSettings {
 	try {
 		const dir = resolveDir(configDir);
 		const raw = readFileSync(join(dir, SETTINGS_FILE), "utf-8");
-		const settings = JSON.parse(stripComments(raw)) as RelaySettings & {
+		const settings = JSON.parse(stripComments(raw)) as GlobalSettings & {
 			/** Retired with Project Groups (ADR-0011); dropped on the next save. */
 			defaultGroupingMode?: unknown;
 		};
@@ -116,8 +116,8 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
  * Uses load-merge-save to preserve existing fields not present in the update.
  * Creates the directory if it doesn't exist. Uses atomic write (tmp + rename).
  */
-export function saveRelaySettings(
-	settings: Omit<RelaySettings, "titleGeneration"> & {
+export function saveGlobalSettings(
+	settings: Omit<GlobalSettings, "titleGeneration"> & {
 		titleGeneration?: TitleGenerationSelection | null;
 	},
 	configDir?: string,
@@ -126,8 +126,8 @@ export function saveRelaySettings(
 	mkdirSync(dir, { recursive: true });
 
 	// Load-merge-save: preserve existing fields not present in the new settings
-	const existing = loadRelaySettings(configDir);
-	const merged: RelaySettings = { ...existing };
+	const existing = loadGlobalSettings(configDir);
+	const merged: GlobalSettings = { ...existing };
 
 	if (settings.defaultModel !== undefined) {
 		merged.defaultModel = settings.defaultModel;

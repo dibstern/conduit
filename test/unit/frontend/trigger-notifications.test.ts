@@ -9,8 +9,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type Approval,
+	type BrowserMessage,
 	PermissionId,
-	type RelayMessage,
 } from "../../../src/lib/shared-types.js";
 
 // Hoisted mocks (run before imports)
@@ -307,12 +307,12 @@ describe("triggerNotifications", () => {
 		await mod.triggerNotifications({
 			type: "delta",
 			text: "hello",
-		} as RelayMessage);
+		} as BrowserMessage);
 		await mod.triggerNotifications({
 			type: "tool_start",
 			id: "t1",
 			name: "bash",
-		} as RelayMessage);
+		} as BrowserMessage);
 
 		expect(notificationInstances).toHaveLength(0);
 		expect(playDoneSoundMock).not.toHaveBeenCalled();

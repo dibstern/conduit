@@ -32,8 +32,8 @@ import {
 import { DaemonOrchestration } from "../../src/lib/domain/daemon/Services/daemon-orchestration.js";
 import { OpenCodeInstancesTag } from "../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
-	addWithoutRelay,
-	startRelay,
+	addWithoutOpening,
+	openRegisteredProject,
 } from "../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	type ProjectParts,
@@ -259,7 +259,7 @@ export async function createDaemonProject(
 	try {
 		const { port, projectContext } = await daemon.runPromise(
 			Effect.gen(function* () {
-				yield* addWithoutRelay(
+				yield* addWithoutOpening(
 					{
 						slug,
 						title: slug,
@@ -275,7 +275,7 @@ export async function createDaemonProject(
 				const projects = yield* ProjectServices;
 				yield* Effect.all(
 					[
-						startRelay(slug),
+						openRegisteredProject(slug),
 						Effect.forEach(
 							(yield* ProviderAdapters).recoveryProjects.filter(
 								(recovering) => recovering !== slug,

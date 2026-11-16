@@ -2792,7 +2792,7 @@ for (const status of ["missing", "invalid", "empty-catalog"] as const) {
 			harnessOptions: {
 				opencodeRecording: "chat-simple",
 				capabilityModels: claudeModels,
-				relaySettings: {
+				globalSettings: {
 					defaultModel: "claude/sonnet",
 					harnessDefaults: {
 						claude: {
@@ -5241,7 +5241,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 			managedOpenCode: true,
 			capabilityModels: claudeModels,
 			restartProof: true,
-			relaySettings: {
+			globalSettings: {
 				harnessDefaults: {
 					opencode: {
 						providerId: "fake",

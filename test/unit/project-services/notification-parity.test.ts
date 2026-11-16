@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { RouteDecision } from "../../../src/lib/provider/event-pipeline.js";
 import { resolveNotifications } from "../../../src/lib/provider/notification-policy.js";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
+import type { BrowserMessage } from "../../../src/lib/shared-types.js";
 
 const routeSend = (sessionId: string): RouteDecision => ({
 	action: "send",
@@ -19,7 +19,7 @@ const routeDrop = (reason: string): RouteDecision => ({
 describe("notification parity contract", () => {
 	it("root done with viewers → push yes, cross-session no", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0, alertId: "turn-1:done" } as RelayMessage,
+			{ type: "done", code: 0, alertId: "turn-1:done" } as BrowserMessage,
 			routeSend("s1"),
 			false, // not subagent
 			"s1",
@@ -31,7 +31,7 @@ describe("notification parity contract", () => {
 
 	it("root done without viewers → push yes, cross-session yes with payload", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0, alertId: "turn-1:done" } as RelayMessage,
+			{ type: "done", code: 0, alertId: "turn-1:done" } as BrowserMessage,
 			routeDrop("no viewers for session s1"),
 			false,
 			"s1",
@@ -53,7 +53,7 @@ describe("notification parity contract", () => {
 				alertId: "turn-1:error",
 				code: 1,
 				error: "Something broke",
-			} as RelayMessage,
+			} as BrowserMessage,
 			routeDrop("no viewers"),
 			false,
 			"s1",
@@ -71,7 +71,7 @@ describe("notification parity contract", () => {
 
 	it("subagent done → completely suppressed (no push, no cross-session)", () => {
 		const result = resolveNotifications(
-			{ type: "done", code: 0, alertId: "turn-1:done" } as RelayMessage,
+			{ type: "done", code: 0, alertId: "turn-1:done" } as BrowserMessage,
 			routeDrop("no viewers"),
 			true, // is subagent
 			"sub-1",
@@ -88,7 +88,7 @@ describe("notification parity contract", () => {
 				alertId: "turn-1:error",
 				code: 1,
 				error: "subagent failed",
-			} as RelayMessage,
+			} as BrowserMessage,
 			routeDrop("no viewers"),
 			true, // is subagent
 			"sub-1",
@@ -106,7 +106,7 @@ describe("notification parity contract", () => {
 
 	it("non-notifiable delta → no push, no cross-session", () => {
 		const result = resolveNotifications(
-			{ type: "delta", text: "hello" } as RelayMessage,
+			{ type: "delta", text: "hello" } as BrowserMessage,
 			routeSend("s1"),
 			false,
 			"s1",
@@ -123,7 +123,7 @@ describe("notification parity contract", () => {
 				alertId: "turn-1:error",
 				code: 1,
 				error: "oops",
-			} as RelayMessage,
+			} as BrowserMessage,
 			routeSend("s1"),
 			false,
 			"s1",
@@ -140,7 +140,7 @@ describe("notification parity contract", () => {
 				id: "t1",
 				content: "output",
 				is_error: false,
-			} as RelayMessage,
+			} as BrowserMessage,
 			routeDrop("no viewers"),
 			false,
 			"s1",

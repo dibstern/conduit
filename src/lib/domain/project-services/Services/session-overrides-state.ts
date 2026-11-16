@@ -21,8 +21,8 @@ import {
 	Ref,
 } from "effect";
 import {
+	type GlobalSettings,
 	parseDefaultModel,
-	type RelaySettings,
 } from "../../../daemon/global-settings.js";
 import { guardCurrentWrite } from "../../../persistence/effect/commit-and-signal.js";
 import type { SessionPermissionMode } from "../../../shared-types.js";
@@ -69,7 +69,7 @@ export class OverridesStateTag extends Context.Service<
 >()("OverridesState") {}
 
 export const makeOverridesStateLive = (
-	settings: RelaySettings = {},
+	settings: GlobalSettings = {},
 ): Layer.Layer<OverridesStateTag> =>
 	Layer.effect(
 		OverridesStateTag,

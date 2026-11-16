@@ -9,7 +9,7 @@ import {
 	type ProjectSettingsEnvelope,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { saveGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import { publishProjectSetting } from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
@@ -43,7 +43,7 @@ const makeLayer = () => {
 	})) as typeof api.provider.list;
 	api.config.update = vi.fn(async () => undefined) as typeof api.config.update;
 	const configDir = mkdtempSync(join(tmpdir(), "conduit-project-settings-"));
-	saveRelaySettings(
+	saveGlobalSettings(
 		{
 			defaultVariants: { "openai/gpt-4": "fast" },
 			hiddenModels: ["openai/gpt-3"],

@@ -7,7 +7,7 @@ import type { AccountId } from "../contracts/provider-instance.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../contracts/session-workspace.js";
 import { DeleteNeedsConfirm } from "../contracts/ws-rpc.js";
-import { saveRelaySettings } from "../daemon/global-settings.js";
+import { saveGlobalSettings } from "../daemon/global-settings.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	DaemonEvent,
@@ -52,7 +52,7 @@ import {
 } from "../provider/turn-settings.js";
 import { CurrentEventDelivery } from "../server/event-delivery.js";
 import type { SessionPermissionMode } from "../shared-types.js";
-import { RelaySettingsSaveError } from "./model.js";
+import { GlobalSettingsSaveError } from "./model.js";
 
 interface ViewSessionPayload {
 	readonly sessionId: string;
@@ -309,7 +309,7 @@ export const createSessionForClient = <E = never>({
 								const { model: pickModel, effort } = pick;
 								yield* Effect.try({
 									try: () =>
-										saveRelaySettings(
+										saveGlobalSettings(
 											{
 												defaultVariants: {
 													[`${pickModel.providerId}/${pickModel.modelId}`]:
@@ -318,7 +318,7 @@ export const createSessionForClient = <E = never>({
 											},
 											config.configDir,
 										),
-									catch: (cause) => new RelaySettingsSaveError({ cause }),
+									catch: (cause) => new GlobalSettingsSaveError({ cause }),
 								});
 								const projectSettings =
 									yield* Effect.serviceOption(ProjectSettingsTag);

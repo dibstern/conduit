@@ -11,7 +11,7 @@ import type { OpenCodeInstanceEvent } from "../../daemon/Services/opencode-insta
 import { OpenCodeProjectStreams } from "../../daemon/Services/opencode-project-streams.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 
-export interface RelayOpenCodeStream extends SSEStreamPort {
+export interface ProjectOpenCodeStream extends SSEStreamPort {
 	/** Register before dispatch; earlier directories remain live for in-flight turns. */
 	includeDirectory(directory: string): Effect.Effect<void>;
 	/**
@@ -28,7 +28,7 @@ export interface RelayOpenCodeStream extends SSEStreamPort {
 
 export class SSEStreamTag extends Context.Service<
 	SSEStreamTag,
-	RelayOpenCodeStream
+	ProjectOpenCodeStream
 >()("SSEStream") {}
 
 const makeChannel = (log: Logger) => {
@@ -242,6 +242,6 @@ export const SSEStreamLive: Layer.Layer<
 					wirer = (stream, instanceId) =>
 						register(stream, instanceId).pipe(Effect.provide(context));
 				}),
-		} satisfies RelayOpenCodeStream;
+		} satisfies ProjectOpenCodeStream;
 	}),
 );

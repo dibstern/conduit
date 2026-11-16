@@ -15,7 +15,7 @@ import {
 	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 } from "../../daemon/config-persistence.js";
-import { saveRelaySettings } from "../../daemon/global-settings.js";
+import { saveGlobalSettings } from "../../daemon/global-settings.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../../domain/daemon/Services/config-persistence-service.js";
 import {
@@ -44,10 +44,10 @@ import * as Failure from "../../effect/failure-classification.js";
 import {
 	getClaudeSettingsOverrides,
 	resolveClaudeSettingsForInstance,
-	setClaudeSettingsForRelay,
+	setClaudeSettingsGlobally,
 } from "../../handlers/claude-settings.js";
-import { setDefaultPermissionModeForRelay } from "../../handlers/permissions.js";
-import { setHiddenEntriesForRelay } from "../../handlers/visibility.js";
+import { setDefaultPermissionModeGlobally } from "../../handlers/permissions.js";
+import { setHiddenEntriesGlobally } from "../../handlers/visibility.js";
 import { setLogLevel } from "../../logger.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
@@ -244,7 +244,7 @@ export const settingsHandlers = {
 			return { enabled: false, reason: "Cursor account is not configured" };
 		}),
 	SetDefaultPermissionMode: (request) =>
-		setDefaultPermissionModeForRelay({
+		setDefaultPermissionModeGlobally({
 			clientId: request.originId ?? "rpc",
 			mode: request.mode,
 		}).pipe(
@@ -265,7 +265,7 @@ export const settingsHandlers = {
 			const config = yield* ConfigTag;
 			yield* Effect.try({
 				try: () =>
-					saveRelaySettings({ defaultSessionMode: mode }, config.configDir),
+					saveGlobalSettings({ defaultSessionMode: mode }, config.configDir),
 				catch: (cause) =>
 					new WsRpcError({
 						message: `SetDefaultSessionMode failed: ${String(cause)}`,
@@ -275,7 +275,7 @@ export const settingsHandlers = {
 			return { mode };
 		}),
 	SetHiddenEntries: (request) =>
-		setHiddenEntriesForRelay({
+		setHiddenEntriesGlobally({
 			clientId: request.originId ?? "rpc",
 			hiddenModels: request.hiddenModels,
 			hiddenAgents: request.hiddenAgents,
@@ -302,7 +302,7 @@ export const settingsHandlers = {
 			};
 		}),
 	SetClaudeSettings: (request) =>
-		setClaudeSettingsForRelay({
+		setClaudeSettingsGlobally({
 			clientId: request.originId ?? "rpc",
 			overrides: request.overrides,
 		}).pipe(

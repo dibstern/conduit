@@ -83,7 +83,7 @@ import {
 	ProjectManagementServiceTag,
 } from "../../src/lib/domain/project-services/Services/project-management-service.js";
 import { ProjectSettingsLive } from "../../src/lib/domain/project-services/Services/project-settings.js";
-import { RelayStatusSnapshotLive } from "../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotLive } from "../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
@@ -176,7 +176,7 @@ import {
 } from "../../src/lib/provider/provider-registry.js";
 import { RpcSubscriptionScopeLive } from "../../src/lib/server/ws-rpc.js";
 import type { PtyManager } from "../../src/lib/terminal/pty-manager.js";
-import type { ProjectRelayConfig } from "../../src/lib/types.js";
+import type { ProjectServicesConfig } from "../../src/lib/types.js";
 import { withDispatchEffect } from "./orchestration-engine-test-double.js";
 import { partialFake } from "./partial-fake.js";
 
@@ -637,10 +637,10 @@ export function makeMockSessionTitleService(
 	};
 }
 
-/** Create a mock ProjectRelayConfig for Effect tests. */
+/** Create a mock ProjectServicesConfig for Effect tests. */
 export function makeMockConfig(
-	overrides?: Partial<ProjectRelayConfig>,
-): ProjectRelayConfig {
+	overrides?: Partial<ProjectServicesConfig>,
+): ProjectServicesConfig {
 	return {
 		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
@@ -648,7 +648,7 @@ export function makeMockConfig(
 		...overrides,
 		configDir:
 			overrides?.configDir ?? mkdtempSync(join(mockConfigRoot, "config-")),
-	} as unknown as ProjectRelayConfig;
+	} as unknown as ProjectServicesConfig;
 }
 
 /** Real directory rules over explicit test accounts, with no disk or login reads. */
@@ -809,7 +809,7 @@ export interface TestHandlerLayerOptions {
 	sessionMgr?: SessionManagerShape;
 	sessionManagerService?: SessionManagerService;
 	ptyManager?: PtyManager;
-	config?: ProjectRelayConfig;
+	config?: ProjectServicesConfig;
 	log?: Logger;
 	statusPoller?: StatusPollerShape;
 	pollerManager?: PollerManagerShape;
@@ -1047,7 +1047,7 @@ export function makeTestHandlerLayer(
 						DaemonEventBusLive,
 						configLayer,
 						accountDirectoryLayer,
-						RelayStatusSnapshotLive,
+						ProjectStatusSnapshotLive,
 						openCodeInstancesLayer,
 						overridesStateLayer,
 						sessionManagerOrchestrationLayer,

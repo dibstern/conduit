@@ -66,7 +66,7 @@ export class WebSocketUpgradeError extends Data.TaggedError(
 		| "invalid_path"
 		| "auth_failed"
 		| "foreign_origin"
-		| "relay_unavailable"
+		| "project_open_failed"
 		| "daemon_shutting_down"
 		| "server_unavailable";
 	readonly slug?: string;
@@ -80,8 +80,8 @@ export class WebSocketUpgradeError extends Data.TaggedError(
 	}
 }
 
-export interface WebSocketRelayRouter {
-	readonly ensureRelayStarted: (
+export interface WebSocketProjectRouter {
+	readonly ensureProjectOpen: (
 		slug: string,
 	) => Effect.Effect<void, WebSocketUpgradeError>;
 	readonly touchLastUsed: (
@@ -89,10 +89,10 @@ export interface WebSocketRelayRouter {
 	) => Effect.Effect<void, WebSocketUpgradeError>;
 }
 
-export class WebSocketRelayRouterTag extends Context.Service<
-	WebSocketRelayRouterTag,
-	WebSocketRelayRouter
->()("WebSocketRelayRouter") {}
+export class WebSocketProjectRouterTag extends Context.Service<
+	WebSocketProjectRouterTag,
+	WebSocketProjectRouter
+>()("WebSocketProjectRouter") {}
 
 /**
  * Each project's RPC context, built by the daemon from the project's own
@@ -117,7 +117,7 @@ export class ProjectRpcContextsTag extends Context.Service<
 export const ProjectRpcContextsLive = Layer.effect(
 	ProjectRpcContextsTag,
 	Effect.gen(function* () {
-		const relayRouter = yield* WebSocketRelayRouterTag;
+		const projectRouter = yield* WebSocketProjectRouterTag;
 		const projects = yield* ProjectServices;
 		const { registry } = yield* ProviderAdapters;
 		const { drafts } = yield* DaemonOrchestration;
@@ -173,8 +173,8 @@ export const ProjectRpcContextsLive = Layer.effect(
 		return (slug) =>
 			Effect.gen(function* () {
 				// The relay still wires the project's live provider events until S6.
-				yield* relayRouter.ensureRelayStarted(slug);
-				yield* relayRouter.touchLastUsed(slug);
+				yield* projectRouter.ensureProjectOpen(slug);
+				yield* projectRouter.touchLastUsed(slug);
 				return Context.merge(daemon, yield* projects.forProject(slug));
 			}).pipe(
 				Effect.catch((cause) => Effect.fail(unavailable(slug, cause))),
@@ -183,22 +183,22 @@ export const ProjectRpcContextsLive = Layer.effect(
 	}),
 );
 
-const toRelayUnavailable = (slug: string, cause: unknown) =>
+const toProjectUnavailable = (slug: string, cause: unknown) =>
 	new WebSocketUpgradeError({
-		reason: "relay_unavailable",
+		reason: "project_open_failed",
 		slug,
 		cause,
 	});
 
-export const WebSocketRelayRouterLive: Layer.Layer<
-	WebSocketRelayRouterTag,
+export const WebSocketProjectRouterLive: Layer.Layer<
+	WebSocketProjectRouterTag,
 	never,
 	| ProjectServices
 	| ProjectRegistryTag
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
 > = Layer.effect(
-	WebSocketRelayRouterTag,
+	WebSocketProjectRouterTag,
 	Effect.gen(function* () {
 		const projects = yield* ProjectServices;
 		const projectRegistry = yield* ProjectRegistryTag;
@@ -218,27 +218,29 @@ export const WebSocketRelayRouterLive: Layer.Layer<
 				Effect.provideService(ConfigPersistenceTag, configPersistence),
 			);
 
-		const failRelayUnavailable = (slug: string, cause: unknown) =>
+		const failProjectUnavailable = (slug: string, cause: unknown) =>
 			withProjectRegistry(markError(slug, formatCause(cause))).pipe(
 				Effect.catch(() => Effect.void),
-				Effect.andThen(Effect.fail(toRelayUnavailable(slug, cause))),
+				Effect.andThen(Effect.fail(toProjectUnavailable(slug, cause))),
 			);
 
-		const loadRelay = (slug: string) =>
+		const loadProject = (slug: string) =>
 			withProjectRegistry(getProject(slug)).pipe(
 				Effect.flatMap(() => projects.open(slug)),
 				Effect.tap(() => withProjectRegistry(markReady(slug))),
-				Effect.catch((cause) => failRelayUnavailable(slug, cause)),
-				Effect.catchDefect((cause) => failRelayUnavailable(slug, cause)),
+				Effect.catch((cause) => failProjectUnavailable(slug, cause)),
+				Effect.catchDefect((cause) => failProjectUnavailable(slug, cause)),
 			);
 
 		return {
-			ensureRelayStarted: (slug) => loadRelay(slug).pipe(Effect.asVoid),
+			ensureProjectOpen: (slug) => loadProject(slug).pipe(Effect.asVoid),
 			touchLastUsed: (slug) =>
 				withProjectRegistry(touchProjectLastUsed(slug)).pipe(
-					Effect.catch((cause) => Effect.fail(toRelayUnavailable(slug, cause))),
+					Effect.catch((cause) =>
+						Effect.fail(toProjectUnavailable(slug, cause)),
+					),
 				),
-		} satisfies WebSocketRelayRouter;
+		} satisfies WebSocketProjectRouter;
 	}),
 );
 

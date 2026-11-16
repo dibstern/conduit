@@ -33,7 +33,7 @@ import {
 	startOnboardingServer,
 } from "../../../daemon/daemon-lifecycle.js";
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
-import { loadRelaySettings } from "../../../daemon/global-settings.js";
+import { loadGlobalSettings } from "../../../daemon/global-settings.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV, resolveTraceConfig } from "../../../env.js";
 import { startContentionMetrics } from "../../../persistence/contention-metrics.js";
@@ -88,7 +88,7 @@ import {
 import {
 	ProjectRpcContextsLive,
 	ProjectRpcContextsTag,
-	WebSocketRelayRouterLive,
+	WebSocketProjectRouterLive,
 	WebSocketRoutingLive,
 } from "../../server/Layers/ws-routing-layer.js";
 import {
@@ -674,7 +674,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provide(EnsureCertsLive),
 	);
 	const services = Layer.mergeAll(
-		Layer.suspend(() => makeOverridesStateLive(loadRelaySettings(configDir))),
+		Layer.suspend(() => makeOverridesStateLive(loadGlobalSettings(configDir))),
 		CategorySetLive(configDir),
 		AuthManagerFromConfigLive,
 		tlsCertWithDeps,
@@ -1049,9 +1049,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withDaemonWiring),
 	);
 
-	const withWsRelayRouter = ProjectRpcContextsLive.pipe(
+	const withWsProjectRouter = ProjectRpcContextsLive.pipe(
 		Layer.provideMerge(
-			Layer.merge(WebSocketRelayRouterLive, DaemonWsRpcHandlersLive),
+			Layer.merge(WebSocketProjectRouterLive, DaemonWsRpcHandlersLive),
 		),
 		Layer.provideMerge(withBackground),
 	);
@@ -1085,7 +1085,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		SessionPrefetchLive,
 		ServerBuildUpdateLive,
 		makePreviewGateLive(configDir),
-	).pipe(Layer.provideMerge(withWsRelayRouter));
+	).pipe(Layer.provideMerge(withWsProjectRouter));
 
 	return scopedFibers;
 };

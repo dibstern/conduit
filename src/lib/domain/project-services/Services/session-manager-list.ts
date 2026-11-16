@@ -15,8 +15,8 @@ import {
 	type SessionRowsScope,
 } from "../../daemon/Services/session-rows.js";
 import {
-	type RelayStatusSnapshotService,
-	RelayStatusSnapshotTag,
+	type ProjectStatusSnapshotService,
+	ProjectStatusSnapshotTag,
 } from "./project-status-snapshot.js";
 import { SessionManagerError } from "./session-manager-error.js";
 import type {
@@ -40,8 +40,8 @@ const sessionRowsParentMap = (
 	return parentMap;
 };
 
-export const updateRelaySessionCountSnapshot = (sessionCount: number) =>
-	RelayStatusSnapshotTag.pipe(
+export const updateProjectSessionCountSnapshot = (sessionCount: number) =>
+	ProjectStatusSnapshotTag.pipe(
 		Effect.flatMap((snapshot) => snapshot.setSessionCount(sessionCount)),
 	);
 
@@ -58,7 +58,7 @@ export const incrementLastKnownSessionCount = () =>
 				},
 			];
 		});
-		yield* updateRelaySessionCountSnapshot(sessionCount);
+		yield* updateProjectSessionCountSnapshot(sessionCount);
 		return sessionCount;
 	});
 
@@ -95,7 +95,7 @@ export const listSessions = (
 			),
 			lastKnownSessionCount: lineage.count,
 		}));
-		yield* updateRelaySessionCountSnapshot(lineage.count);
+		yield* updateProjectSessionCountSnapshot(lineage.count);
 		return sessions;
 	}).pipe(
 		Effect.annotateLogs({ operation: "listSessions", projectSlug }),
@@ -135,7 +135,7 @@ export const makeSessionListOperations = ({
 	sql: SqlClient.SqlClient;
 	accounts: Context.Service.Shape<typeof AccountDirectory>;
 	activity: SessionActivity;
-	snapshot: RelayStatusSnapshotService;
+	snapshot: ProjectStatusSnapshotService;
 	projectFolders: readonly [string, ...string[]];
 	projectSlug: string;
 }) => {
@@ -154,7 +154,7 @@ export const makeSessionListOperations = ({
 			);
 			return yield* withEffectRead.pipe(
 				Effect.provideService(SessionActivityTag, activity),
-				Effect.provideService(RelayStatusSnapshotTag, snapshot),
+				Effect.provideService(ProjectStatusSnapshotTag, snapshot),
 			);
 		});
 	const refreshSessionLineage: SessionManagerService["refreshSessionLineage"] =

@@ -8,7 +8,7 @@ import type {
 import { PendingInteractionCancelled } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { MissingPendingInteractions } from "../../../src/lib/provider/errors.js";
-import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../src/lib/provider/project-event-sink.js";
 
 function makeEvent<T extends ProviderRuntimeEventType>(
 	type: T,
@@ -28,10 +28,10 @@ function makeEvent<T extends ProviderRuntimeEventType>(
 	};
 }
 
-describe("createRelayEventSink — processing timeouts", () => {
+describe("createProjectEventSink — processing timeouts", () => {
 	it("clears timeout on turn.completed", async () => {
 		const clearTimeout = vi.fn();
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			clearTimeout,
 		});
@@ -50,7 +50,7 @@ describe("createRelayEventSink — processing timeouts", () => {
 
 	it("clears timeout on turn.error", async () => {
 		const clearTimeout = vi.fn();
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			clearTimeout,
 		});
@@ -71,7 +71,7 @@ describe("createRelayEventSink — processing timeouts", () => {
 	it("keeps the turn alive while the SDK retries", async () => {
 		const clearTimeout = vi.fn();
 		const resetTimeout = vi.fn();
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			clearTimeout,
 			resetTimeout,
@@ -99,7 +99,7 @@ describe("createRelayEventSink — processing timeouts", () => {
 	it("noteActivity resets the timeout mid-turn and clears it at turn end", () => {
 		const resetTimeout = vi.fn();
 		const clearTimeout = vi.fn();
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			clearTimeout,
 			resetTimeout,
@@ -123,7 +123,7 @@ describe("createRelayEventSink — processing timeouts", () => {
 
 	it("does not clear timeout on idle/busy session.status", async () => {
 		const clearTimeout = vi.fn();
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			clearTimeout,
 		});
@@ -141,7 +141,7 @@ describe("createRelayEventSink — processing timeouts", () => {
 	});
 });
 
-describe("createRelayEventSink — persistence", () => {
+describe("createProjectEventSink — persistence", () => {
 	it("delegates provider output to ProviderRuntimeIngestion when provided", async () => {
 		const persistEvent = vi.fn(() => Effect.void);
 		const event = makeEvent("text.delta", {
@@ -152,7 +152,7 @@ describe("createRelayEventSink — persistence", () => {
 		const ingestion = {
 			ingest: vi.fn(() => Effect.succeed(1)),
 		};
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			persist: { persistEvent },
 			ingestion,
@@ -175,7 +175,7 @@ describe("createRelayEventSink — persistence", () => {
 				message: "ingestion failed",
 			}),
 		});
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			ingestion: {
 				ingest: vi.fn(() => Effect.fail(ingestionError)),
@@ -193,7 +193,7 @@ describe("createRelayEventSink — persistence", () => {
 	it("runs Effect persistence when persist deps are provided", async () => {
 		const persistEvent = vi.fn(() => Effect.void);
 
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			persist: { persistEvent },
 		});
@@ -219,7 +219,7 @@ describe("createRelayEventSink — persistence", () => {
 
 	it("runs Effect-native persistence programs", async () => {
 		const persisted: string[] = [];
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			persist: {
 				persistEvent: (event) =>
@@ -245,7 +245,7 @@ describe("createRelayEventSink — persistence", () => {
 	it("uses batch persistence for runtime events that map to multiple domain events", async () => {
 		const persistEvent = vi.fn(() => Effect.void);
 		const persistEvents = vi.fn(() => Effect.void);
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			persist: { persistEvent, persistEvents },
 		});
@@ -269,9 +269,9 @@ describe("createRelayEventSink — persistence", () => {
 	});
 });
 
-describe("createRelayEventSink — permission/question", () => {
+describe("createProjectEventSink — permission/question", () => {
 	it("rejects permission and question requests with a typed error when the pending interaction port is missing", async () => {
-		const sink = createRelayEventSink({ sessionId: "ses-1" });
+		const sink = createProjectEventSink({ sessionId: "ses-1" });
 
 		const permissionResult = await Effect.runPromise(
 			Effect.result(
@@ -364,7 +364,7 @@ describe("createRelayEventSink — permission/question", () => {
 				}),
 			),
 		};
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			pendingInteractions,
 		});
@@ -464,7 +464,7 @@ describe("createRelayEventSink — permission/question", () => {
 			resolveQuestionRequest: (_id: string, reply: Record<string, unknown>) =>
 				Deferred.succeed(deferred, reply),
 		};
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			providerId: "codex",
 			pendingInteractions,
@@ -516,7 +516,7 @@ describe("createRelayEventSink — permission/question", () => {
 			),
 			resolveQuestionRequest: vi.fn(() => Effect.succeed(true)),
 		};
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			clearTimeout,
 			resetTimeout,
@@ -548,7 +548,7 @@ describe("createRelayEventSink — permission/question", () => {
 	});
 });
 
-describe("createRelayEventSink — permission delegation", () => {
+describe("createProjectEventSink — permission delegation", () => {
 	// Conduit passes the real permissionMode to the SDK, which resolves the
 	// escalating modes (acceptEdits / bypassPermissions / auto / dontAsk) before
 	// canUseTool is reached. So anything arriving here is a genuine ask, whatever
@@ -596,7 +596,7 @@ describe("createRelayEventSink — permission delegation", () => {
 		{ toolName: "mcp__foo__bar" },
 	])("surfaces the ask for tool=$toolName", async ({ toolName }) => {
 		const { beginPermissionRequest, port } = makePendingInteractions();
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			pendingInteractions: port,
 		});
@@ -613,14 +613,14 @@ describe("createRelayEventSink — permission delegation", () => {
 	// SDK's own auto-allows never reach here, so none is fabricated.
 	const recorded = async (
 		ask: (
-			sink: ReturnType<typeof createRelayEventSink>,
+			sink: ReturnType<typeof createProjectEventSink>,
 		) => Effect.Effect<unknown, unknown>,
-		port: Parameters<typeof createRelayEventSink>[0]["pendingInteractions"],
+		port: Parameters<typeof createProjectEventSink>[0]["pendingInteractions"],
 	) => {
 		const persistEvents = vi.fn(
 			(_events: readonly CanonicalEvent[]) => Effect.void,
 		);
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			providerId: "claude",
 			persist: { persistEvent: () => Effect.void, persistEvents },

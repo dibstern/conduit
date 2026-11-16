@@ -12,7 +12,7 @@ import {
 	handleSSEEventEffect,
 	type SSEWiringDeps,
 } from "../../../src/lib/provider/opencode/sse-wiring.js";
-import type { RelayMessage } from "../../../src/lib/types.js";
+import type { BrowserMessage } from "../../../src/lib/types.js";
 import {
 	createMockSSEWiringDeps,
 	makeMockConfig,
@@ -84,7 +84,7 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 				}),
 			),
 		);
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "delta",
 			sessionId: "s1",
 			text: "Hello",
@@ -176,7 +176,7 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 				} as const),
 			),
 		);
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "delta",
 			sessionId: "s1",
 			text: "Hello",
@@ -245,7 +245,7 @@ describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
 	});
 
 	it("continues relay handling when runtime ingress is absent", async () => {
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "delta",
 			sessionId: "s1",
 			text: "Hello",

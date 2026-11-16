@@ -13,7 +13,7 @@ import {
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { publishProviderRelayMessage } from "../../../src/lib/provider/turn-done-publisher.js";
+import { publishTurnDone } from "../../../src/lib/provider/turn-done-publisher.js";
 import { turnEndedAlert } from "../../../src/lib/provider/turn-ended-alert.js";
 
 const idleActivity = {
@@ -57,7 +57,7 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 					),
 				);
 				if (!alert) throw new Error("expected turn-ended alert");
-				yield* publishProviderRelayMessage(alert, deps).pipe(
+				yield* publishTurnDone(alert, deps).pipe(
 					Effect.provideService(AlertLedgerTag, ledger),
 				);
 			}

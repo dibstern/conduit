@@ -17,8 +17,8 @@ import {
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
+	loadGlobalSettings,
+	saveGlobalSettings,
 } from "../../../src/lib/daemon/global-settings.js";
 import { syncGlobalSetting } from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import { discoverCapabilitiesEffect } from "../../../src/lib/provider/claude/claude-runtime-discovery.js";
@@ -82,7 +82,7 @@ describe("title generation settings through browser RPC", () => {
 		() =>
 			withSettings((root) =>
 				Effect.gen(function* () {
-					saveRelaySettings({ hiddenModels: ["claude/opus"] }, root);
+					saveGlobalSettings({ hiddenModels: ["claude/opus"] }, root);
 					const other = yield* makeProject(root, "other-project");
 					const origin = yield* makeProject(root, "origin-project", (tag) =>
 						syncGlobalSetting(tag).pipe(Effect.provide(other.context)),
@@ -142,7 +142,7 @@ describe("title generation settings through browser RPC", () => {
 						selection,
 						status: "unverified",
 					});
-					expect(loadRelaySettings(root)).toMatchObject({
+					expect(loadGlobalSettings(root)).toMatchObject({
 						titleGeneration: selection,
 						hiddenModels: ["claude/opus"],
 					});
@@ -197,7 +197,7 @@ describe("title generation settings through browser RPC", () => {
 						.SetTitleGeneration({ projectSlug: "project", selection: invalid })
 						.pipe(Effect.result);
 					expect(rejected._tag).toBe("Failure");
-					expect(loadRelaySettings(root).titleGeneration).toEqual(selection);
+					expect(loadGlobalSettings(root).titleGeneration).toEqual(selection);
 				}).pipe(Effect.scoped, Effect.timeout("10 seconds")),
 			),
 		);

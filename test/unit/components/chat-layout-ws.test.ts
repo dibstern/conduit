@@ -133,7 +133,7 @@ vi.mock(
 	() => ({
 		getIsConnected: () => true,
 		connectionState: { status: "connected", statusText: "" },
-		viewRelayStatus: vi.fn(),
+		viewProjectStatus: vi.fn(),
 	}),
 );
 

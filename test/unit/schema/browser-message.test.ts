@@ -2,20 +2,20 @@ import { Result as Either, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { ProjectSettingSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
-	RELAY_MESSAGE_TYPES,
-	RelayMessageSchema,
+	BROWSER_MESSAGE_TYPES,
+	BrowserMessageSchema,
 } from "../../../src/lib/shared-types.js";
 
-describe("RelayMessage Schema", () => {
+describe("BrowserMessage Schema", () => {
 	it("decodes delta message", () => {
 		const raw = { type: "delta", sessionId: "s1", text: "hello" };
-		const result = Schema.decodeUnknownResult(RelayMessageSchema)(raw);
+		const result = Schema.decodeUnknownResult(BrowserMessageSchema)(raw);
 		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("decodes thinking_start message", () => {
 		const raw = { type: "thinking_start", sessionId: "s1" };
-		const result = Schema.decodeUnknownResult(RelayMessageSchema)(raw);
+		const result = Schema.decodeUnknownResult(BrowserMessageSchema)(raw);
 		expect(Either.isSuccess(result)).toBe(true);
 	});
 
@@ -26,19 +26,19 @@ describe("RelayMessage Schema", () => {
 			code: 1,
 			error: "Rate limited",
 		};
-		const result = Schema.decodeUnknownResult(RelayMessageSchema)(raw);
+		const result = Schema.decodeUnknownResult(BrowserMessageSchema)(raw);
 		expect(Either.isSuccess(result)).toBe(true);
 	});
 
 	it("rejects unknown message type", () => {
 		const raw = { type: "not_a_real_type", sessionId: "s1" };
-		const result = Schema.decodeUnknownResult(RelayMessageSchema)(raw);
+		const result = Schema.decodeUnknownResult(BrowserMessageSchema)(raw);
 		expect(Either.isFailure(result)).toBe(true);
 	});
 
 	it("rejects message missing required fields", () => {
 		const raw = { type: "delta" }; // missing sessionId, text
-		const result = Schema.decodeUnknownResult(RelayMessageSchema)(raw);
+		const result = Schema.decodeUnknownResult(BrowserMessageSchema)(raw);
 		expect(Either.isFailure(result)).toBe(true);
 	});
 
@@ -50,7 +50,7 @@ describe("RelayMessage Schema", () => {
 			"default_permission_mode_info",
 			"permission_mode_info",
 		])
-			expect(RELAY_MESSAGE_TYPES).not.toContain(type);
+			expect(BROWSER_MESSAGE_TYPES).not.toContain(type);
 	});
 
 	it("rejects a non-JSON Claude settings fact", () => {

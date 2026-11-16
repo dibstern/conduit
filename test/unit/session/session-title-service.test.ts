@@ -12,7 +12,7 @@ import {
 	type OpenCodeAccount,
 } from "../../../src/lib/contracts/account.js";
 import { isPlaceholderTitle } from "../../../src/lib/contracts/session-title.js";
-import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { saveGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ProjectSettingsLive,
@@ -385,7 +385,7 @@ describe("SessionTitleService", () => {
 			});
 			return Effect.gen(function* () {
 				yield* Effect.sync(() =>
-					saveRelaySettings(
+					saveGlobalSettings(
 						{
 							titleGeneration: {
 								account: { _tag: "Id", id: "claude-work" },
@@ -487,7 +487,7 @@ describe("SessionTitleService", () => {
 				configDir,
 				clientForAccount: route,
 			});
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					titleGeneration: {
 						account: { _tag: "Id", id: account.id },
@@ -561,7 +561,7 @@ describe("SessionTitleService", () => {
 					"../../fixtures/cursor-sdk-traces/title-generation.jsonl",
 				),
 			);
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					titleGeneration: {
 						account: { _tag: "Id", id: "cursor-titles" },
@@ -668,7 +668,7 @@ describe("SessionTitleService", () => {
 				});
 
 				yield* Effect.sync(() =>
-					saveRelaySettings(
+					saveGlobalSettings(
 						{
 							titleGeneration: {
 								account: { _tag: "Id", id: "claude-work" },
@@ -694,7 +694,7 @@ describe("SessionTitleService", () => {
 				});
 
 				yield* Effect.sync(() =>
-					saveRelaySettings({ titleGeneration: null }, configDir),
+					saveGlobalSettings({ titleGeneration: null }, configDir),
 				);
 				yield* seedSessionRow("after-reset");
 				yield* service.titleFromMessage({

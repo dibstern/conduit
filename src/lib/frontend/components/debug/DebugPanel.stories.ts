@@ -32,7 +32,7 @@ const meta = {
 		connectionState.status = "connected";
 		connectionState.statusText = "Connected to the Conduit relay";
 		connectionState.attempts = 1;
-		connectionState.relayStatus = "ready";
+		connectionState.projectStatus = "ready";
 		return () => {
 			Date.now = originalDateNow;
 			clearDebugLog();

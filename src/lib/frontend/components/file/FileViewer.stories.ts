@@ -15,7 +15,7 @@ import {
 } from "../../stores/ws-listeners.js";
 import { mockFileContent } from "../../stories/mocks.js";
 import { connectedSocket } from "../../stories/sockets.js";
-import { viewRelayStatus } from "../../transport/connection-status.svelte.js";
+import { viewProjectStatus } from "../../transport/connection-status.svelte.js";
 import { loadHighlighter } from "../../utils/load-highlighter.js";
 import FileViewerHost from "./__fixtures__/FileViewerHost.svelte";
 
@@ -68,13 +68,13 @@ export const Loading: Story = {
 		const restoreSocket = connectedSocket();
 		routerState.path = "/";
 		routerState.search = "?project=storybook";
-		viewRelayStatus("storybook");
+		viewProjectStatus("storybook");
 		clearFileTreeState();
 		fileTreeState.scope = "storybook";
 		openFileViewer("src/lib/project.ts");
 		return () => {
 			restoreSocket();
-			viewRelayStatus(null);
+			viewProjectStatus(null);
 			routerState.search = "";
 			globalThis.fetch = realFetch;
 			closeFileViewer();

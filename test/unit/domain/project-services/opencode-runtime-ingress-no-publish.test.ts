@@ -24,7 +24,7 @@ import {
 } from "../../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
 import {
 	makeProviderRuntimeIngestionLive,
-	type ProviderRuntimeRelayPublisher,
+	type ProviderRuntimeBrowserPublisher,
 } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	type SessionEventBus,
@@ -41,7 +41,7 @@ function makeLogger(): OpenCodeRuntimeIngressLog {
 
 function makeTestRuntime(
 	dbPath: string,
-	relayPublisher: ProviderRuntimeRelayPublisher,
+	browserPublisher: ProviderRuntimeBrowserPublisher,
 	sessionEventBus: SessionEventBus,
 ) {
 	const persistenceLayer = makePersistenceEffectLayer(dbPath, "test-project");
@@ -50,7 +50,7 @@ function makeTestRuntime(
 	return ManagedRuntime.make(
 		Layer.mergeAll(
 			persistenceLayer,
-			makeProviderRuntimeIngestionLive({ relayPublisher }).pipe(
+			makeProviderRuntimeIngestionLive({ browserPublisher }).pipe(
 				Layer.provide(persistenceLayer),
 				Layer.provideMerge(sessionEventBusLayer),
 			),
@@ -62,16 +62,16 @@ describe("OpenCode runtime ingress does not publish to relay/browser", () => {
 	let dir: string;
 	let runtime: ReturnType<typeof makeTestRuntime> | undefined;
 	let publishToBus: Mock<SessionEventBus["publish"]>;
-	let publishToRelay: Mock<ProviderRuntimeRelayPublisher["publish"]>;
+	let publishToBrowser: Mock<ProviderRuntimeBrowserPublisher["publish"]>;
 	let hook: EffectOpenCodeRuntimeIngress;
 
 	beforeEach(async () => {
 		dir = mkdtempSync(join(tmpdir(), "conduit-ingress-nopublish-"));
 		publishToBus = vi.fn(() => Effect.void);
-		publishToRelay = vi.fn(() => Effect.void);
+		publishToBrowser = vi.fn(() => Effect.void);
 		const rt = makeTestRuntime(
 			join(dir, "events.db"),
-			{ publish: publishToRelay },
+			{ publish: publishToBrowser },
 			{
 				publish: publishToBus,
 				publishAdvance: () => Effect.void,
@@ -121,7 +121,7 @@ describe("OpenCode runtime ingress does not publish to relay/browser", () => {
 
 		// The legacy translator is the only path allowed to deliver OpenCode
 		// events to the browser. If the ingress publishes to the relay, deltas double.
-		expect(publishToRelay).not.toHaveBeenCalled();
+		expect(publishToBrowser).not.toHaveBeenCalled();
 	});
 
 	it("signals committed events to SessionEventBus without publishing to the browser", async () => {
@@ -147,6 +147,6 @@ describe("OpenCode runtime ingress does not publish to relay/browser", () => {
 			]),
 			new Set(),
 		);
-		expect(publishToRelay).not.toHaveBeenCalled();
+		expect(publishToBrowser).not.toHaveBeenCalled();
 	});
 });

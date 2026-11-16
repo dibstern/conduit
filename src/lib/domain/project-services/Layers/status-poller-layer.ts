@@ -29,7 +29,7 @@ import {
 	type SessionStatusValue,
 } from "../../../persistence/events.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
-import { RelayStatusSnapshotTag } from "../Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotTag } from "../Services/project-status-snapshot.js";
 import { ConfigTag, LoggerTag, StatusPollerTag } from "../Services/services.js";
 import { SessionManagerStateTag } from "../Services/session-manager-state.js";
 import {
@@ -174,7 +174,7 @@ export const StatusPollerLive: Layer.Layer<
 	| LoggerTag
 	| PollerPubSubTag
 	| PollerStateTag
-	| RelayStatusSnapshotTag
+	| ProjectStatusSnapshotTag
 	| SessionActivityTag
 	| SessionManagerStateTag
 	| ReadQueryEffectTag
@@ -188,7 +188,7 @@ export const StatusPollerLive: Layer.Layer<
 		const log = yield* LoggerTag;
 		const stateRef = yield* PollerStateTag;
 		const pubsub = yield* PollerPubSubTag;
-		const statusSnapshot = yield* RelayStatusSnapshotTag;
+		const statusSnapshot = yield* ProjectStatusSnapshotTag;
 		const sessionState = yield* SessionManagerStateTag;
 		const readQuery = yield* ReadQueryEffectTag;
 		const eventStore = yield* EventStoreEffectTag;

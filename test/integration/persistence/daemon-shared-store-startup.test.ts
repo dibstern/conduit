@@ -767,20 +767,20 @@ describe("daemon shared-store startup", () => {
 						);
 					}),
 				);
-				const relayProject = ManagedRuntime.make(
+				const projectRuntime = ManagedRuntime.make(
 					makePersistenceProjectLayer("beta").pipe(
 						Layer.provideMerge(Layer.succeedContext(store)),
 					),
 				);
 				try {
-					const sessions = await relayProject.runPromise(
+					const sessions = await projectRuntime.runPromise(
 						Effect.flatMap(ReadQueryEffectTag, (query) =>
 							query.listSessions({ projectIds: ["beta"] }),
 						),
 					);
 					expect(sessions.map(({ id }) => id)).toEqual(["child"]);
 				} finally {
-					await relayProject.dispose();
+					await projectRuntime.dispose();
 				}
 				expect(
 					await runtime.runPromise(
@@ -947,13 +947,13 @@ describe("daemon shared-store startup", () => {
 				for (const { slug } of projects) {
 					const launch = join(root, `${slug}-launch`);
 					mkdirSync(launch);
-					const relayProject = ManagedRuntime.make(
+					const projectRuntime = ManagedRuntime.make(
 						makePersistenceProjectLayer(slug).pipe(
 							Layer.provideMerge(Layer.succeedContext(store)),
 						),
 					);
 					try {
-						await relayProject.runPromise(
+						await projectRuntime.runPromise(
 							Effect.gen(function* () {
 								const events = yield* EventStoreEffectTag;
 								const runner = yield* ProjectionRunnerEffectTag;
@@ -976,7 +976,7 @@ describe("daemon shared-store startup", () => {
 							}),
 						);
 					} finally {
-						await relayProject.dispose();
+						await projectRuntime.dispose();
 					}
 				}
 				await runtime.runPromise(

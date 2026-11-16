@@ -5,8 +5,8 @@ import { describe, it } from "@effect/vitest";
 import { Cause, Effect, Exit, Layer, Option, PubSub } from "effect";
 import { expect } from "vitest";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
+	loadGlobalSettings,
+	saveGlobalSettings,
 } from "../../../src/lib/daemon/global-settings.js";
 import {
 	ProjectSettingsLive,
@@ -19,7 +19,7 @@ import {
 import { makeOverridesStateLive } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import {
 	getHiddenEntries,
-	setHiddenEntriesForRelay,
+	setHiddenEntriesGlobally,
 } from "../../../src/lib/handlers/visibility.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import {
@@ -45,7 +45,7 @@ const published = Effect.flatMap(ProjectSettingsTag, ({ changes }) =>
 	),
 );
 
-describe("setHiddenEntriesForRelay", () => {
+describe("setHiddenEntriesGlobally", () => {
 	it.effect(
 		"persists provided lists to relay settings and publishes the visibility setting",
 		() => {
@@ -54,13 +54,13 @@ describe("setHiddenEntriesForRelay", () => {
 
 			return Effect.gen(function* () {
 				const takePublished = yield* published;
-				const result = yield* setHiddenEntriesForRelay({
+				const result = yield* setHiddenEntriesGlobally({
 					clientId: "c1",
 					hiddenModels: ["a/b"],
 					hiddenAgents: ["opencode/plan"],
 				});
 
-				const persisted = loadRelaySettings(configDir);
+				const persisted = loadGlobalSettings(configDir);
 				expect(persisted.hiddenModels).toEqual(["a/b"]);
 				expect(persisted.hiddenAgents).toEqual(["opencode/plan"]);
 				expect(yield* takePublished).toEqual([
@@ -80,17 +80,17 @@ describe("setHiddenEntriesForRelay", () => {
 
 	it.effect("leaves the omitted list untouched", () => {
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-visibility-"));
-		saveRelaySettings({ hiddenAgents: ["claude/researcher"] }, configDir);
+		saveGlobalSettings({ hiddenAgents: ["claude/researcher"] }, configDir);
 		const layer = makeLayer(configDir);
 
 		return Effect.gen(function* () {
 			const takePublished = yield* published;
-			const result = yield* setHiddenEntriesForRelay({
+			const result = yield* setHiddenEntriesGlobally({
 				clientId: "c1",
 				hiddenModels: ["x/y"],
 			});
 
-			const persisted = loadRelaySettings(configDir);
+			const persisted = loadGlobalSettings(configDir);
 			expect(persisted.hiddenModels).toEqual(["x/y"]);
 			expect(persisted.hiddenAgents).toEqual(["claude/researcher"]);
 			expect(yield* takePublished).toEqual([
@@ -110,7 +110,7 @@ describe("setHiddenEntriesForRelay", () => {
 	it.effect(
 		"surfaces fs failures as a catchable typed failure, not a defect",
 		() => {
-			// configDir points at a FILE, so saveRelaySettings' mkdirSync throws.
+			// configDir points at a FILE, so saveGlobalSettings' mkdirSync throws.
 			const base = mkdtempSync(join(tmpdir(), "conduit-visibility-fail-"));
 			const notADir = join(base, "not-a-dir");
 			writeFileSync(notADir, "occupied", "utf-8");
@@ -119,7 +119,7 @@ describe("setHiddenEntriesForRelay", () => {
 			return Effect.gen(function* () {
 				const takePublished = yield* published;
 				const exit = yield* Effect.exit(
-					setHiddenEntriesForRelay({ clientId: "c1", hiddenModels: ["a/b"] }),
+					setHiddenEntriesGlobally({ clientId: "c1", hiddenModels: ["a/b"] }),
 				);
 
 				expect(Exit.isFailure(exit)).toBe(true);
@@ -128,7 +128,7 @@ describe("setHiddenEntriesForRelay", () => {
 					: Option.none();
 				expect(Option.isSome(failure)).toBe(true);
 				if (Option.isSome(failure)) {
-					expect(failure.value._tag).toBe("RelaySettingsSaveError");
+					expect(failure.value._tag).toBe("GlobalSettingsSaveError");
 				}
 				expect(yield* takePublished).toEqual([]);
 			}).pipe(Effect.provide(layer, { local: true }));

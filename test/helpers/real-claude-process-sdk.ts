@@ -1,6 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { defaultClaudeSessionForkSdk } from "../../src/lib/provider/claude/claude-session-fork.js";
-import type { ProjectRelayConfig } from "../../src/lib/types.js";
+import type { ProjectServicesConfig } from "../../src/lib/types.js";
 import { claudeSdk as fakeClaudeSdk } from "./fake-claude-process-sdk.js";
 
 type Query = ReturnType<typeof query>;
@@ -15,7 +15,7 @@ const deafQuery = (params: Parameters<typeof query>[0]): Query =>
 		},
 	});
 
-export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
+export const claudeSdk: NonNullable<ProjectServicesConfig["claudeSdk"]> = {
 	query:
 		process.env["CONDUIT_TEST_REAL_CLAUDE_DEAF_INTERRUPT"] === "1"
 			? deafQuery

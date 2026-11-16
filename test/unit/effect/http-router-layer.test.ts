@@ -29,12 +29,12 @@ import {
 	ProjectSettingsTag,
 } from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import {
-	type RelayStatusSnapshot,
-	type RelayStatusSnapshotService,
-	RelayStatusSnapshotTag,
+	type ProjectStatusSnapshot,
+	type ProjectStatusSnapshotService,
+	ProjectStatusSnapshotTag,
 } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
-	type RelayOpenCodeStream,
+	type ProjectOpenCodeStream,
 	SSEStreamTag,
 } from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -144,20 +144,22 @@ const daemonHandleStub = Layer.succeed(DaemonHandleTag)({
 });
 
 /** What an opened project reports: its snapshot, its browser count and its stream health. */
-type OpenedProjectStatus = RelayStatusSnapshot & {
+type OpenedProjectStatus = ProjectStatusSnapshot & {
 	readonly clients: number;
 	readonly sse: ConnectionHealth;
 };
 
 // The listing reads only these three services of an opened project.
 const openedWithStatus = ({ clients, sse, ...snapshot }: OpenedProjectStatus) =>
-	Context.make(RelayStatusSnapshotTag, {
+	Context.make(ProjectStatusSnapshotTag, {
 		getSnapshot: () => snapshot,
-	} as RelayStatusSnapshotService).pipe(
+	} as ProjectStatusSnapshotService).pipe(
 		Context.add(ProjectSettingsTag, {
 			browsers: { count: () => clients },
 		} as ProjectSettings),
-		Context.add(SSEStreamTag, { getHealth: () => sse } as RelayOpenCodeStream),
+		Context.add(SSEStreamTag, {
+			getHealth: () => sse,
+		} as ProjectOpenCodeStream),
 	) as Context.Context<ProjectParts>;
 
 const makeDaemonRouterLayer = (

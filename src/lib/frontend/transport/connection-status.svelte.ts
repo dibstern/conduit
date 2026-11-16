@@ -6,15 +6,15 @@ export const connectionState = $state({
 	status: "" as ConnectionStatus,
 	statusText: "",
 	attempts: 0,
-	relayStatus: undefined as "registering" | "ready" | "error" | undefined,
-	relayError: undefined as string | undefined,
+	projectStatus: undefined as "registering" | "ready" | "error" | undefined,
+	projectError: undefined as string | undefined,
 });
 
 let controlSocket: WebSocket | null = null;
 let lastMessageAt = 0;
-let relayStatusGeneration = 0;
+let projectStatusGeneration = 0;
 /** The shown session's or draft's project, whose relay readiness the overlay shows. */
-let relayProject: string | null = null;
+let statusProject: string | null = null;
 // Advances on proof of authentication, so a slower probe sent before it
 // cannot send the user back to the PIN page.
 let authGeneration = 0;
@@ -24,21 +24,21 @@ export function getIsConnected(): boolean {
 }
 
 /** Non-blocking relay readiness for the current dial. */
-function fetchRelayStatus(slug: string): void {
-	const generation = ++relayStatusGeneration;
+function fetchProjectStatus(slug: string): void {
+	const generation = ++projectStatusGeneration;
 	const isCurrent = () =>
-		relayProject === slug && relayStatusGeneration === generation;
-	connectionState.relayStatus = undefined;
-	connectionState.relayError = undefined;
+		statusProject === slug && projectStatusGeneration === generation;
+	connectionState.projectStatus = undefined;
+	connectionState.projectError = undefined;
 	fetch(`/p/${slug}/api/status`)
 		.then((res) => (isCurrent() && res.ok ? res.json() : null))
 		.then((data: { status?: string; error?: string } | null) => {
 			if (!data || !isCurrent()) return;
 			if (data.status === "registering" || data.status === "ready") {
-				connectionState.relayStatus = data.status;
+				connectionState.projectStatus = data.status;
 			} else if (data.status === "error") {
-				connectionState.relayStatus = "error";
-				connectionState.relayError = data.error;
+				connectionState.projectStatus = "error";
+				connectionState.projectError = data.error;
 			}
 			wsDebugLog(
 				"relay:status",
@@ -52,10 +52,10 @@ function fetchRelayStatus(slug: string): void {
 }
 
 /** Follow the readiness of the shown session's or draft's project relay. */
-export function viewRelayStatus(project: string | null): void {
-	if (project === relayProject) return;
-	relayProject = project;
-	if (project) fetchRelayStatus(project);
+export function viewProjectStatus(project: string | null): void {
+	if (project === statusProject) return;
+	statusProject = project;
+	if (project) fetchProjectStatus(project);
 }
 
 /**
@@ -88,8 +88,8 @@ export function trackControlSocket(socket: WebSocket): void {
 	connectionState.status = "connecting";
 	connectionState.statusText = "Connecting";
 	connectionState.attempts++;
-	connectionState.relayStatus = undefined;
-	connectionState.relayError = undefined;
+	connectionState.projectStatus = undefined;
+	connectionState.projectError = undefined;
 	wsDebugLog("rpc:connect", connectionState.status);
 	let opened = false;
 
@@ -108,7 +108,7 @@ export function trackControlSocket(socket: WebSocket): void {
 		if (controlSocket === socket) lastMessageAt = Date.now();
 	});
 
-	if (relayProject) fetchRelayStatus(relayProject);
+	if (statusProject) fetchProjectStatus(statusProject);
 }
 
 /**
@@ -124,8 +124,8 @@ export function markControlSocketOpen(): void {
 	connectionState.status = "connected";
 	connectionState.statusText = "Connected";
 	connectionState.attempts = 0;
-	connectionState.relayStatus = undefined;
-	connectionState.relayError = undefined;
+	connectionState.projectStatus = undefined;
+	connectionState.projectError = undefined;
 	wsDebugLog("rpc:open", connectionState.status);
 }
 

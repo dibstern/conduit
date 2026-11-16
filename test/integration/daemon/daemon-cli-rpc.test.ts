@@ -18,7 +18,7 @@ import { run } from "../../../src/bin/cli-core.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { makeDaemonRpcSocketLayer } from "../../../src/lib/daemon/daemon-rpc-server.js";
-import { loadRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { loadGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { subscribeProjectSettings } from "../../../src/lib/domain/project-services/Services/project-settings.js";
@@ -79,7 +79,7 @@ describe("CLI and browser daemon RPC parity", () => {
 							providerID: "openai",
 							modelID: "gpt-4",
 						});
-						expect(loadRelaySettings(root).defaultModel).toBe("openai/gpt-4");
+						expect(loadGlobalSettings(root).defaultModel).toBe("openai/gpt-4");
 						// Catalog refresh also republishes the title-generation status.
 						expect([...(yield* Queue.takeBetween(tab, 5, 5))]).toMatchObject([
 							{ _tag: "upsert", item: { _tag: "harnessDefaults" } },

@@ -30,7 +30,7 @@ import type {
 } from "../../project-services/Services/opencode-runtime-ingress-service.js";
 import type { PendingInteractionServiceTag } from "../../project-services/Services/pending-interaction-service.js";
 import type { ProjectSettingsTag } from "../../project-services/Services/project-settings.js";
-import type { RelayStatusSnapshotTag } from "../../project-services/Services/project-status-snapshot.js";
+import type { ProjectStatusSnapshotTag } from "../../project-services/Services/project-status-snapshot.js";
 import type { ProviderRuntimeIngestionTag } from "../../project-services/Services/provider-runtime-ingestion-service.js";
 import type { ProviderTurnServiceTag } from "../../project-services/Services/provider-turn-service.js";
 import type { RecapServiceTag } from "../../project-services/Services/recap-service.js";
@@ -72,7 +72,7 @@ import type { WorktreeCleanupRequest } from "./worktree-cleanup-service.js";
 
 /** What one generation of a project owns: dropped when its owner scope closes. */
 export type ProjectGenerationParts =
-	| RelayStatusSnapshotTag
+	| ProjectStatusSnapshotTag
 	| OpenCodeSessionCreationGateTag
 	| OpenCodeModelServiceTag
 	| PersistenceProjectContext

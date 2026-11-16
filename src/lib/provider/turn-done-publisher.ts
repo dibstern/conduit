@@ -3,12 +3,12 @@ import { SqlClient } from "effect/sql";
 import { publishAlert } from "../domain/project-services/Services/alerts.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
-import type { RelayMessage, SessionActivityView } from "../shared-types.js";
+import type { BrowserMessage, SessionActivityView } from "../shared-types.js";
 import { resolveNotifications } from "./notification-policy.js";
 import { sendPushForEventEffect } from "./opencode/sse-wiring.js";
 
-export const publishProviderRelayMessage = (
-	msg: Extract<RelayMessage, { type: "done" }>,
+export const publishTurnDone = (
+	msg: Extract<BrowserMessage, { type: "done" }>,
 	deps: {
 		/** A browser is viewing the session: its turn end needs no alert. */
 		isViewed: (sessionId: string) => boolean;

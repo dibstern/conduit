@@ -1,12 +1,12 @@
 import { expect, expectTypeOf, it } from "vitest";
 import {
-	RELAY_MESSAGE_TYPES,
-	type RelayMessage,
+	BROWSER_MESSAGE_TYPES,
+	type BrowserMessage,
 } from "../../../src/lib/shared-types.js";
 
 // conduit-test-ni8.12/.13/.14/.15: frames whose data now comes only from RPC
 // replies (or from nowhere). Asserted at the union so a reintroduction fails.
-const RETIRED_RELAY_TYPES = [
+const RETIRED_MESSAGE_TYPES = [
 	"file_tree",
 	"file_list",
 	"file_content",
@@ -23,13 +23,13 @@ const RETIRED_RELAY_TYPES = [
 	"instance_status",
 ] as const;
 
-it("retired push frames are absent from the RelayMessage union", () => {
+it("retired push frames are absent from the BrowserMessage union", () => {
 	expectTypeOf<
-		Extract<RelayMessage, { type: (typeof RETIRED_RELAY_TYPES)[number] }>
+		Extract<BrowserMessage, { type: (typeof RETIRED_MESSAGE_TYPES)[number] }>
 	>().toBeNever();
 	expect(
-		RELAY_MESSAGE_TYPES.filter((type) =>
-			(RETIRED_RELAY_TYPES as readonly string[]).includes(type),
+		BROWSER_MESSAGE_TYPES.filter((type) =>
+			(RETIRED_MESSAGE_TYPES as readonly string[]).includes(type),
 		),
 	).toEqual([]);
 });

@@ -35,8 +35,8 @@ import {
 	syncRecentProjects,
 } from "../../../daemon/config-persistence.js";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
+	loadGlobalSettings,
+	saveGlobalSettings,
 } from "../../../daemon/global-settings.js";
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
@@ -1073,7 +1073,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				run(
 					Effect.sync(() => ({
 						terminalKeys:
-							loadRelaySettings(configDir).terminalKeys ??
+							loadGlobalSettings(configDir).terminalKeys ??
 							DEFAULT_TERMINAL_KEYS,
 					})),
 				),
@@ -1081,7 +1081,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				run(
 					Effect.gen(function* () {
 						yield* Effect.try(() =>
-							saveRelaySettings({ terminalKeys }, configDir),
+							saveGlobalSettings({ terminalKeys }, configDir),
 						);
 						yield* PubSub.publish(
 							bus,

@@ -219,7 +219,7 @@ async function exercise(
 			expect(before.backgroundTasks).toHaveLength(1);
 			const extra = join(harness.root, "project-b-extra");
 			mkdirSync(extra);
-			// Changing the folder set enters projectRegistry.replaceRelay.
+			// Changing the folder set enters projectRegistry.reopenProject.
 			// Keeping the primary folder retains the live Claude process.
 			const saved = await Effect.runPromise(
 				control.rpc.SaveProject({ slug: slugB, folders: [folderB, extra] }),

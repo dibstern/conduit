@@ -16,7 +16,7 @@ import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	allProjects,
 	evictOldestSessions,
 	isStarting,
@@ -126,11 +126,11 @@ describe("projectInfos", () => {
 		fixtureDirs.push(directory);
 		const missingDirectory = join(directory, "missing");
 		return Effect.gen(function* () {
-			yield* addWithoutRelay({
+			yield* addWithoutOpening({
 				...testProject,
 				folders: [directory],
 			});
-			yield* addWithoutRelay({
+			yield* addWithoutOpening({
 				...testProject,
 				slug: "missing",
 				folders: [missingDirectory],
@@ -193,8 +193,8 @@ describe("projectInfos", () => {
 				const git = { branch: "main", dirty: false };
 				yield* sql`INSERT INTO session_git_published (directory, git, version)
 					VALUES (${realpathSync(directory)}, ${JSON.stringify(git)}, 1)`;
-				yield* addWithoutRelay(cached);
-				yield* addWithoutRelay(uncached);
+				yield* addWithoutOpening(cached);
+				yield* addWithoutOpening(uncached);
 				const projects = yield* projectInfos.pipe(
 					Effect.provideService(SessionGit, {
 						read: () => Effect.die("Project reads must use published git"),
@@ -243,7 +243,7 @@ describe("evictOldestSessions", () => {
 describe("isStarting", () => {
 	it.effect("returns true for a project in Registering state", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(testProject);
+			yield* addWithoutOpening(testProject);
 			const result = yield* isStarting(testProject.slug);
 			expect(result).toBe(true);
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
@@ -251,7 +251,7 @@ describe("isStarting", () => {
 
 	it.effect("returns false for a project in Ready state", () =>
 		Effect.gen(function* () {
-			yield* addWithoutRelay(testProject);
+			yield* addWithoutOpening(testProject);
 			yield* markReady(testProject.slug);
 			const result = yield* isStarting(testProject.slug);
 			expect(result).toBe(false);

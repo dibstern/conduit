@@ -4,15 +4,15 @@ import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../domain/daemon/Services/opencode-instances-service.js";
 import { AgentServiceTag } from "../../domain/project-services/Services/agent-service.js";
+import { readTitleGenerationState } from "../../domain/project-services/Services/project-settings.js";
 import { ConfigTag } from "../../domain/project-services/Services/services.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { switchContextWindowForSession } from "../../handlers/context-window.js";
 import {
 	getModelsResponse,
-	getTitleGenerationForRelay,
-	setDefaultModelForRelay,
-	setHarnessDefaultForRelay,
-	setTitleGenerationForRelay,
+	setDefaultModelGlobally,
+	setHarnessDefaultGlobally,
+	setTitleGenerationGlobally,
 	switchModelForSession,
 	switchVariantForSession,
 } from "../../handlers/model.js";
@@ -130,7 +130,7 @@ export const modelsHandlers = {
 			),
 		),
 	SetDefaultModel: (request) =>
-		setDefaultModelForRelay({
+		setDefaultModelGlobally({
 			clientId: request.originId ?? "rpc",
 			model: request.model,
 			provider: request.provider,
@@ -147,7 +147,7 @@ export const modelsHandlers = {
 			),
 		),
 	SetHarnessDefault: (request) =>
-		setHarnessDefaultForRelay(request).pipe(
+		setHarnessDefaultGlobally(request).pipe(
 			Effect.map((state) => ({
 				projectSlug: request.projectSlug,
 				harness: request.harness,
@@ -164,14 +164,14 @@ export const modelsHandlers = {
 			),
 		),
 	GetTitleGeneration: (request) =>
-		getTitleGenerationForRelay.pipe(
+		readTitleGenerationState.pipe(
 			Effect.map((state) => ({
 				projectSlug: request.projectSlug,
 				...state,
 			})),
 		),
 	SetTitleGeneration: (request) =>
-		setTitleGenerationForRelay(request.selection).pipe(
+		setTitleGenerationGlobally(request.selection).pipe(
 			Effect.map((state) => ({
 				projectSlug: request.projectSlug,
 				...state,

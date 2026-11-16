@@ -89,7 +89,7 @@ describe("Codex skills and digest forks through the daemon and detached runners"
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
 			logLevel: "warn",
-			relaySettings: {
+			globalSettings: {
 				harnessDefaults: {
 					codex: { providerId: "codex", modelId: MODEL, contextWindow: "" },
 					cursor: {

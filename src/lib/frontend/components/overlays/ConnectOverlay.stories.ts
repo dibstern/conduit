@@ -23,8 +23,8 @@ const meta = {
 	beforeEach: () => {
 		connectionState.status = "";
 		connectionState.statusText = "";
-		connectionState.relayStatus = undefined;
-		connectionState.relayError = undefined;
+		connectionState.projectStatus = undefined;
+		connectionState.projectError = undefined;
 	},
 } satisfies Meta<typeof ConnectOverlay>;
 
@@ -55,8 +55,8 @@ export const Connecting: Story = {
  */
 export const RelayError: Story = {
 	beforeEach: () => {
-		connectionState.relayStatus = "error";
-		connectionState.relayError =
+		connectionState.projectStatus = "error";
+		connectionState.projectError =
 			"Failed to bind port 4096: address already in use";
 	},
 };
@@ -66,7 +66,7 @@ export const RelayError: Story = {
  */
 export const RelayRegistering: Story = {
 	beforeEach: () => {
-		connectionState.relayStatus = "registering";
+		connectionState.projectStatus = "registering";
 	},
 };
 

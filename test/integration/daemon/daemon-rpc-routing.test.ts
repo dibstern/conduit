@@ -37,8 +37,8 @@ import { makeWsTransportLive } from "../../../src/lib/domain/project-services/La
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	ProjectRpcContextsTag,
-	WebSocketRelayRouterLive,
-	WebSocketRelayRouterTag,
+	WebSocketProjectRouterLive,
+	WebSocketProjectRouterTag,
 	WebSocketRoutingLive,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/server/Services/http-server-ref.js";
@@ -124,11 +124,11 @@ const standInProjectServicesLayer = (
 
 /** Test projects run their RPCs on a stand-in project runtime. */
 const standInProjectContexts = Effect.gen(function* () {
-	const router = yield* WebSocketRelayRouterTag;
+	const router = yield* WebSocketProjectRouterTag;
 	const projects = yield* ProjectServices;
 	return (slug: string) =>
 		Effect.gen(function* () {
-			yield* router.ensureRelayStarted(slug);
+			yield* router.ensureProjectOpen(slug);
 			const context = yield* projects.open(slug);
 			return context as Context.Context<unknown> as ProjectRpcContext;
 		}).pipe(
@@ -223,7 +223,7 @@ describe("daemon shared RPC routing", () => {
 			const upgrades = vi.fn();
 			server.on("upgrade", upgrades);
 			const routerContext = yield* Layer.build(
-				WebSocketRelayRouterLive.pipe(
+				WebSocketProjectRouterLive.pipe(
 					Layer.provideMerge(
 						Layer.mergeAll(
 							makeProjectRegistryLive(projects),
@@ -442,7 +442,7 @@ describe("daemon shared RPC routing", () => {
 				);
 				const upgrades = vi.fn();
 				server.on("upgrade", upgrades);
-				const routerLayer = WebSocketRelayRouterLive.pipe(
+				const routerLayer = WebSocketProjectRouterLive.pipe(
 					Layer.provideMerge(
 						Layer.mergeAll(
 							makeProjectRegistryLive(projects),

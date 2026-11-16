@@ -2,8 +2,8 @@
 
 import { Data, Effect } from "effect";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
+	loadGlobalSettings,
+	saveGlobalSettings,
 } from "../daemon/global-settings.js";
 import { publishGlobalProjectSetting } from "../domain/project-services/Services/project-settings.js";
 import {
@@ -18,15 +18,15 @@ export interface HiddenEntries {
 
 /** Read the persisted hide-lists (empty arrays when unset). */
 export function getHiddenEntries(configDir?: string): HiddenEntries {
-	const settings = loadRelaySettings(configDir);
+	const settings = loadGlobalSettings(configDir);
 	return {
 		hiddenModels: settings.hiddenModels ?? [],
 		hiddenAgents: settings.hiddenAgents ?? [],
 	};
 }
 
-class RelaySettingsSaveError extends Data.TaggedError(
-	"RelaySettingsSaveError",
+class GlobalSettingsSaveError extends Data.TaggedError(
+	"GlobalSettingsSaveError",
 )<{
 	readonly cause: unknown;
 }> {}
@@ -41,7 +41,7 @@ export interface SetHiddenEntriesInput {
  * Persist the provided hide-lists (replace semantics; an omitted list is left
  * untouched), publish the merged view as a project setting, and return it.
  */
-export const setHiddenEntriesForRelay = (input: SetHiddenEntriesInput) =>
+export const setHiddenEntriesGlobally = (input: SetHiddenEntriesInput) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		const config = yield* ConfigTag;
@@ -50,7 +50,7 @@ export const setHiddenEntriesForRelay = (input: SetHiddenEntriesInput) =>
 		// failure the RPC entry's Effect.catch can convert to WsRpcError.
 		yield* Effect.try({
 			try: () =>
-				saveRelaySettings(
+				saveGlobalSettings(
 					{
 						...(input.hiddenModels !== undefined
 							? { hiddenModels: [...input.hiddenModels] }
@@ -61,7 +61,7 @@ export const setHiddenEntriesForRelay = (input: SetHiddenEntriesInput) =>
 					},
 					config.configDir,
 				),
-			catch: (cause) => new RelaySettingsSaveError({ cause }),
+			catch: (cause) => new GlobalSettingsSaveError({ cause }),
 		});
 
 		const entries = getHiddenEntries(config.configDir);

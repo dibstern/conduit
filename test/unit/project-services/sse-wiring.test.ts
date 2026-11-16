@@ -11,7 +11,7 @@ import {
 	type SSEWiringDeps,
 	wireSSEConsumerEffect,
 } from "../../../src/lib/provider/opencode/sse-wiring.js";
-import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
+import type { BrowserMessage, OpenCodeEvent } from "../../../src/lib/types.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 import {
@@ -76,7 +76,7 @@ describe("extractSessionId", () => {
 describe("handleSSEEventEffect", () => {
 	it("translates events with the upstream session ID", async () => {
 		const deps = createMockSSEWiringDeps();
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "delta",
 			sessionId: "s1",
 			text: "hello",
@@ -244,7 +244,11 @@ describe("handleSSEEventEffect", () => {
 				}),
 		});
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
+		const translated: BrowserMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+		};
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [translated],
@@ -269,7 +273,7 @@ describe("handleSSEEventEffect", () => {
 				}),
 		});
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "done",
 			alertId: "error-1",
 			sessionId: "s1",
@@ -311,7 +315,7 @@ describe("handleSSEEventEffect", () => {
 				}),
 		});
 		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "done",
 			sessionId: "s1",
 			code: 0,
@@ -481,7 +485,7 @@ describe("wireSSEConsumerEffect", () => {
 
 		await wireSSEConsumerForTest(deps, consumer);
 
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "delta",
 			sessionId: "s1",
 			text: "hi",
@@ -695,7 +699,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 		vi.mocked(deps.translator.translate).mockReturnValue({
 			ok: true,
 			messages: [
-				{ type: "delta", sessionId: "s1", text: "hello" } as RelayMessage,
+				{ type: "delta", sessionId: "s1", text: "hello" } as BrowserMessage,
 			],
 		});
 
@@ -734,7 +738,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 					sessionId: "s1",
 					code: 0,
 					alertId: "done-1",
-				} as RelayMessage,
+				} as BrowserMessage,
 			],
 		});
 
@@ -773,7 +777,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 					sessionId: "s1",
 					code: 0,
 					alertId: "done-1",
-				} as RelayMessage,
+				} as BrowserMessage,
 			],
 		});
 
@@ -801,7 +805,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 					sessionId: "s1",
 					code: 0,
 					alertId: "done-1",
-				} as RelayMessage,
+				} as BrowserMessage,
 			],
 		});
 
@@ -839,7 +843,7 @@ describe("notification routing: push gating via resolveNotifications", () => {
 					sessionId: "s1",
 					code: 1,
 					error: "crashed",
-				} as RelayMessage,
+				} as BrowserMessage,
 			],
 		});
 
@@ -857,7 +861,7 @@ describe("alert published for dropped notification-worthy events", () => {
 	it("publishes an alert when done is dropped (no viewers)", async () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.hasViewers).mockReturnValue(false);
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "done",
 			sessionId: "s1",
 			code: 0,
@@ -887,7 +891,7 @@ describe("alert published for dropped notification-worthy events", () => {
 	it("publishes an alert with message when error is dropped", async () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.hasViewers).mockReturnValue(false);
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "done",
 			alertId: "error-1",
 			sessionId: "s1",
@@ -920,7 +924,7 @@ describe("alert published for dropped notification-worthy events", () => {
 		const deps = createMockSSEWiringDeps();
 		// An RPC viewer suppresses the completion alert.
 		vi.mocked(deps.hasViewers).mockReturnValue(true);
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "done",
 			sessionId: "s1",
 			code: 0,
@@ -941,7 +945,7 @@ describe("alert published for dropped notification-worthy events", () => {
 	it("does NOT publish an alert for non-notification types (delta)", async () => {
 		const deps = createMockSSEWiringDeps();
 		vi.mocked(deps.hasViewers).mockReturnValue(false);
-		const translated: RelayMessage = {
+		const translated: BrowserMessage = {
 			type: "delta",
 			sessionId: "s1",
 			text: "hello",

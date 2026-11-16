@@ -122,7 +122,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 
 		expect(imports).toEqual(["effect"]);
 		expect(source).not.toMatch(
-			/Context\.Tag|Layer|Effect\.|CanonicalEvent|ProviderInstance|RelayMessage|EventSink|sqlite|fetch\(/,
+			/Context\.Tag|Layer|Effect\.|CanonicalEvent|ProviderInstance|BrowserMessage|EventSink|sqlite|fetch\(/,
 		);
 	});
 });

@@ -45,8 +45,8 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { AgentServiceTag } from "../../../src/lib/domain/project-services/Services/agent-service.js";
 import {
-	RelayStatusSnapshotLive,
-	RelayStatusSnapshotTag,
+	ProjectStatusSnapshotLive,
+	ProjectStatusSnapshotTag,
 } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	ConfigTag,
@@ -106,7 +106,7 @@ import { SqliteProviderSessionBindingReadModel } from "../../../src/lib/provider
 import type { TurnSettings } from "../../../src/lib/provider/turn-settings.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
-import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import type { ProjectServicesConfig } from "../../../src/lib/types.js";
 import { publishRun } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockAgentService,
@@ -272,7 +272,7 @@ function makeNamedOpenCodeDaemonConfig(): DaemonConfig {
 	};
 }
 
-function makeRelayConfig(configDir: string): ProjectRelayConfig {
+function makeRelayConfig(configDir: string): ProjectServicesConfig {
 	return {
 		projectDir: "/tmp/project",
 		slug: "project",
@@ -422,7 +422,7 @@ const requiredSessionServices = Layer.mergeAll(
 	sessionLoggerLayer,
 	Layer.succeed(OpenCodeAPITag)(openCodeApi),
 	Layer.effect(SessionActivityTag, makeSessionActivity),
-	RelayStatusSnapshotLive,
+	ProjectStatusSnapshotLive,
 	makeOverridesStateLive(),
 	Layer.succeed(OpenCodeInstancesTag)(
 		makeOpenCodeInstancesStub({ opencode: openCodeApi }),
@@ -1121,7 +1121,7 @@ describe("SessionManagerService", () => {
 				keepAwake: false,
 				projects: [],
 			};
-			const relayConfig: ProjectRelayConfig = {
+			const projectConfig: ProjectServicesConfig = {
 				projectDir: "/tmp/project",
 				slug: "project",
 				persistenceDbPath: tempEventsDbPath(),
@@ -1152,7 +1152,7 @@ describe("SessionManagerService", () => {
 						makeOpenCodeInstancesStub({ opencode: api }),
 					),
 					Layer.succeed(LoggerTag)(makeMockLogger()),
-					Layer.succeed(ConfigTag)(relayConfig),
+					Layer.succeed(ConfigTag)(projectConfig),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
 					DaemonEventBusLive,
@@ -1737,7 +1737,7 @@ describe("SessionManagerService", () => {
 					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					RelayStatusSnapshotLive,
+					ProjectStatusSnapshotLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
 					Layer.succeed(OrchestrationEngineTag)(engine),
 				),
@@ -1746,7 +1746,7 @@ describe("SessionManagerService", () => {
 			yield* Effect.gen(function* () {
 				const service = yield* projectSessionManager;
 				const stateRef = yield* SessionManagerStateTag;
-				const relayStatus = yield* RelayStatusSnapshotTag;
+				const projectStatus = yield* ProjectStatusSnapshotTag;
 				const daemonEvents = yield* subscribeToDaemonEvents;
 				yield* Ref.update(stateRef, (state) => ({
 					...state,
@@ -1784,7 +1784,7 @@ describe("SessionManagerService", () => {
 				expect(dispatch).toHaveBeenCalledOnce();
 				expect(api.session.delete).toHaveBeenCalledOnce();
 				expect(state.lastKnownSessionCount).toBe(1);
-				expect(relayStatus.getSnapshot().sessionCount).toBe(1);
+				expect(projectStatus.getSnapshot().sessionCount).toBe(1);
 				expect(
 					Array.from(publishedEvents).filter(
 						(event) => event._tag === "SessionDeleted",
@@ -2438,14 +2438,14 @@ describe("SessionManagerService", () => {
 					Layer.succeed(LoggerTag)(makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
-					RelayStatusSnapshotLive,
+					ProjectStatusSnapshotLive,
 					makePersistenceEffectLayer(dbFile, "test-project"),
 				),
 			);
 
 			return Effect.gen(function* () {
 				const service = yield* projectSessionManager;
-				const snapshot = yield* RelayStatusSnapshotTag;
+				const snapshot = yield* ProjectStatusSnapshotTag;
 				const sql = yield* SqlClient.SqlClient;
 				const runner = yield* ProjectionRunnerEffectTag;
 				yield* runner.markRecovered();
@@ -3121,7 +3121,7 @@ describe("SessionManagerService", () => {
 			Layer.succeed(LoggerTag)(makeMockLogger()),
 			makeSessionManagerStateLive(),
 			DaemonEventBusLive,
-			RelayStatusSnapshotLive,
+			ProjectStatusSnapshotLive,
 		);
 		return Effect.gen(function* () {
 			const service = yield* projectSessionManager;
@@ -3134,7 +3134,7 @@ describe("SessionManagerService", () => {
 				Option.some("root"),
 			);
 			expect([...state.cachedSideThreadIds]).toEqual(["side"]);
-			expect((yield* RelayStatusSnapshotTag).getSnapshot().sessionCount).toBe(
+			expect((yield* ProjectStatusSnapshotTag).getSnapshot().sessionCount).toBe(
 				3,
 			);
 		}).pipe(

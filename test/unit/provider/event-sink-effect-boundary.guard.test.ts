@@ -55,7 +55,7 @@ describe("EventSink Effect boundary", () => {
 			/throw new Error\([^)]*pendingInteractions/,
 		);
 		expect(relayEventSink).not.toContain(
-			"RelayEventSink requires pendingInteractions for permission/question requests",
+			"EventSink requires pendingInteractions for permission/question requests",
 		);
 	});
 });

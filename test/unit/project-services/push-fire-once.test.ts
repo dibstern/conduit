@@ -40,8 +40,8 @@ import type {
 import { PushNotificationManager } from "../../../src/lib/server/push.js";
 import {
 	type Approval,
+	type BrowserMessage,
 	PermissionId,
-	type RelayMessage,
 } from "../../../src/lib/shared-types.js";
 
 const silentBus = Layer.succeed(SessionEventBusTag)({
@@ -121,7 +121,7 @@ const seed = (sessionId: string, turnId: string) =>
 			VALUES (${turnId}, ${sessionId}, 'completed', 1000, 1001)`;
 	});
 
-const done: RelayMessage = {
+const done: BrowserMessage = {
 	type: "done",
 	sessionId: "s1",
 	code: 0,

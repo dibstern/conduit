@@ -1,5 +1,5 @@
 // Tests for lazy Schema validation of daemon→client WebSocket messages at the
-// frontend boundary. Uses RelayMessageSchema from shared-types.ts.
+// frontend boundary. Uses BrowserMessageSchema from shared-types.ts.
 
 import { describe, expect, it } from "vitest";
 

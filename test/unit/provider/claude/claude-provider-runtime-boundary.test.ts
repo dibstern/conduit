@@ -6,8 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import * as configPersistence from "../../../../src/lib/daemon/config-persistence.js";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
+	loadGlobalSettings,
+	saveGlobalSettings,
 } from "../../../../src/lib/daemon/global-settings.js";
 import {
 	makeClaudeProviderRuntime,
@@ -178,12 +178,12 @@ describe("Claude provider runtime boundary", () => {
 	it("reads and merges SDK settings overrides at each session start", async () => {
 		const capturedSettings: SDKOptions["settings"][] = [];
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-claude-settings-"));
-		saveRelaySettings(
+		saveGlobalSettings(
 			{ claudeSettings: { autoCompactEnabled: false } },
 			configDir,
 		);
 		const claudeSettingsOverrides = vi.fn(
-			() => loadRelaySettings(configDir).claudeSettings,
+			() => loadGlobalSettings(configDir).claudeSettings,
 		);
 		const instance = makeTestClaudeProviderInstance({
 			queryFactory: ({ options }: { options?: SDKOptions }) => {
@@ -202,7 +202,7 @@ describe("Claude provider runtime boundary", () => {
 				}),
 			),
 		);
-		saveRelaySettings(
+		saveGlobalSettings(
 			{ claudeSettings: { autoCompactEnabled: true } },
 			configDir,
 		);

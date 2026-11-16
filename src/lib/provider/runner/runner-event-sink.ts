@@ -7,8 +7,8 @@ import {
 import type { ProviderRuntimeIngestion } from "../../domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { createEventId } from "../../persistence/events.js";
 import {
-	createRelayEventSink,
-	type RelayEventSinkDeps,
+	createProjectEventSink,
+	type ProjectEventSinkDeps,
 	toEventSinkError,
 } from "../project-event-sink.js";
 
@@ -22,12 +22,12 @@ export const makeRecoveredEventSink = (options: {
 	readonly onRegistered: (requestId: string) => Effect.Effect<unknown>;
 	/** Without these, an answered question's re-armed timeout fails a live turn. */
 	readonly timeoutHooks: Pick<
-		RelayEventSinkDeps,
+		ProjectEventSinkDeps,
 		"clearTimeout" | "resetTimeout"
 	>;
 }) => {
 	const { sessionId, sql, ingestion, pending } = options;
-	const sink = createRelayEventSink({
+	const sink = createProjectEventSink({
 		sessionId,
 		providerId: options.driverKind,
 		...options.timeoutHooks,

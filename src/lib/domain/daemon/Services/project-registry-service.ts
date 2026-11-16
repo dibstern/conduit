@@ -49,7 +49,7 @@ import {
 	type SaveProjectInput,
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
-import { loadRelaySettings } from "../../../daemon/global-settings.js";
+import { loadGlobalSettings } from "../../../daemon/global-settings.js";
 import { readProjectFile } from "../../../daemon/project-file.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { readRepositoryIdentity } from "../../../git/repository-identity.js";
@@ -181,7 +181,7 @@ const refreshProjectRollups = (changedSlugs: readonly string[]) =>
 			});
 	});
 
-const formatRelayFailure = (cause: unknown): string =>
+const formatOpenFailure = (cause: unknown): string =>
 	cause instanceof Error ? cause.message : String(cause);
 
 export interface ProjectRegistering {
@@ -386,7 +386,7 @@ export const resolveSessionMode = (slug: string) =>
 				source: "file",
 				...warning,
 			} satisfies ResolveSessionModeResponse;
-		const settings = loadRelaySettings(configDir);
+		const settings = loadGlobalSettings(configDir);
 		return {
 			mode:
 				settings.defaultSessionMode === "last"
@@ -509,7 +509,7 @@ export const size = Effect.gen(function* () {
  * Register a project without starting a relay. Sets status to Registering.
  * Publishes InstanceAdded event unless silent is true.
  */
-export const addWithoutRelay = (
+export const addWithoutOpening = (
 	project: StoredProject,
 	options?: { silent?: boolean },
 ) =>
@@ -554,7 +554,7 @@ export const addWithoutRelay = (
 	}).pipe(
 		Effect.uninterruptible,
 		Effect.annotateLogs("slug", project.slug),
-		Effect.withSpan("projectRegistry.addWithoutRelay", {
+		Effect.withSpan("projectRegistry.addWithoutOpening", {
 			attributes: { slug: project.slug },
 		}),
 	);
@@ -833,7 +833,7 @@ export const touchLastUsed = (slug: string) =>
  * from Registering/Error → Ready on success, or → Error on failure.
  * Publishes appropriate InstanceStatusChanged events.
  */
-export const startRelay = (slug: string) =>
+export const openRegisteredProject = (slug: string) =>
 	Effect.gen(function* () {
 		const ref = yield* ProjectRegistryTag;
 		const projects = yield* ProjectServices;
@@ -859,14 +859,14 @@ export const startRelay = (slug: string) =>
 		// Keep the registry state honest for both typed start failures and defects.
 		yield* projects.open(slug).pipe(
 			Effect.flatMap(() => markReady(slug)),
-			Effect.catch((cause) => markError(slug, formatRelayFailure(cause))),
+			Effect.catch((cause) => markError(slug, formatOpenFailure(cause))),
 			Effect.catchDefect((defect) =>
-				markError(slug, formatRelayFailure(defect)),
+				markError(slug, formatOpenFailure(defect)),
 			),
 		);
 	}).pipe(
 		Effect.annotateLogs("slug", slug),
-		Effect.withSpan("projectRegistry.startRelay", {
+		Effect.withSpan("projectRegistry.openRegisteredProject", {
 			attributes: { slug },
 		}),
 	);
@@ -927,20 +927,20 @@ export const evictOldestSessions = (count: number) =>
  * Restart a project with its current folders: close its start, open it
  * again, and transition the project to Ready.
  */
-export const replaceRelay = (slug: string) =>
+export const reopenProject = (slug: string) =>
 	Effect.gen(function* () {
 		const projects = yield* ProjectServices;
 		yield* projects.close(slug);
 		yield* projects.open(slug).pipe(
 			Effect.flatMap(() => markReady(slug)),
-			Effect.catch((cause) => markError(slug, formatRelayFailure(cause))),
+			Effect.catch((cause) => markError(slug, formatOpenFailure(cause))),
 			Effect.catchDefect((defect) =>
-				markError(slug, formatRelayFailure(defect)),
+				markError(slug, formatOpenFailure(defect)),
 			),
 		);
 	}).pipe(
 		Effect.annotateLogs("slug", slug),
-		Effect.withSpan("projectRegistry.replaceRelay"),
+		Effect.withSpan("projectRegistry.reopenProject"),
 	);
 
 /**
@@ -1166,7 +1166,7 @@ export const saveProject = (input: SaveProjectInput) =>
 						Effect.mapError(
 							(cause) =>
 								new WsRpcError({
-									message: `Failed to check running sessions: ${formatRelayFailure(cause)}`,
+									message: `Failed to check running sessions: ${formatOpenFailure(cause)}`,
 								}),
 						),
 					);
@@ -1186,7 +1186,7 @@ export const saveProject = (input: SaveProjectInput) =>
 							}),
 						catch: (cause) =>
 							new WsRpcError({
-								message: `Failed to read project storage: ${formatRelayFailure(cause)}`,
+								message: `Failed to read project storage: ${formatOpenFailure(cause)}`,
 							}),
 					}));
 				const created: string[] = [];
@@ -1204,7 +1204,7 @@ export const saveProject = (input: SaveProjectInput) =>
 										{
 											kind: "mkdir-failed",
 											path: folder.path,
-											message: formatRelayFailure(cause),
+											message: formatOpenFailure(cause),
 										},
 									],
 								}),
@@ -1238,7 +1238,7 @@ export const saveProject = (input: SaveProjectInput) =>
 													{
 														kind: "git-init-failed",
 														path: folder.path,
-														message: formatRelayFailure(cause),
+														message: formatOpenFailure(cause),
 													},
 												],
 											}),
@@ -1257,7 +1257,7 @@ export const saveProject = (input: SaveProjectInput) =>
 								}).pipe(
 									Effect.catch((cause) =>
 										Effect.logWarning(
-											`Failed to remove created folder ${path}: ${formatRelayFailure(cause)}`,
+											`Failed to remove created folder ${path}: ${formatOpenFailure(cause)}`,
 										),
 									),
 								),
@@ -1339,7 +1339,7 @@ export const saveProject = (input: SaveProjectInput) =>
 									),
 							).pipe(
 								// The reservation must close before using the shared SQL client.
-								// Reconcile before addWithoutRelay makes these sessions routable.
+								// Reconcile before addWithoutOpening makes these sessions routable.
 								Effect.tap((result) =>
 									Effect.gen(function* () {
 										if (result.error) return;
@@ -1360,7 +1360,7 @@ export const saveProject = (input: SaveProjectInput) =>
 												sql,
 											);
 										}
-										// Repair every currently visible family. addWithoutRelay then
+										// Repair every currently visible family. addWithoutOpening then
 										// includes the new owner and refreshes families containing its rows.
 										const projects = Context.get(store, SessionRollupProjects);
 										yield* refreshCrossProjectSidebar(
@@ -1381,7 +1381,7 @@ export const saveProject = (input: SaveProjectInput) =>
 										error: new DaemonStoreImportError({
 											projectId: slug,
 											kind: "io",
-											message: formatRelayFailure(cause),
+											message: formatOpenFailure(cause),
 											cause,
 										}),
 									}),
@@ -1400,7 +1400,7 @@ export const saveProject = (input: SaveProjectInput) =>
 							yield* log("Daemon store project import", result);
 						}
 					}
-					yield* addWithoutRelay(project);
+					yield* addWithoutOpening(project);
 				}
 				if (
 					existing &&
@@ -1410,12 +1410,12 @@ export const saveProject = (input: SaveProjectInput) =>
 								normalizeProjectDirectory(folder) !== canonicalFolders[index],
 						))
 				) {
-					yield* replaceRelay(slug);
+					yield* reopenProject(slug);
 					if (mainChanged) {
 						yield* stopRegisteredRunners(existing.folders[0], configDir).pipe(
 							Effect.catchCause((cause) =>
 								Effect.logWarning(
-									`Failed to stop old project runners after saving ${slug}: ${formatRelayFailure(cause)}`,
+									`Failed to stop old project runners after saving ${slug}: ${formatOpenFailure(cause)}`,
 								),
 							),
 						);

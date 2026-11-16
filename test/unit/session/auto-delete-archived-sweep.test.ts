@@ -33,7 +33,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { PortWatcher } from "../../../src/lib/domain/persistence/Services/port-watcher.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -111,7 +111,7 @@ describe("archived tree retention", () => {
 								mark: () => Effect.succeed({ kind: "unclaimed" } as const),
 								known: () => true,
 							}),
-							RelayStatusSnapshotLive,
+							ProjectStatusSnapshotLive,
 							makeOverridesStateLive(),
 							Layer.succeed(OpenCodeInstancesTag)(
 								makeOpenCodeInstancesStub({ opencode: api }),

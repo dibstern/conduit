@@ -1,4 +1,4 @@
-// Integration test: RelayEventSink -> Effect persistence -> SQLite read query
+// Integration test: EventSink -> Effect persistence -> SQLite read query
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,14 +11,14 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../src/lib/provider/project-event-sink.js";
 import {
 	makeMessageCreatedEvent,
 	makeTextDelta,
 } from "../../helpers/persistence-factories.js";
 import { providerRuntimeEventFromCanonical } from "../../helpers/provider-runtime-event.js";
 
-describe("RelayEventSink Effect persistence integration", () => {
+describe("EventSink Effect persistence integration", () => {
 	it.effect(
 		"persisted Claude events are readable through ReadQueryEffect",
 		() => {
@@ -43,7 +43,7 @@ describe("RelayEventSink Effect persistence integration", () => {
 				yield* runner.projectEvent(creation);
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const readQuery = yield* ReadQueryEffectTag;
-				const sink = createRelayEventSink({
+				const sink = createProjectEventSink({
 					sessionId: "s1",
 					persist,
 				});
@@ -86,7 +86,7 @@ describe("RelayEventSink Effect persistence integration", () => {
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const readQuery = yield* ReadQueryEffectTag;
 				const eventStore = yield* EventStoreEffectTag;
-				const sink = createRelayEventSink({
+				const sink = createProjectEventSink({
 					sessionId: "s-claude",
 					persist,
 				});

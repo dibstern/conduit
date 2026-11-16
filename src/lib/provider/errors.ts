@@ -186,7 +186,7 @@ export class MissingPendingInteractions extends Data.TaggedError(
 	readonly sessionId: string;
 }> {
 	get message(): string {
-		return `RelayEventSink requires pendingInteractions for ${this.operation} in session ${this.sessionId}`;
+		return `EventSink requires pendingInteractions for ${this.operation} in session ${this.sessionId}`;
 	}
 }
 

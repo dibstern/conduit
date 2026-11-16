@@ -38,11 +38,11 @@ import {
 	ProjectServices,
 } from "../../../src/lib/domain/daemon/Services/project-services.js";
 import {
-	type RelayStatusSnapshotService,
-	RelayStatusSnapshotTag,
+	type ProjectStatusSnapshotService,
+	ProjectStatusSnapshotTag,
 } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
-	type RelayOpenCodeStream,
+	type ProjectOpenCodeStream,
 	SSEStreamTag,
 } from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -189,15 +189,15 @@ describe("DaemonHandleTag", () => {
 					stale: false,
 				},
 			) =>
-				Context.make(RelayStatusSnapshotTag, {
+				Context.make(ProjectStatusSnapshotTag, {
 					getSnapshot: () => ({
 						sessionCount: slug === "existing" ? 5 : 4,
 						isProcessing: false,
 					}),
-				} as RelayStatusSnapshotService).pipe(
+				} as ProjectStatusSnapshotService).pipe(
 					Context.add(SSEStreamTag, {
 						getHealth: () => sse,
-					} as RelayOpenCodeStream),
+					} as ProjectOpenCodeStream),
 				) as Context.Context<ProjectParts>;
 			const projectServicesStub = Layer.succeed(ProjectServices)({
 				forProject: () => Effect.die("unused"),

@@ -48,7 +48,7 @@ import type {
 	SDKMessage,
 } from "../../../src/lib/provider/claude/types.js";
 import type { ModelInfo } from "../../../src/lib/provider/types.js";
-import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import type { ProjectServicesConfig } from "../../../src/lib/types.js";
 
 export type ClaudeTraceName =
 	| "api-retry-pong-turn"
@@ -136,7 +136,7 @@ export interface ClaudeReplayPlan {
 
 export interface ClaudeTraceReplayer {
 	/** Pass as `claudeSdk` to createRelayStack. */
-	readonly sdk: NonNullable<ProjectRelayConfig["claudeSdk"]> & {
+	readonly sdk: NonNullable<ProjectServicesConfig["claudeSdk"]> & {
 		readonly subagentSdk: ClaudeSubagentSdk;
 	};
 	/** The permission mode the runtime requested for each sent prompt, in order. */

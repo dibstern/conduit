@@ -9,7 +9,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
-import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../src/lib/provider/project-event-sink.js";
 import type { SessionPermissionMode } from "../../../src/lib/shared-types.js";
 
 const modeChanged = (mode: SessionPermissionMode): ProviderRuntimeEvent => ({
@@ -24,11 +24,11 @@ const modeChanged = (mode: SessionPermissionMode): ProviderRuntimeEvent => ({
 	createdAt: Date.now(),
 });
 
-describe("createRelayEventSink — SDK-reported permission mode", () => {
+describe("createProjectEventSink — SDK-reported permission mode", () => {
 	it("persists the change and updates the live override", async () => {
 		const persisted: CanonicalEvent[] = [];
 		const applied: SessionPermissionMode[] = [];
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			persist: {
 				persistEvent: (event) =>
@@ -57,7 +57,7 @@ describe("createRelayEventSink — SDK-reported permission mode", () => {
 	// swallowed it would leave the SDK and conduit disagreeing again.
 	it("still updates the live override when the sink has no persistence", async () => {
 		const applied: SessionPermissionMode[] = [];
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: "ses-1",
 			applyReportedPermissionMode: (mode) =>
 				Effect.sync(() => {

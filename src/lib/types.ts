@@ -11,12 +11,13 @@ import type {
 export type {
 	AgentInfo,
 	AskUserQuestion,
+	BrowserMessage,
 	CommandInfo,
 	DaemonSessionCursor,
 	DaemonSessionQueryOptions,
 	DaemonSessionQueryResult,
 	FileEntry,
-	GlobalRelayEvent,
+	GlobalBrowserMessage,
 	InstanceConfig,
 	InstanceStatus,
 	ModelInfo,
@@ -29,13 +30,12 @@ export type {
 	ProviderPermissionUpdateDestination,
 	PtyInfo,
 	PtyStatus,
-	RelayMessage,
 	SessionInfo,
 	TodoItem,
 	TodoStatus,
 	ToolName,
 	ToolStatus,
-	UntaggedRelayMessage,
+	UntaggedBrowserMessage,
 	UsageInfo,
 } from "./shared-types.js";
 export { tagWithSessionId } from "./shared-types.js";
@@ -148,7 +148,7 @@ export interface ClaudeSdkSeam {
 }
 
 /** Config for creating a per-project relay that receives attached sockets. */
-export interface ProjectRelayConfig {
+export interface ProjectServicesConfig {
 	/** Immediate cached environment snapshot; shell resolution runs in the background. */
 	shellEnv?: (
 		directory: string,

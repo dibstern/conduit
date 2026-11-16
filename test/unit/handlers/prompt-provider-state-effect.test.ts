@@ -43,7 +43,7 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
-import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import type { ProjectServicesConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	MOCK_PROJECT_DIR,
@@ -102,7 +102,7 @@ const makeIngestionLayer = (
 	persistence: ReturnType<typeof makePersistenceEffectLayer>,
 ) =>
 	makeProviderRuntimeIngestionLive({
-		relayPublisher: { publish: () => Effect.void },
+		browserPublisher: { publish: () => Effect.void },
 	}).pipe(Layer.provide(persistence));
 
 describe("handleMessage with Effect provider state persistence", () => {
@@ -187,7 +187,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						configDir: dir,
 						persistenceDbPath: filename,
 						publishGlobalSetting: () => Effect.void,
-					} satisfies ProjectRelayConfig),
+					} satisfies ProjectServicesConfig),
 					PendingInteractionServiceLive,
 					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
@@ -319,7 +319,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					configDir: dir,
 					persistenceDbPath: filename,
 					publishGlobalSetting: () => Effect.void,
-				} satisfies ProjectRelayConfig),
+				} satisfies ProjectServicesConfig),
 				PendingInteractionServiceLive,
 				Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 				Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
@@ -452,7 +452,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						configDir: dir,
 						persistenceDbPath: filename,
 						publishGlobalSetting: () => Effect.void,
-					} satisfies ProjectRelayConfig),
+					} satisfies ProjectServicesConfig),
 					PendingInteractionServiceLive,
 					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
@@ -611,7 +611,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						configDir: dir,
 						persistenceDbPath: filename,
 						publishGlobalSetting: () => Effect.void,
-					} satisfies ProjectRelayConfig),
+					} satisfies ProjectServicesConfig),
 					PendingInteractionServiceLive,
 					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),

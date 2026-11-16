@@ -8,7 +8,7 @@ import {
 	resetProcessingTimeout,
 } from "../domain/project-services/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
-import type { RelayMessage } from "../shared-types.js";
+import type { BrowserMessage } from "../shared-types.js";
 
 export type RouteDecision =
 	| { action: "send"; sessionId: string }
@@ -17,7 +17,7 @@ export type RouteDecision =
 export type EventSource = "sse" | "message-poller" | "status-poller" | "prompt";
 
 export interface PipelineResult {
-	msg: RelayMessage;
+	msg: BrowserMessage;
 	route: RouteDecision;
 	cache: boolean;
 	timeout: "clear" | "reset" | "none";
@@ -26,7 +26,7 @@ export interface PipelineResult {
 
 /** Determine whether a message type is persisted to the event store for replay. */
 export function shouldCache(
-	type: RelayMessage["type"],
+	type: BrowserMessage["type"],
 ): type is PersistedEventType {
 	return PERSISTED_TYPES.has(type);
 }
@@ -49,12 +49,12 @@ export const PERSISTED_EVENT_TYPES = [
 
 export type PersistedEventType = (typeof PERSISTED_EVENT_TYPES)[number];
 
-const PERSISTED_TYPES: ReadonlySet<RelayMessage["type"]> = new Set(
+const PERSISTED_TYPES: ReadonlySet<BrowserMessage["type"]> = new Set(
 	PERSISTED_EVENT_TYPES,
 );
 
 type _AssertPersistedSubset =
-	(typeof PERSISTED_EVENT_TYPES)[number] extends RelayMessage["type"]
+	(typeof PERSISTED_EVENT_TYPES)[number] extends BrowserMessage["type"]
 		? true
 		: { error: "PERSISTED_EVENT_TYPES has invalid types" };
 const _assertPersistedTypes: _AssertPersistedSubset = true;
@@ -141,7 +141,7 @@ export function applyPipelineResultEffect(
  * The caller is responsible for executing side effects (sending, caching, etc.).
  */
 export function processEvent(
-	msg: RelayMessage,
+	msg: BrowserMessage,
 	sessionId: string | undefined,
 	viewed: boolean,
 	source: EventSource = "sse",

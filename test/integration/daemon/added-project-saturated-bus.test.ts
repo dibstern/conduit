@@ -15,7 +15,7 @@ import {
 	DaemonEventBusTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
@@ -168,7 +168,7 @@ it("serves a project added while the daemon's bus is saturated: clears its orpha
 	const addWhileSaturated = () =>
 		daemon.runPromise(
 			Effect.gen(function* () {
-				yield* addWithoutRelay(added, { silent: true });
+				yield* addWithoutOpening(added, { silent: true });
 				yield* PubSub.publishAll(
 					yield* DaemonEventBusTag,
 					Array.from({ length: 300 }, () =>

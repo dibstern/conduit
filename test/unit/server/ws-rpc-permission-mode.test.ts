@@ -7,7 +7,7 @@ import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { loadGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import { LoggerTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { restoreSessionSettings } from "../../../src/lib/domain/project-services/Services/session-model-settings.js";
 import {
@@ -42,7 +42,7 @@ describe("WsRpcServerLayer SetDefaultPermissionMode", () => {
 
 			expect(result).toEqual({ projectSlug: "project-a", mode: "auto" });
 			expect(yield* getDefaultPermissionMode()).toBe("auto");
-			expect(loadRelaySettings(configDir).defaultPermissionMode).toBe("auto");
+			expect(loadGlobalSettings(configDir).defaultPermissionMode).toBe("auto");
 			// A tab with no session shows the mode a new session would start in.
 			const models = yield* client.GetModels({ projectSlug: "project-a" });
 			expect(models.permissionMode).toBe("auto");

@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-	loadRelaySettings,
+	loadGlobalSettings,
 	parseDefaultModel,
-	saveRelaySettings,
+	saveGlobalSettings,
 } from "../../../src/lib/daemon/global-settings.js";
 
 describe("global-settings", () => {
@@ -19,9 +19,9 @@ describe("global-settings", () => {
 		rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	describe("loadRelaySettings", () => {
+	describe("loadGlobalSettings", () => {
 		it("returns empty settings when file does not exist", () => {
-			const settings = loadRelaySettings(tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings).toEqual({});
 		});
 
@@ -30,7 +30,7 @@ describe("global-settings", () => {
 				join(tempDir, "settings.jsonc"),
 				JSON.stringify({ defaultModel: "anthropic/claude-sonnet-4-20250514" }),
 			);
-			const settings = loadRelaySettings(tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.defaultModel).toBe("anthropic/claude-sonnet-4-20250514");
 		});
 
@@ -39,20 +39,23 @@ describe("global-settings", () => {
 				join(tempDir, "settings.jsonc"),
 				'{\n  // Default model\n  "defaultModel": "openai/gpt-4o" /* inline */\n}',
 			);
-			const settings = loadRelaySettings(tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.defaultModel).toBe("openai/gpt-4o");
 		});
 
 		it("returns empty settings on corrupt file", () => {
 			writeFileSync(join(tempDir, "settings.jsonc"), "not json{{{");
-			const settings = loadRelaySettings(tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings).toEqual({});
 		});
 	});
 
-	describe("saveRelaySettings", () => {
+	describe("saveGlobalSettings", () => {
 		it("creates the file with correct content", () => {
-			saveRelaySettings({ defaultModel: "anthropic/claude-opus-4-6" }, tempDir);
+			saveGlobalSettings(
+				{ defaultModel: "anthropic/claude-opus-4-6" },
+				tempDir,
+			);
 			const content = readFileSync(join(tempDir, "settings.jsonc"), "utf-8");
 			expect(JSON.parse(content)).toEqual({
 				defaultModel: "anthropic/claude-opus-4-6",
@@ -61,15 +64,15 @@ describe("global-settings", () => {
 
 		it("creates the directory if missing", () => {
 			const nested = join(tempDir, "nested", "dir");
-			saveRelaySettings({ defaultModel: "test/model" }, nested);
+			saveGlobalSettings({ defaultModel: "test/model" }, nested);
 			const content = readFileSync(join(nested, "settings.jsonc"), "utf-8");
 			expect(JSON.parse(content).defaultModel).toBe("test/model");
 		});
 
 		it("overwrites existing settings atomically", () => {
-			saveRelaySettings({ defaultModel: "old/model" }, tempDir);
-			saveRelaySettings({ defaultModel: "new/model" }, tempDir);
-			const settings = loadRelaySettings(tempDir);
+			saveGlobalSettings({ defaultModel: "old/model" }, tempDir);
+			saveGlobalSettings({ defaultModel: "new/model" }, tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.defaultModel).toBe("new/model");
 		});
 	});
@@ -108,21 +111,21 @@ describe("global-settings", () => {
 
 	describe("defaultVariants persistence", () => {
 		it("saves and loads defaultVariants", () => {
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					defaultModel: "anthropic/claude-opus-4-6",
 					defaultVariants: { "anthropic/claude-opus-4-6": "high" },
 				},
 				tempDir,
 			);
-			const settings = loadRelaySettings(tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.defaultVariants).toEqual({
 				"anthropic/claude-opus-4-6": "high",
 			});
 		});
 
 		it("preserves defaultVariants when saving only defaultModel", () => {
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					defaultModel: "anthropic/claude-opus-4-6",
 					defaultVariants: { "anthropic/claude-opus-4-6": "high" },
@@ -130,8 +133,8 @@ describe("global-settings", () => {
 				tempDir,
 			);
 			// Second save with only defaultModel — should merge, not overwrite
-			saveRelaySettings({ defaultModel: "openai/gpt-4o" }, tempDir);
-			const settings = loadRelaySettings(tempDir);
+			saveGlobalSettings({ defaultModel: "openai/gpt-4o" }, tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.defaultModel).toBe("openai/gpt-4o");
 			expect(settings.defaultVariants).toEqual({
 				"anthropic/claude-opus-4-6": "high",
@@ -139,19 +142,19 @@ describe("global-settings", () => {
 		});
 
 		it("merges new defaultVariants entries with existing", () => {
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					defaultVariants: { "anthropic/claude-opus-4-6": "high" },
 				},
 				tempDir,
 			);
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					defaultVariants: { "openai/gpt-4o": "medium" },
 				},
 				tempDir,
 			);
-			const settings = loadRelaySettings(tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.defaultVariants).toEqual({
 				"anthropic/claude-opus-4-6": "high",
 				"openai/gpt-4o": "medium",
@@ -159,39 +162,42 @@ describe("global-settings", () => {
 		});
 
 		it("overwrites variant for same model key", () => {
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					defaultVariants: { "anthropic/claude-opus-4-6": "high" },
 				},
 				tempDir,
 			);
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					defaultVariants: { "anthropic/claude-opus-4-6": "low" },
 				},
 				tempDir,
 			);
-			const settings = loadRelaySettings(tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.defaultVariants?.["anthropic/claude-opus-4-6"]).toBe(
 				"low",
 			);
 		});
 
 		it("returns undefined for missing defaultVariants field", () => {
-			saveRelaySettings({ defaultModel: "anthropic/claude-opus-4-6" }, tempDir);
-			const settings = loadRelaySettings(tempDir);
+			saveGlobalSettings(
+				{ defaultModel: "anthropic/claude-opus-4-6" },
+				tempDir,
+			);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.defaultVariants).toBeUndefined();
 		});
 
 		it("round-trip: persisted variant survives restart", () => {
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					defaultModel: "anthropic/claude-opus-4-6",
 					defaultVariants: { "anthropic/claude-opus-4-6": "high" },
 				},
 				tempDir,
 			);
-			const loaded = loadRelaySettings(tempDir);
+			const loaded = loadGlobalSettings(tempDir);
 			const modelKey = loaded.defaultModel ?? "";
 			expect(loaded.defaultVariants?.[modelKey]).toBe("high");
 		});
@@ -207,7 +213,7 @@ describe("global-settings", () => {
 				}),
 			);
 
-			const settings = loadRelaySettings(tempDir);
+			const settings = loadGlobalSettings(tempDir);
 
 			expect(settings.defaultPermissionMode).toBeUndefined();
 			expect(settings.defaultModel).toBe("openai/gpt-4o");
@@ -219,12 +225,12 @@ describe("global-settings", () => {
 					join(tempDir, "settings.jsonc"),
 					JSON.stringify({ defaultPermissionMode: mode }),
 				);
-				expect(loadRelaySettings(tempDir).defaultPermissionMode).toBe(mode);
+				expect(loadGlobalSettings(tempDir).defaultPermissionMode).toBe(mode);
 			}
 		});
 
 		it("round-trips without replacing other persisted fields", () => {
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					defaultModel: "claude/claude-sonnet-4-7",
 					defaultVariants: { "claude/claude-sonnet-4-7": "high" },
@@ -234,9 +240,9 @@ describe("global-settings", () => {
 				tempDir,
 			);
 
-			saveRelaySettings({ defaultPermissionMode: "auto" }, tempDir);
+			saveGlobalSettings({ defaultPermissionMode: "auto" }, tempDir);
 
-			expect(loadRelaySettings(tempDir)).toEqual({
+			expect(loadGlobalSettings(tempDir)).toEqual({
 				defaultModel: "claude/claude-sonnet-4-7",
 				defaultPermissionMode: "auto",
 				defaultVariants: { "claude/claude-sonnet-4-7": "high" },
@@ -257,7 +263,7 @@ describe("global-settings", () => {
 					defaultPermissionMode: "auto",
 				}),
 			);
-			expect(loadRelaySettings(tempDir)).toEqual({
+			expect(loadGlobalSettings(tempDir)).toEqual({
 				defaultPermissionMode: "auto",
 			});
 		});
@@ -266,9 +272,9 @@ describe("global-settings", () => {
 			"local",
 			"worktree",
 		] as const)("round-trips %s without replacing other persisted fields", (mode) => {
-			saveRelaySettings({ defaultModel: "openai/gpt-4o" }, tempDir);
-			saveRelaySettings({ defaultSessionMode: mode }, tempDir);
-			expect(loadRelaySettings(tempDir)).toEqual({
+			saveGlobalSettings({ defaultModel: "openai/gpt-4o" }, tempDir);
+			saveGlobalSettings({ defaultSessionMode: mode }, tempDir);
+			expect(loadGlobalSettings(tempDir)).toEqual({
 				defaultModel: "openai/gpt-4o",
 				defaultSessionMode: mode,
 			});
@@ -277,8 +283,11 @@ describe("global-settings", () => {
 
 	describe("round-trip: save → load → parse", () => {
 		it("persisted default model survives restart", () => {
-			saveRelaySettings({ defaultModel: "anthropic/claude-opus-4-6" }, tempDir);
-			const loaded = loadRelaySettings(tempDir);
+			saveGlobalSettings(
+				{ defaultModel: "anthropic/claude-opus-4-6" },
+				tempDir,
+			);
+			const loaded = loadGlobalSettings(tempDir);
 			const parsed = parseDefaultModel(loaded.defaultModel);
 			expect(parsed).toEqual({
 				providerID: "anthropic",
@@ -289,14 +298,14 @@ describe("global-settings", () => {
 
 	describe("hidden entries persistence", () => {
 		it("saves and loads hiddenModels and hiddenAgents", () => {
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					hiddenModels: ["openai/gpt-4o", "claude/claude-haiku-4"],
 					hiddenAgents: ["opencode/plan"],
 				},
 				tempDir,
 			);
-			const settings = loadRelaySettings(tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.hiddenModels).toEqual([
 				"openai/gpt-4o",
 				"claude/claude-haiku-4",
@@ -305,43 +314,43 @@ describe("global-settings", () => {
 		});
 
 		it("replaces (not merges) hidden lists on save", () => {
-			saveRelaySettings({ hiddenModels: ["a/b", "c/d"] }, tempDir);
-			saveRelaySettings({ hiddenModels: ["e/f"] }, tempDir);
-			expect(loadRelaySettings(tempDir).hiddenModels).toEqual(["e/f"]);
+			saveGlobalSettings({ hiddenModels: ["a/b", "c/d"] }, tempDir);
+			saveGlobalSettings({ hiddenModels: ["e/f"] }, tempDir);
+			expect(loadGlobalSettings(tempDir).hiddenModels).toEqual(["e/f"]);
 		});
 
 		it("clears a hidden list when saving an empty array", () => {
-			saveRelaySettings({ hiddenAgents: ["opencode/plan"] }, tempDir);
-			saveRelaySettings({ hiddenAgents: [] }, tempDir);
-			expect(loadRelaySettings(tempDir).hiddenAgents).toEqual([]);
+			saveGlobalSettings({ hiddenAgents: ["opencode/plan"] }, tempDir);
+			saveGlobalSettings({ hiddenAgents: [] }, tempDir);
+			expect(loadGlobalSettings(tempDir).hiddenAgents).toEqual([]);
 		});
 
 		it("preserves hidden lists when saving unrelated fields", () => {
-			saveRelaySettings({ hiddenModels: ["a/b"] }, tempDir);
-			saveRelaySettings({ defaultModel: "openai/gpt-4o" }, tempDir);
-			const settings = loadRelaySettings(tempDir);
+			saveGlobalSettings({ hiddenModels: ["a/b"] }, tempDir);
+			saveGlobalSettings({ defaultModel: "openai/gpt-4o" }, tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.hiddenModels).toEqual(["a/b"]);
 			expect(settings.defaultModel).toBe("openai/gpt-4o");
 		});
 
 		it("preserves defaultModel/defaultVariants when saving hidden lists", () => {
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					defaultModel: "openai/gpt-4o",
 					defaultVariants: { "openai/gpt-4o": "high" },
 				},
 				tempDir,
 			);
-			saveRelaySettings({ hiddenModels: ["a/b"] }, tempDir);
-			const settings = loadRelaySettings(tempDir);
+			saveGlobalSettings({ hiddenModels: ["a/b"] }, tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.defaultModel).toBe("openai/gpt-4o");
 			expect(settings.defaultVariants).toEqual({ "openai/gpt-4o": "high" });
 			expect(settings.hiddenModels).toEqual(["a/b"]);
 		});
 
 		it("returns undefined hidden lists when never saved", () => {
-			saveRelaySettings({ defaultModel: "a/b" }, tempDir);
-			const settings = loadRelaySettings(tempDir);
+			saveGlobalSettings({ defaultModel: "a/b" }, tempDir);
+			const settings = loadGlobalSettings(tempDir);
 			expect(settings.hiddenModels).toBeUndefined();
 			expect(settings.hiddenAgents).toBeUndefined();
 		});
@@ -349,7 +358,7 @@ describe("global-settings", () => {
 
 	describe("Claude settings overrides persistence", () => {
 		it("round-trips and replaces the open JSON-valued record", () => {
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					claudeSettings: {
 						autoCompactEnabled: false,
@@ -358,12 +367,12 @@ describe("global-settings", () => {
 				},
 				tempDir,
 			);
-			saveRelaySettings(
+			saveGlobalSettings(
 				{ claudeSettings: { alwaysThinkingEnabled: true } },
 				tempDir,
 			);
 
-			expect(loadRelaySettings(tempDir).claudeSettings).toEqual({
+			expect(loadGlobalSettings(tempDir).claudeSettings).toEqual({
 				alwaysThinkingEnabled: true,
 			});
 		});

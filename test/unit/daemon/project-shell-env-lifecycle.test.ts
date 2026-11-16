@@ -20,7 +20,7 @@ import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daem
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	makeProjectRegistryFromDaemonStateLive,
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
@@ -124,7 +124,7 @@ describe("daemon project shell env lifecycle", () => {
 					});
 					const config = yield* buildDaemonConfigSnapshot;
 					expect(config.projects[0]?.shellEnv).toEqual(shellEnv);
-					yield* addWithoutRelay({
+					yield* addWithoutOpening({
 						slug: "added",
 						title: "Added",
 						folders: [added],

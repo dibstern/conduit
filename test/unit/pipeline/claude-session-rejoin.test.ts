@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../src/lib/provider/project-event-sink.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 const SESSION_ID = "ses-rejoin-1";
@@ -9,7 +9,7 @@ describe("Claude session processing timeout", () => {
 	it("clears PROCESSING_TIMEOUT after a provider error", async () => {
 		let timeoutCleared = false;
 
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: SESSION_ID,
 			clearTimeout: () => {
 				timeoutCleared = true;

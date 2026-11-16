@@ -1,12 +1,12 @@
 // Diff/synthesize logic for converting REST message snapshots into relay
 // events. These functions compare current messages against previous state and
-// emit synthetic RelayMessages (delta, tool_start, tool_result,
+// emit synthetic BrowserMessages (delta, tool_start, tool_result,
 // thinking_*, result, done, etc.).
 //
 // Used by the message poller implementation and tested independently.
 
 import type { Message } from "../../instance/sdk-types.js";
-import type { UntaggedRelayMessage } from "../../shared-types.js";
+import type { UntaggedBrowserMessage } from "../../shared-types.js";
 import {
 	endsOpenCodeTurn,
 	mapToolName,
@@ -48,7 +48,7 @@ export interface MessageSnapshot {
 export function synthesizeTextPart(
 	part: { id: string; type: string; [key: string]: unknown },
 	snap: PartSnapshot,
-	events: UntaggedRelayMessage[],
+	events: UntaggedBrowserMessage[],
 	messageId: string,
 	deltaType: "delta" | "thinking_delta",
 ): boolean {
@@ -90,7 +90,7 @@ export function synthesizeToolPart(
 	part: { id: string; type: string; [key: string]: unknown },
 	snap: PartSnapshot,
 	prev: PartSnapshot | null,
-	events: UntaggedRelayMessage[],
+	events: UntaggedBrowserMessage[],
 	messageId: string,
 ): boolean {
 	const state = part["state"] as
@@ -163,11 +163,11 @@ export function synthesizePartEvents(
 	prev: PartSnapshot | null,
 	messageId: string,
 ): {
-	events: UntaggedRelayMessage[];
+	events: UntaggedBrowserMessage[];
 	snapshot: PartSnapshot;
 	hasActivity: boolean;
 } {
-	const events: UntaggedRelayMessage[] = [];
+	const events: UntaggedBrowserMessage[] = [];
 	let hasActivity = false;
 	const partType = part.type;
 
@@ -220,7 +220,7 @@ function extractUserText(msg: Message): string {
 function synthesizeResultEvent(
 	msg: Message,
 	messages: readonly Message[],
-): UntaggedRelayMessage | null {
+): UntaggedBrowserMessage | null {
 	if (msg.time?.completed === undefined) return null;
 
 	const turnSteps =
@@ -257,11 +257,11 @@ export function diffAndSynthesize(
 	previousSnapshot: Map<string, MessageSnapshot>,
 	messages: Message[],
 ): {
-	events: UntaggedRelayMessage[];
+	events: UntaggedBrowserMessage[];
 	newSnapshot: Map<string, MessageSnapshot>;
 	hasActivity: boolean;
 } {
-	const events: UntaggedRelayMessage[] = [];
+	const events: UntaggedBrowserMessage[] = [];
 	let hasActivity = false;
 	const newSnapshot = new Map<string, MessageSnapshot>();
 

@@ -10,7 +10,7 @@
 //   viewers on session).
 
 import type { Alert } from "../contracts/ws-rpc.js";
-import type { RelayMessage } from "../shared-types.js";
+import type { BrowserMessage } from "../shared-types.js";
 import type { RouteDecision } from "./event-pipeline.js";
 
 export interface NotificationResolution {
@@ -25,7 +25,7 @@ export interface NotificationResolution {
  * session is a subagent, decide what notifications to fire.
  */
 export function resolveNotifications(
-	msg: RelayMessage,
+	msg: BrowserMessage,
 	route: RouteDecision,
 	isSubagent: boolean,
 	sessionId?: string,

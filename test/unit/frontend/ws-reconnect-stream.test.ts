@@ -62,7 +62,7 @@ import {
 	connectionState,
 	markControlSocketOpen,
 	trackControlSocket,
-	viewRelayStatus,
+	viewProjectStatus,
 } from "../../../src/lib/frontend/transport/connection-status.svelte.js";
 
 function installBrowserGlobals(): void {
@@ -94,12 +94,12 @@ describe("RPC connection status recovery", () => {
 		replaceStateMock.mockClear();
 		routerState.path = "/";
 		routerState.search = "?p=conduit";
-		viewRelayStatus(null);
+		viewProjectStatus(null);
 		connectionState.status = "";
 		connectionState.statusText = "";
 		connectionState.attempts = 0;
-		connectionState.relayStatus = undefined;
-		connectionState.relayError = undefined;
+		connectionState.projectStatus = undefined;
+		connectionState.projectError = undefined;
 	});
 
 	afterEach(() => {
@@ -108,7 +108,7 @@ describe("RPC connection status recovery", () => {
 		for (const socket of instances) socket.close();
 		vi.unstubAllGlobals();
 		routerState.path = "/";
-		viewRelayStatus(null);
+		viewProjectStatus(null);
 	});
 
 	it("waits for a shown project before fetching its relay status", async () => {
@@ -123,9 +123,9 @@ describe("RPC connection status recovery", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 		const ws = instances[0];
 		await vi.waitFor(() => expect(ws?.listenerCount("message")).toBe(1));
-		viewRelayStatus("project-b");
+		viewProjectStatus("project-b");
 
-		await vi.waitFor(() => expect(connectionState.relayStatus).toBe("ready"));
+		await vi.waitFor(() => expect(connectionState.projectStatus).toBe("ready"));
 		expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
 			"/p/project-b/api/status",
 		);
@@ -150,14 +150,14 @@ describe("RPC connection status recovery", () => {
 		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
 		const ws = instances[0];
 		await vi.waitFor(() => expect(ws?.listenerCount("message")).toBe(1));
-		viewRelayStatus("project-a");
+		viewProjectStatus("project-a");
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-		viewRelayStatus("project-b");
-		await vi.waitFor(() => expect(connectionState.relayStatus).toBe("ready"));
+		viewProjectStatus("project-b");
+		await vi.waitFor(() => expect(connectionState.projectStatus).toBe("ready"));
 		resolveOldStatus(new Response(null, { status: 401 }));
 		// Flush the stale response handler before asserting it did not replace the new status.
 		await new Promise<void>((resolve) => setImmediate(resolve));
-		expect(connectionState.relayStatus).toBe("ready");
+		expect(connectionState.projectStatus).toBe("ready");
 		expect(replaceStateMock).not.toHaveBeenCalled();
 		expect(fetchMock.mock.calls).toEqual([
 			["/p/project-a/api/status"],
@@ -186,7 +186,7 @@ describe("RPC connection status recovery", () => {
 
 	it("applies a successful relay status without replacing the route", async () => {
 		// The shown project, picked while the network is offline.
-		viewRelayStatus("conduit");
+		viewProjectStatus("conduit");
 		vi.stubGlobal(
 			"fetch",
 			vi.fn().mockResolvedValue(
@@ -199,14 +199,14 @@ describe("RPC connection status recovery", () => {
 
 		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
 
-		await vi.waitFor(() => expect(connectionState.relayStatus).toBe("ready"));
+		await vi.waitFor(() => expect(connectionState.projectStatus).toBe("ready"));
 		expect(routerState.path).toBe("/");
 		expect(replaceStateMock).not.toHaveBeenCalled();
 	});
 
 	it("ignores an unauthenticated response from an obsolete connection", async () => {
 		// The shown project, picked while the network is offline.
-		viewRelayStatus("conduit");
+		viewProjectStatus("conduit");
 		let resolveFirst!: (response: Response) => void;
 		const firstResponse = new Promise<Response>((resolve) => {
 			resolveFirst = resolve;
@@ -236,12 +236,12 @@ describe("RPC connection status recovery", () => {
 			),
 		);
 
-		await vi.waitFor(() => expect(connectionState.relayStatus).toBe("ready"));
+		await vi.waitFor(() => expect(connectionState.projectStatus).toBe("ready"));
 		instances[1]?.open();
 		markControlSocketOpen();
 		expect(connectionState.status).toBe("connected");
 		expect(connectionState.attempts).toBe(0);
-		expect(connectionState.relayStatus).toBeUndefined();
+		expect(connectionState.projectStatus).toBeUndefined();
 		instances[0]?.open();
 		instances[0]?.close();
 		expect(connectionState.status).toBe("connected");
@@ -251,7 +251,7 @@ describe("RPC connection status recovery", () => {
 
 	it("ignores a parsed status body from an obsolete connection", async () => {
 		// The shown project, picked while the network is offline.
-		viewRelayStatus("conduit");
+		viewProjectStatus("conduit");
 		let bodyController!: ReadableStreamDefaultController<Uint8Array>;
 		const delayedResponse = new Response(
 			new ReadableStream<Uint8Array>({
@@ -275,7 +275,7 @@ describe("RPC connection status recovery", () => {
 		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
 		trackControlSocket(new WebSocket("ws://localhost:3000/rpc"));
-		await vi.waitFor(() => expect(connectionState.relayStatus).toBe("ready"));
+		await vi.waitFor(() => expect(connectionState.projectStatus).toBe("ready"));
 
 		bodyController.enqueue(
 			new TextEncoder().encode(
@@ -285,6 +285,6 @@ describe("RPC connection status recovery", () => {
 		bodyController.close();
 		// Flush the closed stale stream before asserting it did not change relay state.
 		await new Promise<void>((resolve) => setImmediate(resolve));
-		expect(connectionState.relayError).toBeUndefined();
+		expect(connectionState.projectError).toBeUndefined();
 	});
 });

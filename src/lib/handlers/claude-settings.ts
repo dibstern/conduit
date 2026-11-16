@@ -7,8 +7,8 @@ import {
 } from "../contracts/claude-settings.js";
 import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
+	loadGlobalSettings,
+	saveGlobalSettings,
 } from "../daemon/global-settings.js";
 import { ProjectShellEnvTag } from "../domain/daemon/Layers/project-shell-env-layer.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
@@ -24,8 +24,8 @@ import {
 	resolveClaudeSettingsFromDisk,
 } from "../provider/claude/claude-settings-resolver.js";
 
-class RelaySettingsSaveError extends Data.TaggedError(
-	"RelaySettingsSaveError",
+class GlobalSettingsSaveError extends Data.TaggedError(
+	"GlobalSettingsSaveError",
 )<{ readonly cause: unknown }> {}
 
 class ClaudeSettingsInstanceError extends Data.TaggedError(
@@ -35,10 +35,10 @@ class ClaudeSettingsInstanceError extends Data.TaggedError(
 export function getClaudeSettingsOverrides(
 	configDir?: string,
 ): ClaudeSettingsOverrides {
-	return loadRelaySettings(configDir).claudeSettings ?? {};
+	return loadGlobalSettings(configDir).claudeSettings ?? {};
 }
 
-export const setClaudeSettingsForRelay = (input: {
+export const setClaudeSettingsGlobally = (input: {
 	readonly clientId: string;
 	readonly overrides: ClaudeSettingsOverrides;
 }) =>
@@ -57,11 +57,11 @@ export const setClaudeSettingsForRelay = (input: {
 		const log = yield* LoggerTag;
 		yield* Effect.try({
 			try: () =>
-				saveRelaySettings(
+				saveGlobalSettings(
 					{ claudeSettings: { ...input.overrides } },
 					config.configDir,
 				),
-			catch: (cause) => new RelaySettingsSaveError({ cause }),
+			catch: (cause) => new GlobalSettingsSaveError({ cause }),
 		});
 
 		const overrides = getClaudeSettingsOverrides(config.configDir);

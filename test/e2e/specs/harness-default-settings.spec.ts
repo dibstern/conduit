@@ -6,7 +6,7 @@ import {
 	ProjectSettingSchema,
 	WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import type { RelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import type { GlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import type { Harness } from "../../../src/lib/provider/turn-settings.js";
 import type { ModelInfo } from "../../../src/lib/provider/types.js";
 import type {
@@ -45,7 +45,7 @@ const openCodePick = {
 	effort: "",
 	contextWindow: "",
 };
-const legacySettings: RelaySettings = {
+const legacySettings: GlobalSettings = {
 	defaultModel: "claude/sonnet",
 	defaultVariants: { "claude/sonnet": "low", "claude/opus": "high" },
 };
@@ -56,17 +56,17 @@ test.use({
 	harnessOptions: {
 		opencodeRecording: "chat-simple",
 		capabilityModels: claudeModels,
-		relaySettings: legacySettings,
+		globalSettings: legacySettings,
 	},
 });
 
 const field = (page: Page, harness: Harness, name: string) =>
 	page.getByTestId(`settings-harness-default-${harness}-${name}`);
 
-function stored(harness: ProcessHarness): RelaySettings {
+function stored(harness: ProcessHarness): GlobalSettings {
 	const file = join(harness.configDir, "settings.jsonc");
 	return existsSync(file)
-		? (JSON.parse(readFileSync(file, "utf8")) as RelaySettings)
+		? (JSON.parse(readFileSync(file, "utf8")) as GlobalSettings)
 		: {};
 }
 
@@ -390,7 +390,7 @@ test.describe("foreign stored pick", () => {
 		harnessOptions: {
 			opencodeRecording: "chat-simple",
 			capabilityModels: claudeModels,
-			relaySettings: {
+			globalSettings: {
 				...legacySettings,
 				harnessDefaults: {
 					claude: {
@@ -435,7 +435,7 @@ test.describe("no OpenCode catalog", () => {
 		harnessOptions: {
 			capabilityModels: claudeModels,
 			managedOpenCode: true,
-			relaySettings: {
+			globalSettings: {
 				harnessDefaults: {
 					opencode: {
 						providerId: openCodePick.providerId,
@@ -471,7 +471,7 @@ test.describe("unavailable stored model", () => {
 		harnessOptions: {
 			opencodeRecording: "chat-simple",
 			capabilityModels: claudeModels,
-			relaySettings: {
+			globalSettings: {
 				harnessDefaults: {
 					claude: {
 						providerId: "claude",

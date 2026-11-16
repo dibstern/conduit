@@ -30,7 +30,7 @@ import {
 	WsRpcError,
 } from "../../contracts/ws-rpc.js";
 import { autoSettleIdleWindowMs } from "../../daemon/config-persistence.js";
-import { saveRelaySettings } from "../../daemon/global-settings.js";
+import { saveGlobalSettings } from "../../daemon/global-settings.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
 import { FolderTimeline } from "../../domain/daemon/Services/folder-timeline.js";
@@ -951,7 +951,7 @@ export const sessionsHandlers = {
 						config.slug !== SCRATCH_PROJECT_SLUG
 					) {
 						yield* Effect.try(() =>
-							saveRelaySettings(
+							saveGlobalSettings(
 								{ lastSessionMode: request.newWorktree ? "worktree" : "local" },
 								config.configDir,
 							),

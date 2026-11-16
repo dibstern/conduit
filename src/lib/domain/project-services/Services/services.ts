@@ -24,8 +24,8 @@ import type { OrchestrationEngine } from "../../../provider/orchestration-engine
 import type { HistoryMessage } from "../../../shared-types.js";
 import type { PtyManager } from "../../../terminal/pty-manager.js";
 import type {
-	ProjectRelayConfig,
-	RelayMessage,
+	BrowserMessage,
+	ProjectServicesConfig,
 	SessionInfo,
 } from "../../../types.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
@@ -55,7 +55,7 @@ export interface PollerManagerShape {
 	on(
 		event: "events",
 		callback: (
-			messages: RelayMessage[],
+			messages: BrowserMessage[],
 			sessionId: string,
 			hasActivity?: boolean,
 		) => void,
@@ -63,7 +63,7 @@ export interface PollerManagerShape {
 	off(
 		event: "events",
 		callback: (
-			messages: RelayMessage[],
+			messages: BrowserMessage[],
 			sessionId: string,
 			hasActivity?: boolean,
 		) => void,
@@ -377,9 +377,10 @@ export class PtyManagerTag extends Context.Service<PtyManagerTag, PtyManager>()(
 	"PtyManager",
 ) {}
 
-export class ConfigTag extends Context.Service<ConfigTag, ProjectRelayConfig>()(
-	"Config",
-) {}
+export class ConfigTag extends Context.Service<
+	ConfigTag,
+	ProjectServicesConfig
+>()("Config") {}
 
 export class LoggerTag extends Context.Service<LoggerTag, Logger>()("Logger") {}
 
@@ -433,7 +434,7 @@ type _AssertCoverage = {
 		: K extends "ptyManager"
 			? PtyManager
 			: K extends "config"
-				? ProjectRelayConfig
+				? ProjectServicesConfig
 				: K extends "log"
 					? Logger
 					: K extends "statusPoller"

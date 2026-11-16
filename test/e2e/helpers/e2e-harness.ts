@@ -20,8 +20,8 @@ import {
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
+	loadGlobalSettings,
+	saveGlobalSettings,
 } from "../../../src/lib/daemon/global-settings.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSdkClient } from "../../../src/lib/instance/sdk-factory.js";
@@ -231,7 +231,7 @@ export async function createReplayHarness(
 	const claudeReplayer =
 		options.claudeReplay && createClaudeTraceReplayer(options.claudeReplay);
 	const eventsDbPath = path.join(configDir, "events.db");
-	saveRelaySettings(
+	saveGlobalSettings(
 		{
 			defaultModel: claudeReplayer
 				? `claude/${CLAUDE_TRACE_MODEL}`
@@ -293,7 +293,7 @@ export async function createReplayHarness(
 			slug: "e2e-replay",
 			...(options.projectDir && { projectDir: options.projectDir }),
 			defaultModel: null,
-			settings: { ...loadRelaySettings(configDir) },
+			settings: { ...loadGlobalSettings(configDir) },
 			...(claudeReplayer && { claudeSdk: claudeReplayer.sdk }),
 		});
 	let project = await start(0);

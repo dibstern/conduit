@@ -11,8 +11,8 @@ import type {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import type {
 	AssistantMessage,
+	BrowserMessage,
 	ChatMessage,
-	RelayMessage,
 	ThinkingMessage,
 } from "../../../src/lib/frontend/types.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
@@ -21,11 +21,11 @@ let _ta: SessionActivity;
 let _tm: SessionMessages;
 
 // Helper to create typed relay messages
-function _msg<T extends RelayMessage["type"]>(
+function _msg<T extends BrowserMessage["type"]>(
 	type: T,
-	data?: Partial<Extract<RelayMessage, { type: T }>>,
-): Extract<RelayMessage, { type: T }> {
-	return { type, ...data } as Extract<RelayMessage, { type: T }>;
+	data?: Partial<Extract<BrowserMessage, { type: T }>>,
+): Extract<BrowserMessage, { type: T }> {
+	return { type, ...data } as Extract<BrowserMessage, { type: T }>;
 }
 
 describe("Fork-split thinking invariants", () => {

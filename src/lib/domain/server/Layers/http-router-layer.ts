@@ -31,7 +31,7 @@ import {
 import { ProjectServices } from "../../daemon/Services/project-services.js";
 import { AttachmentStoreTag } from "../../persistence/Services/attachment-store.js";
 import { ProjectSettingsTag } from "../../project-services/Services/project-settings.js";
-import { RelayStatusSnapshotTag } from "../../project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotTag } from "../../project-services/Services/project-status-snapshot.js";
 import { StatusPollerCoreTag } from "../../project-services/Services/session-status-poller.js";
 import { PushManagerTag } from "../Services/push-service.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
@@ -176,7 +176,8 @@ const makeDaemonProjectsReader = (deps: {
 					// An unopened project reads its persisted count and stays closed.
 					const opened = Option.getOrUndefined(yield* projects.opened(slug));
 					const snapshot =
-						opened && Context.get(opened, RelayStatusSnapshotTag).getSnapshot();
+						opened &&
+						Context.get(opened, ProjectStatusSnapshotTag).getSnapshot();
 					const sessions =
 						snapshot?.sessionCount ||
 						config.persistedSessionCounts.get(slug) ||

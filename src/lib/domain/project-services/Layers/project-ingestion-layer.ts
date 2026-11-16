@@ -8,7 +8,7 @@ import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effec
 import { ClaudeProviderInstance } from "../../../provider/claude/claude-provider-instance.js";
 import { OpenCodeProviderInstance } from "../../../provider/opencode-provider-instance.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
-import { publishProviderRelayMessage } from "../../../provider/turn-done-publisher.js";
+import { publishTurnDone } from "../../../provider/turn-done-publisher.js";
 import type { PushNotificationSender } from "../../../server/push.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { ProviderAdapters } from "../../daemon/Services/provider-adapters.js";
@@ -125,12 +125,12 @@ export const makeProjectIngestionLive = (
 								new EventStoreError({ operation: "workspace.changed", cause }),
 						),
 					),
-				relayPublisher: {
+				browserPublisher: {
 					publish: (msg) =>
 						Effect.gen(function* () {
 							const pushManager = Option.getOrUndefined(yield* push);
 							// A browser on the daemon socket counts as a viewer (82tn.16).
-							yield* publishProviderRelayMessage(msg, {
+							yield* publishTurnDone(msg, {
 								isViewed: activity.hasViewers,
 								log,
 								slug,

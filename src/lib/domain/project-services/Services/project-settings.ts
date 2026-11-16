@@ -33,9 +33,9 @@ import type {
 	ProjectSettingsEnvelope,
 } from "../../../contracts/ws-rpc.js";
 import {
-	loadRelaySettings,
+	type GlobalSettings,
+	loadGlobalSettings,
 	parseDefaultModel,
-	type RelaySettings,
 } from "../../../daemon/global-settings.js";
 import {
 	resolveTitleGeneration,
@@ -163,7 +163,7 @@ export const publishProjectSetting = (setting: ProjectSetting) =>
 
 const readHarnessDefaults = Effect.gen(function* () {
 	const config = yield* ConfigTag;
-	const settings = loadRelaySettings(config.configDir);
+	const settings = loadGlobalSettings(config.configDir);
 	const facts = yield* Ref.get((yield* ProjectSettingsTag).live);
 	const modelService = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 	const openCode =
@@ -237,7 +237,8 @@ const readHarnessDefaults = Effect.gen(function* () {
 
 export const readTitleGenerationState = Effect.gen(function* () {
 	const config = yield* ConfigTag;
-	const selection = loadRelaySettings(config.configDir).titleGeneration ?? null;
+	const selection =
+		loadGlobalSettings(config.configDir).titleGeneration ?? null;
 	const directory = yield* Effect.serviceOption(AccountDirectory);
 	if (Option.isNone(directory))
 		return { selection, status: "unverified" } satisfies TitleGenerationState;
@@ -281,7 +282,7 @@ export const refreshModelSettings: Effect.Effect<void> = Effect.gen(
 );
 
 const globalSettingRows = (
-	settings: RelaySettings,
+	settings: GlobalSettings,
 	defaults: OverridesState,
 	titleGeneration: TitleGenerationState,
 	projectId: string,
@@ -332,7 +333,7 @@ export const refreshGlobalDefaults = Effect.gen(function* () {
 	const config = yield* ConfigTag;
 	const titleGeneration = yield* readTitleGenerationState;
 	return yield* Ref.modify(yield* OverridesStateTag, (state) => {
-		const settings = loadRelaySettings(config.configDir);
+		const settings = loadGlobalSettings(config.configDir);
 		const defaultModel = parseDefaultModel(settings.defaultModel);
 		const next: OverridesState = {
 			...state,
@@ -379,7 +380,7 @@ const readProjectSettings = Effect.gen(function* () {
 	return [
 		...Object.values(
 			globalSettingRows(
-				loadRelaySettings(config.configDir),
+				loadGlobalSettings(config.configDir),
 				defaults,
 				titleGeneration,
 				config.slug,

@@ -5,7 +5,7 @@ import {
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
 import type { ModelInfo as WireModelInfo } from "../contracts/ws-rpc.js";
-import type { RelaySettings } from "../daemon/global-settings.js";
+import type { GlobalSettings } from "../daemon/global-settings.js";
 import {
 	claudeApiModelId,
 	isSameModelIdentity,
@@ -168,7 +168,7 @@ export class PickRequired extends Data.TaggedError("PickRequired") {
 /** Creation and legacy backfill defaults. Stored session picks stay unchanged. */
 export function harnessDefaultPick(
 	harness: Harness,
-	settings: RelaySettings,
+	settings: GlobalSettings,
 	nativeDefaultModel?: string,
 ): TurnPick | undefined {
 	const stored = settings.harnessDefaults?.[harness];

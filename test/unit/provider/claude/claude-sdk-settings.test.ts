@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CLAUDE_TRUST_TIERED_SETTINGS_KEYS } from "../../../../src/lib/contracts/claude-settings.js";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
+	loadGlobalSettings,
+	saveGlobalSettings,
 } from "../../../../src/lib/daemon/global-settings.js";
 import { buildClaudeFlagSettings } from "../../../../src/lib/provider/claude/claude-sdk-settings.js";
 
@@ -50,7 +50,7 @@ describe("buildClaudeFlagSettings", () => {
 			join(tmpdir(), "conduit-claude-permission-boundary-"),
 		);
 		try {
-			saveRelaySettings(
+			saveGlobalSettings(
 				{
 					defaultPermissionMode: "auto",
 					claudeSettings: { autoCompactEnabled: false },
@@ -58,12 +58,12 @@ describe("buildClaudeFlagSettings", () => {
 				configDir,
 			);
 
-			const relaySettings = loadRelaySettings(configDir);
-			expect(relaySettings.claudeSettings).not.toHaveProperty(
+			const globalSettings = loadGlobalSettings(configDir);
+			expect(globalSettings.claudeSettings).not.toHaveProperty(
 				"defaultPermissionMode",
 			);
 			expect(
-				buildClaudeFlagSettings(relaySettings.claudeSettings),
+				buildClaudeFlagSettings(globalSettings.claudeSettings),
 			).not.toHaveProperty("defaultPermissionMode");
 		} finally {
 			rmSync(configDir, { recursive: true, force: true });

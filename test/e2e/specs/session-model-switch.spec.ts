@@ -3,7 +3,7 @@
 // a new-session draft has no model for the session yet.
 
 import { dirname } from "node:path";
-import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { saveGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -28,7 +28,7 @@ test.describe("Claude session model on session switch", () => {
 		// A different global default, so the draft's chip cannot stand in for
 		// the session's model.
 		await harness.restart(() =>
-			saveRelaySettings(
+			saveGlobalSettings(
 				{ defaultModel: "opencode/big-pickle" },
 				dirname(harness.eventsDbPath),
 			),

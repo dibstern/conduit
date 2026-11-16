@@ -351,8 +351,8 @@
 			</div>
 			<div class="flex gap-4 text-gray-400">
 				<span>attempts: {connectionState.attempts}</span>
-				{#if connectionState.relayStatus}
-					<span>relay: {connectionState.relayStatus}</span>
+				{#if connectionState.projectStatus}
+					<span>relay: {connectionState.projectStatus}</span>
 				{/if}
 			</div>
 			{#if connectionState.statusText}

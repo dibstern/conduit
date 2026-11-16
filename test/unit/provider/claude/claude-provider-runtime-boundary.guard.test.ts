@@ -13,7 +13,7 @@ describe("Claude provider runtime boundary", () => {
 			"src/lib/domain/daemon/Layers/provider-adapters-layer.ts",
 		);
 		const getters = wiring.match(
-			/claudeSettingsOverrides: \(\) =>\s*loadRelaySettings\(configDir\)\.claudeSettings/g,
+			/claudeSettingsOverrides: \(\) =>\s*loadGlobalSettings\(configDir\)\.claudeSettings/g,
 		);
 
 		expect(getters).toHaveLength(1);

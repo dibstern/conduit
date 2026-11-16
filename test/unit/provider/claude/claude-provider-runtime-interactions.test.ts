@@ -47,7 +47,7 @@ import type {
 } from "../../../../src/lib/provider/claude/types.js";
 import { ClaudeBoundaryError } from "../../../../src/lib/provider/event-sink-errors.js";
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
-import { createRelayEventSink } from "../../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../../src/lib/provider/project-event-sink.js";
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
 import { makeRunnerReceiptStore } from "../../../../src/lib/provider/runner/runner-receipts.js";
 import type {
@@ -119,7 +119,7 @@ async function persistentInteractions(permissionTimeoutMs?: number) {
 				),
 			);
 			yield* runner.projectEvent(creation);
-			const sink = createRelayEventSink({
+			const sink = createProjectEventSink({
 				sessionId: "session-1",
 				providerId: "claude",
 				ingestion,
@@ -583,7 +583,7 @@ describe("Claude durable interaction resolution", () => {
 				Effect.gen(function* () {
 					const answerRead = yield* Deferred.make<void>();
 					const finalize = yield* Deferred.make<void>();
-					const sink = createRelayEventSink({
+					const sink = createProjectEventSink({
 						sessionId: "session-1",
 						providerId: "claude",
 						ingestion: f.ingestion,

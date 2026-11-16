@@ -1,6 +1,6 @@
 import { runTerminalStatus } from "../persistence/effect/projectors-effect.js";
 import type { CanonicalEvent } from "../persistence/events.js";
-import type { RelayMessage } from "../shared-types.js";
+import type { BrowserMessage } from "../shared-types.js";
 import { isRecord } from "../utils.js";
 
 export function turnEndedAlert(
@@ -8,7 +8,7 @@ export function turnEndedAlert(
 		readonly type: string;
 		readonly data: unknown;
 	},
-): Extract<RelayMessage, { type: "done" }> | undefined {
+): Extract<BrowserMessage, { type: "done" }> | undefined {
 	const data: Record<string, unknown> = isRecord(event.data) ? event.data : {};
 	// A wake's end is a turn end too: its result's outcome, or completed when it has none.
 	const outcome = isRecord(data["result"])

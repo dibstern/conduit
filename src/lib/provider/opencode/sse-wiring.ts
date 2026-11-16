@@ -55,7 +55,7 @@ import type {
 	SessionPermissionMode,
 } from "../../shared-types.js";
 import { tagWithSessionId } from "../../shared-types.js";
-import type { RelayMessage } from "../../types.js";
+import type { BrowserMessage } from "../../types.js";
 import { applyPipelineResultEffect, processEvent } from "../event-pipeline.js";
 import { resolveNotifications } from "../notification-policy.js";
 import type { Translator } from "./event-translator.js";
@@ -183,7 +183,7 @@ function buildPushContext(slug?: string, sessionId?: string): PushEventContext {
 /**
  * Send a push notification for notable relay messages (done, error, etc.).
  * No-op for message types that don't warrant a notification.
- * Safe to call with any RelayMessage.
+ * Safe to call with any BrowserMessage.
  *
  * Legacy/test-only: the live relay runs the Effect wirings, which go through
  * {@link sendPushForEventEffect}. This twin has no durable delivery claim, so it can
@@ -196,7 +196,7 @@ function buildPushContext(slug?: string, sessionId?: string): PushEventContext {
  */
 export function sendPushForEvent(
 	pushManager: PushSender,
-	msg: RelayMessage | Approval,
+	msg: BrowserMessage | Approval,
 	log: Logger,
 	context?: PushEventContext,
 ): void {
@@ -225,7 +225,7 @@ export function sendPushForEvent(
  * ledger's persisted kinds still key on them.
  */
 const pushKind = (
-	msg: RelayMessage | Approval | GoalStuckNotification,
+	msg: BrowserMessage | Approval | GoalStuckNotification,
 ): string =>
 	"_tag" in msg
 		? msg._tag === "goal_stuck"
@@ -252,7 +252,7 @@ class PushSendFailure extends Data.TaggedError("PushSendFailure")<{
  * Anonymous idle hints cannot identify a completed turn and do not claim one.
  */
 const pushAlert = (
-	msg: RelayMessage | Approval | GoalStuckNotification,
+	msg: BrowserMessage | Approval | GoalStuckNotification,
 	sessionId: string | undefined,
 ): SessionAlert | undefined => {
 	if ("_tag" in msg && msg._tag === "goal_stuck")
@@ -308,7 +308,7 @@ const pushAlert = (
  */
 export const sendPushForEventEffect = (
 	pushManager: PushSender,
-	msg: RelayMessage | Approval | GoalStuckNotification,
+	msg: BrowserMessage | Approval | GoalStuckNotification,
 	log: Logger,
 	context?: PushEventContext,
 ): Effect.Effect<void> =>
@@ -583,10 +583,10 @@ const handleSSEEventAfterPendingEffect = (
 		}
 
 		const targetSessionId = eventSessionId;
-		const toSend: RelayMessage[] = translateResult.messages.map((m) =>
+		const toSend: BrowserMessage[] = translateResult.messages.map((m) =>
 			targetSessionId
 				? tagWithSessionId(m, targetSessionId)
-				: (m as RelayMessage),
+				: (m as BrowserMessage),
 		);
 		for (let msg of toSend) {
 			const pipeResult = processEvent(

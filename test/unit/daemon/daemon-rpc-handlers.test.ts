@@ -30,15 +30,15 @@ import {
 	ProjectSettingsTag,
 } from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import {
-	type RelayStatusSnapshotService,
-	RelayStatusSnapshotTag,
+	type ProjectStatusSnapshotService,
+	ProjectStatusSnapshotTag,
 } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	makeOverridesStateLive,
 	OverridesStateTag,
 } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import {
-	type RelayOpenCodeStream,
+	type ProjectOpenCodeStream,
 	SSEStreamTag,
 } from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
 import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -74,15 +74,15 @@ describe("daemon control through the shared RPC group", () => {
 				stale: false,
 			};
 			// Status reads only these three services of an opened project.
-			const cached = Context.make(RelayStatusSnapshotTag, {
+			const cached = Context.make(ProjectStatusSnapshotTag, {
 				getSnapshot: () => ({ sessionCount: 3, isProcessing: true }),
-			} as RelayStatusSnapshotService).pipe(
+			} as ProjectStatusSnapshotService).pipe(
 				Context.add(ProjectSettingsTag, {
 					browsers: { count: () => 2 },
 				} as ProjectSettings),
 				Context.add(SSEStreamTag, {
 					getHealth: () => sse,
-				} as RelayOpenCodeStream),
+				} as ProjectOpenCodeStream),
 			) as Context.Context<ProjectParts>;
 			return Effect.gen(function* () {
 				const client = yield* makeClient;

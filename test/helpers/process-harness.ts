@@ -54,7 +54,7 @@ import {
 	loadDaemonConfigResult,
 } from "../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../src/lib/daemon/daemon-rpc-client.js";
-import type { RelaySettings } from "../../src/lib/daemon/global-settings.js";
+import type { GlobalSettings } from "../../src/lib/daemon/global-settings.js";
 import { decodeSessionDetail } from "../../src/lib/frontend/transport/session-detail-wire.js";
 import {
 	inspectManagedOpenCodeProcess,
@@ -305,7 +305,7 @@ export class ProcessHarness {
 		capabilityAgents?: readonly ProviderAgentInfo[],
 		private continuationSweepIntervalMs?: number,
 		private readonly logLevel?: "warn" | "info",
-		relaySettings?: RelaySettings,
+		globalSettings?: GlobalSettings,
 		private readonly respawnOnExit = false,
 		managedOpenCodeId = "managed-test",
 		private readonly opencodeBorrowIdleTimeoutMs?: number,
@@ -342,10 +342,10 @@ export class ProcessHarness {
 		]) {
 			mkdirSync(join(this.root, directory));
 		}
-		if (relaySettings)
+		if (globalSettings)
 			writeFileSync(
 				join(this.configDir, "settings.jsonc"),
-				JSON.stringify(relaySettings, null, 2),
+				JSON.stringify(globalSettings, null, 2),
 			);
 		// macOS resolves the login Keychain under HOME, so an isolated HOME hides
 		// the Claude login. Link only the Keychains dir for real-SDK runs.
@@ -792,7 +792,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
 			capabilityAgents?: readonly ProviderAgentInfo[];
-			relaySettings?: RelaySettings;
+			globalSettings?: GlobalSettings;
 			restartProof?: boolean;
 			continuationSweepIntervalMs?: number;
 			/** Enable warning diagnostics for provider lifecycle regressions. */
@@ -854,7 +854,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			options.capabilityAgents,
 			options.continuationSweepIntervalMs,
 			options.logLevel,
-			options.relaySettings,
+			options.globalSettings,
 			options.respawnOnExit,
 			options.managedOpenCodeId,
 			options.opencodeBorrowIdleTimeoutMs,

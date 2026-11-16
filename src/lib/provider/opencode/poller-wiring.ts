@@ -24,7 +24,7 @@ import {
 import * as Failure from "../../effect/failure-classification.js";
 import type { Logger } from "../../logger.js";
 import type { PushNotificationSender } from "../../server/push.js";
-import type { RelayMessage } from "../../shared-types.js";
+import type { BrowserMessage } from "../../shared-types.js";
 import {
 	applyPipelineResult,
 	applyPipelineResultEffect,
@@ -47,7 +47,7 @@ interface PollerManagerLike {
 	on(
 		event: "events",
 		callback: (
-			messages: RelayMessage[],
+			messages: BrowserMessage[],
 			sessionId: string,
 			hasActivity?: boolean,
 		) => void,
@@ -55,7 +55,7 @@ interface PollerManagerLike {
 	off(
 		event: "events",
 		callback: (
-			messages: RelayMessage[],
+			messages: BrowserMessage[],
 			sessionId: string,
 			hasActivity?: boolean,
 		) => void,
@@ -101,7 +101,7 @@ export type EffectPollerWiringDeps = Omit<
 
 const handlePollerEventsEffect = (
 	deps: EffectPollerWiringDeps,
-	events: RelayMessage[],
+	events: BrowserMessage[],
 	polledSessionId: string,
 	hasActivity = false,
 ) =>
@@ -256,7 +256,7 @@ export const wirePollersEffect = (deps: EffectPollerWiringDeps) =>
 		>();
 		const runFork = Effect.runForkWith(runtime);
 		const onPolled = (
-			events: RelayMessage[],
+			events: BrowserMessage[],
 			polledSessionId: string,
 			hasActivity?: boolean,
 		) => {

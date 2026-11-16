@@ -85,7 +85,7 @@ test.use({
 	harnessOptions: {
 		managedOpenCode: true,
 		managedOpenCodeId: "opencode",
-		relaySettings: {
+		globalSettings: {
 			defaultModel: "fake/fake-model",
 			harnessDefaults: {
 				opencode: {

@@ -20,7 +20,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
 import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -122,7 +122,7 @@ describe("SessionManager Effect", () => {
 			configLayer,
 			loggerLayer,
 			Layer.effect(SessionActivityTag, makeSessionActivity),
-			RelayStatusSnapshotLive,
+			ProjectStatusSnapshotLive,
 			makeOverridesStateLive(),
 			Layer.succeed(OpenCodeInstancesTag)(
 				makeOpenCodeInstancesStub({ opencode: mockApi }),

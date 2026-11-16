@@ -27,7 +27,7 @@ import {
 import { subscribeDaemonShell } from "../../../src/lib/domain/daemon/Services/shell-subscription.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionLive,
@@ -142,7 +142,7 @@ const makeShellTestLayer = (
 				opencode: handlerApi ?? makeMockOpenCodeAPI(),
 			}),
 		),
-		RelayStatusSnapshotLive,
+		ProjectStatusSnapshotLive,
 		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 		persistenceLayer,
 		InputDraftsLive.pipe(Layer.provide(persistenceLayer)),

@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
+	loadGlobalSettings,
+	saveGlobalSettings,
 } from "../../../src/lib/daemon/global-settings.js";
 import {
 	type ProcessBrowser,
@@ -97,10 +97,10 @@ describe("projects sharing a Repository Identity", () => {
 				defaultGroupingMode: "repository",
 			}),
 		);
-		expect(loadRelaySettings(fixture.configDir)).toEqual({
+		expect(loadGlobalSettings(fixture.configDir)).toEqual({
 			defaultModel: "acme/model",
 		});
-		saveRelaySettings({ hiddenModels: ["hidden/model"] }, fixture.configDir);
+		saveGlobalSettings({ hiddenModels: ["hidden/model"] }, fixture.configDir);
 		expect(
 			JSON.parse(
 				readFileSync(join(fixture.configDir, "settings.jsonc"), "utf8"),

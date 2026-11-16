@@ -1,10 +1,10 @@
 // Translates OpenCode SSE events → relay WebSocket messages.
 // Stateful: tracks seen parts for lifecycle detection.
 
-import type { UntaggedRelayMessage } from "../../shared-types.js";
+import type { UntaggedBrowserMessage } from "../../shared-types.js";
 import type {
+	BrowserMessage,
 	PartType,
-	RelayMessage,
 	ToolName,
 	ToolStatus,
 } from "../../types.js";
@@ -91,7 +91,7 @@ export function mapToolName(name: string): string {
 export function translatePartDelta(
 	event: SSEEvent,
 	seenParts: Map<string, { type: PartType; status?: ToolStatus }>,
-): UntaggedRelayMessage | null {
+): UntaggedBrowserMessage | null {
 	if (!isPartDeltaEvent(event)) return null;
 	const { properties: props } = event;
 
@@ -144,7 +144,7 @@ export function translateToolPartUpdated(
 	},
 	isNew: boolean,
 	messageId?: string,
-): UntaggedRelayMessage | UntaggedRelayMessage[] | null {
+): UntaggedBrowserMessage | UntaggedBrowserMessage[] | null {
 	if (part.type !== "tool") return null;
 
 	const status = part.state?.status;
@@ -197,7 +197,7 @@ export function translateReasoningPartUpdated(
 	part: { type: PartType; time?: { start?: number; end?: number } },
 	isNew: boolean,
 	messageId?: string,
-): UntaggedRelayMessage | null {
+): UntaggedBrowserMessage | null {
 	if (part.type !== "reasoning") return null;
 
 	if (isNew) {
@@ -283,7 +283,7 @@ function formatResetTime(delayMs: number): string {
 /** Translate session.status event */
 export function translateSessionStatus(
 	event: SSEEvent,
-): UntaggedRelayMessage | UntaggedRelayMessage[] | null {
+): UntaggedBrowserMessage | UntaggedBrowserMessage[] | null {
 	if (!isSessionStatusEvent(event)) return null;
 	const { properties: props } = event;
 	const statusType = props.status?.type;
@@ -305,7 +305,7 @@ export function translateSessionStatus(
 /** Translate message.created event → user_message (for TUI-originated messages) */
 export function translateMessageCreated(
 	event: SSEEvent,
-): UntaggedRelayMessage | null {
+): UntaggedBrowserMessage | null {
 	if (!isMessageCreatedEvent(event)) return null;
 	const { properties: props } = event;
 
@@ -385,7 +385,7 @@ export function openCodeTurnTotals(
 export function translateMessageUpdated(
 	event: SSEEvent,
 	turnSteps?: Iterable<OpenCodeStep>,
-): Extract<RelayMessage, { type: "result" }> | null {
+): Extract<BrowserMessage, { type: "result" }> | null {
 	if (!isMessageUpdatedEvent(event)) return null;
 	// OpenCode sends message data under "info" (observed in live SSE events),
 	// but we also support "message" for backward compatibility.
@@ -418,7 +418,7 @@ export function translateMessageUpdated(
 /** Translate message.part.removed event */
 export function translatePartRemoved(
 	event: SSEEvent,
-): UntaggedRelayMessage | null {
+): UntaggedBrowserMessage | null {
 	if (!isPartRemovedEvent(event)) return null;
 	const { properties: props } = event;
 
@@ -432,14 +432,14 @@ export function translatePartRemoved(
 /** Translate message.removed event */
 export function translateMessageRemoved(
 	event: SSEEvent,
-): UntaggedRelayMessage | null {
+): UntaggedBrowserMessage | null {
 	if (!isMessageRemovedEvent(event)) return null;
 	const { properties: props } = event;
 	return { type: "message_removed", messageId: props.messageID };
 }
 
 export type TranslateResult =
-	| { ok: true; messages: UntaggedRelayMessage[] }
+	| { ok: true; messages: UntaggedBrowserMessage[] }
 	| { ok: false; reason: string };
 
 /** Optional context passed to the translator (e.g. session scope). */
@@ -449,7 +449,7 @@ export interface TranslateContext {
 
 /** Wrap a sub-translator return value into a TranslateResult */
 function wrapResult(
-	result: UntaggedRelayMessage | UntaggedRelayMessage[] | null,
+	result: UntaggedBrowserMessage | UntaggedBrowserMessage[] | null,
 	fallbackReason: string,
 ): TranslateResult {
 	if (!result) return { ok: false, reason: fallbackReason };
@@ -790,7 +790,7 @@ function evictOldestIfNeeded(
 function handlePartUpdated(
 	event: SSEEvent,
 	seenParts: Map<string, { type: PartType; status?: ToolStatus }>,
-): UntaggedRelayMessage | UntaggedRelayMessage[] | null {
+): UntaggedBrowserMessage | UntaggedBrowserMessage[] | null {
 	if (!isPartUpdatedEvent(event)) return null;
 	const { properties: props } = event;
 

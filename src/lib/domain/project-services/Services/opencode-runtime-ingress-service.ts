@@ -870,7 +870,7 @@ export class EffectOpenCodeRuntimeIngress
 			}
 			let complete = false;
 			yield* this.ingestBatch(events, {
-				publishToRelay: false,
+				publishToBrowser: false,
 				beforeCommit: this.withSql(
 					Effect.gen({ self: this }, function* () {
 						yield* options?.beforeCommit ?? Effect.void;
@@ -1546,7 +1546,7 @@ export class EffectOpenCodeRuntimeIngress
 							cachedParentId,
 						),
 					],
-					{ publishToRelay: false },
+					{ publishToBrowser: false },
 				);
 				this.removeSession(sessionId);
 				this.stats.eventsSkipped++;
@@ -1639,7 +1639,7 @@ export class EffectOpenCodeRuntimeIngress
 									knownParentId,
 								),
 							],
-							{ publishToRelay: false },
+							{ publishToBrowser: false },
 						);
 						if (yield* this.hasProjectedSession(sessionId)) {
 							this.seenSessions.add(sessionId);
@@ -1722,7 +1722,7 @@ export class EffectOpenCodeRuntimeIngress
 					? providerProcessId
 					: undefined;
 			const ingestOptions = {
-				publishToRelay: false,
+				publishToBrowser: false,
 				...(translation.droppedRewrite
 					? { beforeCommit: this.invalidateHistory(sessionId) }
 					: {}),
@@ -2013,7 +2013,7 @@ export class EffectOpenCodeRuntimeIngress
 						? Effect.void
 						: this.withSql(
 								this.ingestion.ingestBatch([], {
-									publishToRelay: false,
+									publishToBrowser: false,
 									evidence: this.processStarted(sessionId, processId),
 									afterCommit: Effect.sync(() =>
 										this.reportedProcesses.set(sessionId, processId),

@@ -15,7 +15,7 @@ import {
 } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { publishProviderRelayMessage } from "../../../src/lib/provider/turn-done-publisher.js";
+import { publishTurnDone } from "../../../src/lib/provider/turn-done-publisher.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 const idleActivity = {
@@ -135,9 +135,9 @@ it.each([
 			const alerts = yield* AlertsTag;
 			const ledger = yield* AlertLedgerTag;
 			return makeProviderRuntimeIngestionLive({
-				relayPublisher: {
+				browserPublisher: {
 					publish: (message) =>
-						publishProviderRelayMessage(message, {
+						publishTurnDone(message, {
 							isViewed: () => false,
 							pushManager: { sendToAll },
 							log: createSilentLogger(),

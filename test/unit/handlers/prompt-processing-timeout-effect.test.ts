@@ -49,7 +49,7 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
-import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import type { ProjectServicesConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	MOCK_OPENCODE_GPT4_CATALOG,
@@ -72,7 +72,7 @@ import {
 const config = {
 	projectDir: MOCK_PROJECT_DIR,
 	slug: "timeout-test",
-} satisfies Partial<ProjectRelayConfig>;
+} satisfies Partial<ProjectServicesConfig>;
 
 describe("prompt processing timeouts through Effect state", () => {
 	for (const continuation of [false, true]) {
@@ -119,7 +119,7 @@ describe("prompt processing timeouts through Effect state", () => {
 							makeTestSessionActivityLayer("session-1"),
 							Layer.succeed(LoggerTag)(createSilentLogger()),
 							Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
-							Layer.succeed(ConfigTag)(config as ProjectRelayConfig),
+							Layer.succeed(ConfigTag)(config as ProjectServicesConfig),
 							Layer.succeed(SessionManagerServiceTag)(
 								mockSessionManagers(makeMockSessionManagerService()),
 							),
@@ -457,7 +457,7 @@ describe("prompt processing timeouts through Effect state", () => {
 				makeTestSessionActivityLayer("session-1"),
 				Layer.succeed(LoggerTag)(createSilentLogger()),
 				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
-				Layer.succeed(ConfigTag)(config as ProjectRelayConfig),
+				Layer.succeed(ConfigTag)(config as ProjectServicesConfig),
 				Layer.succeed(SessionManagerServiceTag)(
 					mockSessionManagers(makeMockSessionManagerService()),
 				),

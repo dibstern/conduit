@@ -13,7 +13,7 @@ import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Servic
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	has,
 	makeProjectRegistryLive,
 	remove,
@@ -220,7 +220,7 @@ describe("retained child sidebar roll-up", () => {
 							FROM session_sidebar WHERE session_id = 'parent'`;
 						yield* sql`CREATE TEMP TRIGGER fail_rollup BEFORE UPDATE ON session_sidebar
 							BEGIN SELECT RAISE(ABORT, 'rollup failure'); END`;
-						const failed = yield* Effect.exit(addWithoutRelay(retained));
+						const failed = yield* Effect.exit(addWithoutOpening(retained));
 						yield* sql`DROP TRIGGER fail_rollup`;
 						expect(failed._tag).toBe("Failure");
 						expect
@@ -238,7 +238,7 @@ describe("retained child sidebar roll-up", () => {
 							)
 							.toBe(false);
 						const retriedRegistration = yield* Effect.exit(
-							addWithoutRelay(retained),
+							addWithoutOpening(retained),
 						);
 						expect
 							.soft(retriedRegistration._tag, "registration retry succeeds")
@@ -246,7 +246,7 @@ describe("retained child sidebar roll-up", () => {
 						yield* check(true);
 						yield* remove(retained.slug);
 						const initial = yield* check(false);
-						yield* addWithoutRelay(retained);
+						yield* addWithoutOpening(retained);
 						yield* check(true, initial);
 						yield* writeParentStatus();
 						const registered = yield* check(true);
@@ -291,7 +291,7 @@ describe("retained child sidebar roll-up", () => {
 						]);
 						// Leave a cached active family behind. The persisted config still
 						// registers only alpha, so the next startup must repair that cache.
-						yield* addWithoutRelay(retained);
+						yield* addWithoutOpening(retained);
 						yield* check(true);
 					}),
 				);

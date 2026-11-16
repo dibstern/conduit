@@ -41,7 +41,7 @@
 		initSWMessageListener,
 		reconcilePushActive,
 	} from "../../stores/ws-notifications.js";
-	import { getIsConnected, viewRelayStatus } from "../../transport/connection-status.svelte.js";
+	import { getIsConnected, viewProjectStatus } from "../../transport/connection-status.svelte.js";
 	import { avatarState, loadAvatar } from "../../stores/avatar.svelte.js";
 	import AvatarFirstRun from "../overlays/AvatarFirstRun.svelte";
 	import { getCurrentRoute, getCurrentSearchParams, routerState } from "../../stores/router.svelte.js";
@@ -346,12 +346,12 @@
 		untrack(() => {
 			viewPtys(project);
 			viewProjectSettings(project);
-			viewRelayStatus(project);
+			viewProjectStatus(project);
 		});
 		return () => {
 			viewPtys(null);
 			viewProjectSettings(null);
-			viewRelayStatus(null);
+			viewProjectStatus(null);
 		};
 	});
 	$effect(() => {

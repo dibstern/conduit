@@ -1246,16 +1246,16 @@ const forkSessionInWorkspace = (
 		);
 		const side = options?.side;
 		const title = side ? sideThreadTitle(side.title) : `${parent.title} (fork)`;
-		const relayConfig = config;
+		const projectConfig = config;
 		const openCode =
 			account.driver === "opencode"
 				? yield* Effect.gen(function* () {
-						if (relayConfig._tag === "None")
+						if (projectConfig._tag === "None")
 							return yield* new SessionCommandError({
 								operation: "session.forked.opencode",
 								cause: "OpenCode fork requires the target project's folder",
 							});
-						const directory = relayConfig.value.projectDir;
+						const directory = projectConfig.value.projectDir;
 						const api = yield* (yield* OpenCodeInstancesTag)
 							.use(account.id, directory)
 							.pipe(
@@ -1277,8 +1277,8 @@ const forkSessionInWorkspace = (
 					options?.sessionId ??
 					(openCode ? `ses_${randomUUID().replaceAll("-", "")}` : randomUUID());
 				const configDir =
-					relayConfig._tag === "Some"
-						? (relayConfig.value.configDir ?? DEFAULT_CONFIG_DIR)
+					projectConfig._tag === "Some"
+						? (projectConfig.value.configDir ?? DEFAULT_CONFIG_DIR)
 						: DEFAULT_CONFIG_DIR;
 				// A fork into another project starts a fresh thread in that project's
 				// folder; the runner seeds it with the fork digest on its first turn.
@@ -1297,8 +1297,8 @@ const forkSessionInWorkspace = (
 								const cwd =
 									workspace._tag === "Some"
 										? yield* workspace.value.get(parentSessionId)
-										: relayConfig._tag === "Some"
-											? relayConfig.value.projectDir
+										: projectConfig._tag === "Some"
+											? projectConfig.value.projectDir
 											: process.cwd();
 								return forkSource ? { home, forkSource, cwd } : undefined;
 							}).pipe(

@@ -1,10 +1,10 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../src/lib/provider/project-event-sink.js";
 
 const SESSION_ID = "ses-snap-1";
 
-describe("RelayEventSink lifecycle", () => {
+describe("EventSink lifecycle", () => {
 	it("pending permission resolves through the pending interaction port", async () => {
 		let trackedId: string | undefined;
 		let repliedId: string | undefined;
@@ -12,7 +12,7 @@ describe("RelayEventSink lifecycle", () => {
 			| ((response: { decision: "once" | "always" | "reject" }) => void)
 			| undefined;
 
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: SESSION_ID,
 			pendingInteractions: {
 				beginPermissionRequest(entry) {
@@ -68,7 +68,7 @@ describe("RelayEventSink lifecycle", () => {
 
 	it("cancels service-owned pending interactions through the port", async () => {
 		const cancelSessionInteractions = vi.fn(() => Effect.void);
-		const sink = createRelayEventSink({
+		const sink = createProjectEventSink({
 			sessionId: SESSION_ID,
 			pendingInteractions: {
 				beginPermissionRequest: () =>

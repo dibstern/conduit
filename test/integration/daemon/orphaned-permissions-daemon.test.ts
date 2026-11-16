@@ -8,7 +8,7 @@ import Database from "better-sqlite3";
 import { Effect, ManagedRuntime, Stream } from "effect";
 import { afterEach, expect, it } from "vitest";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
-import { addWithoutRelay } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { addWithoutOpening } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { SessionEventBusTag } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeEventStoreEffect } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -137,7 +137,7 @@ it("after a restart, the daemon rejects orphaned Claude asks in every registered
 				// On the daemon's own bus: a project relay's context carries its own.
 				yield* Effect.promise(() =>
 					daemon.runPromise(
-						addWithoutRelay({
+						addWithoutOpening({
 							slug: "added",
 							title: "added",
 							folders: [folder("added")],

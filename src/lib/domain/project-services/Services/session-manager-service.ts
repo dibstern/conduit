@@ -74,7 +74,7 @@ import { PersistenceProjectTag } from "../../persistence/Services/persistence-se
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { DraftChange } from "./input-drafts.js";
 import { InputDraftsTag } from "./input-drafts.js";
-import { RelayStatusSnapshotTag } from "./project-status-snapshot.js";
+import { ProjectStatusSnapshotTag } from "./project-status-snapshot.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -96,7 +96,7 @@ import {
 	incrementLastKnownSessionCount,
 	makeSessionListOperations,
 	sessionExists,
-	updateRelaySessionCountSnapshot,
+	updateProjectSessionCountSnapshot,
 } from "./session-manager-list.js";
 import {
 	SessionManagerCoordinationTag,
@@ -640,7 +640,7 @@ export const deleteSession = (
 			};
 		});
 		const state = yield* Ref.get(stateRef);
-		yield* updateRelaySessionCountSnapshot(state.lastKnownSessionCount);
+		yield* updateProjectSessionCountSnapshot(state.lastKnownSessionCount);
 		// After the committed delete and its provider cleanup: closing first would
 		// interrupt cleanup the session's own resources depend on.
 		const owners = yield* Effect.serviceOption(OwnerScopes);
@@ -857,7 +857,7 @@ export type ProjectSessionManagerParts =
 	| InputDraftsTag
 	| LoggerTag
 	| ConfigTag
-	| RelayStatusSnapshotTag
+	| ProjectStatusSnapshotTag
 	| OpenCodeInstancesTag
 	| SessionActivityTag
 	| OverridesStateTag
@@ -1006,7 +1006,7 @@ const makeProjectSessionManager: Effect.Effect<
 	const sql = yield* SqlClient.SqlClient;
 	const drafts = yield* InputDraftsTag;
 	const activity = yield* SessionActivityTag;
-	const snapshot = yield* RelayStatusSnapshotTag;
+	const snapshot = yield* ProjectStatusSnapshotTag;
 	const instanceClients = yield* OpenCodeInstancesTag;
 	const accounts = yield* AccountDirectory;
 	const overrides = yield* OverridesStateTag;
@@ -1210,7 +1210,7 @@ const makeProjectSessionManager: Effect.Effect<
 			Effect.provideService(LoggerTag, log),
 			Effect.provideService(OrchestrationEngineTag, engine),
 			Effect.provideService(OverridesStateTag, overrides),
-			Effect.provideService(RelayStatusSnapshotTag, snapshot),
+			Effect.provideService(ProjectStatusSnapshotTag, snapshot),
 		);
 		return modelService._tag === "Some"
 			? create.pipe(
@@ -1263,7 +1263,7 @@ const makeProjectSessionManager: Effect.Effect<
 				const session = yield* createSessionWithServices(title);
 				yield* incrementLastKnownSessionCount().pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
-					Effect.provideService(RelayStatusSnapshotTag, snapshot),
+					Effect.provideService(ProjectStatusSnapshotTag, snapshot),
 				);
 				yield* publishSessionCreated(session.id).pipe(
 					Effect.provideService(DaemonEventBusTag, eventBus),
@@ -1282,10 +1282,10 @@ const makeProjectSessionManager: Effect.Effect<
 				const session = yield* createSessionWithServices(title);
 				yield* incrementLastKnownSessionCount().pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
-					Effect.provideService(RelayStatusSnapshotTag, snapshot),
+					Effect.provideService(ProjectStatusSnapshotTag, snapshot),
 				);
-				yield* updateRelaySessionCountSnapshot(1).pipe(
-					Effect.provideService(RelayStatusSnapshotTag, snapshot),
+				yield* updateProjectSessionCountSnapshot(1).pipe(
+					Effect.provideService(ProjectStatusSnapshotTag, snapshot),
 				);
 				return session.id;
 			}),
@@ -1303,7 +1303,7 @@ const makeProjectSessionManager: Effect.Effect<
 				const session = yield* createSessionWithServices(title, options);
 				yield* incrementLastKnownSessionCount().pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
-					Effect.provideService(RelayStatusSnapshotTag, snapshot),
+					Effect.provideService(ProjectStatusSnapshotTag, snapshot),
 				);
 				yield* publishSessionCreated(session.id).pipe(
 					Effect.provideService(DaemonEventBusTag, eventBus),
@@ -1366,7 +1366,7 @@ const makeProjectSessionManager: Effect.Effect<
 							Effect.provideService(OverridesStateTag, overrides),
 							Effect.provideService(SessionWorkspaceTag, workspace),
 							Effect.provideService(LoggerTag, log),
-							Effect.provideService(RelayStatusSnapshotTag, snapshot),
+							Effect.provideService(ProjectStatusSnapshotTag, snapshot),
 						);
 						if (deleted)
 							yield* publishSessionDeleted(sessionId).pipe(

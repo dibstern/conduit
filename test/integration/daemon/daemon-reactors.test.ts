@@ -16,7 +16,7 @@ import { Effect, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { SessionEventBusTag } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
@@ -70,7 +70,7 @@ beforeAll(async () => {
 		Effect.forEach(
 			["reactors-unopened", "reactors-removed"],
 			(slug) =>
-				addWithoutRelay(
+				addWithoutOpening(
 					{ slug, title: slug, folders: [repo] },
 					{ silent: true },
 				),

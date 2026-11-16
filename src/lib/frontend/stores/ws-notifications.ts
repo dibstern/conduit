@@ -3,7 +3,7 @@
 
 import { notificationContent } from "../../notification-content.js";
 import type { Approval } from "../../shared-types.js";
-import type { RelayMessage } from "../types.js";
+import type { BrowserMessage } from "../types.js";
 import { NOTIFICATION_DISMISS_MS } from "../ui-constants.js";
 import { getNotifSettings } from "../utils/notif-settings.js";
 import { emitDoneSound, readyDoneSound } from "../utils/sound.js";
@@ -118,7 +118,7 @@ export function initSWMessageListener(): void {
 // The same ids the server's push ledger uses, so one receipt covers both.
 // Session ids are daemon-wide and every tab hears every project's alerts, so
 // the key names no project: tabs on different projects share it (82tn.12).
-function alertIdentity(msg: RelayMessage | Approval): string {
+function alertIdentity(msg: BrowserMessage | Approval): string {
 	if ("_tag" in msg)
 		return msg._tag === "permission"
 			? `${msg.sessionId}:permission:${msg.requestId}`
@@ -156,7 +156,7 @@ const unpersistedReceipts = new Set<string>();
 let receiptStorageWarningLogged = false;
 
 export async function triggerNotifications(
-	msg: RelayMessage | Approval,
+	msg: BrowserMessage | Approval,
 ): Promise<void> {
 	// Approvals (from the approvals subscription) always deserve an alert. Idle
 	// hints update the UI; only an identified terminal event proves completion.

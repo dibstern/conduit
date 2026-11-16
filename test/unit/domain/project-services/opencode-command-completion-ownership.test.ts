@@ -8,8 +8,8 @@ import { expect, vi } from "vitest";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
 import {
 	makeProviderRuntimeIngestionLive,
+	type ProviderRuntimeBrowserPublisher,
 	ProviderRuntimeIngestionTag,
-	type ProviderRuntimeRelayPublisher,
 } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	hasActiveProcessingTimeout,
@@ -58,12 +58,12 @@ const recordCase = (scenario: string) => {
 		`${JSON.stringify({ cases }, null, 2)}\n`,
 	);
 };
-function fixtureLayer(relayPublisher?: ProviderRuntimeRelayPublisher) {
+function fixtureLayer(browserPublisher?: ProviderRuntimeBrowserPublisher) {
 	const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 	return Layer.merge(
 		persistence,
 		makeProviderRuntimeIngestionLive(
-			relayPublisher ? { relayPublisher } : {},
+			browserPublisher ? { browserPublisher } : {},
 		).pipe(Layer.provide(persistence)),
 	);
 }
@@ -785,7 +785,7 @@ for (const duplicate of [false, true]) {
 		`publishes run-end alerts only for committed run transitions (duplicate: ${duplicate})`,
 		() => {
 			const alerts: Array<
-				Parameters<ProviderRuntimeRelayPublisher["publish"]>[0]
+				Parameters<ProviderRuntimeBrowserPublisher["publish"]>[0]
 			> = [];
 			return Effect.gen(function* () {
 				const ingestion = yield* ProviderRuntimeIngestionTag;

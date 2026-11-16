@@ -23,7 +23,7 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { ownSessionManagersLive } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/project-services/Services/session-manager-state.js";
@@ -64,7 +64,7 @@ const makeLayer = () => {
 		persistence,
 		makeSessionManagerStateLive(),
 		DaemonEventBusLive,
-		RelayStatusSnapshotLive,
+		ProjectStatusSnapshotLive,
 		Layer.effect(SessionActivityTag, makeSessionActivity),
 	);
 	return WsRpcServerLayer.pipe(

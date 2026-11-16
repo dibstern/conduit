@@ -1,7 +1,7 @@
 // Re-exports the handler functions.
 
 export {
-	setDefaultModelForRelay,
+	setDefaultModelGlobally,
 	switchModelForSession,
 	switchVariantForSession,
 } from "./model.js";

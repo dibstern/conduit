@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { saveGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ConfigTag,
@@ -53,7 +53,7 @@ describe("model handlers with Effect override state", () => {
 		"stores selected session model and restored variant without legacy SessionOverrides",
 		() => {
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-model-state-"));
-			saveRelaySettings(
+			saveGlobalSettings(
 				{ defaultVariants: { "openai/gpt-4": "fast" } },
 				configDir,
 			);
@@ -116,7 +116,7 @@ describe("model handlers with Effect override state", () => {
 		"uses the selected model and variant when sending the next turn",
 		() => {
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-model-prompt-"));
-			saveRelaySettings(
+			saveGlobalSettings(
 				{ defaultVariants: { "openai/gpt-4": "fast" } },
 				configDir,
 			);

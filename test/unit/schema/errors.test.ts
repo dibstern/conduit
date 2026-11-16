@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+	ConduitError,
 	fromCaught,
 	OpenCodeApiError,
 	OpenCodeConnectionError,
-	RelayError,
 	wrapError,
 } from "../../../src/lib/errors.js";
 import { PersistenceError } from "../../../src/lib/persistence/errors.js";
@@ -111,21 +111,21 @@ describe("Schema.TaggedError errors", () => {
 		expect(log.code).toBe("MIGRATION_FAILED");
 	});
 
-	it("RelayError base class supports generic codes", () => {
-		const err = new RelayError("base error", { code: "INTERNAL_ERROR" });
+	it("ConduitError base class supports generic codes", () => {
+		const err = new ConduitError("base error", { code: "INTERNAL_ERROR" });
 		expect(err._tag).toBe("INTERNAL_ERROR");
 		expect(err.message).toBe("base error");
 	});
 
-	it("RelayError toJSON works", () => {
-		const err = new RelayError("test error", { code: "INTERNAL_ERROR" });
+	it("ConduitError toJSON works", () => {
+		const err = new ConduitError("test error", { code: "INTERNAL_ERROR" });
 		const json = err.toJSON();
 		expect(json.error.code).toBe("INTERNAL_ERROR");
 		expect(json.error.message).toBe("test error");
 	});
 
-	it("RelayError.fromCaught still works for backward compat", () => {
-		const err = RelayError.fromCaught(new Error("oops"), "INTERNAL_ERROR");
+	it("ConduitError.fromCaught still works for backward compat", () => {
+		const err = ConduitError.fromCaught(new Error("oops"), "INTERNAL_ERROR");
 		expect(err._tag).toBe("INTERNAL_ERROR");
 		expect(err.message).toContain("oops");
 	});

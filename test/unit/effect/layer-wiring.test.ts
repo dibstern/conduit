@@ -48,7 +48,7 @@ import {
 	PollerFibersTag,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	ProjectRegistryTag,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -436,7 +436,7 @@ describe("makeDaemonLive wiring", () => {
 				} satisfies DaemonLiveOptions;
 
 				const persisted = yield* Effect.gen(function* () {
-					yield* addWithoutRelay(
+					yield* addWithoutOpening(
 						{
 							slug: "alpha",
 							folders: ["/tmp/alpha"],

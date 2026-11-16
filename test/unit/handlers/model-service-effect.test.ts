@@ -21,8 +21,8 @@ import { expect, vi } from "vitest";
 import { NO_OPENCODE_HEALTH } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
+	loadGlobalSettings,
+	saveGlobalSettings,
 } from "../../../src/lib/daemon/global-settings.js";
 import {
 	AccountDirectory,
@@ -56,9 +56,9 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 import {
 	getModelsResponse,
 	savedVariantFor,
-	setDefaultModelForRelay,
-	setHarnessDefaultForRelay,
-	setTitleGenerationForRelay,
+	setDefaultModelGlobally,
+	setHarnessDefaultGlobally,
+	setTitleGenerationGlobally,
 	switchModelForSession,
 	switchVariantForSession,
 } from "../../../src/lib/handlers/model.js";
@@ -88,7 +88,7 @@ layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory())
 describe("model handlers with Effect-native model service", () => {
 	it.effect("uses Default and warns once when a saved parameter choice is no longer offered", () => {
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-stale-choice-"));
-		saveRelaySettings({ defaultVariants: { "claude/sonnet": "removed" } }, configDir);
+		saveGlobalSettings({ defaultVariants: { "claude/sonnet": "removed" } }, configDir);
 		const logger = makeMockLogger();
 		return Effect.gen(function* () {
 			const result = yield* savedVariantFor(
@@ -126,7 +126,7 @@ describe("model handlers with Effect-native model service", () => {
 	for (const session of [false, true]) {
 		it.effect(`lists the active model and ${session ? "preserves a stale session choice" : "uses Default for a stale saved preference"} with one warning`, () => {
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-stale-models-"));
-			saveRelaySettings({ defaultModel: "openai/gpt-4", defaultVariants: { "openai/gpt-4": "removed" } }, configDir);
+			saveGlobalSettings({ defaultModel: "openai/gpt-4", defaultVariants: { "openai/gpt-4": "removed" } }, configDir);
 			const logger = makeMockLogger();
 			const deps = Layer.mergeAll(
 				Layer.succeed(OpenCodeModelServiceTag)({
@@ -588,7 +588,7 @@ describe("model handlers with Effect-native model service", () => {
 		() => {
 			const logger = makeMockLogger();
 			const configDir = mkdtempSync(join(tmpdir(), "conduit-switch-model-"));
-			saveRelaySettings({ defaultVariants: { "openai/gpt-4": "removed" } }, configDir);
+			saveGlobalSettings({ defaultVariants: { "openai/gpt-4": "removed" } }, configDir);
 			const modelService = {
 				listProviders: vi.fn(() =>
 					Effect.succeed({
@@ -693,7 +693,7 @@ describe("model handlers with Effect-native model service", () => {
 			);
 
 			return Effect.gen(function* () {
-				const result = yield* setDefaultModelForRelay({
+				const result = yield* setDefaultModelGlobally({
 					clientId: "client-1",
 					model: "gpt-4",
 					provider: "openai",
@@ -719,7 +719,7 @@ describe("model handlers with Effect-native model service", () => {
 	for (const harnessDefault of [false, true]) {
 	it.effect(`sets the ${harnessDefault ? "harness" : "model"} default with Default when the saved choice is stale`, () => {
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-stale-default-"));
-		saveRelaySettings({
+		saveGlobalSettings({
 			defaultModel: "openai/previous",
 			harnessDefaults: { opencode: { providerId: "openai", modelId: "previous", contextWindow: "" } },
 			defaultVariants: { "openai/gpt-4": "removed" },
@@ -742,18 +742,18 @@ describe("model handlers with Effect-native model service", () => {
 		);
 		return Effect.gen(function* () {
 			if (harnessDefault) {
-				const result = yield* setHarnessDefaultForRelay({
+				const result = yield* setHarnessDefaultGlobally({
 					harness: "opencode", providerId: "openai", modelId: "gpt-4", contextWindow: "",
 				});
 				expect(result).toMatchObject({ status: "ok", pick: { modelId: "gpt-4", effort: "" } });
 			} else {
-				const result = yield* setDefaultModelForRelay({
+				const result = yield* setDefaultModelGlobally({
 					clientId: "client-1", provider: "openai", model: "gpt-4",
 				});
 				expect(result).toMatchObject({ model: "gpt-4", variant: "", variants: ["high"] });
 				expect(persistDefaultModel).toHaveBeenCalledExactlyOnceWith("openai", "gpt-4");
 			}
-			expect(loadRelaySettings(configDir).harnessDefaults?.opencode).toMatchObject({ providerId: "openai", modelId: "gpt-4" });
+			expect(loadGlobalSettings(configDir).harnessDefaults?.opencode).toMatchObject({ providerId: "openai", modelId: "gpt-4" });
 			expect(publishGlobalSetting).toHaveBeenCalled();
 			expect(logger.warn).toHaveBeenCalledOnce();
 			expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("openai/gpt-4"));
@@ -778,13 +778,13 @@ describe("model handlers with Effect-native model service", () => {
 			makeOverridesStateLive(), ProjectSettingsLive,
 		);
 		return Effect.gen(function* () {
-			const result = yield* Effect.result(setTitleGenerationForRelay({
+			const result = yield* Effect.result(setTitleGenerationGlobally({
 				account: { _tag: "Id", id: "opencode" }, providerId: "openai", modelId: "gpt-4", effort: "never-offered",
 			}));
 			expect(result).toMatchObject({ _tag: "Failure", failure: {
 				_tag: "ModelParametersUnavailable", choice: "never-offered", reason: "not-offered", offered: ["high"],
 			} });
-			expect(loadRelaySettings(configDir).titleGeneration).toBeUndefined();
+			expect(loadGlobalSettings(configDir).titleGeneration).toBeUndefined();
 			expect(logger.warn).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(deps, { local: true }));
 	});

@@ -6,7 +6,7 @@ import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
-import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { saveGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ConfigTag,
@@ -317,7 +317,7 @@ describe("Integration: Claude Session Titles", () => {
 				);
 			return Effect.gen(function* () {
 				yield* Effect.sync(() =>
-					saveRelaySettings(
+					saveGlobalSettings(
 						{
 							titleGeneration: {
 								account: { _tag: "Id", id: "claude-work" },

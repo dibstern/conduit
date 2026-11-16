@@ -1,6 +1,6 @@
 // Verifies that createTranslator().translate() returns TranslateResult
 // (ok: true with messages array, or ok: false with reason string)
-// instead of the old RelayMessage | RelayMessage[] | null.
+// instead of the old BrowserMessage | BrowserMessage[] | null.
 
 import { describe, expect, it } from "vitest";
 import type { TranslateResult } from "../../../src/lib/provider/opencode/event-translator.js";
@@ -180,7 +180,7 @@ describe("translator returns TranslateResult", () => {
 		});
 
 		if (result.ok) {
-			// TypeScript should narrow to { ok: true; messages: RelayMessage[] }
+			// TypeScript should narrow to { ok: true; messages: BrowserMessage[] }
 			const msgs = result.messages;
 			expect(msgs.length).toBeGreaterThan(0);
 		} else {

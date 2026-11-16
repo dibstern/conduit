@@ -23,7 +23,7 @@ import {
 	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
-import type { RelayMessage } from "../../../src/lib/frontend/types.js";
+import type { BrowserMessage } from "../../../src/lib/frontend/types.js";
 import { probeClaudeCapabilitiesEffect } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 import { seedSessions } from "../stores/session-fixtures.js";
@@ -33,8 +33,11 @@ function _resultMsg(usage: {
 	output?: number;
 	cache_read?: number;
 	cache_creation?: number;
-}): Extract<RelayMessage, { type: "result" }> {
-	return { type: "result", usage } as Extract<RelayMessage, { type: "result" }>;
+}): Extract<BrowserMessage, { type: "result" }> {
+	return { type: "result", usage } as Extract<
+		BrowserMessage,
+		{ type: "result" }
+	>;
 }
 
 // The probe's model rows carry fields the frontend `ModelInfo` does not

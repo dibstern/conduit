@@ -13,7 +13,7 @@ import {
 	wirePollers,
 	wirePollersEffect,
 } from "../../../src/lib/provider/opencode/poller-wiring.js";
-import type { RelayMessage } from "../../../src/lib/shared-types.js";
+import type { BrowserMessage } from "../../../src/lib/shared-types.js";
 import {
 	makeMockConfig,
 	mockSessionManagers,
@@ -22,7 +22,7 @@ import {
 describe("wirePollers", () => {
 	it("uses the service-backed parent map when suppressing subagent done notifications", () => {
 		let pollerEvents:
-			| ((messages: RelayMessage[], sessionId: string) => void)
+			| ((messages: BrowserMessage[], sessionId: string) => void)
 			| undefined;
 		const pushManager = {
 			sendToAll: vi.fn(async () => undefined),
@@ -75,7 +75,7 @@ describe("wirePollers", () => {
 
 	it("effect-owned production wiring reads parent map from SessionManagerService", async () => {
 		let pollerEvents:
-			| ((messages: RelayMessage[], sessionId: string) => void)
+			| ((messages: BrowserMessage[], sessionId: string) => void)
 			| undefined;
 		const alerts = Effect.runSync(PubSub.unbounded<Alert>());
 		const alertsSeen = Effect.runSync(

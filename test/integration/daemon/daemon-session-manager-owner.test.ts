@@ -43,7 +43,7 @@ import { makeDaemonLive } from "../../../src/lib/domain/daemon/Layers/daemon-lay
 import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { OwnerScopes } from "../../../src/lib/domain/daemon/Services/owner-scopes.js";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	ProjectRegistryTag,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
@@ -150,7 +150,7 @@ const start = async (scenario: string) => {
 		return found;
 	};
 	const register = (slug: string) =>
-		daemon.runPromise(addWithoutRelay(project(slug), { silent: true }));
+		daemon.runPromise(addWithoutOpening(project(slug), { silent: true }));
 	/** Open the project, as a tab or a folder change does; `stop` closes it. */
 	const relay = async (slug: string): Promise<Opened> => ({
 		slug,

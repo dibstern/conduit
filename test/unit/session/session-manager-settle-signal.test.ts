@@ -19,7 +19,7 @@ import { expect } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -71,7 +71,7 @@ describe("SessionManagerService settle signal", () => {
 					loggerLayer,
 					configLayer,
 					Layer.effect(SessionActivityTag, makeSessionActivity),
-					RelayStatusSnapshotLive,
+					ProjectStatusSnapshotLive,
 					makeOverridesStateLive(),
 					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: openCodeApi }),

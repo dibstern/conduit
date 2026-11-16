@@ -13,7 +13,7 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { makeSessionRows } from "../../../src/lib/domain/daemon/Services/session-rows.js";
-import { makeRelayStatusSnapshot } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import { makeProjectStatusSnapshot } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import type { Envelope } from "../../../src/lib/domain/project-services/Services/read-model-subscription.js";
 import { ConfigTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { announceBackgroundWork } from "../../../src/lib/domain/project-services/Services/session-attention.js";
@@ -321,7 +321,7 @@ describe("Session Rows read paths", () => {
 							sql,
 							accounts,
 							activity,
-							snapshot: makeRelayStatusSnapshot(),
+							snapshot: makeProjectStatusSnapshot(),
 							projectFolders: folders,
 							projectSlug: slug,
 						});

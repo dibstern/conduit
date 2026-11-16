@@ -30,7 +30,7 @@ import {
 	DaemonEventBusTag,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
-	addWithoutRelay,
+	addWithoutOpening,
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
@@ -107,7 +107,7 @@ describe("daemon-wide committed session signals", () => {
 			// Registered projects, as the daemon serves them: no relay (82tn.84).
 			const contexts: Context.Context<ProjectParts>[] = [];
 			for (const project of projects) {
-				await daemon.runPromise(addWithoutRelay(project, { silent: true }));
+				await daemon.runPromise(addWithoutOpening(project, { silent: true }));
 				contexts.push(
 					await daemon.runPromise(
 						Effect.flatMap(ProjectServices, (services) =>

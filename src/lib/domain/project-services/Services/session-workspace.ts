@@ -15,7 +15,7 @@ import {
 	type WorktreeBranchRenameError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
-import { RelayError } from "../../../errors.js";
+import { ConduitError } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { readPublishedWorkspaceMissing } from "../../../persistence/effect/session-git-publication.js";
 import { recordedOwnershipForFolder } from "../../../persistence/effect/session-worktree-ownership.js";
@@ -139,7 +139,7 @@ export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
 		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
 		if (!session)
 			return yield* Effect.fail(
-				new RelayError(`Session ${sessionId} not found`, {
+				new ConduitError(`Session ${sessionId} not found`, {
 					code: "SESSION_NOT_FOUND",
 				}),
 			);

@@ -61,7 +61,7 @@ const switchFixture = async (
 		runnerLifecycle: { idleTimeoutMs: null },
 		// The stub reads rejected-resume-session-id beside its proof file.
 		restartProof: true,
-		relaySettings: {
+		globalSettings: {
 			harnessDefaults: {
 				cursor: {
 					providerId: "cursor",

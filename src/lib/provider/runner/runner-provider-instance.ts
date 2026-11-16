@@ -45,7 +45,7 @@ import {
 	ProviderInstanceFailure,
 } from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
-import type { RelayEventSinkDeps } from "../project-event-sink.js";
+import type { ProjectEventSinkDeps } from "../project-event-sink.js";
 import type { ProviderRegistry } from "../provider-registry.js";
 import type { NativeCommandView } from "../run-ledger/run-ledger-model.js";
 import { settleToolChildRuns } from "../session-run-settlement.js";
@@ -168,7 +168,7 @@ export interface RunnerRecoveryDependencies {
 	readonly ingestion: ProviderRuntimeIngestion;
 	readonly pending: PendingInteractionService;
 	readonly timeoutHooks: Pick<
-		RelayEventSinkDeps,
+		ProjectEventSinkDeps,
 		"clearTimeout" | "resetTimeout"
 	>;
 	readonly persist: ClaudeEventPersistEffect;
@@ -435,7 +435,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 								(events) =>
 									recovery.ingestion.ingestBatch(events, {
 										publishToBus: false,
-										publishToRelay: false,
+										publishToBrowser: false,
 									}),
 							);
 					}
@@ -486,7 +486,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 										// Startup has no WebSocket publisher or live sink yet.
 										yield* recovery.ingestion.ingestBatch([output.event], {
 											publishToBus: false,
-											publishToRelay: false,
+											publishToBrowser: false,
 											...(output.event.type === "turn.error"
 												? {
 														beforeProject,

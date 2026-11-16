@@ -31,7 +31,7 @@ import {
 } from "../../../contracts/worktree.js";
 import { DraftAttachmentMissing } from "../../../contracts/ws-rpc.js";
 import * as Failure from "../../../effect/failure-classification.js";
-import { formatErrorDetail, RelayError } from "../../../errors.js";
+import { ConduitError, formatErrorDetail } from "../../../errors.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
@@ -43,7 +43,7 @@ import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { openCodeInputMessageId } from "../../../provider/opencode/opencode-input-message-id.js";
-import { createRelayEventSink } from "../../../provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../provider/project-event-sink.js";
 import {
 	catalogFromProviderList,
 	harnessForModelProvider,
@@ -187,7 +187,7 @@ export const resolveSessionFolders = (
 							const row = yield* read.value.getSession(session.id);
 							if (!row)
 								return yield* Effect.fail(
-									new RelayError(`Session ${session.id} not found`, {
+									new ConduitError(`Session ${session.id} not found`, {
 										code: "SESSION_NOT_FOUND",
 									}),
 								);
@@ -264,7 +264,7 @@ export const resolveSessionFolders = (
 			// A No-project session never falls back to the shared scratch root; nothing recreates it.
 			if (config.slug === SCRATCH_PROJECT_SLUG)
 				return yield* Effect.fail(
-					new RelayError(`Session folder does not exist: ${workspaceRoot}`, {
+					new ConduitError(`Session folder does not exist: ${workspaceRoot}`, {
 						code: "FILE_NOT_FOUND",
 					}),
 				);
@@ -275,7 +275,7 @@ export const resolveSessionFolders = (
 				workspaceRoot !== config.projectDir;
 			if (!fallback || !(yield* workspaceFolderPresent(config.projectDir)))
 				return yield* Effect.fail(
-					new RelayError(
+					new ConduitError(
 						`Main project folder does not exist: ${fallback ? config.projectDir : workspaceRoot}`,
 						{
 							code: "FILE_NOT_FOUND",
@@ -421,7 +421,7 @@ export const makeEventSinkFactory = Effect.gen(function* () {
 	const persist = yield* ClaudeEventPersistEffectTag;
 	const ingestion = yield* ProviderRuntimeIngestionTag;
 	return (sessionId: string, driver: string) =>
-		createRelayEventSink({
+		createProjectEventSink({
 			sessionId,
 			providerId: driver,
 			...makeProcessingTimeoutHooks(runtime, sessionId),
@@ -476,7 +476,7 @@ const handleDispatchFailure = (
 		const missing = sendErr instanceof MissingWorktreeError;
 		const error = missing
 			? { message: sendErr.message, code: "WORKTREE_MISSING" }
-			: RelayError.fromCaught(
+			: ConduitError.fromCaught(
 					sendErr,
 					"SEND_FAILED",
 					failureCode ? undefined : "Failed to send message",
@@ -1037,7 +1037,7 @@ const sendViaEngine = (
 			Effect.catchIf(
 				(cause) =>
 					cause instanceof MissingWorktreeError ||
-					(cause instanceof RelayError && cause.code === "FILE_NOT_FOUND"),
+					(cause instanceof ConduitError && cause.code === "FILE_NOT_FOUND"),
 				(cause) => handleDispatchFailure(input, cause, account.driver),
 			),
 		);

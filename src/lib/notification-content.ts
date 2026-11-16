@@ -2,7 +2,7 @@
 // Used by both server-side push (sse-wiring.ts) and browser Notification API
 // (ws-notifications.ts) so the copy stays consistent.
 
-import type { Approval, RelayMessage } from "./shared-types.js";
+import type { Approval, BrowserMessage } from "./shared-types.js";
 
 export interface NotificationContent {
 	title: string;
@@ -23,7 +23,7 @@ export interface GoalStuckNotification {
  * Returns `null` for message types that don't warrant a notification.
  */
 export function notificationContent(
-	msg: RelayMessage | Approval | GoalStuckNotification,
+	msg: BrowserMessage | Approval | GoalStuckNotification,
 ): NotificationContent | null {
 	if ("_tag" in msg && msg._tag === "goal_stuck") {
 		const reason = msg.reason.trim();

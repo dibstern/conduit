@@ -20,7 +20,7 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../src/lib/provider/project-event-sink.js";
 import { makeRunnerAuthority } from "../../../src/lib/provider/runner/runner-authority.js";
 import {
 	currentRunnerOutput,
@@ -52,7 +52,7 @@ describe("runner ingestion authorization", () => {
 				)).grants.get("runner");
 				if (!grant) return yield* Effect.die("missing grant");
 				const ingestion = yield* ProviderRuntimeIngestionTag;
-				const sink = createRelayEventSink({
+				const sink = createProjectEventSink({
 					sessionId: "parent",
 					ingestion,
 					pendingInteractions: {
@@ -247,7 +247,7 @@ describe("runner ingestion authorization", () => {
 		() =>
 			Effect.gen(function* () {
 				const events: ProviderRuntimeEvent[] = [];
-				const sink = createRelayEventSink({
+				const sink = createProjectEventSink({
 					sessionId: "parent",
 					ingestion: {
 						ingest: (event, onPrompt) =>

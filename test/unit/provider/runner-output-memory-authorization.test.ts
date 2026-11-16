@@ -8,7 +8,7 @@ import {
 	setPermissionMode,
 } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
+import { createProjectEventSink } from "../../../src/lib/provider/project-event-sink.js";
 import { makeRunnerAuthority } from "../../../src/lib/provider/runner/runner-authority.js";
 import { runnerSinkId } from "../../../src/lib/provider/runner/runner-protocol.js";
 import {
@@ -123,7 +123,7 @@ describe("runner output memory authorization", () => {
 		() =>
 			Effect.gen(function* () {
 				const changes: string[] = [];
-				const sink = createRelayEventSink({
+				const sink = createProjectEventSink({
 					sessionId: "s",
 					resetTimeout: () => {
 						changes.push("timeout");
@@ -175,7 +175,7 @@ describe("runner output memory authorization", () => {
 				let registered = 0;
 				const entered = yield* Deferred.make<void>();
 				const resume = yield* Deferred.make<void>();
-				const sink = createRelayEventSink({
+				const sink = createProjectEventSink({
 					sessionId: "s",
 					persist: {
 						persistEvent: () =>
@@ -246,7 +246,7 @@ describe("runner output memory authorization", () => {
 				providerState: {},
 				workspaceRoot: "/tmp",
 				extraFolders: [],
-				eventSink: createRelayEventSink({ sessionId: "s" }),
+				eventSink: createProjectEventSink({ sessionId: "s" }),
 				abortSignal: new AbortController().signal,
 			});
 			const authority = yield* makeRunnerAuthority();

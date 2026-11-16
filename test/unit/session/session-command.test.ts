@@ -7,7 +7,7 @@ import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { AUTO_TITLE_SOURCE } from "../../../src/lib/contracts/session-title.js";
-import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { saveGlobalSettings } from "../../../src/lib/daemon/global-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
@@ -100,7 +100,7 @@ describe("applySessionCommand", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-session-command-"));
 		const api = makeMockApi();
 		const log = makeMockLogger();
-		saveRelaySettings(
+		saveGlobalSettings(
 			{
 				harnessDefaults: {
 					opencode: {

@@ -19,8 +19,8 @@ import type {
 	ProjectSettingsEnvelope,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import {
-	loadRelaySettings,
-	saveRelaySettings,
+	loadGlobalSettings,
+	saveGlobalSettings,
 } from "../../../src/lib/daemon/global-settings.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -49,7 +49,7 @@ it("fans global settings out to another live project's subscribers and defaults"
 	try {
 		await harness.restart();
 		const projectA = "process-test";
-		saveRelaySettings(
+		saveGlobalSettings(
 			{ defaultVariants: { "claude/opus": "high" } },
 			harness.configDir,
 		);
@@ -203,7 +203,7 @@ it("fans global settings out to another live project's subscribers and defaults"
 				claude: { status: "unverified", pick: expectedPick },
 			}),
 		);
-		expect(loadRelaySettings(harness.configDir)).toMatchObject({
+		expect(loadGlobalSettings(harness.configDir)).toMatchObject({
 			defaultPermissionMode: "full",
 			defaultModel: "claude/opus",
 			defaultVariants: { "claude/opus": "high" },
@@ -250,7 +250,7 @@ it("fans global settings out to another live project's subscribers and defaults"
 				{ _tag: "Exit", requestId: "1", exit: { _tag: "Success" } },
 				{ _tag: "Exit", requestId: "2", exit: { _tag: "Success" } },
 			]);
-		expect(loadRelaySettings(harness.configDir).defaultPermissionMode).toBe(
+		expect(loadGlobalSettings(harness.configDir).defaultPermissionMode).toBe(
 			"auto",
 		);
 		// Both live streams must finish at the persisted value, including B,
@@ -324,7 +324,7 @@ it("fans global settings out to another live project's subscribers and defaults"
 			variantSnapshotB?._tag === "snapshot" && variantSnapshotB.rows,
 		).toContainEqual(expectedModel);
 		expect(
-			loadRelaySettings(harness.configDir).defaultVariants?.["claude/opus"],
+			loadGlobalSettings(harness.configDir).defaultVariants?.["claude/opus"],
 		).toBe("");
 		passed = true;
 	} finally {
@@ -332,7 +332,7 @@ it("fans global settings out to another live project's subscribers and defaults"
 		batchedRpc?.terminate();
 		for (const subscriber of subscribers)
 			await Effect.runPromise(Fiber.interrupt(subscriber));
-		const persistedSettings = loadRelaySettings(harness.configDir);
+		const persistedSettings = loadGlobalSettings(harness.configDir);
 		await harness.dispose();
 		mkdirSync("test-results", { recursive: true });
 		writeFileSync(

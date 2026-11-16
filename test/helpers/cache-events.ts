@@ -16,7 +16,7 @@ import {
 	PERSISTED_EVENT_TYPES,
 	type PersistedEventType,
 } from "../../src/lib/provider/event-pipeline.js";
-import type { RelayMessage } from "../../src/lib/shared-types.js";
+import type { BrowserMessage } from "../../src/lib/shared-types.js";
 
 const persistedSet: ReadonlySet<string> = new Set(PERSISTED_EVENT_TYPES);
 
@@ -25,7 +25,7 @@ const persistedSet: ReadonlySet<string> = new Set(PERSISTED_EVENT_TYPES);
  * stored in the SQLite event store. Throws with a clear message identifying
  * the offending event type and index.
  */
-export function assertCacheRealisticEvents(events: RelayMessage[]): void {
+export function assertCacheRealisticEvents(events: BrowserMessage[]): void {
 	for (const [i, event] of events.entries()) {
 		if (!persistedSet.has(event.type)) {
 			throw new Error(
@@ -39,8 +39,8 @@ export function assertCacheRealisticEvents(events: RelayMessage[]): void {
 
 /** Type-narrowed version: returns events typed as having persisted types. */
 export function asCacheEvents(
-	events: RelayMessage[],
-): Array<RelayMessage & { type: PersistedEventType }> {
+	events: BrowserMessage[],
+): Array<BrowserMessage & { type: PersistedEventType }> {
 	assertCacheRealisticEvents(events);
-	return events as Array<RelayMessage & { type: PersistedEventType }>;
+	return events as Array<BrowserMessage & { type: PersistedEventType }>;
 }

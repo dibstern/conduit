@@ -56,7 +56,7 @@ import type {
 
 const log = createLogger("project-event-sink");
 
-export interface EffectRelayEventSinkPersist {
+export interface ProjectEventSinkPersist {
 	readonly persistEvent: (
 		event: CanonicalEvent,
 	) => Effect.Effect<void, EventSinkPersistenceError>;
@@ -65,9 +65,7 @@ export interface EffectRelayEventSinkPersist {
 	) => Effect.Effect<void, EventSinkPersistenceError>;
 }
 
-export type RelayEventSinkPersist = EffectRelayEventSinkPersist;
-
-export interface RelayEventSinkDeps {
+export interface ProjectEventSinkDeps {
 	readonly sessionId: string;
 	readonly providerId?: string;
 	/** Optional: clear processing timeout when the turn finishes (done/error). */
@@ -84,7 +82,7 @@ export interface RelayEventSinkDeps {
 		mode: SessionPermissionMode,
 	) => Effect.Effect<void, Error>;
 	/** Optional: persist events to SQLite for session history survival. */
-	readonly persist?: RelayEventSinkPersist;
+	readonly persist?: ProjectEventSinkPersist;
 	/** Optional durable runtime ingestion owner. When present, push() delegates provider output to this path. */
 	readonly ingestion?: Pick<ProviderRuntimeIngestion, "ingest">;
 	/** Effect-owned pending interaction state. Required when permission/question methods are used. */
@@ -129,9 +127,7 @@ export interface RelayEventSinkDeps {
 	};
 }
 
-export type RelayEventSink = EventSink;
-
-export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
+export function createProjectEventSink(deps: ProjectEventSinkDeps): EventSink {
 	const { sessionId, clearTimeout, resetTimeout, persist } = deps;
 	let mapperState = emptyProviderRuntimeDomainMapperState;
 	let detachingInteractions = false;
@@ -274,7 +270,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			),
 		);
 
-	const sink: RelayEventSink = {
+	const sink: EventSink = {
 		// Without the finish, a client connecting before the status poller
 		// sees idle is told the finished turn is still processing.
 		noteActivity: (event) =>

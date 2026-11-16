@@ -1,7 +1,7 @@
 //
 // Schema-backed tagged error hierarchy for the relay layer.
 // Keep _tag last in each schema to preserve the existing JSON field order.
-// The RelayError base class is kept as a plain Error subclass for generic
+// The ConduitError base class is kept as a plain Error subclass for generic
 // error codes used throughout the codebase (e.g. NO_SESSION, INVALID_REQUEST).
 
 import { Effect, Schema } from "effect";
@@ -53,7 +53,7 @@ export type ErrorCode =
 	| "WEBSOCKET_ERROR"
 	| "CONFIG_INVALID";
 
-const RelayErrorFields = {
+const ConduitErrorFields = {
 	message: Schema.String,
 	userVisible: Schema.Boolean.pipe(
 		Schema.withDecodingDefaultType(Effect.sync(() => false)),
@@ -76,7 +76,7 @@ function contextDetails(
 	return Object.keys(ctx).length > 0 ? ctx : undefined;
 }
 
-type TaggedRelayErrorConstructor = abstract new (
+type TaggedConduitErrorConstructor = abstract new (
 	...args: never[]
 ) => {
 	readonly _tag: string;
@@ -84,23 +84,25 @@ type TaggedRelayErrorConstructor = abstract new (
 	readonly context: Record<string, unknown>;
 };
 
-type TaggedRelayErrorMethods<Tag extends string> = {
+type TaggedConduitErrorMethods<Tag extends string> = {
 	readonly code: Tag;
 	toJSON(): { error: { code: string; message: string; details?: unknown } };
 	toLog(): Record<string, unknown>;
 };
 
-function withTaggedRelayErrorMethods<TBase extends TaggedRelayErrorConstructor>(
+function withTaggedConduitErrorMethods<
+	TBase extends TaggedConduitErrorConstructor,
+>(
 	Base: TBase,
 ): Omit<TBase, "prototype"> &
 	(abstract new (
 		...args: ConstructorParameters<TBase>
-	) => Omit<InstanceType<TBase>, keyof TaggedRelayErrorMethods<string>> &
-		TaggedRelayErrorMethods<InstanceType<TBase>["_tag"]>);
-function withTaggedRelayErrorMethods(
-	Base: TaggedRelayErrorConstructor,
+	) => Omit<InstanceType<TBase>, keyof TaggedConduitErrorMethods<string>> &
+		TaggedConduitErrorMethods<InstanceType<TBase>["_tag"]>);
+function withTaggedConduitErrorMethods(
+	Base: TaggedConduitErrorConstructor,
 ): unknown {
-	abstract class TaggedRelayErrorWithMethods extends Base {
+	abstract class TaggedConduitErrorWithMethods extends Base {
 		abstract get statusCode(): number;
 
 		get code(): this["_tag"] {
@@ -127,12 +129,12 @@ function withTaggedRelayErrorMethods(
 		}
 	}
 
-	return TaggedRelayErrorWithMethods;
+	return TaggedConduitErrorWithMethods;
 }
 
-export class OpenCodeConnectionError extends withTaggedRelayErrorMethods(
+export class OpenCodeConnectionError extends withTaggedConduitErrorMethods(
 	Schema.Error<OpenCodeConnectionError>("OpenCodeConnectionError")({
-		...RelayErrorFields,
+		...ConduitErrorFields,
 		_tag: Schema.tag("OpenCodeConnectionError"),
 	}),
 ) {
@@ -141,9 +143,9 @@ export class OpenCodeConnectionError extends withTaggedRelayErrorMethods(
 	}
 }
 
-export class OpenCodeApiError extends withTaggedRelayErrorMethods(
+export class OpenCodeApiError extends withTaggedConduitErrorMethods(
 	Schema.Error<OpenCodeApiError>("OpenCodeApiError")({
-		...RelayErrorFields,
+		...ConduitErrorFields,
 		endpoint: Schema.String,
 		responseStatus: Schema.Number,
 		retryAfter: Schema.optional(Schema.String),
@@ -187,9 +189,9 @@ export class OpenCodeApiError extends withTaggedRelayErrorMethods(
 	}
 }
 
-export class SSEConnectionError extends withTaggedRelayErrorMethods(
+export class SSEConnectionError extends withTaggedConduitErrorMethods(
 	Schema.Error<SSEConnectionError>("SSEConnectionError")({
-		...RelayErrorFields,
+		...ConduitErrorFields,
 		_tag: Schema.tag("SSEConnectionError"),
 	}),
 ) {
@@ -198,9 +200,9 @@ export class SSEConnectionError extends withTaggedRelayErrorMethods(
 	}
 }
 
-export class WebSocketError extends withTaggedRelayErrorMethods(
+export class WebSocketError extends withTaggedConduitErrorMethods(
 	Schema.Error<WebSocketError>("WebSocketError")({
-		...RelayErrorFields,
+		...ConduitErrorFields,
 		_tag: Schema.tag("WebSocketError"),
 	}),
 ) {
@@ -209,9 +211,9 @@ export class WebSocketError extends withTaggedRelayErrorMethods(
 	}
 }
 
-export class AuthenticationError extends withTaggedRelayErrorMethods(
+export class AuthenticationError extends withTaggedConduitErrorMethods(
 	Schema.Error<AuthenticationError>("AuthenticationError")({
-		...RelayErrorFields,
+		...ConduitErrorFields,
 		_tag: Schema.tag("AuthenticationError"),
 	}),
 ) {
@@ -220,9 +222,9 @@ export class AuthenticationError extends withTaggedRelayErrorMethods(
 	}
 }
 
-export class ConfigurationError extends withTaggedRelayErrorMethods(
+export class ConfigurationError extends withTaggedConduitErrorMethods(
 	Schema.Error<ConfigurationError>("ConfigurationError")({
-		...RelayErrorFields,
+		...ConduitErrorFields,
 		_tag: Schema.tag("ConfigurationError"),
 	}),
 ) {
@@ -234,10 +236,10 @@ export class ConfigurationError extends withTaggedRelayErrorMethods(
 // Kept as a plain Error subclass for generic error codes used throughout the
 // codebase (e.g. NO_SESSION, INVALID_REQUEST, SEND_FAILED). Unlike the
 // Schema.Error subclasses above, this class supports arbitrary ErrorCode
-// values and is constructed with the traditional `new RelayError(message, opts)`.
+// values and is constructed with the traditional `new ConduitError(message, opts)`.
 
 /** Base error class for generic relay errors with arbitrary error codes */
-export class RelayError extends Error {
+export class ConduitError extends Error {
 	/** Tagged discriminant — equals the ErrorCode for generic errors */
 	readonly _tag: string;
 	readonly code: ErrorCode;
@@ -256,7 +258,7 @@ export class RelayError extends Error {
 		},
 	) {
 		super(message, { cause: options.cause });
-		this.name = "RelayError";
+		this.name = "ConduitError";
 		this._tag = options.code;
 		this.code = options.code;
 		this.statusCode = options.statusCode ?? 500;
@@ -292,22 +294,22 @@ export class RelayError extends Error {
 	/**
 	 * Create a relay error from any caught value (AC4: error translation).
 	 * Kept as static method for backward compatibility with existing call sites.
-	 * Returns AnyRelayError because infrastructure codes map to Schema.Error subclasses.
+	 * Returns AnyConduitError because infrastructure codes map to Schema.Error subclasses.
 	 */
 	static fromCaught(
 		err: unknown,
 		code: ErrorCode,
 		prefix?: string,
-	): AnyRelayError {
+	): AnyConduitError {
 		return fromCaught(err, code, prefix);
 	}
 }
 
-// Union of all relay error types (Schema.Error subclasses + generic RelayError).
+// Union of all relay error types (Schema.Error subclasses + generic ConduitError).
 // Used as return type for fromCaught/wrapError utilities.
 
-export type AnyRelayError =
-	| RelayError
+export type AnyConduitError =
+	| ConduitError
 	| OpenCodeConnectionError
 	| OpenCodeApiError
 	| SSEConnectionError
@@ -339,13 +341,13 @@ const CODE_TO_CLASS: Record<
 /**
  * Create a relay error from any caught value.
  * Maps well-known infrastructure codes to their Schema.Error subclass;
- * falls back to a generic RelayError for other codes.
+ * falls back to a generic ConduitError for other codes.
  */
 export function fromCaught(
 	err: unknown,
 	code: ErrorCode,
 	prefix?: string,
-): AnyRelayError {
+): AnyConduitError {
 	const detail = formatErrorDetail(err);
 	const message = prefix ? `${prefix}: ${detail}` : detail;
 	const cause = err instanceof Error ? err : undefined;
@@ -359,7 +361,7 @@ export function fromCaught(
 		});
 	}
 
-	return new RelayError(message, {
+	return new ConduitError(message, {
 		code,
 		...(cause != null && { cause }),
 	});
@@ -371,7 +373,7 @@ export function wrapError<
 		message: string;
 		cause?: unknown;
 		context?: Record<string, unknown>;
-	}) => AnyRelayError,
+	}) => AnyConduitError,
 >(
 	error: unknown,
 	ErrorClass: E,

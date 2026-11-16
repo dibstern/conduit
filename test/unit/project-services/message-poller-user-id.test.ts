@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { expect, it } from "vitest";
 import { translateMessageCreated } from "../../../src/lib/provider/opencode/event-translator.js";
 import { diffAndSynthesize } from "../../../src/lib/provider/opencode/message-poller.js";
-import { RelayMessageSchema } from "../../../src/lib/shared-types.js";
+import { BrowserMessageSchema } from "../../../src/lib/shared-types.js";
 
 it("preserves user provider ids through the event schema", () => {
 	const event = {
@@ -11,7 +11,7 @@ it("preserves user provider ids through the event schema", () => {
 		text: "Hello",
 		messageId: "provider-1",
 	};
-	expect(Schema.decodeUnknownSync(RelayMessageSchema)(event)).toEqual(event);
+	expect(Schema.decodeUnknownSync(BrowserMessageSchema)(event)).toEqual(event);
 });
 
 it("polls user provider ids", () => {

@@ -26,7 +26,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { StatusPollerLive } from "../../../src/lib/domain/project-services/Layers/status-poller-layer.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -114,7 +114,7 @@ const makeStatusPollerLayer = (dbPath: string) => {
 			Layer.succeed(LoggerTag)(makeMockLogger()),
 			makePollerStateLive(),
 			makePollerPubSubLive(),
-			RelayStatusSnapshotLive,
+			ProjectStatusSnapshotLive,
 			Layer.effect(SessionActivityTag, makeSessionActivity),
 			makeSessionManagerStateLive(),
 			PendingInteractionServiceLive,

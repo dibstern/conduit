@@ -22,7 +22,7 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import { ProjectStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -171,7 +171,7 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 		Layer.succeed(ConfigTag)(makeMockConfig()),
 		Layer.effect(SessionActivityTag, makeSessionActivity),
 		makeOverridesStateLive(),
-		RelayStatusSnapshotLive,
+		ProjectStatusSnapshotLive,
 		Layer.succeed(OpenCodeInstancesTag)(instances),
 		Layer.succeed(OpenCodeAPITag)(api),
 		Layer.succeed(PollerManagerTag)(services.pollerManager as any),
