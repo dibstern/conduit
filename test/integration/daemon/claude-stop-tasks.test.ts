@@ -353,12 +353,16 @@ describe("Stop tasks refuses what it cannot stop, with its reason", () => {
 			),
 		).toEqual({ ok: true });
 		const mixed = read(fixture, sessionId);
+		expect(mixed.outbox.map((row) => row.taskId)).toEqual([shell.task_id]);
+		// The reply is the decision; the runner's stop reaches the SDK after it (CONTRACT.md 8.4).
+		// test-waits-allow polling: the fake SDK reports a stop only through sdk-proof.ndjson.
+		await vi.waitFor(() =>
+			expect(stopMarks(fixture, "requested")).toEqual([shell.task_id]),
+		);
 		proof["live among unknown"] = {
 			outbox: mixed.outbox,
 			requested: stopMarks(fixture, "requested"),
 		};
-		expect(mixed.outbox.map((row) => row.taskId)).toEqual([shell.task_id]);
-		expect(stopMarks(fixture, "requested")).toEqual([shell.task_id]);
 
 		// Once a snapshot drops it, the shell is no longer a task to stop.
 		const cursor = browser.frames.length;
