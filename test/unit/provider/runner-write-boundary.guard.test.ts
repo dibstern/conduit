@@ -16,7 +16,7 @@ const sharedWriters = [
 function runnerSources(directory: string): Source[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
 		const path = join(directory, entry.name);
-		// Match on the repo-relative path: CI checks out under /home/runner/.
+		// Match on the repo-relative path: the CI runner's home directory is itself named runner.
 		const repoPath = relative(process.cwd(), path);
 		return entry.isDirectory()
 			? runnerSources(path)
