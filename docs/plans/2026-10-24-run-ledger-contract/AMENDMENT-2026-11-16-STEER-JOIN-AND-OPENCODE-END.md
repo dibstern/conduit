@@ -17,8 +17,8 @@ User-visible behaviour:
 - A Claude steer appears in the transcript as soon as Claude starts reading it, but it counts as
   part of the running turn only once that turn's result lists it. A Claude Stop no longer fails a
   steer Claude says it will still run.
-- A Codex steer is part of the running turn from the moment Codex echoes it into the turn, not
-  from the `turn/steer` reply.
+- A Codex steer is part of the running turn from the moment Codex echoes it into the turn under
+  the steer's own id, not from the `turn/steer` reply, and never from an echo that carries no id.
 - A Cursor steer is declined only when Cursor itself sends it back as a follow-up; a steer the
   runner could not send runs once, as the next turn.
 - An OpenCode turn that ends in an error shows that error at once (main's code), but the session
@@ -78,7 +78,7 @@ Tombstone and no outcome.
 | provider | the join event (in the model's history, names the steer) | runner change |
 |---|---|---|
 | Claude | the open Run's `result` whose `user_message_uuids` names the steer (hybrid, J6) | move the steer's `run.started` from `command_lifecycle` started (claude-runner-payload.ts 2680-2740: `currentRunId ??=` at 2695, emit at 2721) to the result (2410-2425), emitted before that result's terminal events; started only places the transcript message. |
-| Codex | the `item/started` `userMessage` echo whose `clientUserMessageId` is the steer's inputId | move `run.started` from `acceptSteer` (codex-runner-payload.ts 1253-1306, emit at 1273) to the notification loop (999-1004). A `turn/steer` reply that arrives after the turn settled joins nothing and must not reach a closed Run. |
+| Codex | the `item/started` `userMessage` echo whose `clientId` is the steer's inputId (sent as `clientUserMessageId`), on its thread's executing turn while that turn is open | move `run.started` from `acceptSteer` (codex-runner-payload.ts 1253-1306, emit at 1273) to the notification loop (999-1004). The echo's `clientId` is the only key. An echo without one joins nothing, wherever it falls in the turn. The `turn/steer` reply only places the steer, and the runner keeps no turn it names. A reply that arrives after the turn settled joins nothing and must not reach a closed Run. |
 | Cursor | the steer's `complete_delivered` result (cursor-runner-payload.ts 476, 821) | the unique-text delta match (477-494) no longer settles a steer as delivered; the runner declines a steer only on the SDK's `revert_to_followup`, never locally (J7). |
 | OpenCode | none: steering is `queue` (provider-instance.ts 168) | none |
 
@@ -257,7 +257,10 @@ inside the open Run.
 - Fake: `joinedSteerRuns`, `joinedSteers`' outlived path, the `forcedSends` pend.
 - Claude runner: `run.started` at `command_lifecycle` started and `currentRunId ??=` from a steer
   (2695, 2721); the "still_queued is not read" rule (3333-3335).
-- Codex runner: `run.started` in `acceptSteer`.
+- Codex runner: `run.started` in `acceptSteer`; `ActiveTurn.openedTurnId`, a pending steer's
+  reply `turnId` and the untagged-echo branch that read them. A pending steer is
+  `{ input, sink, host }` keyed by its inputId, written at the send and removed at its echo or a
+  failed send.
 - Cursor runner: the delta match's `settleSteer(..., true)`; every local decline (`declinePending`
   439-445, the call-failure `false`, the pre-call guards at 318 and 808 as declines).
 - pending.ts: seven entries (two named, six convergence keys; `mainGateRefusal` stays).
@@ -271,9 +274,16 @@ inside the open Run.
 
 ## Confirm before building
 
-- Codex emits the `userMessage` echo with `clientUserMessageId` on every app-server version conduit
-  supports (fixture `codex-app-server-traces/steer.jsonl` line 26; `protocol.ts` 517). If not, an
-  older server needs a version gate that keeps the `turn/steer` reply as the join.
+- Confirmed 2026-11-17: every app-server version conduit supports (`CODEX_MIN_VERSION` 0.160.0,
+  `protocol.ts` 3) echoes `clientUserMessageId` as the `userMessage` item's `clientId`, for
+  `turn/start` and for `turn/steer`, including a steer Codex holds and records at the turn's end.
+  Codex `rust-v0.160.0`: `app-server/src/request_processors/turn_processor.rs` 612-618 and
+  1065-1069, `core/src/session/turn_input.rs` 695-746, `core/src/hook_runtime.rs` 715-737,
+  `core/src/session/mod.rs` 4963-5021, `app-server-protocol/src/protocol/v2/item.rs` 241 and 874;
+  `rust-v0.159.0` has the same. Conduit sends the id on every request that carries user input
+  (codex-runner-payload.ts 846, 1374), and `check-codex-app-server-schema.ts` pins the request
+  and item fields. No version gate. So, by inference, an echo without `clientId` is another
+  client's input on the thread or a fixture recorded without the id, never conduit's.
 - Whether Codex echoes a pending steer it records to history at abort (codex `mod.rs` 789-815). If it
   does, that echo is after the turn settled and joins nothing (J2).
 - Claude's interrupt receipt carries `still_queued` as the runner expects (3122 lists the
@@ -335,6 +345,15 @@ SEND-SETTLEMENT's 46 to 83 and the earlier lists still apply. Added:
 106. A Cursor steer refused before the SDK call (images, cancel requested, steering closed): it is
      reported not reached, returned to the inbox front, and runs once as its own turn, never twice.
 107. A Cursor steer call fails: the steer fails, final, its text back; it is not declined.
+108. A Codex `userMessage` echo without `clientId` joins no steer on any turn. That holds on the
+     turn the steer's reply named, on a goal successor that has no opening echo, and when its text
+     matches the steer's. The steer stays pending until its own echo (90).
+109. A Codex echo whose `clientId` names a steer but whose turn is not the thread's executing turn
+     (a late echo of an ended turn read during a later one) joins nothing. Codex writes a turn's
+     echoes before its `turn/completed` on one ordered stream (inferred from `tasks/mod.rs`
+     671-693), so this echo comes only from a reordered read; the steer stays pending and 87
+     covers it.
+110. A Codex echo read as both `item/started` and `item/completed` joins its steer once.
 
 ## Tests
 
@@ -345,7 +364,8 @@ Each failure mode is red before its production edit, at the highest seam that in
 - the runner payload units and the run-ledger integration suites with recorded fixtures for 84,
   86, 87, 103 and 104 (Claude: `steer-misses-boundary`, `stop-with-steer-pending`,
   `two-steers-one-boundary`; mode 9 as a synthetic trace in `claude-run-ownership.test.ts`), 90 and
-  91 (Codex: `steer.jsonl`, `steer-race.jsonl`), and 92, 105 to 107 (Cursor: `steer.jsonl`,
+  91 and 108 to 110 (Codex: `steer.jsonl`, `steer-race.jsonl`, `goal-chain.jsonl` with a spliced
+  steer; `codex-runner-payload.test.ts`, `codex-goals.test.ts`), and 92, 105 to 107 (Cursor: `steer.jsonl`,
   `steer-shell.jsonl`, `cursor-steer.test.ts`);
 - `opencode-run-ledger.test.ts` for 95 and 97 with a real OpenCode on a dynamic port;
   `opencode-steer.spec.ts` (E2E) stays green as the user-visible check.
@@ -371,6 +391,19 @@ f6a9bbfc29, monocode 09d04436ba, diri ab0bfdc2fb, capy docs 2026-11-16.
 - **Different on purpose:** no re-send and no deadline (bb's hold, zeron's re-send). 978-983
   already let the steer run as its own Run, and a re-send could run it twice when Claude still runs
   its queued copy.
+
+Codex steer echo, surveyed 2026-11-17 (t3code dfeaf7b137, its fetch failed so stale; paseo
+038a9ca00; bb 5a1f59e268):
+
+| competitor | a Codex steer is matched to its echo by |
+|---|---|
+| t3code | nothing. It takes the steer when `turn/steer` succeeds and sends no `clientUserMessageId`. |
+| paseo | the echo's `clientId`. An untagged echo falls to one slot holding the `turn/start` id, which paseo sends untagged. |
+| bb | nothing. It binds the steer to `expectedTurnId` when `turn/steer` succeeds, and the turn's end waits for steers. |
+
+- **Taken:** paseo's `clientId` match.
+- **Different on purpose:** no positional fallback. Paseo needs one because it omits the id on
+  `turn/start`; conduit sends it on every input.
 
 ## Decisions
 
@@ -398,3 +431,9 @@ lane's choice.
 | M: a pending steer is a Run record behind the open Run | **chosen**: no new field; `activeInputRun` and 978-983 already do the rest |
 | N: a pending steer is a send with no Run until the open Run ends | rejected: no `retryAt`, no Run to show a failure on, no alarm |
 | O: a new Pending phase | rejected: every phase switch in the decider and the reference changes |
+| Codex P: join by the echo's `clientId` only (2026-11-17 redesign) | **chosen**: every supported Codex tags every conduit input; position decided S4 and S8 wrongly |
+| Codex Q: untagged echo falls back to the reply's turnId while open (prior user decision) | retired: unreachable on supported Codex; produced S4 and S8 |
+| Codex R: classify only the `turn/start` turn's first echo as opening | rejected: still positional; goal successors and wakes each need a case |
+| Codex S: version-gate the fallback | rejected: no supported version omits the tag |
+| Codex T: match an untagged echo by text | rejected: text is no identity (S4) |
+| Codex U: an untagged echo while steers pend fails the turn | rejected: another client on the thread sends untagged input legitimately |
