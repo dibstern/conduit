@@ -2,7 +2,13 @@
 // probing again, duplicate token totals, fresh threads on reset, cross-account
 // continuation, signed-out probes throwing, and incomplete trace consumption.
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	watch,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { Effect, Fiber, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -38,6 +44,21 @@ describe("Codex usage through the built daemon", () => {
 			`${trace.map((row) => JSON.stringify(row)).join("\n")}\n`,
 		);
 
+	const boot = (fixture: ProcessHarness) =>
+		fixture.restart({
+			startupTimeoutMs: TIMEOUT,
+			runnerStartupTimeoutMs: TIMEOUT,
+			continuationSweepIntervalMs: CONTINUATION_SWEEP_INTERVAL_MS,
+			serviceEnvironment: {
+				CONDUIT_QUOTA_READ_MAX_AGE_MS: "0",
+				CONDUIT_CODEX_APP_SERVER_TRACE: tracePath,
+				CONDUIT_TEST_CODEX_USAGE_TRACE: usagePath,
+				CONDUIT_CODEX_APP_SERVER_CAPTURE: capturePath,
+				CONDUIT_CODEX_APP_SERVER_TRACE_REPORT: reportPath,
+				CONDUIT_CODEX_APP_SERVER_TRACE_GATE: gatePath,
+			},
+		});
+
 	async function start(name: string) {
 		artifactRoot = resolve(`test-results/codex-usage/${name}`);
 		mkdirSync(artifactRoot, { recursive: true });
@@ -56,19 +77,7 @@ describe("Codex usage through the built daemon", () => {
 		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 		writeTrace(tracePath, signedInCodexDiscoveryTrace());
 		writeTrace(usagePath, fixtureRows("usage-read"));
-		await fixture.restart({
-			startupTimeoutMs: TIMEOUT,
-			runnerStartupTimeoutMs: TIMEOUT,
-			continuationSweepIntervalMs: CONTINUATION_SWEEP_INTERVAL_MS,
-			serviceEnvironment: {
-				CONDUIT_QUOTA_READ_MAX_AGE_MS: "0",
-				CONDUIT_CODEX_APP_SERVER_TRACE: tracePath,
-				CONDUIT_TEST_CODEX_USAGE_TRACE: usagePath,
-				CONDUIT_CODEX_APP_SERVER_CAPTURE: capturePath,
-				CONDUIT_CODEX_APP_SERVER_TRACE_REPORT: reportPath,
-				CONDUIT_CODEX_APP_SERVER_TRACE_GATE: gatePath,
-			},
-		});
+		await boot(fixture);
 		const browser = await fixture.connect();
 		const account = (await browser.instances()).instances.find(
 			({ driver }) => driver === "codex",
@@ -300,6 +309,40 @@ describe("Codex usage through the built daemon", () => {
 		},
 		TIMEOUT,
 	);
+
+	it("reads usage at startup before any browser asks for it", async () => {
+		const { fixture, accountId } = await start("startup-read");
+		// A fresh config gains its Codex account after start; a restart boots
+		// with it saved, as a real server does.
+		await fixture.kill();
+		await boot(fixture);
+		const historyPath = join(fixture.configDir, "usage-history.json");
+		const saved = () =>
+			existsSync(historyPath)
+				? (
+						JSON.parse(readFileSync(historyPath, "utf8")) as Record<
+							string,
+							{ reading?: UsageReading }
+						>
+					)[accountId]?.reading
+				: undefined;
+		// No QuotaForAccounts and no usage subscription: only a startup read
+		// saves a reading. The test's timeout bounds the wait.
+		const reading = await new Promise<UsageReading>((resolve) => {
+			const check = () => {
+				const current = saved();
+				if (!current) return;
+				watcher.close();
+				resolve(current);
+			};
+			const watcher = watch(fixture.configDir, check).on("error", () =>
+				watcher.close(),
+			);
+			check();
+		});
+		expect(reading).toMatchObject({ accountId, status: "available" });
+		evidence["startupReading"] = reading;
+	});
 
 	it(
 		"publishes a sparse mid-turn update without probing and preserves other allowances",

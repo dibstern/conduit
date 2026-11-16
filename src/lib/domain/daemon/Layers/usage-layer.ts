@@ -146,6 +146,9 @@ export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
 					}),
 				},
 			});
+			// Read every account at start, so usage is current before anyone
+			// opens a tab. A tab that reconnects joins these reads.
+			yield* Effect.forkScoped(usage.refresh({ maxAge: 0, wait: 0 }));
 			return { ...usage, setCursorKeychain: cursor.setKeychain };
 		}),
 	);
