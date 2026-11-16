@@ -369,10 +369,15 @@ const commandFor = (
 				// 9 (CONTRACT.md 3032-3033, 3101-3102): OpenCode's echo of a prompt, its user message under
 				// the conduit id main gave it, is that input's acceptance (3.4, 506-507), which beats an
 				// earlier absent reading (564, 3128-3131). Conduit's own placement carries the bare input id.
+				// A summarize names no conduit id, so its echo is the one the adapter tagged with its input:
+				// without it a compaction stays unconfirmed past main's terminal (AMENDMENT-2026-11-16 E2).
 				const inputId =
 					event.data.role === "user" &&
 					getProviderDriver(provider)?.runsOpenCodeServer === true
-						? inputIdFromOpenCodeMessageId(event.data.messageId)
+						? (inputIdFromOpenCodeMessageId(event.data.messageId) ??
+							(event.data.inputId !== event.data.messageId
+								? event.data.inputId
+								: undefined))
 						: undefined;
 				if (inputId === undefined) return undefined;
 				// 3.4: a direct start's token is its run.requested runId; the echo names no try, so the latest.
