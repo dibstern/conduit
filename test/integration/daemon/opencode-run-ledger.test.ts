@@ -817,7 +817,16 @@ describe("OpenCode on the Run Ledger", () => {
 			"opencode",
 		);
 		await browser.send(sessionId, "first", 60_000);
-		// The send reads its session before it posts the prompt; the gate holds that read.
+		// The send reads its session before it posts the prompt; the gate holds that read. The first
+		// turn's end probe reads the session too and can outlast the send: held, it would fence the
+		// next send unclaimed, and a Stop returns that send to the queue instead of ending it.
+		await until(
+			() =>
+				expect(probing(fixture, sessionId).probes).toEqual([
+					{ target: "native_session", status: "completed" },
+				]),
+			15_000,
+		);
 		const gate = join(fixture.configDir, "fake-opencode-hold-session");
 		const held = join(fixture.configDir, "fake-opencode-held-session.jsonl");
 		writeFileSync(gate, "hold");
