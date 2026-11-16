@@ -1,6 +1,6 @@
 // Failure modes: git-parent/extra roots omitted, escaped targets included,
 // linked descendants skipped, HOME aliases rejected, managed cache omitted.
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import { discoverCursorSkillsEffect } from "../../../../src/lib/provider/cursor/
 import { createTraceCursorSdkPort } from "../../../../src/lib/provider/cursor/sdk-trace-player.js";
 import { cursorAccountResourcesFixture } from "../../../helpers/cursor-account-resources-fixture.js";
 import {
+	cursorSkill,
 	cursorSkillCycle,
 	cursorSkillsFixture,
 } from "../../../helpers/cursor-skills-fixture.js";
@@ -36,6 +37,33 @@ describe("Cursor skill root rules", () => {
 			discoverCursorSkillsEffect(cwd, { settingSources: ["project"] }),
 		);
 		expect(skills.map(({ name }) => name)).toContain("deep-legitimate");
+	});
+	it("lists the newest completed marketplace install and skips older snapshots", async () => {
+		const { cwd, home } = fixture();
+		const plugin = join(home, ".cursor/plugins/cache/cursor-public/pstack");
+		const install = (version: string, skill: string) => {
+			const root = join(plugin, version);
+			mkdirSync(join(root, ".cursor-plugin"), { recursive: true });
+			writeFileSync(
+				join(root, ".cursor-plugin/plugin.json"),
+				JSON.stringify({ name: "pstack", skills: "./skills/" }),
+			);
+			writeFileSync(join(root, ".cache-complete"), "");
+			cursorSkill(join(root, "skills", skill), skill);
+			return root;
+		};
+		const older = install("old", "stale");
+		const current = install("current", "fresh");
+		const partial = join(plugin, "partial");
+		cursorSkill(join(partial, "skills/partial"), "partial");
+		utimesSync(join(older, ".cache-complete"), 1, 1);
+		utimesSync(join(current, ".cache-complete"), 2, 2);
+		const names = (
+			await Effect.runPromise(discoverCursorSkillsEffect(cwd))
+		).map(({ name }) => name);
+		expect(names).toContain("fresh");
+		expect(names).not.toContain("stale");
+		expect(names).not.toContain("partial");
 	});
 	it("lists the on-disk managed cache by default", async () => {
 		const { cwd } = fixture();

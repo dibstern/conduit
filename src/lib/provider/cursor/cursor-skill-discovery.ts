@@ -353,84 +353,120 @@ export const discoverCursorSkillsEffect = (
 			}
 			return true;
 		};
-		// SDK ck.load/Id/pd/rd: local plugins load by presence, independently of
-		// marketplace registrations. Never infer enabled plugins from cache contents.
-		const localRoot = await realpath(
-			join(homedir(), ".cursor", "plugins", "local"),
-		).catch(() => undefined);
+		const loadPlugin = async (root: string) => {
+			let selected: string | readonly string[] | undefined;
+			for (const manifest of [
+				".cursor-plugin/plugin.json",
+				".claude-plugin/plugin.json",
+				"plugin.json",
+			]) {
+				const path = join(root, manifest);
+				if ((await lstat(path).catch(() => undefined))?.isSymbolicLink())
+					continue;
+				const content = await pluginDocument(root, path);
+				if (content === undefined) continue;
+				try {
+					const parsed: unknown = JSON.parse(content);
+					const decoded = decodePluginManifest(parsed);
+					if (decoded._tag === "None") continue;
+					const fields = parsed as Record<string, unknown>;
+					if (
+						![
+							"commands",
+							"agents",
+							"skills",
+							"rules",
+							"hooks",
+							"mcpServers",
+							"displayName",
+							"description",
+							"author",
+							"logo",
+							"variables",
+							"capabilities",
+						].some((field) => fields[field] !== undefined)
+					)
+						continue;
+					selected = decoded.value.skills;
+					break;
+				} catch {
+					// Invalid manifests fall through to the next supported location.
+				}
+			}
+			if (selected === undefined)
+				await collectPlugin(root, join(root, "SKILL.md"));
+			for (const selection of selected === undefined
+				? ["skills"]
+				: typeof selected === "string"
+					? [selected]
+					: selected) {
+				if (exhausted()) break;
+				if (
+					selection.includes("..") ||
+					isAbsolute(selection) ||
+					selection.includes("://")
+				)
+					continue;
+				const path = join(root, selection.replace(/^\.\//, ""));
+				if (
+					Array.isArray(selected) &&
+					(await collectPlugin(
+						root,
+						path.endsWith("SKILL.md") ? path : join(path, "SKILL.md"),
+					))
+				)
+					continue;
+				for (const child of await pluginChildren(root, path)) {
+					if (exhausted()) break;
+					await collectPlugin(root, join(child, "SKILL.md"));
+				}
+			}
+		};
+		// Local plugins load by presence. A marketplace install is the newest
+		// completed snapshot in the cache; older snapshots of that plugin are not.
+		const pluginsRoot = join(homedir(), ".cursor", "plugins");
+		const localRoot = await realpath(join(pluginsRoot, "local")).catch(
+			() => undefined,
+		);
 		if (sources.includes("plugins") && localRoot)
 			for (const plugin of await pluginChildren(localRoot, localRoot, true)) {
 				if (exhausted()) break;
 				const root = await realpath(plugin).catch(() => undefined);
-				if (!root) continue;
-				let selected: string | readonly string[] | undefined;
-				for (const manifest of [
-					".cursor-plugin/plugin.json",
-					".claude-plugin/plugin.json",
-					"plugin.json",
-				]) {
-					const path = join(root, manifest);
-					if ((await lstat(path).catch(() => undefined))?.isSymbolicLink())
-						continue;
-					const content = await pluginDocument(root, path);
-					if (content === undefined) continue;
-					try {
-						const parsed: unknown = JSON.parse(content);
-						const decoded = decodePluginManifest(parsed);
-						if (decoded._tag === "None") continue;
-						const fields = parsed as Record<string, unknown>;
-						if (
-							![
-								"commands",
-								"agents",
-								"skills",
-								"rules",
-								"hooks",
-								"mcpServers",
-								"displayName",
-								"description",
-								"author",
-								"logo",
-								"variables",
-								"capabilities",
-							].some((field) => fields[field] !== undefined)
-						)
-							continue;
-						selected = decoded.value.skills;
-						break;
-					} catch {
-						// Invalid manifests fall through to the next supported location.
-					}
-				}
-				if (selected === undefined)
-					await collectPlugin(root, join(root, "SKILL.md"));
-				for (const selection of selected === undefined
-					? ["skills"]
-					: typeof selected === "string"
-						? [selected]
-						: selected) {
+				if (root) await loadPlugin(root);
+			}
+		const cacheRoot = await realpath(join(pluginsRoot, "cache")).catch(
+			() => undefined,
+		);
+		if (sources.includes("plugins") && cacheRoot && !exhausted()) {
+			for (const marketplace of await pluginChildren(
+				cacheRoot,
+				cacheRoot,
+				true,
+			)) {
+				if (exhausted()) break;
+				for (const plugin of await pluginChildren(
+					cacheRoot,
+					marketplace,
+					true,
+				)) {
 					if (exhausted()) break;
-					if (
-						selection.includes("..") ||
-						isAbsolute(selection) ||
-						selection.includes("://")
-					)
-						continue;
-					const path = join(root, selection.replace(/^\.\//, ""));
-					if (
-						Array.isArray(selected) &&
-						(await collectPlugin(
-							root,
-							path.endsWith("SKILL.md") ? path : join(path, "SKILL.md"),
-						))
-					)
-						continue;
-					for (const child of await pluginChildren(root, path)) {
-						if (exhausted()) break;
-						await collectPlugin(root, join(child, "SKILL.md"));
+					let newest:
+						| { readonly path: string; readonly mtimeMs: number }
+						| undefined;
+					for (const version of await pluginChildren(cacheRoot, plugin, true)) {
+						const marker = await lstat(join(version, ".cache-complete")).catch(
+							() => undefined,
+						);
+						if (!marker?.isFile()) continue;
+						if (!newest || marker.mtimeMs >= newest.mtimeMs)
+							newest = { path: version, mtimeMs: marker.mtimeMs };
 					}
+					if (!newest) continue;
+					const root = await realpath(newest.path).catch(() => undefined);
+					if (root) await loadPlugin(root);
 				}
 			}
+		}
 		// SDK wh/NestedExtensibilityService also discovers package-local roots in Git workspaces.
 		if (sources.includes("project")) {
 			for (const workspaceRoot of workspaceRoots) {
