@@ -287,6 +287,12 @@ beforeAll(async () => {
 		dispatch,
 		`${ownFibers}\nexport class ProviderTurnDispatchFibersTag extends Context.Service<ProviderTurnDispatchFibersTag, FiberMap.FiberMap<string, void, unknown>>()("ProviderTurnDispatchFibers") {}\n`,
 	);
+	// R2's turn service exported its own layer (6c9ff950 provider-turn-service.ts 407); the
+	// current one is composed in the test harness.
+	writeFileSync(
+		join(scratch, "test/helpers/provider-turns.ts"),
+		'export { ProviderTurnServiceLive } from "../../src/lib/domain/project-services/Services/provider-turn-service.js";\n',
+	);
 	const main: typeof import("./replay.js") = await import(
 		join(scratch, "test/unit/provider/run-ledger-oracle/replay.ts")
 	);

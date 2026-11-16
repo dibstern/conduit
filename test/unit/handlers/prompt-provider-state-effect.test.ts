@@ -12,11 +12,7 @@ import { AgentServiceTag } from "../../../src/lib/domain/project-services/Servic
 import { AlertsLive } from "../../../src/lib/domain/project-services/Services/alerts.js";
 import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
-import {
-	ProviderTurnServiceLive,
-	ProviderTurnServiceTag,
-} from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
+import { ProviderTurnServiceTag } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -44,6 +40,7 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import type { ProjectServicesConfig } from "../../../src/lib/types.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	MOCK_PROJECT_DIR,
@@ -58,6 +55,7 @@ import {
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
+import { ProviderTurnServiceLive } from "../../helpers/provider-turns.js";
 
 const setClaudeModel = (sessionId: string) =>
 	setModel(sessionId, {
@@ -101,7 +99,7 @@ const establishClaudeSession = (sessionId: string) =>
 const makeIngestionLayer = (
 	persistence: ReturnType<typeof makePersistenceEffectLayer>,
 ) =>
-	makeProviderRuntimeIngestionLive({
+	makeTestProviderRuntimeIngestionLive({
 		browserPublisher: { publish: () => Effect.void },
 	}).pipe(Layer.provide(persistence));
 

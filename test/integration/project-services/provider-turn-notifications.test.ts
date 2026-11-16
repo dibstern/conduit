@@ -9,13 +9,11 @@ import {
 	AlertsLive,
 	AlertsTag,
 } from "../../../src/lib/domain/project-services/Services/alerts.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { publishTurnDone } from "../../../src/lib/provider/turn-done-publisher.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 const idleActivity = {
@@ -25,7 +23,7 @@ const idleActivity = {
 } as const;
 
 it("persists Claude content for a session without a session.created event", async () => {
-	const layer = makeProviderRuntimeIngestionLive().pipe(
+	const layer = makeTestProviderRuntimeIngestionLive().pipe(
 		Layer.provideMerge(makePersistenceEffectLayer(":memory:", "test-project")),
 	);
 	await Effect.runPromise(
@@ -134,7 +132,7 @@ it.each([
 			const sql = yield* SqlClient.SqlClient;
 			const alerts = yield* AlertsTag;
 			const ledger = yield* AlertLedgerTag;
-			return makeProviderRuntimeIngestionLive({
+			return makeTestProviderRuntimeIngestionLive({
 				browserPublisher: {
 					publish: (message) =>
 						publishTurnDone(message, {

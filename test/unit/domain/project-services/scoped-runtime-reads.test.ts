@@ -14,6 +14,7 @@ import {
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
+import { DaemonTurnsOrOwn } from "../../../helpers/daemon-turns.js";
 import { makeTestHandlerLayer } from "../../../helpers/mock-factories.js";
 
 // Failure modes: startup dispatches another project's queued inputs; a foreign
@@ -75,7 +76,10 @@ it("keeps inbox startup, advance and overflow drains within the bound project", 
 		).pipe(Layer.provide(persistence)),
 	);
 	const runtime = ManagedRuntime.make(
-		SessionInboxLive.pipe(Layer.provideMerge(deps)),
+		SessionInboxLive.pipe(
+			Layer.provide(DaemonTurnsOrOwn),
+			Layer.provideMerge(deps),
+		),
 	);
 	const record = (read: string, expected: string[]) => {
 		const titles = dispatched

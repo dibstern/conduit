@@ -18,6 +18,7 @@ import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effe
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { messageRowsToHistory } from "../../../../src/lib/persistence/session-history-adapter.js";
+import { DaemonTurnsOrOwn } from "../../../helpers/daemon-turns.js";
 import { makeTestHandlerLayer } from "../../../helpers/mock-factories.js";
 
 it("retains files in history when queued dispatch cannot place the input and pauses the remaining queue", async () => {
@@ -117,7 +118,14 @@ it("retains files in history when queued dispatch cannot place the input and pau
 				]);
 				yield* inbox.start;
 				expect(sendTurn).toHaveBeenCalledTimes(1);
-			}).pipe(Effect.provide(SessionInboxLive.pipe(Layer.provideMerge(deps)))),
+			}).pipe(
+				Effect.provide(
+					SessionInboxLive.pipe(
+						Layer.provide(DaemonTurnsOrOwn),
+						Layer.provideMerge(deps),
+					),
+				),
+			),
 		),
 	);
 });

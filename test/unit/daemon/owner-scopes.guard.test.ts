@@ -4,7 +4,8 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 // These are the daemon-owned destinations for 82tn.10.6, 10.7, 12 and 14.
-// Legacy relay/provider code is deliberately outside this migration guard.
+// Project-services and provider code outside the daemon domain is deliberately
+// outside this migration guard.
 const root = "src/lib/domain/daemon";
 const legacyCalls = new Map([
 	[`${root}/Layers/opencode-instances-reconcile.ts:setTimeout`, 1],
@@ -226,7 +227,7 @@ const tally = (paths: readonly string[], kept: (hit: string) => boolean) => {
 };
 
 describe("daemon-owned sessions and turns (82tn.10.9)", () => {
-	it("the relay names no daemon owner's constructor and builds no engine", () => {
+	it("OpenCode streaming and terminal code name no daemon owner's constructor and build no engine", () => {
 		expect(
 			tally(
 				[
@@ -239,7 +240,7 @@ describe("daemon-owned sessions and turns (82tn.10.9)", () => {
 		).toEqual(new Map());
 	});
 
-	it("only the daemon and a standalone relay's fallback build an engine", () => {
+	it("only the daemon builds an engine", () => {
 		expect(
 			tally(sources("src/lib"), (hit) => hit === "new OrchestrationEngine"),
 		).toEqual(
@@ -248,16 +249,7 @@ describe("daemon-owned sessions and turns (82tn.10.9)", () => {
 					`${root}/Layers/daemon-orchestration-layer.ts:new OrchestrationEngine`,
 					1,
 				],
-				["src/lib/provider/orchestration-wiring.ts:new OrchestrationEngine", 1],
 			]),
-		);
-		const wiring = readFileSync(
-			"src/lib/provider/orchestration-wiring.ts",
-			"utf8",
-		);
-		expect(wiring.indexOf("engine: daemon.value.engine")).toBeGreaterThan(0);
-		expect(wiring.indexOf("engine: daemon.value.engine")).toBeLessThan(
-			wiring.indexOf("new OrchestrationEngine"),
 		);
 	});
 

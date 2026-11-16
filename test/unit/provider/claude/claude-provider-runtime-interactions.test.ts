@@ -20,10 +20,7 @@ import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	makeOverridesStateLive,
 	makeProcessingTimeoutHooks,
@@ -58,6 +55,7 @@ import type {
 	PermissionResponse,
 	TurnResult,
 } from "../../../../src/lib/provider/types.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
 import {
 	createMockEventSink,
 	createMockQuery,
@@ -88,7 +86,7 @@ async function persistentInteractions(permissionTimeoutMs?: number) {
 	);
 	const persistence = ManagedRuntime.make(
 		Layer.merge(
-			makeProviderRuntimeIngestionLive().pipe(
+			makeTestProviderRuntimeIngestionLive().pipe(
 				Layer.provideMerge(persistenceLayer),
 			),
 			makePendingInteractionServiceLive(

@@ -6,16 +6,14 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import {
 	CURRENT_EVENT_STORE_MIGRATION,
 	readMigrationSql,
 } from "../../../src/lib/persistence/schema.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
 const EXISTING_SESSION_ID = "legacy-session";
 const ORPHAN_SESSION_ID = "runtime-only-session";

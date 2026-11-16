@@ -27,10 +27,7 @@ import { SqlError, UnknownError } from "effect/sql/SqlError";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -66,6 +63,7 @@ import type {
 	SessionOutput,
 } from "../../../src/lib/provider/runner/session-runner.js";
 import { cleanupTestClaudeRunners } from "../../helpers/claude-runner-cleanup.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import {
 	admitRunnerCommand,
 	makeRunnerAdmission,

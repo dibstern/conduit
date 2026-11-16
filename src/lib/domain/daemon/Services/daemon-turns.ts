@@ -185,12 +185,3 @@ export const DaemonTurnsLive = Layer.effect(
 		};
 	}),
 );
-
-/** The daemon's DaemonTurns when the context has one; otherwise the caller is its own daemon. */
-export const DaemonTurnsOrOwn = Layer.unwrap(
-	Effect.map(Effect.serviceOption(DaemonTurns), (shared) =>
-		Option.isSome(shared)
-			? Layer.succeed(DaemonTurns, shared.value)
-			: DaemonTurnsLive,
-	),
-);

@@ -1,4 +1,5 @@
 // test/unit/provider/orchestration-wiring.test.ts
+
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +21,6 @@ import {
 	SessionProjectNotFound,
 } from "../../../src/lib/domain/daemon/Services/project-context.js";
 import { ProjectNotFound } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -31,14 +31,15 @@ import {
 	OpenCodeProviderInstance,
 } from "../../../src/lib/provider/opencode-provider-instance.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
-import {
-	getOrchestrationLayer,
-	type OrchestrationRuntimeLayerOptions,
-} from "../../../src/lib/provider/orchestration-wiring.js";
+import { getOrchestrationLayer } from "../../../src/lib/provider/orchestration-wiring.js";
 import * as shellEnvironment from "../../../src/lib/provider/project-shell-env.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
-import { makeTestOrchestrationRuntimeLayer as makeOrchestrationRuntimeLayer } from "../../helpers/provider-adapters.js";
+import {
+	makeTestOrchestrationRuntimeLayer as makeOrchestrationRuntimeLayer,
+	type OrchestrationRuntimeLayerOptions,
+} from "../../helpers/provider-adapters.js";
 
 let configDir: string;
 const Resolver = shellEnvironment.ProjectShellEnvResolver;
@@ -98,7 +99,7 @@ function orchestrationDeps(
 		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
-		makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
+		makeTestProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
 	);
 }
 

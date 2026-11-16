@@ -22,10 +22,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/provider-adapters.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnServiceTag,
 	STOP_ABORT_WAIT_MS,
@@ -49,6 +46,10 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { inboxRunStatusQuery } from "../../../src/lib/persistence/inbox-run-status-query.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { getOrchestrationLayer } from "../../../src/lib/provider/orchestration-wiring.js";
+import {
+	DaemonTurnsOrOwn,
+	makeTestProviderRuntimeIngestionLive,
+} from "../../helpers/daemon-turns.js";
 import {
 	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockAccountDirectory,
@@ -79,7 +80,7 @@ const stopLayer = (api: OpenCodeAPI, scratch: string) => {
 		Layer.provideMerge(
 			Layer.mergeAll(
 				persistence,
-				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
+				makeTestProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
 				Layer.succeed(AccountDirectory, accounts),
 				Layer.succeed(OpenCodeAPITag, api),
 				Layer.succeed(
@@ -98,6 +99,7 @@ const stopLayer = (api: OpenCodeAPI, scratch: string) => {
 		Effect.gen(function* () {
 			const wired = yield* getOrchestrationLayer;
 			return SessionInboxLive.pipe(
+				Layer.provide(DaemonTurnsOrOwn),
 				Layer.provideMerge(
 					Layer.mergeAll(
 						SessionEventBusLive,

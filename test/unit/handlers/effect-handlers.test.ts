@@ -11,14 +11,15 @@ import {
 } from "../../../src/lib/domain/project-services/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/project-services/Services/alerts.js";
 import { ProjectStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
-import { ProviderTurnServiceLive } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/project-services/Services/session-title-service.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import {
 	makeMockAccountDirectory,
 	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
+import { ProviderTurnServiceLive } from "../../helpers/provider-turns.js";
 // Effect Handler Tests (Batch 1)
 // Verifies that the Effect handler implementations produce the expected
 // observable side effects when run against a mock
@@ -48,10 +49,7 @@ import {
 	publishProjectSetting,
 	subscribeProjectSettings,
 } from "../../../src/lib/domain/project-services/Services/project-settings.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
@@ -320,7 +318,7 @@ function mockConfig(
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
 const persistentHandlerPersistence = makePersistenceEffectLayer(":memory:", "test-project");
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.provideMerge(SessionWorkspaceLive, Layer.mergeAll(Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: makeHandlerOpenCodeAPI() })), Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), AlertsLive, InputDraftsLive.pipe(Layer.provide(persistentHandlerPersistence)), persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag)(makeMockAgentService()), Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(mockConfig()), Layer.succeed(LoggerTag)(mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive)))("persistent handler runtime", (it) => {
+layer(Layer.provideMerge(SessionWorkspaceLive, Layer.mergeAll(Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: makeHandlerOpenCodeAPI() })), Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), AlertsLive, InputDraftsLive.pipe(Layer.provide(persistentHandlerPersistence)), persistentHandlerPersistence, makeTestProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag)(makeMockAgentService()), Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(mockConfig()), Layer.succeed(LoggerTag)(mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive)))("persistent handler runtime", (it) => {
 describe("GetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and returns the filtered list",

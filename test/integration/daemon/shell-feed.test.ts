@@ -32,7 +32,6 @@ import {
 import { DaemonStoreAvailability } from "../../../src/lib/domain/daemon/Services/daemon-store-availability.js";
 import { ProjectRegistryTag } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
-import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { markUnread } from "../../../src/lib/domain/project-services/Services/session-attention.js";
 import { SessionEventBusTag } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -49,6 +48,7 @@ import { OpenCodeRuntimeEventTranslator } from "../../../src/lib/provider/openco
 import { translateProviderRuntimeEventToDomain } from "../../../src/lib/provider/provider-runtime-event-to-domain.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { createDaemonProject } from "../../helpers/in-process-daemon.js";
 
 const cleanup: Array<() => Promise<void>> = [];

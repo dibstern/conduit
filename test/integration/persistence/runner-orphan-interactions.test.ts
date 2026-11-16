@@ -7,10 +7,7 @@ import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -22,6 +19,7 @@ import {
 	type RunnerRecoveryDependencies,
 } from "../../../src/lib/provider/runner/runner-provider-instance.js";
 import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
 // A newer attempt can register a question after recovery snapshots the old
 // command. Rejecting its stale terminal must also preserve the newer waiter.

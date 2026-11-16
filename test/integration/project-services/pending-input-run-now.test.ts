@@ -30,9 +30,7 @@ import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/L
 import { ContinuationTag } from "../../../src/lib/domain/project-services/Services/continuation.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
-	ProviderTurnServiceLive,
 	ProviderTurnServiceTag,
 	STOP_ABORT_WAIT_MS,
 } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
@@ -62,7 +60,11 @@ import { ClaudeBoundaryError } from "../../../src/lib/provider/event-sink-errors
 import type { SSEEvent } from "../../../src/lib/provider/opencode/opencode-events.js";
 import { getOrchestrationLayer } from "../../../src/lib/provider/orchestration-wiring.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
-import { makeTestContinuation } from "../../helpers/daemon-turns.js";
+import {
+	DaemonTurnsOrOwn,
+	makeTestContinuation,
+	makeTestProviderRuntimeIngestionLive,
+} from "../../helpers/daemon-turns.js";
 import {
 	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockAccountDirectory,
@@ -81,6 +83,7 @@ import {
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
 import { makeTestOrchestrationRuntimeLayer as makeOrchestrationRuntimeLayer } from "../../helpers/provider-adapters.js";
 import { writeProviderCommandOutboxProof } from "../../helpers/provider-command-outbox-proof.js";
+import { ProviderTurnServiceLive } from "../../helpers/provider-turns.js";
 import { makeSSEEvent } from "../../helpers/sse-factories.js";
 
 const commandOutboxEvidence: Record<string, unknown>[] = [];
@@ -446,7 +449,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 									: {},
 							),
 						),
-						makeProviderRuntimeIngestionLive().pipe(
+						makeTestProviderRuntimeIngestionLive().pipe(
 							Layer.provide(Layer.merge(persistence, SessionEventBusLive)),
 						),
 						Layer.succeed(AccountDirectory, accounts),
@@ -620,7 +623,10 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							: deps;
 					return WsRpcServerLayer.pipe(
 						Layer.provideMerge(
-							SessionInboxLive.pipe(Layer.provideMerge(inboxDeps)),
+							SessionInboxLive.pipe(
+								Layer.provide(DaemonTurnsOrOwn),
+								Layer.provideMerge(inboxDeps),
+							),
 						),
 					);
 				}),

@@ -11,11 +11,7 @@ import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ConfigTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	makeOverridesStateLive,
@@ -32,6 +28,10 @@ import { makeClaudeProviderRuntime } from "../../../src/lib/provider/claude/clau
 import { settleUnclaimedRunnerCommands } from "../../../src/lib/provider/runner/runner-recovery.js";
 import * as runnerRegistry from "../../../src/lib/provider/runner/runner-registry.js";
 import { discoverRunners } from "../../../src/lib/provider/runner/runner-registry.js";
+import {
+	makeTestProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionLive,
+} from "../../helpers/daemon-turns.js";
 import { makeMockConfig } from "../../helpers/mock-factories.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -203,7 +203,7 @@ it.each([
 					// Startup may reclaim the store; open the independent reader afterward.
 					db = new Database(fixture.daemonStorePath(), { readonly: true });
 					const ownerIngestion = yield* Layer.build(
-						makeProviderRuntimeIngestionLive().pipe(
+						makeTestProviderRuntimeIngestionLive().pipe(
 							Layer.provide(ownerPersistence),
 						),
 					);
@@ -486,7 +486,7 @@ it.each([
 					daemonConfigDir: fixture.configDir,
 				});
 				const ownerIngestion = yield* Layer.build(
-					makeProviderRuntimeIngestionLive().pipe(
+					makeTestProviderRuntimeIngestionLive().pipe(
 						Layer.provide(ownerPersistence),
 					),
 				);

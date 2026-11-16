@@ -61,10 +61,7 @@ import {
 	RunnerProviderInstance,
 } from "../../../provider/runner/runner-provider-instance.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
-import {
-	DaemonTurns,
-	DaemonTurnsOrOwn,
-} from "../../daemon/Services/daemon-turns.js";
+import { DaemonTurns } from "../../daemon/Services/daemon-turns.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import { type Continuation, ContinuationTag } from "./continuation.js";
 import { type DraftChange, InputDraftsTag } from "./input-drafts.js";
@@ -1159,4 +1156,4 @@ export const SessionInboxLive = Layer.effect(
 				),
 		} satisfies SessionInbox;
 	}),
-).pipe(Layer.provide(DaemonTurnsOrOwn));
+);

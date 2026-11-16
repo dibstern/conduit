@@ -5,10 +5,7 @@ import { Effect, Layer, Logger, ManagedRuntime, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HistoryMessageSchema } from "../../../src/lib/contracts/ws-rpc.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { sessionPickEvents } from "../../../src/lib/domain/project-services/Services/session-pick.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
@@ -23,6 +20,7 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 function makeCostRuntime(filename: string) {

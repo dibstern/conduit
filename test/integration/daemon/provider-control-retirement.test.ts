@@ -1,10 +1,7 @@
 import { Context, Effect, Layer, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -16,6 +13,7 @@ import { backfillLegacyControlAnswers } from "../../../src/lib/provider/legacy-c
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
 describe("provider process control retirement", () => {
 	it("borrows current project services to retire prompts after daemon control delivery finds a dead process", async () => {
@@ -154,7 +152,7 @@ describe("provider process control retirement", () => {
 			}).pipe(
 				Effect.provide(
 					Layer.provideMerge(
-						makeProviderRuntimeIngestionLive(),
+						makeTestProviderRuntimeIngestionLive(),
 						makePersistenceEffectLayer(":memory:", "project"),
 					),
 				),

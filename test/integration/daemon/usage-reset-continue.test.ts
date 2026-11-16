@@ -44,7 +44,10 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
-import { makeTestContinuation } from "../../helpers/daemon-turns.js";
+import {
+	DaemonTurnsOrOwn,
+	makeTestContinuation,
+} from "../../helpers/daemon-turns.js";
 import { activeRunEvents } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockLogger,
@@ -147,7 +150,9 @@ const fixture = Effect.gen(function* () {
 		]);
 	yield* TestClock.setTime(2_000);
 	const continuation = yield* makeTestContinuation;
-	const context = yield* Layer.build(SessionInboxLive).pipe(
+	const context = yield* Layer.build(
+		SessionInboxLive.pipe(Layer.provide(DaemonTurnsOrOwn)),
+	).pipe(
 		Effect.provide(InputDraftsLive),
 		Effect.provideService(ContinuationTag, continuation),
 		Effect.provideService(Usage, usage),

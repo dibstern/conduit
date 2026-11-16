@@ -32,10 +32,7 @@ import {
 	AccountIdSchema,
 	type ClaudeAccount,
 } from "../../../src/lib/contracts/account.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -58,6 +55,7 @@ import {
 import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
 import { failRunnerTurn } from "../../../src/lib/provider/runner/runner-turn-failure.js";
 import type { SessionCommand } from "../../../src/lib/provider/runner/session-runner.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
 class TestChild extends EventEmitter {
 	constructor(readonly pid = 99_999_999) {

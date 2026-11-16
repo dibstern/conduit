@@ -24,10 +24,7 @@ import {
 	makeEffectOpenCodeRuntimeIngress,
 	type OpenCodeRuntimeIngressLog,
 } from "../../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
@@ -47,6 +44,7 @@ import {
 	createEventId,
 } from "../../../../src/lib/persistence/events.js";
 import { openCodeInputMessageId } from "../../../../src/lib/provider/opencode/opencode-input-message-id.js";
+import { ProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
 import { makeSSEEvent } from "../../../helpers/sse-factories.js";
 
 const SESSION_ID = "sess-proj-001";

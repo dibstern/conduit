@@ -3,10 +3,7 @@ import { Deferred, Effect, Fiber, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { afterAll, expect, it } from "vitest";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -17,6 +14,7 @@ import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestrati
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
 import { settleUnclaimedRunnerCommands } from "../../../src/lib/provider/runner/runner-recovery.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 const scenarios: Record<string, unknown>[] = [];

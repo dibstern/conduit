@@ -5,7 +5,6 @@ import {
 	Effect,
 	Exit,
 	HashMap,
-	Layer,
 	Option,
 	PubSub,
 	Ref,
@@ -1709,30 +1708,6 @@ export const makeSessionManagers = (
 	};
 	return managers;
 };
-
-/** A standalone relay is its own daemon: it serves its one project from its own parts. */
-export const ownSessionManagersLive = Layer.effect(
-	SessionManagerServiceTag,
-	Effect.gen(function* () {
-		// The whole relay context: a fork into this project also reads its
-		// OpenCode creation gate and bound provider state.
-		const parts =
-			yield* Effect.context<
-				Exclude<ProjectSessionManagerParts, SessionManagerServiceTag>
-			>();
-		const { slug } = yield* ConfigTag;
-		return makeSessionManagers((projectId) =>
-			projectId === slug
-				? Effect.succeed(parts)
-				: Effect.fail(
-						new SessionManagerError({
-							operation: "forProject",
-							cause: `No relay serves project ${projectId}`,
-						}),
-					),
-		);
-	}),
-);
 
 /** The daemon's session manager for the calling relay's project. */
 export const projectSessionManager = Effect.map(

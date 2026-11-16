@@ -84,14 +84,8 @@ import {
 } from "../../src/lib/domain/project-services/Services/project-management-service.js";
 import { ProjectSettingsLive } from "../../src/lib/domain/project-services/Services/project-settings.js";
 import { ProjectStatusSnapshotLive } from "../../src/lib/domain/project-services/Services/project-status-snapshot.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
-import {
-	ProviderTurnServiceLive,
-	ProviderTurnServiceTag,
-} from "../../src/lib/domain/project-services/Services/provider-turn-service.js";
+import { ProviderRuntimeIngestionTag } from "../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderTurnServiceTag } from "../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import { ScanServiceLive } from "../../src/lib/domain/project-services/Services/scan-service.js";
 import {
 	ConfigTag,
@@ -115,7 +109,8 @@ import {
 import { SessionInboxTag } from "../../src/lib/domain/project-services/Services/session-inbox.js";
 import { SessionManagerError } from "../../src/lib/domain/project-services/Services/session-manager-error.js";
 import {
-	ownSessionManagersLive,
+	makeSessionManagers,
+	type ProjectSessionManagerParts,
 	type SessionManagerService,
 	SessionManagerServiceTag,
 	type SessionManagers,
@@ -177,8 +172,10 @@ import {
 import { RpcSubscriptionScopeLive } from "../../src/lib/server/ws-rpc.js";
 import type { PtyManager } from "../../src/lib/terminal/pty-manager.js";
 import type { ProjectServicesConfig } from "../../src/lib/types.js";
+import { makeTestProviderRuntimeIngestionLive } from "./daemon-turns.js";
 import { withDispatchEffect } from "./orchestration-engine-test-double.js";
 import { partialFake } from "./partial-fake.js";
+import { ProviderTurnServiceLive } from "./provider-turns.js";
 
 function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 	return {
@@ -473,14 +470,38 @@ export const mockSessionManagers = (
 		Effect.fail(
 			new SessionManagerError({
 				operation: "forProject",
-				cause: `No relay serves project ${projectId}`,
+				cause: `No session manager serves project ${projectId}`,
 			}),
 		),
 });
 
+/** A test runtime with no daemon serves its one project (ConfigTag) from its own parts. */
+export const ownSessionManagersLive = Layer.effect(
+	SessionManagerServiceTag,
+	Effect.gen(function* () {
+		// The whole project context: a fork into this project also reads its
+		// OpenCode creation gate and bound provider state.
+		const parts =
+			yield* Effect.context<
+				Exclude<ProjectSessionManagerParts, SessionManagerServiceTag>
+			>();
+		const { slug } = yield* ConfigTag;
+		return makeSessionManagers((projectId) =>
+			projectId === slug
+				? Effect.succeed(parts)
+				: Effect.fail(
+						new SessionManagerError({
+							operation: "forProject",
+							cause: `No session manager serves project ${projectId}`,
+						}),
+					),
+		);
+	}),
+);
+
 /**
- * The real session manager as a standalone relay builds it: its own daemon
- * manager, serving the relay's project (ConfigTag).
+ * The real session manager with no daemon: its own managers, serving the
+ * test's one project (ConfigTag).
  */
 export const standaloneSessionManagerLive = ownSessionManagersLive.pipe(
 	Layer.provide(
@@ -930,9 +951,10 @@ export function makeTestHandlerLayer(
 				]
 			: []),
 	);
-	const providerRuntimeIngestionLayer = makeProviderRuntimeIngestionLive().pipe(
-		Layer.provide(providerTurnPersistenceLayer),
-	);
+	const providerRuntimeIngestionLayer =
+		makeTestProviderRuntimeIngestionLive().pipe(
+			Layer.provide(providerTurnPersistenceLayer),
+		);
 	const sessionManagerOrchestrationLayer = Layer.succeed(
 		OrchestrationEngineTag,
 	)(

@@ -13,8 +13,8 @@ import {
 	type EffectOpenCodeRuntimeIngress,
 	makeEffectOpenCodeRuntimeIngress,
 } from "../../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
-import { ProviderRuntimeIngestionLive } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
+import { ProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
 import { makeSSEEvent } from "../../../helpers/sse-factories.js";
 
 const SESSION_ID = "sess-opencode-ledger-evidence";

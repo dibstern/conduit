@@ -18,10 +18,7 @@ import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -46,6 +43,7 @@ import {
 	cursorAccountResourcesFixture,
 	cursorCredentialFixture,
 } from "../../helpers/cursor-account-resources-fixture.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,

@@ -28,10 +28,7 @@ import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreError } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -64,6 +61,7 @@ import type {
 	ResolvedSendTurnInput,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { createMockEventSink } from "../../helpers/mock-sdk.js";
 
 const reviewEvidence: Record<string, unknown> = {};

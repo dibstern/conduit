@@ -48,11 +48,7 @@ import {
 	AlertsTag,
 } from "../../../src/lib/domain/project-services/Services/alerts.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import { resolveOrphanedClaudePermissions } from "../../../src/lib/domain/project-services/Services/resolve-orphaned-claude-permissions.js";
 import {
@@ -124,7 +120,11 @@ import {
 	type WorktreeCleanupRetry,
 } from "../../../src/lib/session/worktree-cleanup-sweep.js";
 import { projectManifest } from "../../helpers/daemon-store-import-manifest.js";
-import { makeTestContinuation } from "../../helpers/daemon-turns.js";
+import {
+	makeTestContinuation,
+	makeTestProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionLive,
+} from "../../helpers/daemon-turns.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -230,7 +230,7 @@ async function fixture() {
 		).pipe(
 			Layer.provideMerge(
 				Layer.provideMerge(
-					makeProviderRuntimeIngestionLive(),
+					makeTestProviderRuntimeIngestionLive(),
 					makePersistenceEffectLayer(filename, A),
 				),
 			),

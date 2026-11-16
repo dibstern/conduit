@@ -13,10 +13,7 @@ import { join } from "node:path";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/sql";
 import type { ProviderRuntimeEvent } from "../../src/lib/contracts/providers/provider-runtime-event.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { EventStoreEffectTag } from "../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -27,6 +24,7 @@ import {
 import { ReadQueryEffectTag } from "../../src/lib/persistence/effect/read-query-effect.js";
 import type { StoredEvent } from "../../src/lib/persistence/events.js";
 import type { MessageWithParts } from "../../src/lib/persistence/read-model-types.js";
+import { ProviderRuntimeIngestionLive } from "./daemon-turns.js";
 
 export interface EffectProjectionHarness {
 	/** Submit one provider runtime event and wait for projection to settle. */

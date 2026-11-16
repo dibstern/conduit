@@ -7,11 +7,7 @@ import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	type SessionEventBus,
 	SessionEventBusLive,
@@ -37,6 +33,10 @@ import {
 } from "../../../src/lib/persistence/events.js";
 import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
 import { makeRunnerRunLifecycle } from "../../../src/lib/provider/runner/runner-retirement.js";
+import {
+	makeTestProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionLive,
+} from "../../helpers/daemon-turns.js";
 import { makeEffectProjectionHarness } from "../../helpers/effect-projection-harness.js";
 
 const BASE_EVENT = {
@@ -463,7 +463,7 @@ describe("ProviderRuntimeIngestion", () => {
 	it("publishes only turn-ended alerts through the ingestion owner", async () => {
 		const harness = makeHarness({ existingSession: true });
 		const published: unknown[] = [];
-		const layer = makeProviderRuntimeIngestionLive({
+		const layer = makeTestProviderRuntimeIngestionLive({
 			browserPublisher: {
 				publish: (message) =>
 					Effect.sync(() => {
@@ -571,7 +571,7 @@ describe("ProviderRuntimeIngestion", () => {
 			subscribe: () => Effect.succeed(Stream.empty),
 			subscribeAdvances: () => Effect.succeed(Stream.empty),
 		} satisfies SessionEventBus);
-		const layer = makeProviderRuntimeIngestionLive({
+		const layer = makeTestProviderRuntimeIngestionLive({
 			browserPublisher: { publish: relayPublish },
 		}).pipe(Layer.provide(harness.depsLayer), Layer.provideMerge(busLayer));
 
@@ -617,7 +617,7 @@ describe("ProviderRuntimeIngestion", () => {
 			subscribe: () => Effect.succeed(Stream.empty),
 			subscribeAdvances: () => Effect.succeed(Stream.empty),
 		} satisfies SessionEventBus);
-		const layer = makeProviderRuntimeIngestionLive({
+		const layer = makeTestProviderRuntimeIngestionLive({
 			browserPublisher: { publish: relayPublish },
 		}).pipe(Layer.provide(harness.depsLayer), Layer.provideMerge(busLayer));
 

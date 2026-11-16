@@ -32,10 +32,7 @@ import {
 	makeAccountDirectory,
 } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import type { Envelope } from "../../../src/lib/domain/project-services/Services/read-model-subscription.js";
 import {
 	type SessionDetailItem,
@@ -72,6 +69,7 @@ import {
 } from "../../../src/lib/persistence/events.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { assembleDetailRows } from "../../helpers/detail-rows.js";
 import { makeSSEEvent } from "../../helpers/sse-factories.js";
 

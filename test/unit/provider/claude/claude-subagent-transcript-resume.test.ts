@@ -6,10 +6,7 @@ import { Deferred, Effect, Fiber, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { sessionPickEvents } from "../../../../src/lib/domain/project-services/Services/session-pick.js";
 import { ClaudeEventPersistEffectTag } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
@@ -29,6 +26,7 @@ import type {
 	SessionMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
+import { ProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
 
 // Test seams: ownership's route-transcript operation, real runtime ingestion,
 // and the SQLite message/part projections used to serve session history.

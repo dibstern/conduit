@@ -13,10 +13,7 @@ import {
 	OpenCodeInstancesTag,
 	OpenCodeUnavailable,
 } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	OpenCodeApiError,
 	OpenCodeConnectionError,
@@ -52,6 +49,7 @@ import type {
 	ProviderInstance,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import {
 	makeMockAccountDirectory,
 	makeMockOpenCodeAPI,

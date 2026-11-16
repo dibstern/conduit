@@ -8,8 +8,6 @@ import { AgentServiceTag } from "../../../src/lib/domain/project-services/Servic
 import { AlertsLive } from "../../../src/lib/domain/project-services/Services/alerts.js";
 import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceLive } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -34,6 +32,7 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAccountDirectory,
@@ -48,6 +47,7 @@ import {
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+import { ProviderTurnServiceLive } from "../../helpers/provider-turns.js";
 
 describe("permission/question processing timeouts through Effect state", () => {
 	it.effect(
@@ -85,7 +85,9 @@ describe("permission/question processing timeouts through Effect state", () => {
 					makeOverridesStateLive(),
 					persistence,
 					InputDraftsLive.pipe(Layer.provide(persistence)),
-					makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
+					makeTestProviderRuntimeIngestionLive().pipe(
+						Layer.provide(persistence),
+					),
 					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
 					Layer.succeed(OrchestrationEngineTag)(

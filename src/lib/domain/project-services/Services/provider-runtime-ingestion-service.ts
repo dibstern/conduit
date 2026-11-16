@@ -56,6 +56,7 @@ import type { makeSessionRetries } from "../../../session/session-retries.js";
 import { QuestionApprovalSchema } from "../../../shared-types.js";
 import type { BrowserMessage } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
+import type { DaemonTurns } from "../../daemon/Services/daemon-turns.js";
 import type { UsageService } from "../../daemon/Services/usage.js";
 import { ContinuationLive, ContinuationTag } from "./continuation.js";
 import { InputDraftsLive, InputDraftsTag } from "./input-drafts.js";
@@ -173,7 +174,10 @@ export const makeProviderRuntimeIngestionLive = (
 ): Layer.Layer<
 	ProviderRuntimeIngestionTag | ContinuationTag,
 	never,
-	EventStoreEffectTag | ProjectionRunnerEffectTag | SqlClient.SqlClient
+	| DaemonTurns
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
+	| SqlClient.SqlClient
 > =>
 	Layer.effect(
 		ProviderRuntimeIngestionTag,
@@ -890,11 +894,9 @@ export const makeProviderRuntimeIngestionLive = (
 		}),
 	).pipe(
 		Layer.provide(InputDraftsLive),
-		// Suspended: this module sits on an import cycle back through ContinuationLive, so the eager export below would read it before it is initialised.
+		// Suspended: this module sits on an import cycle back through ContinuationLive, so an eager caller would read it before it is initialised.
 		Layer.provideMerge(Layer.suspend(() => ContinuationLive)),
 	);
-
-export const ProviderRuntimeIngestionLive = makeProviderRuntimeIngestionLive();
 
 function publishBrowserMessages(
 	events: readonly CanonicalEvent[],

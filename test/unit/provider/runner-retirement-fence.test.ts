@@ -44,10 +44,7 @@ import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import {
 	SessionEventBusLive,
@@ -117,6 +114,10 @@ import type {
 	SessionRunner,
 } from "../../../src/lib/provider/runner/session-runner.js";
 import type { EventSink, TurnResult } from "../../../src/lib/provider/types.js";
+import {
+	DaemonTurnsOrOwn,
+	ProviderRuntimeIngestionLive,
+} from "../../helpers/daemon-turns.js";
 import { MainRunnerSendJournal } from "../../helpers/main-runner-send-journal.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 import {
@@ -8668,7 +8669,14 @@ for (const order of [
 						expect(
 							yield* f.sql`SELECT type FROM events WHERE type = 'input.requeued'`,
 						).toHaveLength(1);
-					}).pipe(Effect.provide(SessionInboxLive.pipe(Layer.provide(deps))));
+					}).pipe(
+						Effect.provide(
+							SessionInboxLive.pipe(
+								Layer.provide(DaemonTurnsOrOwn),
+								Layer.provide(deps),
+							),
+						),
+					);
 				}),
 			),
 	);

@@ -10,11 +10,7 @@ import {
 	EventMetadataSchema,
 	RunnerWriteOrigin,
 } from "../../../src/lib/contracts/stored-event.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -26,6 +22,10 @@ import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
+import {
+	makeTestProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionLive,
+} from "../../helpers/daemon-turns.js";
 
 // A fork can retain a receipt while losing its authority context; output and
 // subagent creation must defect before SQL commits, rather than become daemon writes.
@@ -167,7 +167,7 @@ describe("runner ingestion authorization", () => {
 				expect(observed).toEqual([]);
 			}).pipe(
 				Effect.provide(
-					makeProviderRuntimeIngestionLive({
+					makeTestProviderRuntimeIngestionLive({
 						surfacing: {
 							observe: () =>
 								Effect.sync(() => {

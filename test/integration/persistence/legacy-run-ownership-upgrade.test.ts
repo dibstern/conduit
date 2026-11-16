@@ -7,10 +7,7 @@ import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { ContinuationTag } from "../../../src/lib/domain/project-services/Services/continuation.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import { SessionEventBusTag } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import {
@@ -39,6 +36,10 @@ import type {
 	SessionOutput,
 	SessionOutputReply,
 } from "../../../src/lib/provider/runner/session-runner.js";
+import {
+	DaemonTurnsOrOwn,
+	ProviderRuntimeIngestionLive,
+} from "../../helpers/daemon-turns.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 // Failure modes: upgrade declares an executing runner idle, guessing a legacy
@@ -130,7 +131,10 @@ it.each([
 			ProviderRuntimeIngestionLive.pipe(Layer.provide(persistence)),
 		);
 		const runtime = ManagedRuntime.make(
-			SessionInboxLive.pipe(Layer.provideMerge(dependencies)),
+			SessionInboxLive.pipe(
+				Layer.provide(DaemonTurnsOrOwn),
+				Layer.provideMerge(dependencies),
+			),
 		);
 		dispose = () => runtime.dispose();
 		await runtime.runPromise(

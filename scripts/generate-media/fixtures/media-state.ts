@@ -4,26 +4,26 @@
 // canned message arrays consumed by mockRelayWebSocket().
 
 import type {
+	BrowserMessage,
 	PermissionId,
-	RelayMessage,
 	SessionInfo,
 } from "../../../src/lib/shared-types.js";
 import type { MockMessage } from "../../../test/e2e/fixtures/mockup-state.js";
 
-/** Compile-time validation wrapper — ensures all messages satisfy RelayMessage. */
+/** Compile-time validation wrapper — ensures all messages satisfy BrowserMessage. */
 type ShellSnapshot = {
 	type: "shell_snapshot";
 	roots: true;
 	sessions: SessionInfo[];
 };
 
-function msgs(...messages: (RelayMessage | ShellSnapshot)[]): MockMessage[] {
+function msgs(...messages: (BrowserMessage | ShellSnapshot)[]): MockMessage[] {
 	return messages as MockMessage[];
 }
 
 // Shared (not exported)
 
-const modelList: RelayMessage = {
+const modelList: BrowserMessage = {
 	type: "model_list",
 	providers: [
 		{
@@ -47,7 +47,7 @@ const modelList: RelayMessage = {
 	],
 };
 
-const agentList: RelayMessage = {
+const agentList: BrowserMessage = {
 	type: "agent_list",
 	agents: [
 		{ id: "build", name: "Build", description: "Full-stack development" },
@@ -55,7 +55,7 @@ const agentList: RelayMessage = {
 	],
 };
 
-const projectList: RelayMessage = {
+const projectList: BrowserMessage = {
 	type: "project_list",
 	projects: [
 		{
@@ -236,7 +236,7 @@ export const approvalPermission: MockMessage = {
 	toolName: "Bash",
 	toolInput: { command: "npm run build && npm run deploy" },
 	always: ["npm run *"],
-} satisfies RelayMessage as MockMessage;
+} satisfies BrowserMessage as MockMessage;
 
 export const setupInfo = {
 	httpsUrl: "https://192.168.1.42:2634",

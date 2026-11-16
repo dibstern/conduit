@@ -1,5 +1,6 @@
 // Failures: silence settles accepted work, a late answer replaces a newer
 // timer, or a notice for an ended run appears on the newer run's transcript.
+
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Ref, Schema, Stream } from "effect";
 import { SqlClient } from "effect/sql";
@@ -12,7 +13,6 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
-	makeProviderRuntimeIngestionLive,
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
@@ -45,6 +45,7 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import { PermissionId } from "../../../src/lib/shared-types.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
@@ -97,7 +98,7 @@ describe("interaction timeout run ownership", () => {
 								}),
 							).pipe(
 								Layer.provide(
-									makeProviderRuntimeIngestionLive().pipe(
+									makeTestProviderRuntimeIngestionLive().pipe(
 										Layer.provide(persistence),
 									),
 								),

@@ -28,11 +28,7 @@ import { subscribeDaemonShell } from "../../../src/lib/domain/daemon/Services/sh
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import { ProjectStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import type { Envelope } from "../../../src/lib/domain/project-services/Services/read-model-subscription.js";
 import {
 	ConfigTag,
@@ -82,6 +78,10 @@ import {
 	type SessionInfo,
 	SessionInfoSchema,
 } from "../../../src/lib/shared-types.js";
+import {
+	makeTestProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionLive,
+} from "../../helpers/daemon-turns.js";
 import { publishLedgerTasks, publishRun } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockAccountDirectory,
@@ -1862,7 +1862,7 @@ describe("subscribeShell", () => {
 				Layer.provideMerge(
 					Layer.unwrap(
 						Effect.map(SessionActivityTag, (activity) =>
-							makeProviderRuntimeIngestionLive({
+							makeTestProviderRuntimeIngestionLive({
 								compactions: activity.compactions,
 							}),
 						),

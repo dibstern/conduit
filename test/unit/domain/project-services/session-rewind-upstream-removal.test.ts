@@ -8,10 +8,7 @@
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { readOwedRealignment } from "../../../../src/lib/persistence/effect/head-realignment.js";
@@ -23,6 +20,7 @@ import {
 } from "../../../../src/lib/persistence/effect/projectors-effect.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
+import { ProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
 import { providerRuntimeEvent } from "../../../helpers/provider-runtime-event.js";
 
 const SESSION_ID = "upstream-rewind";

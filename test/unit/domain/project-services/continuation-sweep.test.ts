@@ -92,7 +92,10 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../../src/lib/provider/provider-registry.js";
-import { makeTestContinuation } from "../../../helpers/daemon-turns.js";
+import {
+	DaemonTurnsOrOwn,
+	makeTestContinuation,
+} from "../../../helpers/daemon-turns.js";
 import { activeRunEvents } from "../../../helpers/ledger-tasks.js";
 import {
 	makeMockLogger,
@@ -485,7 +488,9 @@ const resetInboxFixture = Effect.gen(function* () {
 				yield* Queue.offer(sent, input.continuation ? "resume" : input.text);
 			}).pipe(Effect.orDie),
 	};
-	const inboxContext = yield* Layer.build(SessionInboxLive).pipe(
+	const inboxContext = yield* Layer.build(
+		SessionInboxLive.pipe(Layer.provide(DaemonTurnsOrOwn)),
+	).pipe(
 		Effect.provide(InputDraftsLive),
 		Effect.provideService(ContinuationTag, continuation),
 		Effect.provideService(ProviderTurnServiceTag, turns),

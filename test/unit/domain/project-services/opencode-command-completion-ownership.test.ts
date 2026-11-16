@@ -7,7 +7,6 @@ import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
 import {
-	makeProviderRuntimeIngestionLive,
 	type ProviderRuntimeBrowserPublisher,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
@@ -34,6 +33,7 @@ import { OpenCodeRuntimeEventTranslator } from "../../../../src/lib/provider/ope
 import { OpenCodeProviderInstance } from "../../../../src/lib/provider/opencode-provider-instance.js";
 import { ProviderSideEffectReactor } from "../../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
 import { makeMockOpenCodeAPI } from "../../../helpers/mock-factories.js";
 import { makeBaseSendTurnInput } from "../../../helpers/mock-sdk.js";
 import { makeSSEEvent } from "../../../helpers/sse-factories.js";
@@ -62,7 +62,7 @@ function fixtureLayer(browserPublisher?: ProviderRuntimeBrowserPublisher) {
 	const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 	return Layer.merge(
 		persistence,
-		makeProviderRuntimeIngestionLive(
+		makeTestProviderRuntimeIngestionLive(
 			browserPublisher ? { browserPublisher } : {},
 		).pipe(Layer.provide(persistence)),
 	);

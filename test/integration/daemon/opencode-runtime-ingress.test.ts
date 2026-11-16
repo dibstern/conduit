@@ -33,10 +33,7 @@ import {
 import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { LoggerTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { applySessionCommand } from "../../../src/lib/domain/project-services/Services/session-command.js";
 import { projectSessionManager } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
@@ -50,6 +47,7 @@ import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import {
 	createDaemonProject,
 	type DaemonProject,

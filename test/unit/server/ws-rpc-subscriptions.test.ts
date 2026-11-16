@@ -25,7 +25,6 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { ProjectStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
-import { ownSessionManagersLive } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/project-services/Services/session-manager-state.js";
 import {
 	type DetailLengthMismatch,
@@ -40,7 +39,10 @@ import {
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
-import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
+import {
+	makeTestHandlerLayer,
+	ownSessionManagersLive,
+} from "../../helpers/mock-factories.js";
 
 const makeLayer = () => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-rpc-sub-"));

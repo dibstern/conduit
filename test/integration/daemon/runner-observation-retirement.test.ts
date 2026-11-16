@@ -14,10 +14,7 @@ import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
@@ -33,6 +30,7 @@ import {
 	prepareRunnerDirectory,
 	registerRunner,
 } from "../../../src/lib/provider/runner/runner-registry.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
 // Services can disappear after recovery classifies the entry, before hello.
 // Cache only a retirement that ran, including a successful zero-prompt result.

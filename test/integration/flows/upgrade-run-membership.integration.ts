@@ -6,10 +6,7 @@ import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, it } from "vitest";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { LoggerTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { makeFailTurn } from "../../../src/lib/domain/project-services/Services/turn-failure.js";
 import type { Message } from "../../../src/lib/instance/sdk-types.js";
@@ -26,6 +23,7 @@ import {
 	settleUnclaimedRunnerCommands,
 } from "../../../src/lib/provider/runner/runner-recovery.js";
 import { failRunnerTurn } from "../../../src/lib/provider/runner/runner-turn-failure.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
 const roots: string[] = [];
 const cases: Array<{ case: string; outcome: "passed" }> = [];

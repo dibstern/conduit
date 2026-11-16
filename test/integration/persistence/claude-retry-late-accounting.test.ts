@@ -3,10 +3,7 @@ import { Deferred, Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterAll, describe, expect, it } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -17,6 +14,7 @@ import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 // Retries replace the prompt's current turn owner. Historical results must still

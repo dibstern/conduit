@@ -55,13 +55,11 @@ import {
 } from "../../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	type ProviderRuntimeIngestion,
-	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	attachProviderTurnsLive,
 	type ProviderTurnService,
-	ProviderTurnServiceLive,
 	type ProviderTurnServiceSendInput,
 	ProviderTurnServiceTag,
 	ProviderTurns,
@@ -140,6 +138,10 @@ import type {
 	TurnResult,
 } from "../../../../src/lib/provider/types.js";
 import {
+	DaemonTurnsOrOwn,
+	ProviderRuntimeIngestionLive,
+} from "../../../helpers/daemon-turns.js";
+import {
 	MOCK_PROJECT_DIR,
 	makeMockAccountDirectory,
 	makeMockAgentService,
@@ -155,6 +157,7 @@ import {
 import { withDurableStopAcceptance } from "../../../helpers/orchestration-engine-test-double.js";
 import { partialFake } from "../../../helpers/partial-fake.js";
 import { providerRuntimeEvent } from "../../../helpers/provider-runtime-event.js";
+import { ProviderTurnServiceLive } from "../../../helpers/provider-turns.js";
 
 const completedTurn = (overrides?: Partial<TurnResult>): TurnResult => ({
 	status: "completed",
@@ -869,6 +872,7 @@ describe("ProviderTurnService", () => {
 				Effect.provide(
 					SessionInboxLive.pipe(
 						Layer.provide(InputDraftsLive),
+						Layer.provide(DaemonTurnsOrOwn),
 						Layer.provideMerge(dependencies),
 					),
 				),
@@ -1149,6 +1153,7 @@ describe("ProviderTurnService", () => {
 					Effect.provide(
 						SessionInboxLive.pipe(
 							Layer.provide(InputDraftsLive),
+							Layer.provide(DaemonTurnsOrOwn),
 							Layer.provideMerge(dependencies),
 						),
 					),
@@ -1949,6 +1954,7 @@ describe("ProviderTurnService", () => {
 					Effect.provide(
 						SessionInboxLive.pipe(
 							Layer.provide(InputDraftsLive),
+							Layer.provide(DaemonTurnsOrOwn),
 							Layer.provideMerge(dependencies),
 						),
 					),

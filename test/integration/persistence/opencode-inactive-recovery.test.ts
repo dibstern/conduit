@@ -3,10 +3,7 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterAll, expect, it } from "vitest";
 import { EffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { LoggerTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { makeFailTurn } from "../../../src/lib/domain/project-services/Services/turn-failure.js";
 import type {
@@ -23,6 +20,7 @@ import { openCodeInputMessageId } from "../../../src/lib/provider/opencode/openc
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { runningRunnerCommands } from "../../../src/lib/provider/runner/runner-recovery.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
 const evidence: Record<string, unknown>[] = [];
 afterAll(() => {

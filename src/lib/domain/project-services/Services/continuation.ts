@@ -52,10 +52,7 @@ import { previewFreshHandoff } from "../../../provider/switch-handoff.js";
 import { assertNever } from "../../../utils.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
-import {
-	DaemonTurns,
-	DaemonTurnsOrOwn,
-} from "../../daemon/Services/daemon-turns.js";
+import { DaemonTurns } from "../../daemon/Services/daemon-turns.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import {
 	type ProviderTurnService,
@@ -1080,7 +1077,4 @@ export const makeContinuation = Effect.gen(function* () {
 	} satisfies Continuation;
 });
 
-export const ContinuationLive = Layer.effect(
-	ContinuationTag,
-	makeContinuation,
-).pipe(Layer.provide(DaemonTurnsOrOwn));
+export const ContinuationLive = Layer.effect(ContinuationTag, makeContinuation);

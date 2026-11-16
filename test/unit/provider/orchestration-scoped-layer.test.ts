@@ -9,7 +9,6 @@ import {
 	makeAccountDirectory,
 } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -18,6 +17,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import { RunnerProviderInstance } from "../../../src/lib/provider/runner/runner-provider-instance.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 import { makeTestOrchestrationRuntimeLayer as makeOrchestrationRuntimeLayer } from "../../helpers/provider-adapters.js";
 
@@ -89,7 +89,9 @@ describe("orchestration scoped layer", () => {
 						Layer.succeed(OpenCodeInstancesTag)(
 							makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 						),
-						makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
+						makeTestProviderRuntimeIngestionLive().pipe(
+							Layer.provide(persistence),
+						),
 					),
 				),
 			),

@@ -32,10 +32,7 @@ import type { CanonicalEvent } from "../../../persistence/events.js";
 import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { settleSessionRuns } from "../../../provider/session-run-settlement.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
-import {
-	type DaemonTurns,
-	DaemonTurnsOrOwn,
-} from "../../daemon/Services/daemon-turns.js";
+import type { DaemonTurns } from "../../daemon/Services/daemon-turns.js";
 import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { OwnerScopes } from "../../daemon/Services/owner-scopes.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
@@ -633,15 +630,6 @@ export const ProviderTurnsLive = Layer.effect(
 	}),
 );
 
-/** The daemon's turn service when the daemon lends one; otherwise its own. */
-export const ProviderTurnsOrOwn = Layer.unwrap(
-	Effect.map(Effect.serviceOption(ProviderTurns), (shared) =>
-		Option.isSome(shared)
-			? Layer.succeed(ProviderTurns, shared.value)
-			: ProviderTurnsLive,
-	),
-);
-
 /** A relay's view of its project's turns, run against the relay's parts. */
 export const attachProviderTurnsLive = Layer.effect(
 	ProviderTurnServiceTag,
@@ -653,13 +641,4 @@ export const attachProviderTurnsLive = Layer.effect(
 			yield* Effect.context<ProviderTurnParts>(),
 		);
 	}),
-);
-
-export const ProviderTurnServiceLive: Layer.Layer<
-	ProviderTurnServiceTag,
-	never,
-	Exclude<ProviderTurnParts, DaemonTurns>
-> = attachProviderTurnsLive.pipe(
-	Layer.provide(ProviderTurnsOrOwn),
-	Layer.provide(DaemonTurnsOrOwn),
 );

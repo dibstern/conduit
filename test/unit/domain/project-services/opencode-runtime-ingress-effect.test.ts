@@ -22,12 +22,12 @@ import {
 import {
 	type ProviderRuntimeIngestion,
 	type ProviderRuntimeIngestionError,
-	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import type { ProjectionRunnerEffect } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { opencodeSessionCreatedRuntimeEvent } from "../../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
+import { ProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
 import {
 	makeSSEEvent,
 	makeUnknownSSEEvent,

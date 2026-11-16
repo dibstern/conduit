@@ -22,15 +22,13 @@ import {
 	makeEffectOpenCodeRuntimeIngress,
 	type OpenCodeRuntimeIngressLog,
 } from "../../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	type ProviderRuntimeBrowserPublisher,
-} from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import type { ProviderRuntimeBrowserPublisher } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
 } from "../../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
 import { makeSSEEvent } from "../../../helpers/sse-factories.js";
 
 const SESSION_ID = "sess-nopublish-001";
@@ -50,7 +48,7 @@ function makeTestRuntime(
 	return ManagedRuntime.make(
 		Layer.mergeAll(
 			persistenceLayer,
-			makeProviderRuntimeIngestionLive({ browserPublisher }).pipe(
+			makeTestProviderRuntimeIngestionLive({ browserPublisher }).pipe(
 				Layer.provide(persistenceLayer),
 				Layer.provideMerge(sessionEventBusLayer),
 			),

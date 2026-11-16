@@ -22,7 +22,6 @@ vi.mock("../../../../src/lib/env.js", async (importOriginal) => ({
 }));
 
 import { BUILD_ID } from "../../../../src/lib/build-id.js";
-import { ProviderRuntimeIngestionLive } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { makeProcessClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-process-session-runner.js";
 import { ClaudeRunnerSocket } from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
@@ -41,6 +40,7 @@ import {
 	runnerProcessTable,
 } from "../../../../src/lib/provider/runner/runner-registry.js";
 import type { SessionOutput } from "../../../../src/lib/provider/runner/session-runner.js";
+import { ProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
 import { makeRunnerAdmission } from "../../../helpers/runner-provider-admission.js";
 
 const observations: Record<string, unknown>[] = [];

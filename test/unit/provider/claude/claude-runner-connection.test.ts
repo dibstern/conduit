@@ -19,10 +19,7 @@ import {
 	accountsStateFromInstances,
 } from "../../../../src/lib/account-directory.js";
 import { BUILD_ID } from "../../../../src/lib/build-id.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
@@ -57,6 +54,7 @@ import type {
 	SessionOutputReply,
 } from "../../../../src/lib/provider/runner/session-runner.js";
 import type { PermissionResponse } from "../../../../src/lib/provider/types.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -97,7 +95,7 @@ async function fixture(
 		subscribeAdvances: () => Effect.succeed(Stream.empty),
 	} satisfies SessionEventBus);
 	const runtime = ManagedRuntime.make(
-		makeProviderRuntimeIngestionLive().pipe(
+		makeTestProviderRuntimeIngestionLive().pipe(
 			Layer.provideMerge(
 				Layer.merge(
 					makePersistenceEffectLayer(

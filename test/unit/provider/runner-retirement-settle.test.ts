@@ -6,10 +6,7 @@ import { Effect, Exit, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -37,6 +34,7 @@ import { RunnerSendJournal } from "../../../src/lib/provider/runner/runner-send-
 import type { SendEvidence } from "../../../src/lib/provider/runner/send-settlement.js";
 import { settleSend } from "../../../src/lib/provider/runner/send-settlement-outbox.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
 // Settle at the reconciler's interface over a real store: a gone runner's held
 // send with no journal is released only when the runner journals before it

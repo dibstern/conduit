@@ -24,7 +24,6 @@ import {
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { makeAccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
-	makeProviderRuntimeIngestionLive,
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
@@ -50,6 +49,7 @@ import type {
 	ResolvedSendTurnInput,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
 const retryCases: Array<{ case: string; outcome: string }> = [];
 
@@ -1305,7 +1305,7 @@ describe("ProviderSideEffectReactor", () => {
 			}).pipe(
 				Effect.provide(
 					Layer.provideMerge(
-						makeProviderRuntimeIngestionLive(),
+						makeTestProviderRuntimeIngestionLive(),
 						makePersistenceEffectLayer(":memory:", "test-project"),
 					),
 				),
@@ -2260,7 +2260,7 @@ describe("ProviderSideEffectReactor", () => {
 			}).pipe(
 				Effect.provide(
 					Layer.provideMerge(
-						makeProviderRuntimeIngestionLive(),
+						makeTestProviderRuntimeIngestionLive(),
 						makePersistenceEffectLayer(":memory:", "test-project"),
 					),
 				),
@@ -2581,7 +2581,7 @@ describe("ProviderSideEffectReactor", () => {
 });
 
 const reactorTestLayer = Layer.provideMerge(
-	makeProviderRuntimeIngestionLive(),
+	makeTestProviderRuntimeIngestionLive(),
 	makePersistenceEffectLayer(":memory:", "test-project"),
 );
 

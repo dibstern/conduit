@@ -11,10 +11,7 @@ import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { LoggerTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { recordPermissionTimedOut } from "../../../src/lib/handlers/permissions.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -26,6 +23,7 @@ import { CommandReadModelRepository } from "../../../src/lib/provider/orchestrat
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { PermissionId } from "../../../src/lib/shared-types.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
 const evidence: Record<string, unknown>[] = [];
 afterAll(() => {

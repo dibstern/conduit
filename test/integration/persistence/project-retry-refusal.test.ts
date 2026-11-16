@@ -5,10 +5,7 @@ import { join } from "node:path";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterAll, expect, it } from "vitest";
-import {
-	ProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -17,6 +14,7 @@ import { DurableCommandCommitRepository } from "../../../src/lib/provider/orches
 import { decideDurableSendTurnCommand } from "../../../src/lib/provider/orchestration-decider.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 const scenarios: Record<string, unknown>[] = [];

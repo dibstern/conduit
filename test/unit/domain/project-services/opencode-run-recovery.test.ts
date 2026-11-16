@@ -5,7 +5,6 @@ import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { SessionWorkspaceLive } from "../../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
-import { ProviderRuntimeIngestionLive } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -21,6 +20,7 @@ import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { openCodeInputMessageId } from "../../../../src/lib/provider/opencode/opencode-input-message-id.js";
 import { OpenCodeProviderInstance } from "../../../../src/lib/provider/opencode-provider-instance.js";
 import { runningRunnerCommands } from "../../../../src/lib/provider/runner/runner-recovery.js";
+import { ProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,

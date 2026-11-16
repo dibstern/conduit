@@ -11,14 +11,10 @@ import { AlertsLive } from "../../../src/lib/domain/project-services/Services/al
 import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
-	makeProviderRuntimeIngestionLive,
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
-import {
-	ProviderTurnServiceLive,
-	ProviderTurnServiceTag,
-} from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
+import { ProviderTurnServiceTag } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -50,6 +46,7 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import type { ProjectServicesConfig } from "../../../src/lib/types.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	MOCK_OPENCODE_GPT4_CATALOG,
@@ -68,6 +65,7 @@ import {
 	withDispatchEffect,
 	withDurableStopAcceptance,
 } from "../../helpers/orchestration-engine-test-double.js";
+import { ProviderTurnServiceLive } from "../../helpers/provider-turns.js";
 
 const config = {
 	projectDir: MOCK_PROJECT_DIR,
@@ -152,7 +150,7 @@ describe("prompt processing timeouts through Effect state", () => {
 								}),
 							).pipe(
 								Layer.provide(
-									makeProviderRuntimeIngestionLive().pipe(
+									makeTestProviderRuntimeIngestionLive().pipe(
 										Layer.provide(persistence),
 									),
 								),
@@ -465,7 +463,7 @@ describe("prompt processing timeouts through Effect state", () => {
 				makeOverridesStateLive(),
 				persistence,
 				InputDraftsLive.pipe(Layer.provide(persistence)),
-				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
+				makeTestProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
 				Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 				Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
 				Layer.succeed(OrchestrationEngineTag)(engine),

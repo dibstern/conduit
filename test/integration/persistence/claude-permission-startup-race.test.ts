@@ -1,6 +1,7 @@
 // Startup cleanup may run after a recovered ask commits but before its waiter
 // registers, or after cleanup snapshots waiters and before registration finishes.
 // Neither ordering may reject the live owner's ask or strand an answered waiter.
+
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,10 +21,7 @@ import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
-import {
-	makeProviderRuntimeIngestionLive,
-	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { resolveOrphanedClaudePermissions } from "../../../src/lib/domain/project-services/Services/resolve-orphaned-claude-permissions.js";
 import {
 	ConfigTag,
@@ -54,6 +52,7 @@ import type {
 } from "../../../src/lib/provider/runner/session-runner.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
 import { PermissionId } from "../../../src/lib/shared-types.js";
+import { makeTestProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -142,7 +141,7 @@ describe("Claude permission ownership during startup cleanup", () => {
 		);
 		const runtime = ManagedRuntime.make(
 			Layer.mergeAll(
-				makeProviderRuntimeIngestionLive().pipe(
+				makeTestProviderRuntimeIngestionLive().pipe(
 					Layer.provideMerge(
 						makePersistenceEffectLayer(join(root, "events.db"), "project"),
 					),

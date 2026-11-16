@@ -17,6 +17,7 @@
  * 5. Teardown calls (a closing query's interrupt) count as unanswered: calls are judged after the
  *    last step settles, before the stack closes.
  */
+
 import { createHook } from "node:async_hooks";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,7 +42,6 @@ import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { SessionWorkspaceLive } from "../../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
 import { ContinuationTag } from "../../../../src/lib/domain/project-services/Services/continuation.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
-import { makeProviderRuntimeIngestionLive } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -67,6 +67,10 @@ import type { SSEEvent } from "../../../../src/lib/provider/opencode/opencode-ev
 import { inputIdFromOpenCodeMessageId } from "../../../../src/lib/provider/opencode/opencode-input-message-id.js";
 import { getOrchestrationLayer } from "../../../../src/lib/provider/orchestration-wiring.js";
 import { WsRpcServerLayer } from "../../../../src/lib/server/ws-rpc.js";
+import {
+	DaemonTurnsOrOwn,
+	makeTestProviderRuntimeIngestionLive,
+} from "../../../helpers/daemon-turns.js";
 import {
 	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockAccountDirectory,
@@ -411,7 +415,7 @@ export function replayTrace(
 				persistence,
 				SessionEventBusLive,
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
-				makeProviderRuntimeIngestionLive().pipe(
+				makeTestProviderRuntimeIngestionLive().pipe(
 					Layer.provide(Layer.merge(persistence, SessionEventBusLive)),
 				),
 				Layer.succeed(AccountDirectory, accounts),
@@ -475,7 +479,12 @@ export function replayTrace(
 				}),
 			);
 			return WsRpcServerLayer.pipe(
-				Layer.provideMerge(SessionInboxLive.pipe(Layer.provideMerge(deps))),
+				Layer.provideMerge(
+					SessionInboxLive.pipe(
+						Layer.provide(DaemonTurnsOrOwn),
+						Layer.provideMerge(deps),
+					),
+				),
 			);
 		}),
 	).pipe(Layer.provideMerge(orchestration));
