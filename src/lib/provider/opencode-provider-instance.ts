@@ -90,6 +90,11 @@ export interface OpenCodeProviderInstanceOptions {
 		sessionId: string,
 		account?: OpenCodeAccount,
 	) => Effect.Effect<boolean>;
+	/** Positive proof that the session's managed OpenCode process has ended; never starts it. */
+	readonly isManagedStoppedForSession?: (
+		sessionId: string,
+		account?: Account,
+	) => Effect.Effect<boolean>;
 }
 
 export class OpenCodeProviderInstance implements ProviderInstance {
@@ -104,6 +109,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	private readonly instanceIdForSession: OpenCodeProviderInstanceOptions["instanceIdForSession"];
 	private readonly clientForAccount: OpenCodeProviderInstanceOptions["clientForAccount"];
 	private readonly hasWorktreeToolForSession: OpenCodeProviderInstanceOptions["hasWorktreeToolForSession"];
+	private readonly isManagedStoppedForSession: OpenCodeProviderInstanceOptions["isManagedStoppedForSession"];
 	private readonly compactions = new Map<
 		string,
 		Array<{ inputId: string; messageId?: string }>
@@ -114,6 +120,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		this.clientForAccount = options.clientForAccount;
 		this.instanceIdForSession = options.instanceIdForSession;
 		this.hasWorktreeToolForSession = options.hasWorktreeToolForSession;
+		this.isManagedStoppedForSession = options.isManagedStoppedForSession;
 	}
 
 	/** Summarize alone cannot reserve its native user message identity. */
@@ -853,9 +860,26 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	 * directory, an omission counting only once `session.get` confirms the identity; `retry` is
 	 * busy. An input is present when its conduit message id reads back; a 404 is absent only for a
 	 * confirmed session, as OpenCode answers a missing session the same way. Anything else fails,
-	 * which is no finding.
+	 * which is no finding. A managed process proven ended runs no native work, so it reads idle
+	 * without starting one (AMENDMENT-2026-11-16 E2 probes at every terminal, a crash's included).
 	 */
 	readonly probeEffect: NonNullable<ProviderInstance["probeEffect"]> = (
+		sessionId,
+		target,
+		call,
+	) =>
+		(target.tag === "native_session" && this.isManagedStoppedForSession
+			? this.isManagedStoppedForSession(sessionId, call?.account)
+			: Effect.succeed(false)
+		).pipe(
+			Effect.flatMap((stopped) =>
+				stopped
+					? Effect.succeed({ tag: "native_idle" as const })
+					: this.probeNative(sessionId, target, call),
+			),
+		);
+
+	private readonly probeNative: NonNullable<ProviderInstance["probeEffect"]> = (
 		sessionId,
 		target,
 		call,

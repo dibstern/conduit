@@ -473,6 +473,17 @@ export const makeProviderAdaptersLive = (
 					...(testSdk?.subagentSdk ? { subagentSdk: testSdk.subagentSdk } : {}),
 				}),
 			);
+			const openCodeInstanceIdFor = (
+				sessionId: string,
+				account?: { readonly id: string },
+			) =>
+				Effect.gen(function* () {
+					return (
+						account?.id ??
+						(yield* bindings.getProviderForSession(sessionId)) ??
+						Option.getOrUndefined(yield* accounts.defaultFor("opencode"))?.id
+					);
+				});
 			registry.registerInstance(
 				yield* OpenCodeDriver.create({
 					configDir,
@@ -512,11 +523,10 @@ export const makeProviderAdaptersLive = (
 						),
 					hasWorktreeToolForSession: (sessionId, account) =>
 						Effect.gen(function* () {
-							const instanceId =
-								account?.id ??
-								(yield* bindings.getProviderForSession(sessionId)) ??
-								Option.getOrUndefined(yield* accounts.defaultFor("opencode"))
-									?.id;
+							const instanceId = yield* openCodeInstanceIdFor(
+								sessionId,
+								account,
+							);
 							const snapshot = yield* accounts.snapshot;
 							return snapshot.accounts.some(
 								(configured) =>
@@ -525,6 +535,14 @@ export const makeProviderAdaptersLive = (
 									configured.managed === true,
 							);
 						}),
+					isManagedStoppedForSession: (sessionId, account) =>
+						openCodeInstanceIdFor(sessionId, account).pipe(
+							Effect.flatMap((instanceId) =>
+								instanceId === undefined
+									? Effect.succeed(false)
+									: instances.isManagedStopped(instanceId),
+							),
+						),
 				}),
 			);
 			registry.registerInstance(
