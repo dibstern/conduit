@@ -8,7 +8,7 @@
 // snapshot is read in the same synchronous turn the listener attaches, so no
 // change can fall between them and nothing needs de-duplicating.
 //
-// The scope is the project, by argument (the RPC's projectSlug picks the relay
+// The scope is the project, by argument (the RPC's projectSlug picks the project
 // whose terminal service this reads). Terminals are not tied to a session.
 //
 // Coalescing lives here. A busy shell emits many small writes; each 50 ms

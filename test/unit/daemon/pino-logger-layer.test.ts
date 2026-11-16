@@ -159,7 +159,7 @@ describe("PinoLoggerLive", () => {
 	it.effect("serializes object message parts instead of [object Object]", () =>
 		Effect.gen(function* () {
 			const mock = mockPino();
-			yield* Effect.logWarning("Project relay failed", {
+			yield* Effect.logWarning("Project open failed", {
 				error: "sqlite module version mismatch",
 			}).pipe(Effect.provide(layer(mock), { local: true }));
 			expect(mock.root.warn).toHaveBeenCalled();

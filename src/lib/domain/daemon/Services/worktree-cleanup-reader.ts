@@ -7,7 +7,7 @@ import { worktreeCleanupCandidateFilter } from "../../../session/worktree-cleanu
 import type { StoredProject } from "../../../types.js";
 import { projectReadDatabase } from "./project-read-database.js";
 
-/** Read only: a cold relay is needed only when a persisted candidate could match. */
+/** Read only: opening a cold project is needed only when a persisted candidate could match. */
 export const readColdWorktreeCleanupCandidates = (
 	project: Pick<StoredProject, "slug" | "folders">,
 	setting: WorktreeCleanup,

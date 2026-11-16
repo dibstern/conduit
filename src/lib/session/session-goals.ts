@@ -51,7 +51,7 @@ export function makeSessionGoals() {
 			readonly nativeReads: boolean;
 		}
 	>();
-	/** Sends queued under new ids until the relay dispatches them. */
+	/** Sends queued under new ids until the project dispatches them. */
 	const resends = new Map<string, { id: string; action?: GoalAction }[]>();
 	const queue = (sessionId: string, action?: GoalAction) => {
 		const id = randomUUID();
@@ -120,7 +120,7 @@ export function makeSessionGoals() {
 		 * the confirmed status is the latest applied read, and later reads still apply by order.
 		 */
 		sends: (sessionId: string, sends: readonly NativeCommandView[]) =>
-			// A queued resend counts as a move, so the relay is woken to dispatch it.
+			// A queued resend counts as a move, so the project is woken to dispatch it.
 			update(sessionId, (entry) => {
 				const { pending } = entry.goal;
 				const tagOf = (views: readonly NativeCommandView[]) =>

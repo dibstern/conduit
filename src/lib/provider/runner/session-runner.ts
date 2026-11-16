@@ -289,7 +289,7 @@ export interface SessionRunner {
 	hasDemandEffect?(sessionId: string): Effect.Effect<boolean>;
 	/** Release one project's attachment while its started runner remains independent. */
 	detachSessionEffect?(sessionId: string): Effect.Effect<void>;
-	/** Reattach retained processes when a project's relay is replaced. */
+	/** Reattach retained processes when a project is reopened. */
 	attachSessionsEffect?(
 		sessionIds: readonly string[],
 	): Effect.Effect<void, SessionFailure>;

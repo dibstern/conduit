@@ -1,5 +1,5 @@
 // Load/save settings.jsonc in the config dir (DEFAULT_CONFIG_DIR).
-// Separate from OpenCode's own config — the relay has its own settings file.
+// Separate from OpenCode's own config — conduit has its own settings file.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -63,7 +63,7 @@ const isDefaultSessionMode = Schema.is(DefaultSessionModeSchema);
 const isSessionMode = Schema.is(SessionModeSchema);
 
 /**
- * Load relay settings from the config directory.
+ * Load global settings from the config directory.
  * Returns empty object if file doesn't exist or is corrupt.
  */
 export function loadGlobalSettings(configDir?: string): GlobalSettings {
@@ -112,7 +112,7 @@ export function loadGlobalSettings(configDir?: string): GlobalSettings {
 }
 
 /**
- * Save relay settings to the config directory.
+ * Save global settings to the config directory.
  * Uses load-merge-save to preserve existing fields not present in the update.
  * Creates the directory if it doesn't exist. Uses atomic write (tmp + rename).
  */

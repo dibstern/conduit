@@ -63,7 +63,7 @@ export interface HandlerDeps {
 	 * OrchestrationEngine for routing prompts through provider instances.
 	 * When set, handleMessage() dispatches through the engine instead of calling
 	 * client.session.prompt() directly. Optional — tests may omit it; production
-	 * always provides it via relay-stack.ts.
+	 * always provides it via ProjectServices.
 	 */
 	orchestrationEngine?: OrchestrationEngine;
 }

@@ -1,6 +1,6 @@
 // Recovery for state the shared OpenCode stream can miss: prompts asked while
 // disconnected, and status transitions whose events were lost. Results are
-// emitted as ordinary stream payloads so relays cannot tell them apart.
+// emitted as ordinary stream payloads so subscribers cannot tell them apart.
 
 import type { SessionStatus } from "../../../contracts/providers/opencode-sdk.js";
 import type { Logger } from "../../../logger.js";

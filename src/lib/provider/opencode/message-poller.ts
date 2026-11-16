@@ -1,4 +1,4 @@
-// Diff/synthesize logic for converting REST message snapshots into relay
+// Diff/synthesize logic for converting REST message snapshots into browser
 // events. These functions compare current messages against previous state and
 // emit synthetic BrowserMessages (delta, tool_start, tool_result,
 // thinking_*, result, done, etc.).
@@ -198,7 +198,7 @@ export function synthesizePartEvents(
 		hasActivity = synthesizeToolPart(part, snap, prev, events, messageId);
 	}
 	// Other part types (step_start, step_finish, snapshot, agent) are skipped
-	// — they have no visual representation in the relay UI.
+	// — they have no visual representation in the UI.
 
 	return { events, snapshot: snap, hasActivity };
 }

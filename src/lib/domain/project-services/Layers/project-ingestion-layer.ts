@@ -44,7 +44,7 @@ import {
 /**
  * One project's ingestion side (82tn.16): pending interactions, the alert
  * ledger and provider runtime ingestion. The daemon builds it once per project
- * generation; a relay outside the registry builds its own.
+ * generation; the test harness builds its own outside the registry.
  */
 export const makeProjectIngestionLive = (
 	push: Effect.Effect<Option.Option<Pick<PushNotificationSender, "sendToAll">>>,
@@ -188,8 +188,8 @@ export const makeReadOpenCodeMessages = Effect.map(
 
 /**
  * One project's OpenCode ingress, with the history ports its sends and detail
- * reads use. Built with the project, so the ports work before any relay starts;
- * closed with the project's scope, not a relay's.
+ * reads use. Built with the project, so the ports work before its services
+ * start; closed with the project's scope, not a generation's.
  */
 export const makeProjectOpenCodeIngressLive = Layer.effectContext(
 	Effect.gen(function* () {

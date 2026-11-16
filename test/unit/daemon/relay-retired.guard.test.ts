@@ -44,6 +44,25 @@ const relayConstruction = new Set([
 	"makeStandaloneOpenCodeInstancesLive",
 	"OpenCodeAPILive",
 	"backgroundOpenCodeAPI",
+	// 82tn.86: the names that still said relay after it was gone.
+	"ProjectRelayConfig",
+	"RelayMessage",
+	"RelayMessageSchema",
+	"RelaySettings",
+	"RelayError",
+	"WebSocketRelayRouterTag",
+	"createRelayEventSink",
+	"publishProviderRelayMessage",
+]);
+
+// 82tn.86: standalone fallbacks a project's services never use; they live in
+// the test harness, never in src.
+const testOnlyFallbacks = new Set([
+	"DaemonTurnsOrOwn",
+	"ProviderTurnsOrOwn",
+	"ProviderTurnServiceLive",
+	"ownSessionManagersLive",
+	"makeOrchestrationRuntimeLayer",
 ]);
 
 /** Identifiers in code, never in comments or strings. */
@@ -73,8 +92,28 @@ const constructions = (text: string) =>
 		: [];
 
 describe("the per-project relay stays deleted (82tn.16)", () => {
-	it("has no src/lib/relay directory", () => {
-		expect(existsSync("src/lib/relay")).toBe(false);
+	it.each([
+		"src/lib/relay",
+		"src/lib/domain/relay",
+		"test/unit/relay",
+		"test/unit/domain/relay",
+		"test/integration/relay",
+	])("has no %s directory", (directory) => {
+		expect(existsSync(directory)).toBe(false);
+	});
+
+	it("keeps the standalone fallbacks out of src", () => {
+		const pattern = new RegExp([...testOnlyFallbacks].join("|"));
+		expect(
+			sources("src/lib").flatMap((file) => {
+				const text = readFileSync(file, "utf8");
+				return pattern.test(text)
+					? names(text)
+							.filter((name) => testOnlyFallbacks.has(name))
+							.map((name) => `${file}: ${name}`)
+					: [];
+			}),
+		).toEqual([]);
 	});
 
 	it("builds no relay, in src or the tests", () => {

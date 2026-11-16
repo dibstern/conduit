@@ -11,7 +11,7 @@ import {
 import { SessionDirectory } from "../Services/session-directory.js";
 import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
 
-/** Keep owners and settings live; no relay construction snapshot is consulted. */
+/** Keep owners and settings live; no construction-time snapshot is consulted. */
 export const ProjectContextLive = Layer.effect(
 	ProjectContext,
 	Effect.gen(function* () {

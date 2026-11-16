@@ -198,7 +198,7 @@ export const StatusPollerLive: Layer.Layer<
 		const interval = Duration.millis(
 			config.statusPollerInterval ?? DEFAULT_RECONCILIATION_INTERVAL_MS,
 		);
-		// The daemon's one poller settles stale sessions; a relay with no daemon runs its own.
+		// The daemon's one poller settles stale sessions; a harness with no daemon runs its own.
 		const shared = yield* Effect.serviceOption(StatusPollerCoreTag);
 		const core = Option.isSome(shared)
 			? shared.value
@@ -347,7 +347,7 @@ export const StatusPollerLive: Layer.Layer<
 			{ uninterruptible: "inherit" },
 		);
 		const service: SessionStatusPollerService = {
-			// Held for the caller's scope, so a closed relay leaves no listener behind.
+			// Held for the caller's scope, so a closed project leaves no listener behind.
 			on: (_event, callback) =>
 				Effect.acquireRelease(
 					Ref.update(subscribers, (callbacks) => [...callbacks, callback]),

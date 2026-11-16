@@ -60,11 +60,11 @@ export const makeSessionManagerStateLive = (
 		Ref.make({ ...emptySessionManagerState(), ...initial }),
 	);
 
-/** Locks a project's session manager shares with every relay that serves it. */
+/** Locks a project's session manager shares with every generation that serves it. */
 export interface SessionManagerCoordination {
 	/** Serializes this project's triage writes (archive, settle, delete sweeps). */
 	readonly triageLock: Semaphore.Semaphore;
-	/** One delete per session id at a time, whichever relay asked for it. */
+	/** One delete per session id at a time, whichever generation asked for it. */
 	readonly inFlightDeletes: Map<
 		string,
 		Deferred.Deferred<void, SessionManagerError>
@@ -84,7 +84,7 @@ export class SessionManagerCoordinationTag extends Context.Service<
 	SessionManagerCoordination
 >()("SessionManagerCoordination") {}
 
-/** Without a daemon owner every write lands, as in a standalone relay. */
+/** Without a daemon owner every write lands, as in a standalone test harness. */
 export const makeSessionManagerCoordination = (
 	hold: SessionManagerCoordination["hold"] = () => Effect.succeed(true),
 ) =>

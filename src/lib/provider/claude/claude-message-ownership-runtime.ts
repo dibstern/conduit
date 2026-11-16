@@ -507,7 +507,7 @@ function resolveEnsureClaudeSubagentSessionEffect(
 		if (ensureClaudeSubagentSession) {
 			return ensureClaudeSubagentSession;
 		}
-		// Claude provider turn callbacks run outside the relay persistence context.
+		// Claude provider turn callbacks run outside the project persistence context.
 		const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
 		return persist._tag === "Some"
 			? persist.value.ensureClaudeSubagentSession

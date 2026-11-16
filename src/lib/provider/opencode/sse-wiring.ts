@@ -1,4 +1,4 @@
-// Extracted from relay-stack.ts: the pipeline that takes SSE events from
+// The pipeline that takes SSE events from
 // OpenCode, persists them, maintains timeouts, and publishes alerts and push
 // notifications using RPC viewer presence.
 
@@ -122,7 +122,7 @@ export interface SSEWiringDeps {
 		permissionId: string,
 		response: "once",
 	) => Effect.Effect<void, unknown>;
-	/** Effect-native OpenCode runtime ingress owned by the relay runtime. */
+	/** Effect-native OpenCode runtime ingress owned by the project's services. */
 	opencodeRuntimeIngress?: {
 		onSSEEventEffect(
 			event: SSEEvent,
@@ -142,7 +142,7 @@ export interface SSEWiringDeps {
 	};
 }
 
-// Extracted so both handleSSEEventEffect (SSE path) and relay-stack.ts (status/message
+// Extracted so both handleSSEEventEffect (SSE path) and the status/message
 // poller paths) can fire push notifications for done/error events. Without this,
 // push notifications are only sent when the translator produces done/error —
 // but the translator returns ok:false for session.status:idle, so done events
@@ -181,11 +181,11 @@ function buildPushContext(slug?: string, sessionId?: string): PushEventContext {
 }
 
 /**
- * Send a push notification for notable relay messages (done, error, etc.).
+ * Send a push notification for notable browser messages (done, error, etc.).
  * No-op for message types that don't warrant a notification.
  * Safe to call with any BrowserMessage.
  *
- * Legacy/test-only: the live relay runs the Effect wirings, which go through
+ * Legacy/test-only: open projects run the Effect wirings, which go through
  * {@link sendPushForEventEffect}. This twin has no durable delivery claim, so it can
  * ding again on a reload or reconnect — see ni8.23. It survives only because
  * the sync wirings still exist; retire it with them.
@@ -221,7 +221,7 @@ export function sendPushForEvent(
 
 /**
  * The push payload's `type`. Approvals and failed turns keep the names the old
- * relay messages had, because the service worker (sw.ts) and the alert
+ * browser messages had, because the service worker (sw.ts) and the alert
  * ledger's persisted kinds still key on them.
  */
 const pushKind = (
@@ -297,7 +297,7 @@ const pushAlert = (
  * per successful receipt. Abandoned attempts may be retried and recipients
  * deduplicate the immutable alert identity.
  *
- * This is the Effect-shaped path, and the only one the live relay uses. The
+ * This is the Effect-shaped path, and the only one open projects use. The
  * difference that matters is not the shape: it is that the send is a real
  * Effect, so a push that fails is a failure the ledger can see and give the
  * claim back for, instead of a `.catch` that swallows it after a row already
@@ -540,7 +540,7 @@ const handleSSEEventAfterPendingEffect = (
 			if (statusType === "idle" && eventSessionId && deps.statusPoller) {
 				yield* deps.statusPoller.notifySSEIdle(eventSessionId);
 			}
-			// A retry is shell-row status, not a relay message, but the provider
+			// A retry is shell-row status, not a browser message, but the provider
 			// is still working, so it keeps the turn's timeout alive.
 			if (statusType === "retry" && eventSessionId) {
 				yield* resetProcessingTimeout(
@@ -556,7 +556,7 @@ const handleSSEEventAfterPendingEffect = (
 			sessionId: eventSessionId,
 		});
 		// These part updates still count as progress even though they no
-		// longer produce an internal relay message.
+		// longer produce an internal browser message.
 		if (
 			eventSessionId &&
 			(!translateResult.ok || translateResult.messages.length === 0) &&
@@ -805,7 +805,7 @@ export const wireSSEConsumerEffect = (
 			| ProjectSettingsTag
 			| AlertsTag
 		>();
-		// Held for the caller's scope, so a closed relay leaves no listener behind.
+		// Held for the caller's scope, so a closed project leaves no listener behind.
 		yield* Effect.acquireRelease(
 			Effect.sync(() => {
 				const runFork = Effect.runForkWith(runtime);

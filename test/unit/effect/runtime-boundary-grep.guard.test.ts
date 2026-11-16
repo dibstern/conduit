@@ -2227,14 +2227,7 @@ describe("Effect runtime boundary grep", () => {
 				path: "src/lib/domain/daemon/Layers/project-services-layer.ts",
 				pattern: /\bSessionEventBridgeLive\b/,
 				reason:
-					"relay runtime should subscribe directly to DaemonEventBus, not bridge SessionManager EventEmitter events",
-			},
-			{
-				path: "src/lib/relay/session-event-bridge.ts",
-				pattern: /./,
-				reason:
-					"SessionEventBridgeLive should stay deleted after lifecycle publication moved into SessionManagerServiceLive",
-				optional: true,
+					"project services should subscribe directly to DaemonEventBus, not bridge SessionManager EventEmitter events",
 			},
 			{
 				path: "src/lib/provider/opencode/session-lifecycle-wiring.ts",
@@ -2394,7 +2387,7 @@ describe("Effect runtime boundary grep", () => {
 		const retiredBridgePatterns = [
 			{
 				pattern: /Layer\.succeed\s*\(\s*StatusPollerTag\s*(?:,|\)\s*\()/,
-				reason: "StatusPollerTag must be constructed by a relay-owned Layer",
+				reason: "StatusPollerTag must be constructed by a project-owned Layer",
 			},
 			{
 				pattern: /\bmakeDeferredStatusPollerRuntime\b/,
@@ -2510,7 +2503,7 @@ describe("Effect runtime boundary grep", () => {
 			{
 				pattern: /\.run(?:Promise|Sync)(?:Exit)?(?:With)?\s*\(/,
 				reason:
-					"RPC websocket upgrades should fork into the relay-owned transport runtime",
+					"RPC websocket upgrades should fork into the project-owned transport runtime",
 			},
 			{
 				pattern: /ManagedRuntime\.make\(/,
@@ -2538,7 +2531,7 @@ describe("Effect runtime boundary grep", () => {
 		const retiredBridgePatterns = [
 			{
 				pattern: /Layer\.succeed\s*\(\s*OpenCodeAPITag\s*(?:,|\)\s*\()/,
-				reason: "OpenCodeAPITag must be constructed by a relay-owned Layer",
+				reason: "OpenCodeAPITag must be constructed by a project-owned Layer",
 			},
 			{
 				pattern: /Layer\.succeed\s*\(\s*ConfigTag\s*(?:,|\)\s*\()/,

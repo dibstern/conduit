@@ -371,7 +371,7 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 			permission("pa4-late", sessionB),
 		);
 		const slugB = await addProject(fixture, directoryB);
-		// Project relays start lazily, so B's relay subscribes on first connect.
+		// Projects open lazily, so B's stream subscribes on first connect.
 		const b = await fixture.connect(undefined, undefined, slugB);
 		for (const tab of [b, a])
 			await tab.waitFor(

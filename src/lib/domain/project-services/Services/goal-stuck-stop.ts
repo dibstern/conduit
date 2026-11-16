@@ -63,7 +63,7 @@ export const GoalStuckStopReactorLive = Layer.effectDiscard(
 				tracker.count = row?.goal_stuck != null ? tracker.count + 1 : 0;
 				if (tracker.count < GOAL_STUCK_STOP_AFTER) return;
 				tracker.count = 0;
-				// A provider runs only while a relay serves its project, so a removed or
+				// A provider runs only while its project is open, so a removed or
 				// unserved project has nothing to stop.
 				const served = turns.served(event.projectId);
 				if (Option.isNone(served)) return;

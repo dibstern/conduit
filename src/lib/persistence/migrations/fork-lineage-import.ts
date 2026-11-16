@@ -40,7 +40,7 @@ const Sidecar = Schema.Record(
 
 /**
  * Global data import, not a numbered schema migration. The source has no project key, so this runs before
- * project relays open, across all known stores. It cannot run once per database:
+ * projects open, across all known stores. It cannot run once per database:
  * the first project would delete the remaining projects' only copy of lineage.
  * Unresolved entries are retried from the archive at startup; partial imports are idempotent.
  */

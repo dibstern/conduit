@@ -102,7 +102,7 @@ export const listSessions = (
 		Effect.withSpan("session.listSessions"),
 	);
 
-/** Whether this relay's project has the requested session. */
+/** Whether this project has the requested session. */
 export const sessionExists = (sessionId: string) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;

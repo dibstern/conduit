@@ -8,7 +8,7 @@
 // against the callsite's response schema.
 //
 // Message shape: session.messages() normalizes SDK's nested `{ info, parts }`
-// shape into flat `{ ...info, parts }` messages for relay callers.
+// shape into flat `{ ...info, parts }` messages for conduit callers.
 
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client";
 import type {

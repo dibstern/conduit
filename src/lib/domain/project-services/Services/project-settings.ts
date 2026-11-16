@@ -2,7 +2,7 @@
 // Project-global settings a tab must hear about when someone else changes them:
 // another tab, or the CLI over the same RPC contract.
 //
-// These are not in the read model — persisted defaults also live in relay
+// These are not in the read model — persisted defaults also live in global
 // memory — so there is no version to resume from and no advance to follow.
 // A writer reloads the persisted state before publishing, and every
 // subscribe opens with a snapshot of the current facts. Subscribing before
@@ -60,7 +60,7 @@ type ProjectSettingChange = Extract<
 	{ readonly _tag: "upsert" }
 >;
 
-/** Facts the relay observes rather than reads from config. */
+/** Facts the project observes rather than reads from config. */
 type LiveProjectFact = Extract<
 	ProjectSetting,
 	{
@@ -99,13 +99,13 @@ const isLiveFact = (setting: ProjectSetting): setting is LiveProjectFact =>
 
 export interface ProjectSettings {
 	readonly changes: PubSub.PubSub<ProjectSettingChange>;
-	/** Keep an older read from publishing after a newer one on this relay. */
+	/** Keep an older read from publishing after a newer one on this project. */
 	readonly globalSync: Semaphore.Semaphore;
 	/** Share a pending Claude catalogue refresh for each account. */
 	readonly modelDiscovery: FiberMap.FiberMap<string, void, never>;
 	/**
 	 * Open subscriptions: each tab holds one for its attached project.
-	 * Read synchronously by the relay status snapshot, like its own counts.
+	 * Read synchronously by the project status snapshot, like its own counts.
 	 */
 	readonly browsers: {
 		readonly count: () => number;
@@ -262,7 +262,7 @@ export const readTitleGenerationState = Effect.gen(function* () {
 	} satisfies TitleGenerationState;
 });
 
-/** Catalog-dependent settings are recomputed on the receiving relay. */
+/** Catalog-dependent settings are recomputed on the receiving project. */
 export const refreshModelSettings: Effect.Effect<void> = Effect.gen(
 	function* () {
 		const config = yield* Effect.serviceOption(ConfigTag);

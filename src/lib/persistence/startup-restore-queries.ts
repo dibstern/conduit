@@ -1,4 +1,4 @@
-// Relay startup runs these reads synchronously before the first session can
+// Project startup runs these reads synchronously before the first session can
 // open. They live here as text so tests can check their query plans.
 
 /** Claude AskUserQuestion tools still waiting for an answer. */

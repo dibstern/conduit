@@ -111,7 +111,7 @@ export type ProjectGenerationParts =
 	| GoalSummaryServiceTag
 	// The message poller (lane 16p).
 	| PollerManagerTag
-	// Streams a tab opens on the project end with the generation, not a relay (lane 16p).
+	// Streams a tab opens on the project end with the generation (lane 16p).
 	| RpcSubscriptionScopeTag
 	// The OpenCode stream and the status poller (lane 16q).
 	| SSEStreamTag
@@ -134,14 +134,14 @@ export class ProjectServicesError extends Data.TaggedError(
 	}
 }
 
-/** Each project's context, built from the registry on request (82tn.16); no relay lends it. */
+/** Each project's context, built from the registry on request (82tn.16). */
 export class ProjectServices extends Context.Service<
 	ProjectServices,
 	{
 		readonly forProject: (
 			projectId: string,
 		) => Effect.Effect<Context.Context<ProjectParts>, ProjectServicesError>;
-		/** The parts one generation owns, shared with the project's relay. */
+		/** The parts one generation owns, shared by every RPC on the project. */
 		readonly generation: (
 			projectId: string,
 		) => Effect.Effect<
@@ -163,7 +163,7 @@ export class ProjectServices extends Context.Service<
 		/**
 		 * Ends the project's start (its recovery, stream listeners and inbox) and
 		 * keeps the generation; the next `open` starts again with the current
-		 * folders. Commands wait meanwhile, as across a replaced relay.
+		 * folders. Commands wait meanwhile, as across any reopen.
 		 */
 		readonly close: (projectId: string) => Effect.Effect<void>;
 	}

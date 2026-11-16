@@ -383,7 +383,7 @@ export class SessionActivityTag extends Context.Service<
 	SessionActivity
 >()("SessionActivity") {}
 
-/** Daemon-owned transient state; project relays only borrow its readers and writers. */
+/** Daemon-owned transient state; project services only borrow its readers and writers. */
 export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 	function* () {
 		const changes = yield* PubSub.unbounded<string>();

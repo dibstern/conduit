@@ -267,7 +267,7 @@ export interface DurableCommandStoreOptions {
 export interface ProviderCallRequest {
 	/** Empty for discovery before a draft has a reserved session. */
 	readonly sessionId: string;
-	/** Owning project from an admitted call or durable command, never the caller's relay. */
+	/** Owning project from an admitted call or durable command, never the caller's. */
 	readonly projectId?: string;
 	readonly account?: Account;
 	readonly providerId?: string;
@@ -1127,7 +1127,7 @@ export class OrchestrationEngine {
 			if (command.type === "send_turn" && durable)
 				return yield* Effect.uninterruptibleMask((restore) =>
 					Effect.gen({ self: this }, function* () {
-						// A relay owns the request waiter; the daemon engine owns the
+						// The caller's project owns the request waiter; the daemon engine owns the
 						// accepted send, including intake before a runner exists.
 						const worker = yield* Effect.forkIn(execution, this.commandScope);
 						return yield* restore(Fiber.join(worker));

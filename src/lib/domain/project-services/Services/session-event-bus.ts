@@ -24,7 +24,7 @@ export interface SessionEventFilter {
  *
  * Deep interface: callers publish committed {@link StoredEvent}s post-commit and
  * subscribe to a session-filtered stream. Fan-out, per-session filtering, and
- * the sliding-buffer capacity policy are hidden — unlike RelayEventBus, which
+ * the sliding-buffer capacity policy are hidden — unlike the deleted RelayEventBus, which
  * exposes its raw PubSub. A slow subscriber drops the oldest signals rather than
  * blocking the publisher; the durable, sequence-addressed event store is the
  * replay/resume source, so a subscriber that falls behind recovers missing

@@ -116,7 +116,7 @@ export const DaemonHandleLive: Layer.Layer<
 		);
 		// A new project stays unbound unless the caller picks an instance: the
 		// binding chooses the harness for new sessions, so a default here would
-		// override the default model's harness. The relay picks an OpenCode
+		// override the default model's harness. The project picks an OpenCode
 		// instance on its own.
 		const saveProject = (input: SaveProjectInput) =>
 			Effect.gen(function* () {

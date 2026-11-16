@@ -1240,7 +1240,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							message:
 								"No Conduit session is bound to this OpenCode session and instance",
 						});
-					// The daemon's project context, never a relay's (82tn.16).
+					// The daemon's project context (82tn.16).
 					const projectContext = yield* projects.forProject(target.projectSlug);
 					return yield* Effect.gen(function* () {
 						const sessionId = yield* findOpenCodeSession(

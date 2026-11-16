@@ -1,16 +1,13 @@
 // Regression tests proving that push notifications are sent for "done" and
 // "error" events regardless of which code path produces them.
 //
-// Root cause: `done` messages are produced by the status poller's `became_idle`
-// handler in relay-stack.ts, which routes them through processEvent →
-// applyPipelineResult. This pipeline sends the WS message to session viewers
-// but NEVER calls pushManager.sendToAll(). The push notification code in
-// sse-wiring.ts (lines 266-278) is dead code for "done" events because the
-// SSE translator returns ok:false for session.status:idle — handleSSEEventEffect
-// exits early and never reaches the push code.
+// Root cause: `done` messages from the status poller's `became_idle` handler
+// reached session viewers but never the push manager, because the SSE
+// translator returns ok:false for session.status:idle and the inline push code
+// in sse-wiring.ts was never reached for them.
 //
-// Fix: extract sendPushForEvent() from the inline code in sse-wiring.ts so
-// relay-stack.ts can call it for status-poller-produced done/error events.
+// Fix: sendPushForEvent() is extracted from sse-wiring.ts so the status-poller
+// path (monitoring-wiring.ts) calls it for its done/error events too.
 
 import { describe, expect, it, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";

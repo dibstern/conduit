@@ -12,7 +12,7 @@
  *
  * Faking the socket rather than assigning `connectionState.status` directly is
  * deliberate. The status is set by the real `open` handler, which also resets
- * the attempt counter and clears relay state; poking the store would skip all
+ * the attempt counter and clears project status; poking the store would skip all
  * of it and leave the component in a state the app can never actually be in.
  */
 

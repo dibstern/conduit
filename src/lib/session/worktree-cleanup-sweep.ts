@@ -88,7 +88,7 @@ const checkoutRetrySnapshot = (path: string) =>
 		return [head, common, metadata];
 	});
 
-/** Discovery only: no Git calls and no relay startup for an absent checkout. */
+/** Discovery only: no Git calls and no project open for an absent checkout. */
 export const readWorktreeCleanupPaths = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const { projectId } = yield* PersistenceProjectTag;

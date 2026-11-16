@@ -1,6 +1,6 @@
 // Message Poller Implementation (Internal)
 // Imperative polling classes that wrap the pure diff/synthesize functions.
-// Only imported by relay-stack.ts (composition root). All other modules use
+// Only imported by message-poller-manager-layer.ts. All other modules use
 // structural interfaces (PollerManagerLike) instead of concrete classes.
 //
 // MessagePoller: single-session poller with SSE suppression, held by viewers.
@@ -364,7 +364,7 @@ export class MessagePollerManager {
 		this.eventsCallbacks.push(callback);
 	}
 
-	/** Remove a callback `on` registered, so a closed relay leaves none behind. */
+	/** Remove a callback `on` registered, so a closed project leaves none behind. */
 	off(_event: "events", callback: PollerManagerEventsCallback): void {
 		const at = this.eventsCallbacks.indexOf(callback);
 		if (at >= 0) this.eventsCallbacks.splice(at, 1);
@@ -457,7 +457,7 @@ export class MessagePollerManager {
 
 	/**
 	 * Get all session IDs currently being polled.
-	 * Used by relay-stack to iterate over active polled sessions.
+	 * Used to iterate over active polled sessions.
 	 */
 	getPollingSessionIds(): string[] {
 		return [...this.pollers.keys()];

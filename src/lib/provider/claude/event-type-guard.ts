@@ -84,32 +84,32 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"session.deleted": {
 		produced: false,
 		reason:
-			"Relay-owned lifecycle event recorded by SessionManager through session commands",
+			"Conduit-owned lifecycle event recorded by SessionManager through session commands",
 	},
 	"session.forked": {
 		produced: false,
 		reason:
-			"Fork lineage is recorded by the relay, not the Claude event translator",
+			"Fork lineage is recorded by conduit, not the Claude event translator",
 	},
 	"session.rewind_committed": {
 		produced: false,
-		reason: "Relay-owned cut committed at send admission or upstream removal",
+		reason: "Conduit-owned cut committed at send admission or upstream removal",
 	},
 	"head.move_started": {
 		produced: false,
-		reason: "Relay-owned head move journal, with no Claude SDK mutation",
+		reason: "Conduit-owned head move journal, with no Claude SDK mutation",
 	},
 	"head.moved": {
 		produced: false,
-		reason: "Relay-owned head move journal, with no Claude SDK mutation",
+		reason: "Conduit-owned head move journal, with no Claude SDK mutation",
 	},
 	"session.provider_changed": {
 		produced: false,
-		reason: "Provider switching is a relay-level concept",
+		reason: "Provider switching is a conduit-level concept",
 	},
 	"session.provider_cleanup_failed": {
 		produced: false,
-		reason: "Relay-owned cleanup diagnostic",
+		reason: "Conduit-owned cleanup diagnostic",
 	},
 	"session.handoff_delivered": {
 		produced: false,
@@ -141,7 +141,7 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"session.model_changed": {
 		produced: false,
 		reason:
-			"Relay-owned model settings, appended by the relay's session settings module",
+			"Conduit-owned model settings, appended by the session settings module",
 	},
 	"session.workspace_changed": {
 		produced: false,
@@ -166,42 +166,51 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"session.workspace_hint_changed": {
 		produced: false,
 		reason:
-			"Relay-owned write-path inference; never emitted by the provider translator.",
+			"Conduit-owned write-path inference; never emitted by the provider translator.",
 	},
 	"session.variant_changed": {
 		produced: false,
 		reason:
-			"Relay-owned effort settings, appended by the session settings module",
+			"Conduit-owned effort settings, appended by the session settings module",
 	},
 	"session.context_window_changed": {
 		produced: false,
 		reason:
-			"Relay-owned context window settings, appended by the session settings module",
+			"Conduit-owned context window settings, appended by the session settings module",
 	},
-	"session.settled": { produced: false, reason: "Relay-owned triage state" },
-	"session.unsettled": { produced: false, reason: "Relay-owned triage state" },
-	"session.archived": { produced: false, reason: "Relay-owned triage state" },
-	"session.unarchived": { produced: false, reason: "Relay-owned triage state" },
-	"session.pinned": { produced: false, reason: "Relay-owned triage state" },
-	"session.unpinned": { produced: false, reason: "Relay-owned triage state" },
-	"session.snoozed": { produced: false, reason: "Relay-owned triage state" },
+	"session.settled": { produced: false, reason: "Conduit-owned triage state" },
+	"session.unsettled": {
+		produced: false,
+		reason: "Conduit-owned triage state",
+	},
+	"session.archived": { produced: false, reason: "Conduit-owned triage state" },
+	"session.unarchived": {
+		produced: false,
+		reason: "Conduit-owned triage state",
+	},
+	"session.pinned": { produced: false, reason: "Conduit-owned triage state" },
+	"session.unpinned": { produced: false, reason: "Conduit-owned triage state" },
+	"session.snoozed": { produced: false, reason: "Conduit-owned triage state" },
 	"session.auto_settle_set": {
 		produced: false,
-		reason: "Relay-owned triage state",
+		reason: "Conduit-owned triage state",
 	},
 	"session.jev_set": {
 		produced: false,
-		reason: "Relay-owned Jev preference",
+		reason: "Conduit-owned Jev preference",
 	},
 	"session.diff_base_set": {
 		produced: false,
-		reason: "Relay-owned diff base preference",
+		reason: "Conduit-owned diff base preference",
 	},
 	"folder_timeline.evicted": {
 		produced: false,
 		reason: "Appended by the Folder Timeline's eviction pass",
 	},
-	"session.unsnoozed": { produced: false, reason: "Relay-owned triage state" },
+	"session.unsnoozed": {
+		produced: false,
+		reason: "Conduit-owned triage state",
+	},
 	"permission.asked": {
 		produced: false,
 		reason: "Recorded by the sink's requestPermission(), not push()",
@@ -221,12 +230,13 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	},
 	"input.admitted": {
 		produced: false,
-		reason: "Relay-owned: the Session Inbox commits it when a send is admitted",
+		reason:
+			"Conduit-owned: the Session Inbox commits it when a send is admitted",
 	},
 	"input.sent": {
 		produced: false,
 		reason:
-			"Relay-owned: the Session Inbox records turn handoff or steering delivery",
+			"Conduit-owned: the Session Inbox records turn handoff or steering delivery",
 	},
 	"input.requeued": {
 		produced: false,
@@ -235,7 +245,7 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"input.cancelled": {
 		produced: false,
 		reason:
-			"Relay-owned: the Session Inbox commits it when a queued input is removed",
+			"Conduit-owned: the Session Inbox commits it when a queued input is removed",
 	},
 	"interrupt.requested": {
 		produced: false,
@@ -264,7 +274,7 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"input.interrupt_requested": {
 		produced: false,
 		reason:
-			"Relay-owned: the Session Inbox commits it before interrupting a turn",
+			"Conduit-owned: the Session Inbox commits it before interrupting a turn",
 	},
 	"evidence.process_started": {
 		produced: false,

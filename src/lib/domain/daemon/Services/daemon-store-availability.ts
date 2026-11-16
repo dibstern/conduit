@@ -27,7 +27,7 @@ export const onProjectUnavailable = (
 			}),
 	).pipe(Effect.asVoid);
 
-/** Both persistent failures and retryable relay errors retire the same drafts. */
+/** Both persistent failures and retryable project errors retire the same drafts. */
 export const transitionProjectUnavailable = <A, E, R>(
 	unavailable: Map<string, string>,
 	projectId: string,

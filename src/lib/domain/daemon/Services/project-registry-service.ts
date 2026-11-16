@@ -5,7 +5,7 @@
 //   - Pure Effect functions for add/remove/get/list/update
 //
 // The old class used typed callback maps (not EventEmitter) and AbortController
-// for relay cancellation. This service replaces callbacks with DaemonEventBus
+// for cancellation. This service replaces callbacks with DaemonEventBus
 // publishes, and AbortController with Effect Scope/interruption.
 //
 // A project's start and end go through ProjectServices open and close.
@@ -506,7 +506,7 @@ export const size = Effect.gen(function* () {
 }).pipe(Effect.withSpan("projectRegistry.size"));
 
 /**
- * Register a project without starting a relay. Sets status to Registering.
+ * Register a project without opening it. Sets status to Registering.
  * Publishes InstanceAdded event unless silent is true.
  */
 export const addWithoutOpening = (
@@ -595,7 +595,7 @@ export const markReady = (slug: string) =>
 			DaemonEvent.InstanceStatusChanged({ instanceId: slug }),
 		);
 
-		yield* Effect.logInfo("Project relay ready");
+		yield* Effect.logInfo("Project open");
 	}).pipe(
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.markReady", {
@@ -638,7 +638,7 @@ export const markError = (slug: string, error: string) =>
 			DaemonEvent.InstanceStatusChanged({ instanceId: slug }),
 		);
 
-		yield* Effect.logWarning("Project relay failed", { error });
+		yield* Effect.logWarning("Project open failed", { error });
 	}).pipe(
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.markError", {
@@ -724,7 +724,7 @@ export const remove = (slug: string) =>
 						}),
 					})).pipe(Effect.provideService(DaemonConfigRefTag, config.value));
 				}
-				// Removal can roll back while disposing the relay. Retire launch
+				// Removal can roll back while closing the project. Retire launch
 				// serialization only after it succeeds, before a locked re-add can run.
 				const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 				if (Option.isSome(workspace)) workspace.value.forgetProject?.(slug);
@@ -913,12 +913,12 @@ export const removeAll = Effect.gen(function* () {
 }).pipe(Effect.withSpan("projectRegistry.removeAll"));
 
 /**
- * Evict oldest sessions across relays. Stub implementation until
- * relay access is available in later phases.
+ * Evict oldest sessions across projects. Stub implementation until
+ * project access is available in later phases.
  */
 export const evictOldestSessions = (count: number) =>
 	Effect.gen(function* () {
-		// TODO: Implement session eviction after relay access is available
+		// TODO: Implement session eviction after project access is available
 		yield* Effect.logInfo(`Eviction requested for ${count} sessions (stub)`);
 		return [] as string[];
 	}).pipe(Effect.withSpan("projectRegistry.evictOldestSessions"));
@@ -945,7 +945,7 @@ export const reopenProject = (slug: string) =>
 
 /**
  * Check if a project is currently in Registering state
- * (i.e., a relay creation is in-flight).
+ * (i.e., opening it is in flight).
  */
 export const isStarting = (slug: string) =>
 	getEntry(slug).pipe(
@@ -1161,7 +1161,7 @@ export const saveProject = (input: SaveProjectInput) =>
 						return yield* new WsRpcError({
 							message: `Fix this project's history before changing its main folder: ${unavailableReason}`,
 						});
-					// A send admitted between this check and the relay swap is not blocked.
+					// A send admitted between this check and the reopen is not blocked.
 					const count = yield* countRunningProjectSessions(existing).pipe(
 						Effect.mapError(
 							(cause) =>

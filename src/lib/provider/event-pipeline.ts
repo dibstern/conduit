@@ -137,7 +137,7 @@ export function applyPipelineResultEffect(
 // Composed pipeline (convenience, still side-effect free)
 
 /**
- * Process a relay event through the pipeline. Returns all decisions as data.
+ * Process a browser event through the pipeline. Returns all decisions as data.
  * The caller is responsible for executing side effects (sending, caching, etc.).
  */
 export function processEvent(

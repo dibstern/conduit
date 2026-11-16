@@ -1,4 +1,4 @@
-// Pure helper functions used by both RelayServer (server.ts) and Daemon (daemon.ts).
+// Pure helper functions for the daemon's HTTP and WebSocket edge.
 
 import type { IncomingMessage } from "node:http";
 import { isIP } from "node:net";

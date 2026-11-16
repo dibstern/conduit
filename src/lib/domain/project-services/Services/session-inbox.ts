@@ -433,7 +433,7 @@ export interface SessionInbox {
 		sessionId: string,
 		move: EventPayloadMap["head.move_started"],
 	) => Effect.Effect<void, SessionInboxError>;
-	/** Start draining once the relay's providers are registered and recovered. */
+	/** Start draining once the project's providers are registered and recovered. */
 	readonly start: Effect.Effect<void>;
 }
 
@@ -481,7 +481,7 @@ export const SessionInboxLive = Layer.effect(
 			yield* Effect.context<
 				Effect.Services<ReturnType<typeof finishHeadMove>>
 			>();
-		// The daemon holds the permits, so two relays of one project share them.
+		// The daemon holds the permits, so two generations of one project share them.
 		// Queued and held inputs stay in pending_inputs (CONTRACT.md 5865, D57); only
 		// the per-session permit moves to the daemon.
 		const { serialised } = yield* DaemonTurns;

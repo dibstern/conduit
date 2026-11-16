@@ -60,7 +60,7 @@ export async function confirmRemoveProjects(
 		returnFocus,
 	);
 	if (!confirmed) return false;
-	// Each RPC routes through a project's relay, so prefer one that survives;
+	// Each RPC routes through a project, so prefer one that survives;
 	// only when every project goes does a removal route through itself.
 	const router = [
 		selection.scope?.project,

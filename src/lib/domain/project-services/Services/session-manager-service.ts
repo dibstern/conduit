@@ -839,7 +839,7 @@ export interface SessionManagerService {
 	): Effect.Effect<void, SessionManagerError>;
 	/**
 	 * Re-read session lineage into the parent map, side-thread set and session
-	 * count. Status propagation and the relay snapshot read these caches, so
+	 * count. Status propagation and the project status snapshot read these caches, so
 	 * call it wherever a session or a parent edge may have appeared.
 	 */
 	refreshSessionLineage(): Effect.Effect<void, SessionManagerError>;
@@ -847,7 +847,7 @@ export interface SessionManagerService {
 
 /**
  * What the session manager runs with for one project: the daemon builds it
- * from the registry (82tn.16); a standalone relay is its own daemon.
+ * from the registry (82tn.16); a standalone test harness is its own daemon.
  */
 export type ProjectSessionManagerParts =
 	| AccountDirectory
@@ -988,7 +988,7 @@ const makeServiceCreateSession = ({
 	return serviceCreateSession;
 };
 
-/** One project's operations over the parts its relay lent. Holds no state of its own. */
+/** One project's operations over the parts its services lent. Holds no state of its own. */
 const makeProjectSessionManager: Effect.Effect<
 	SessionManagerService,
 	never,
@@ -1021,7 +1021,7 @@ const makeProjectSessionManager: Effect.Effect<
 	const retentionScheduler = yield* Effect.serviceOption(
 		EventRetentionSchedulerTag,
 	);
-	// The daemon shares one per project, so a rebuilt or overlapping relay
+	// The daemon shares one per project, so a rebuilt or overlapping generation
 	// waits on the same triage lock and delete table.
 	const { triageLock, inFlightDeletes, hold } =
 		yield* SessionManagerCoordinationTag;
@@ -1709,7 +1709,7 @@ export const makeSessionManagers = (
 	return managers;
 };
 
-/** The daemon's session manager for the calling relay's project. */
+/** The daemon's session manager for the caller's project. */
 export const projectSessionManager = Effect.map(
 	Effect.all([SessionManagerServiceTag, ConfigTag]),
 	([managers, config]) => managers.forProject(config.slug),

@@ -19,7 +19,7 @@ export interface GoalStuckNotification {
 }
 
 /**
- * Derive notification content from a relay message or a pending approval.
+ * Derive notification content from a browser message or a pending approval.
  * Returns `null` for message types that don't warrant a notification.
  */
 export function notificationContent(

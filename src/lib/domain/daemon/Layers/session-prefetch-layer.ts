@@ -12,7 +12,7 @@
 //   - ProjectRegistryTag — for iterating registered projects
 //
 // Error handling: all errors are caught per-project. Session count
-// prefetch failure is non-fatal (the daemon shows 0 until the relay
+// prefetch failure is non-fatal (the daemon shows 0 until the project
 // starts and gets real counts).
 //
 // (AP-33)
@@ -131,7 +131,7 @@ export const prefetchSessionCounts: Effect.Effect<
  *
  * Error handling: all failures are caught per-project and logged.
  * Prefetch failure is non-fatal — session counts default to 0 until
- * the relay starts and reports real counts.
+ * the project opens and reports real counts.
  */
 export const SessionPrefetchLive: Layer.Layer<
 	never,

@@ -15,27 +15,27 @@ import { OwnerScopes } from "./owner-scopes.js";
 
 type DispatchFibers = FiberMap.FiberMap<string, void, unknown>;
 
-/** What a started relay lends the daemon so continuations run with its parts. */
+/** What an open project lends the daemon so continuations run with its parts. */
 export interface ProjectContinuation {
 	readonly sweep: Effect.Effect<unknown, unknown>;
 	readonly applyLimitPolicy: (sessionId: string) => Effect.Effect<void>;
 }
 
-/** Running turns and their queues, held by the daemon so relay rebuilds keep them. */
+/** Running turns and their queues, held by the daemon so a reopened project keeps them. */
 export class DaemonTurns extends Context.Service<
 	DaemonTurns,
 	{
-		/** The session's dispatch fibers live in its owner scope, never a relay's. */
+		/** The session's dispatch fibers live in its owner scope, never a generation's. */
 		readonly dispatchFibers: (
 			sessionId: string,
 		) => Effect.Effect<DispatchFibers>;
-		/** One permit per session across every relay, so a session drains once. */
+		/** One permit per session across every generation, so a session drains once. */
 		readonly serialised: (
 			sessionId: string,
 		) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 		/** Sessions holding or awaiting a permit; none once their work ends. */
 		readonly heldPermits: () => number;
-		/** Lend a relay's continuation for its project until the relay's scope closes. */
+		/** Lend a generation's continuation for its project until its scope closes. */
 		readonly attach: (
 			projectId: string,
 			parts: ProjectContinuation,
@@ -48,7 +48,7 @@ export class DaemonTurns extends Context.Service<
 >()("DaemonTurns") {}
 
 /**
- * Built once in the daemon scope (a standalone relay builds its own as its
+ * Built once in the daemon scope (the test harness builds its own as its
  * daemon). Runs the one continuation sweep and the one limit-policy consumer.
  */
 export const DaemonTurnsLive = Layer.effect(
@@ -67,7 +67,7 @@ export const DaemonTurnsLive = Layer.effect(
 		>();
 		const attached = new Map<string, ProjectContinuation[]>();
 		const waiting = new Map<string, string[]>();
-		// An entry without a session marks a newly lent relay for its project.
+		// An entry without a session marks a newly lent generation for its project.
 		const limits = yield* Queue.unbounded<{
 			readonly projectId: string;
 			readonly sessionId?: string;
@@ -93,7 +93,7 @@ export const DaemonTurnsLive = Layer.effect(
 				),
 			),
 		);
-		// A policy for a project with no relay waits, in order, for the next one lent.
+		// A policy for a project with nothing lent waits, in order, for the next one lent.
 		yield* Effect.forkScoped(
 			Queue.take(limits).pipe(
 				Effect.flatMap(({ projectId, sessionId }) => {
@@ -106,7 +106,7 @@ export const DaemonTurnsLive = Layer.effect(
 					if (!parts) return Effect.void;
 					if (sessionId !== undefined) return parts.applyLimitPolicy(sessionId);
 					waiting.delete(projectId);
-					// The daemon's first sweep ran before this relay was lent, so a
+					// The daemon's first sweep ran before this generation was lent, so a
 					// continuation that fell due while the daemon was down fires now.
 					return Effect.andThen(
 						sweep(projectId),

@@ -16,7 +16,7 @@ class ProjectStorageMigrationError extends Data.TaggedError(
 	readonly message: string;
 }> {}
 
-/** Prepare one project's legacy history before publishing it or opening its relay. */
+/** Prepare one project's legacy history before publishing or opening it. */
 export const migrateProjectStorageForProject = (
 	configDir: string,
 	project: Pick<DaemonConfig["projects"][number], "slug" | "path">,

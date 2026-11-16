@@ -391,7 +391,7 @@ export function makeInstanceManagerStateLive(
 	);
 }
 
-/** Relays need runtime state without replacing the daemon's account directory. */
+/** Projects need runtime state without replacing the daemon's account directory. */
 export function makeOpenCodeRuntimeStateLive(
 	config?: Partial<InstanceManagerConfig>,
 	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],

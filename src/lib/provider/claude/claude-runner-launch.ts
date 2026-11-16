@@ -522,7 +522,7 @@ export const makeClaudeRunnerLaunch = (
 									try {
 										workspaceRoot = realpathSync(workspaceRoot);
 									} catch {
-										// The relay validates folders. Retain the actual reported cwd
+										// Conduit validates folders. Retain the actual reported cwd
 										// for restart comparison if the directory has disappeared.
 									}
 									if (workspaceRoot !== snapshot.input.workspaceRoot) {

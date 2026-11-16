@@ -171,7 +171,7 @@ export class ProviderTurnServiceTag extends Context.Service<
 	ProviderTurnService
 >()("ProviderTurnService") {}
 
-/** What a relay lends the daemon's turn service. */
+/** What a project's services lend the daemon's turn service. */
 export type ProviderTurnParts =
 	| AccountDirectory
 	| OpenCodeInstancesTag
@@ -193,7 +193,7 @@ export type ProviderTurnParts =
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag;
 
-/** One project's fences and lifts. They outlive any relay of the project and
+/** One project's fences and lifts. They outlive any generation of the project and
  *  go when the project's owner scope closes. */
 interface ProjectTurns {
 	readonly stopping: Map<string, Deferred.Deferred<void, StopFailure>>;
@@ -207,7 +207,7 @@ interface ProjectTurns {
 export class ProviderTurns extends Context.Service<
 	ProviderTurns,
 	{
-		/** The project's turn service, run against the calling relay's parts and
+		/** The project's turn service, run against the caller's parts and
 		 *  lent to the daemon until the caller's scope closes. The project's
 		 *  outbox Stops are recovered once, before it returns. */
 		readonly forProject: (
@@ -220,7 +220,7 @@ export class ProviderTurns extends Context.Service<
 			projectId: string,
 			parts: Context.Context<ProviderTurnParts>,
 		) => Effect.Effect<ProviderTurnService, never, Scope.Scope>;
-		/** The newest turn service lent for the project; none while no relay serves it. */
+		/** The newest turn service lent for the project; none while the project is closed. */
 		readonly served: (projectId: string) => Option.Option<ProviderTurnService>;
 	}
 >()("ProviderTurns") {}
@@ -238,7 +238,7 @@ const makeProviderTurnService = Effect.fnUntraced(function* (
 	// the button press. Each entry lives exactly as long as its abort worker,
 	// so a fence never outlives the process, scope or call that owns it.
 	// Stop fences stay with the daemon's turn service for the project, main's run
-	// seam (CONTRACT.md 5874, D57); a relay replacement keeps them.
+	// seam (CONTRACT.md 5874, D57); reopening the project keeps them.
 	const { stopping, accountSwitches } = project;
 	// In memory, so no failed write can strand input reserved behind a fence.
 	const { lifts } = project;
@@ -475,7 +475,7 @@ const makeProviderTurnService = Effect.fnUntraced(function* (
 	};
 	// Completed delivery receipts still own a deadline until their captured runs
 	// end. Restore the fences before the inbox can admit another foreground turn,
-	// once per project however many relays it has.
+	// once per project however many generations it has.
 	yield* project.recovery.withPermits(1)(
 		Effect.gen(function* () {
 			if (project.recovered) return;
@@ -521,8 +521,8 @@ const makeProviderTurnService = Effect.fnUntraced(function* (
 	return service;
 });
 
-/** The daemon's turn service: one state per project, kept across relay
- *  replacements and dropped when the project's owner scope closes. A Stop
+/** The daemon's turn service: one state per project, kept across project
+ *  reopens and dropped when the project's owner scope closes. A Stop
  *  worker runs in its session's owner scope, or the daemon's when the session
  *  has none. */
 export const ProviderTurnsLive = Layer.effect(
@@ -630,7 +630,7 @@ export const ProviderTurnsLive = Layer.effect(
 	}),
 );
 
-/** A relay's view of its project's turns, run against the relay's parts. */
+/** A project's view of its turns, run against the parts its services lend. */
 export const attachProviderTurnsLive = Layer.effect(
 	ProviderTurnServiceTag,
 	Effect.gen(function* () {

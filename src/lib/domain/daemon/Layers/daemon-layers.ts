@@ -706,9 +706,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 
 	// State containers and factories. ProjectRegistryLive and
 	// InstanceManagerStateLive have no construction deps but are logically
-	// grouped here. RelayFactoryLive needs DaemonConfigRefTag (from Tier 0,
-	// available via Tier 1's provideMerge passthrough).
-	//
+	// grouped here.
 	const stateLayer = makeDaemonStateLive(
 		options.persistedConfig === undefined
 			? undefined
@@ -734,8 +732,6 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	);
 
 	// Compose registry layers explicitly to preserve type information.
-	// RelayFactoryLive has R = DaemonConfigRefTag, which is satisfied by
-	// the services tier (via provideMerge passthrough from foundation).
 	const projectRegistryLayer = options.persistedConfig
 		? makeProjectRegistryFromDaemonStateLive
 		: makeProjectRegistryLive();
@@ -847,7 +843,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			return InputDraftsLive.pipe(Layer.provide(Layer.succeedContext(store)));
 		}),
 	).pipe(
-		// One alert feed for the daemon: every project's relay publishes to it,
+		// One alert feed for the daemon: every project's services publish to it,
 		// so a tab on any project hears completions from all of them (82tn.12).
 		Layer.merge(AlertsLive),
 		Layer.provideMerge(withProjectContext),
@@ -999,7 +995,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			windowMs: 10_000,
 		}),
 	).pipe(Layer.provideMerge(withSessionManager));
-	// Each project's context comes from the registry, not from its relay (82tn.16).
+	// Each project's context comes from the registry (82tn.16).
 	const withProjectServices = makeProjectServicesLive({
 		configDir,
 		claudeSdk: options.claudeSdk,

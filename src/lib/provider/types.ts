@@ -125,12 +125,12 @@ export interface EventSink {
 		reason: string,
 		options?: { readonly recoverQuestions?: boolean },
 	): Effect.Effect<void>;
-	/** Relay disposal preserves unanswered interactions for the next relay. */
+	/** Closing a project preserves unanswered interactions for its next generation. */
 	detachInteractions?(): Effect.Effect<void>;
 	/**
-	 * Relay liveness hook. Providers never call this; the orchestration reactor
+	 * Liveness hook. Providers never call this; the orchestration reactor
 	 * calls it for every streamed event on the path where provider output goes
-	 * straight to ingestion, so the relay's processing timeout stays alive
+	 * straight to ingestion, so the processing timeout stays alive
 	 * mid-turn and ends with the turn.
 	 */
 	noteActivity?(event: ProviderRuntimeEvent): void;
@@ -318,7 +318,7 @@ export interface SendTurnInput
 	readonly nativeResumeFallback?: boolean;
 	/**
 	 * Optional shared model selection. OpenCode may omit the model from its
-	 * provider request. Claude's relay path infers a catalog model, and its
+	 * provider request. Claude's conduit path infers a catalog model, and its
 	 * runtime rejects direct model-less dispatches.
 	 */
 	readonly model?: ModelSelection;

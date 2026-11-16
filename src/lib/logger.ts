@@ -4,10 +4,10 @@
  * Backend: pino with custom "verbose" level (25, between debug and info).
  *
  * Usage:
- *   const log = createLogger('relay');
+ *   const log = createLogger('project');
  *   const sseLog = log.child('sse');
- *   sseLog.info('Connected');  // pretty → "[relay] [sse]          Connected"
- *                              // json   → {"level":30,"component":["relay","sse"],"msg":"Connected"}
+ *   sseLog.info('Connected');  // pretty → "[project] [sse]        Connected"
+ *                              // json   → {"level":30,"component":["project","sse"],"msg":"Connected"}
  */
 
 import { appendFileSync, renameSync, statSync } from "node:fs";
@@ -30,8 +30,8 @@ export type LogFormat = "pretty" | "json";
 
 /**
  * Fixed column width for the tag portion of log lines.
- * The longest known tag chain is "[relay] [status-poller]" (24 chars).
- * We pad to 26 to leave a 2-char margin before the message body.
+ * The longest known tag chain is "[project] [status-poller]" (25 chars).
+ * We pad to 26 to leave a margin before the message body.
  */
 const TAG_COLUMN_WIDTH = 26;
 
@@ -242,7 +242,7 @@ export function setLogFormat(format: LogFormat): void {
 /**
  * Create a logger with the given tag.
  *
- * @param tag - Component identifier (e.g. "relay", "daemon")
+ * @param tag - Component identifier (e.g. "project", "daemon")
  * @param parent - Optional parent logger for external composition. Prefer
  *   `logger.child(tag)` when you have access to the parent — it provides
  *   column-aligned output. The `parent` parameter delegates formatting to

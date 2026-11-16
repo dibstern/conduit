@@ -16,7 +16,7 @@ import type { OrchestrationEngineTag } from "../../project-services/Services/ser
 import type { OverridesStateTag } from "../../project-services/Services/session-overrides-state.js";
 import type { SessionWorkspaceTag } from "../../project-services/Services/session-workspace.js";
 
-/** Project-owned services borrowed only while that project's relay is alive. */
+/** Project-owned services borrowed only while that project is open. */
 export type ProviderAdapterProjectContext =
 	| SqlClient.SqlClient
 	| InputDraftsTag
@@ -48,7 +48,7 @@ export class ProviderAdapters extends Context.Service<
 		readonly projectContext: (
 			projectId: string,
 		) => Option.Option<Context.Context<ProviderAdapterProjectContext>>;
-		/** Startup relays that must lend their services before recovery can run. */
+		/** Projects opening at startup that must lend their services before recovery can run. */
 		readonly recoveryProjects: readonly string[];
 		readonly registerProject: (
 			projectId: string,

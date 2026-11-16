@@ -250,7 +250,7 @@ export const subscribeShellProjects = <E>(
 		}),
 	);
 
-/** The daemon provides the shared store directly; serving this never acquires a relay. */
+/** The daemon provides the shared store directly; serving this never opens a project. */
 export const subscribeDaemonShell = <E>(
 	options: ShellResume,
 	projects: Stream.Stream<ShellProjectsFrame, E>,

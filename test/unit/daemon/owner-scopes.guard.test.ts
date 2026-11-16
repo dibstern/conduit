@@ -147,8 +147,9 @@ describe("Owner Scope source boundary", () => {
 	});
 });
 
-// 82tn.10.9: the daemon owns sessions and turns. A relay lends its parts; it
-// names no owner's constructor, and each owner keeps its standalone fallback.
+// 82tn.10.9: the daemon owns sessions and turns. A project's services lend
+// their parts and name no owner's constructor; the standalone fallbacks live in
+// the test harness.
 const ownerConstructors = new Set([
 	"SessionManagerServiceLive",
 	"ProviderTurnsLive",
@@ -328,7 +329,7 @@ describe("one alert feed and pollers held by tabs (82tn.12)", () => {
 		expect(read(`${root}/Layers/ask-alerts-layer.ts`)).toContain(
 			"subscribeEveryProjectApprovals(",
 		);
-		// No second ding: the relay pushes no asks and the tab's approvals store dings nothing.
+		// No second ding: SSE wiring pushes no asks and the tab's approvals store dings nothing.
 		expect(read("src/lib/provider/opencode/sse-wiring.ts")).not.toMatch(
 			/AskedPush|permission\.asked[^\n]*sendPush/,
 		);

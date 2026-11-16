@@ -47,7 +47,7 @@ export const WorktreeCleanupLive = () =>
 			const requests = yield* WorktreeCleanupQueueTag;
 			const projectServices = yield* ProjectServices;
 			const daemon = yield* Effect.context<WorktreeServiceTag | AlertsTag>();
-			// The daemon's project context, never a relay's (82tn.16).
+			// The daemon's project context (82tn.16).
 			const projectContext = (slug: string) =>
 				Effect.map(projectServices.forProject(slug), (parts) =>
 					Context.merge(daemon, parts),
@@ -111,7 +111,7 @@ export const WorktreeCleanupLive = () =>
 									Effect.succeed("off" as const),
 								),
 							);
-							// An open relay still marks the project as in use until S6.
+							// An open project still counts as in use.
 							const open = Option.isSome(
 								yield* projectServices.opened(project.slug),
 							);

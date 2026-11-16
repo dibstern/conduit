@@ -75,7 +75,7 @@ export interface ProjectEventSinkDeps {
 	/**
 	 * Optional hook for a permission mode the SDK reported as actually in force.
 	 * The durable event and the client message both ride the normal translation
-	 * path; this is the third place conduit keeps a mode -- the relay's live
+	 * path; this is the third place conduit keeps a mode -- the project's live
 	 * per-session override, which the next turn reads.
 	 */
 	readonly applyReportedPermissionMode?: (
@@ -283,7 +283,7 @@ export function createProjectEventSink(deps: ProjectEventSinkDeps): EventSink {
 			return Effect.gen(function* () {
 				if (Option.isNone(yield* guardCurrentWrite(reset))) return;
 				// Ahead of the ingestion short-circuit: the live override has to
-				// track the SDK on the durable path too, and it is relay state
+				// track the SDK on the durable path too, and it is project state
 				// rather than an event, so ingestion never sees it.
 				if (event.type === "session.permission_mode_changed") {
 					yield* applyReportedPermissionMode(event);
@@ -461,7 +461,7 @@ export function createProjectEventSink(deps: ProjectEventSinkDeps): EventSink {
 					);
 					return yield* awaitResponse;
 				});
-				// Relay disposal detaches its waiter. Cancellation or failure
+				// Closing the project detaches its waiter. Cancellation or failure
 				// resolves the request as a rejection.
 				return yield* ask.pipe(
 					Effect.onExit((exit) =>
@@ -590,7 +590,7 @@ export function createProjectEventSink(deps: ProjectEventSinkDeps): EventSink {
 					);
 					return yield* awaitAnswers;
 				});
-				// Relay disposal and questions kept for recovery leave the ask pending.
+				// Closing the project and questions kept for recovery leave the ask pending.
 				// Other exits resolve it here.
 				return yield* ask.pipe(
 					Effect.onExit((exit) =>

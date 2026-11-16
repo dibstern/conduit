@@ -1,5 +1,5 @@
 // Single import point for types from @opencode-ai/sdk.
-// All relay code should import SDK types from here, not directly from the SDK.
+// All conduit code should import SDK types from here, not directly from the SDK.
 //
 // SessionDetail keeps compatibility with older server session fields and slugs.
 
@@ -11,7 +11,7 @@ export type { PermissionRuleset };
  * Extended session type that includes fields present in OpenCode API responses
  * and permits the missing slug returned by older servers.
  *
- * The relay accesses these fields (modelID, providerID, agentID, slug, archived)
+ * Conduit accesses these fields (modelID, providerID, agentID, slug, archived)
  * when reading session details from the API. They are optional because not all
  * sessions have them set.
  *
@@ -53,8 +53,8 @@ export type PartType = _Part["type"];
  */
 export type ToolStatus = _ToolState["status"];
 
-// Local relay types (migrated from opencode-client.ts)
-// These are simplified interfaces used by relay handlers and the OpenCodeAPI
+// Local conduit types (migrated from opencode-client.ts)
+// These are simplified interfaces used by conduit handlers and the OpenCodeAPI
 // adapter. They do NOT match the SDK's strict types 1:1 (e.g., SDK Agent has
 // many required fields that the API doesn't always return).
 
@@ -98,10 +98,10 @@ export interface ProviderListResult {
 }
 
 /**
- * Flat message shape used by the relay's REST polling pipeline.
+ * Flat message shape used by conduit's REST polling pipeline.
  *
  * The SDK's `Message` (= `UserMessage | AssistantMessage`) does NOT include
- * a `parts` field; parts are returned separately. The relay's message-poller
+ * a `parts` field; parts are returned separately. Conduit's message-poller
  * and session-lifecycle code expect a flat message with inline parts, cost,
  * and token data. This interface preserves the shape that was previously in
  * `opencode-client.ts`.

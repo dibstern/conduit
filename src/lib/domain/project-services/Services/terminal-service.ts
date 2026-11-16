@@ -69,7 +69,7 @@ export interface OpenCodeTerminalService {
 	 *  read it in the same turn it subscribes and miss nothing in between. */
 	snapshot(): PtyRow[];
 	subscribe(listener: (event: PtyEvent) => void): () => void;
-	/** Invalidate discovery; one relay-scoped worker reconciles the provider set. */
+	/** Invalidate discovery; one project-scoped worker reconciles the provider set. */
 	onOpenCodePtysChanged(instanceId: string): void;
 	sendInput(
 		ptyId: string,

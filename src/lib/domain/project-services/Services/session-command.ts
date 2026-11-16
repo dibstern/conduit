@@ -1599,7 +1599,7 @@ export const forkSession = (
 		messageId?: string;
 		instanceId?: string;
 		side?: { title: string; inputId: string };
-		/** Another project's relay parts; the fork is written into that project. */
+		/** Another project's parts; the fork is written into that project. */
 		into?: Context.Context<ProjectSessionManagerParts>;
 		/** The fork's id, chosen by a caller that made its worktree first (82tn.54). */
 		sessionId?: string;

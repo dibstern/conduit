@@ -1,5 +1,5 @@
 // Encapsulates PTY session lifecycle: registration, scrollback buffering,
-// input forwarding, and cleanup. Extracted from relay-stack.ts so PTY state
+// input forwarding, and cleanup. Kept apart so PTY state
 // management is isolated and independently testable.
 
 import type { PtyEvent } from "../contracts/ws-rpc.js";

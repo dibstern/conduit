@@ -487,7 +487,7 @@ export const makeContinuation = Effect.gen(function* () {
 									: undefined;
 							const turns = yield* ProviderTurnServiceTag;
 							// The inbox constructs this service's scheduling context before
-							// it exists. Actual resumes run in the completed relay context.
+							// it exists. Actual resumes run in the completed project context.
 							const inbox = yield* Effect.serviceOption(SessionInboxTag);
 							if (source.id !== account.id) {
 								const hold = turns.holdUserTurnsForAccountSwitch(sessionId);

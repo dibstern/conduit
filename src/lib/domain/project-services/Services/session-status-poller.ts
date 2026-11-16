@@ -433,7 +433,7 @@ export const startReconciliationLoop = <E, R>(
 	);
 
 // The production status poller exposes Effect programs. Synchronous reads at
-// process boundaries should use an explicit relay read model/snapshot, not a
+// process boundaries should use an explicit project read model/snapshot, not a
 // runtime bridge into the poller Ref.
 
 export interface SessionStatusPollerService {

@@ -1699,7 +1699,7 @@ export class EffectOpenCodeRuntimeIngress
 				),
 			];
 			// Persist and signal committed events to SessionEventBus, but never
-			// publish to the relay. The legacy SSE translator (sse-wiring.ts) is
+			// publish to the browser. The legacy SSE translator (sse-wiring.ts) is
 			// the sole live-delivery path to the browser for OpenCode; publishing
 			// here too would deliver every streamed delta twice (rendered as
 			// doubled text, e.g. "I'mI'm ready. ready.").
@@ -1709,7 +1709,7 @@ export class EffectOpenCodeRuntimeIngress
 			// copy of the same event translates and persists again. It advances at
 			// the durable boundary — inside the append+project transaction's
 			// uninterruptible region, after COMMIT and before publication — because
-			// everything after COMMIT (bus publish, relay publish) can die or be
+			// everything after COMMIT (bus publish, browser publish) can die or be
 			// interrupted while the batch stays durable, and a retry then would
 			// translate the same event onto a store that already holds it.
 			// CONTRACT.md 9 "OpenCode adapter", 2.1 row 215: the reporter's process_started, labelled

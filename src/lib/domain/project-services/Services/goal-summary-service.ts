@@ -266,8 +266,8 @@ export const makeGoalSummaryServiceLive = (
 										),
 								}),
 							);
-							// Relay ownership keeps one disconnected opener from cancelling the
-							// shared request. The timeout and relay scope still abort SDK work.
+							// Project ownership keeps one disconnected opener from cancelling the
+							// shared request. The timeout and project scope still abort SDK work.
 							yield* run.pipe(
 								Effect.ensuring(
 									Effect.sync(() => {

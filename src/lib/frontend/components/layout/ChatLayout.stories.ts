@@ -58,7 +58,7 @@ const STUB_VERSION = "0.0.0-storybook";
 
 /**
  * Connecting is not enough to get off the network: ChatLayout also fetches the
- * relay status and the daemon version. Both are left unstubbed by default, which
+ * project status and the daemon version. Both are left unstubbed by default, which
  * the network guard rejects — see its message for why a racing request makes a
  * baseline platform-dependent.
  */

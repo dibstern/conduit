@@ -2,7 +2,7 @@
 // Constructs PipelineDeps, EffectDeps, monitoring reducer state, SSE tracker,
 // poller gating config, and wires the statusPoller "changed" handler.
 //
-// Extracted from createProjectRelay() — all closure captures are explicit params.
+// All closure captures are explicit params.
 
 import { Deferred, Effect, Option, type Scope } from "effect";
 import { SqlClient } from "effect/sql";
@@ -144,7 +144,7 @@ export interface MonitoringWiringResult {
 	pollerGatingCfg: PollerGatingConfig;
 	getMonitoringState: () => MonitoringState;
 	setMonitoringState: (state: MonitoringState) => void;
-	/** Stop accepting status-poller updates before relay shutdown drains sources. */
+	/** Stop accepting status-poller updates before project shutdown drains sources. */
 	stopMonitoring: () => void;
 	/**
 	 * Record that a "done" event was delivered via SSE or message poller.
@@ -320,7 +320,7 @@ const processAndApplyDoneEffect = (
 		}
 		if (!originId && !isSubagent && sql._tag === "Some" && pushManager) {
 			// The provider can know the completed assistant message before its
-			// terminal event reaches this relay. Resolve that identity off the tick.
+			// terminal event reaches this project. Resolve that identity off the tick.
 			yield* Effect.forkDetach(
 				deps.readMessages(sessionId).pipe(
 					Effect.flatMap((messages) => {

@@ -35,7 +35,7 @@ import {
 } from "../../daemon/Services/opencode-instances-service.js";
 import type { SessionStatusPollerService } from "./session-status-poller.js";
 
-/** Shape for the statusPoller field — methods needed by relay effects and lifecycle wiring. */
+/** Shape for the statusPoller field — methods needed by project effects and lifecycle wiring. */
 export type StatusPollerShape = Pick<
 	SessionStatusPollerService,
 	| "clearMessageActivity"

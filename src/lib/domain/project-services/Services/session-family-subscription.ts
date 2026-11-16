@@ -2,7 +2,7 @@
 // The concrete SubscriptionSource for one session family: the root a viewed
 // session descends from and every descendant (subagent and fork rows). It is
 // the shell adapter scoped to one family, and replaces the `session_family`
-// push the relay used to send each viewer after every family change.
+// push the deleted relay used to send each viewer after every family change.
 //
 // Rows are versioned like the shell's roots: a member moves when anything in
 // its subtree does, because its summary aggregates descendants. Removals come

@@ -67,7 +67,7 @@ export class DraftPreWarmTag extends Context.Service<
 	}
 >()("DraftPreWarm") {}
 
-/** Owned by the daemon in shared mode, or the standalone relay otherwise. */
+/** Owned by the daemon in shared mode, or the standalone test harness otherwise. */
 export const DraftPreWarmLive = Layer.effect(
 	DraftPreWarmTag,
 	Effect.gen(function* () {

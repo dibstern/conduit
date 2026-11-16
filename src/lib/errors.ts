@@ -1,5 +1,5 @@
 //
-// Schema-backed tagged error hierarchy for the relay layer.
+// Schema-backed tagged error hierarchy for conduit's server code.
 // Keep _tag last in each schema to preserve the existing JSON field order.
 // The ConduitError base class is kept as a plain Error subclass for generic
 // error codes used throughout the codebase (e.g. NO_SESSION, INVALID_REQUEST).
@@ -238,7 +238,7 @@ export class ConfigurationError extends withTaggedConduitErrorMethods(
 // Schema.Error subclasses above, this class supports arbitrary ErrorCode
 // values and is constructed with the traditional `new ConduitError(message, opts)`.
 
-/** Base error class for generic relay errors with arbitrary error codes */
+/** Base error class for generic conduit errors with arbitrary error codes */
 export class ConduitError extends Error {
 	/** Tagged discriminant — equals the ErrorCode for generic errors */
 	readonly _tag: string;
@@ -292,7 +292,7 @@ export class ConduitError extends Error {
 	}
 
 	/**
-	 * Create a relay error from any caught value (AC4: error translation).
+	 * Create a conduit error from any caught value (AC4: error translation).
 	 * Kept as static method for backward compatibility with existing call sites.
 	 * Returns AnyConduitError because infrastructure codes map to Schema.Error subclasses.
 	 */
@@ -305,7 +305,7 @@ export class ConduitError extends Error {
 	}
 }
 
-// Union of all relay error types (Schema.Error subclasses + generic ConduitError).
+// Union of all conduit error types (Schema.Error subclasses + generic ConduitError).
 // Used as return type for fromCaught/wrapError utilities.
 
 export type AnyConduitError =
@@ -339,7 +339,7 @@ const CODE_TO_CLASS: Record<
 };
 
 /**
- * Create a relay error from any caught value.
+ * Create a conduit error from any caught value.
  * Maps well-known infrastructure codes to their Schema.Error subclass;
  * falls back to a generic ConduitError for other codes.
  */
@@ -367,7 +367,7 @@ export function fromCaught(
 	});
 }
 
-/** Wrap a low-level error in a relay error subclass, preserving the cause chain */
+/** Wrap a low-level error in a conduit error subclass, preserving the cause chain */
 export function wrapError<
 	E extends new (props: {
 		message: string;

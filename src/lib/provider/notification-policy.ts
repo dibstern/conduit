@@ -1,4 +1,4 @@
-// Pure policy: given a relay message, its route decision, and whether the
+// Pure policy: given a browser message, its route decision, and whether the
 // session is a subagent, decide what notifications to fire.
 //
 // Rules:
@@ -21,7 +21,7 @@ export interface NotificationResolution {
 }
 
 /**
- * Pure policy: given a relay message, its route decision, and whether the
+ * Pure policy: given a browser message, its route decision, and whether the
  * session is a subagent, decide what notifications to fire.
  */
 export function resolveNotifications(

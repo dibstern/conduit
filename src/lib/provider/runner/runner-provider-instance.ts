@@ -324,7 +324,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				else
 					yield* runningRunnerCommands(sql, this.providerId, driverForAccount);
 			}
-			// An in-process runner's turns ended with the relay that ran them, so
+			// An in-process runner's turns ended with the generation that ran them, so
 			// every running command is unclaimed. Runner processes may outlive it.
 			const claimed = new Set<string>();
 			if (this.runner.recoverEffect) {

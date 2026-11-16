@@ -172,7 +172,7 @@ describe("model handlers with Effect-native model service", () => {
 		});
 	}
 	it.effect(
-		"loads providers and relay-owned active-session model info without requiring the Promise OpenCode API tag",
+		"loads providers and project-owned active-session model info without requiring the Promise OpenCode API tag",
 		() => {
 			const logger = makeMockLogger();
 			const modelService = {

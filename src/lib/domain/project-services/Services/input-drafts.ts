@@ -221,7 +221,7 @@ export const makeInputDrafts: Effect.Effect<
 	never,
 	SqlClient.SqlClient
 > = Effect.gen(function* () {
-	// Daemon relays borrow one service so moving a draft between projects also
+	// Projects borrow one daemon service so moving a draft between projects also
 	// reaches subscribers still attached to its previous project.
 	const shared = yield* Effect.serviceOption(InputDraftsTag);
 	if (Option.isSome(shared)) return shared.value;

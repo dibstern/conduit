@@ -14,7 +14,7 @@ export type DaemonEvent = Data.TaggedEnum<{
 	DiskSpaceLow: { readonly usage: number };
 	DiskSpaceOk: { readonly usage: number };
 	InstanceError: { readonly instanceId: string; readonly error: string };
-	// Session lifecycle events (used by relay wiring Layers)
+	// Session lifecycle events (used by project wiring Layers)
 	SessionCreated: { readonly sessionId: string };
 	SessionDeleted: { readonly sessionId: string };
 	ConfigChanged: Record<never, never>;

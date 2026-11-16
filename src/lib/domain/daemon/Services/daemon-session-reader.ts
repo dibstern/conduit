@@ -113,7 +113,7 @@ const readProjectSessions = (
 		};
 	});
 
-/** Check recovery work without acquiring the project's relay or starting providers. */
+/** Check recovery work without opening the project or starting providers. */
 export const hasProviderRecoveryCandidate = (
 	project: Pick<StoredProject, "slug" | "folders">,
 	openCodeInstanceIds: readonly string[],
@@ -176,7 +176,7 @@ export const countRunningProjectSessions = (
 		}).pipe(Effect.provide(database));
 	});
 
-/** Probe without acquiring the project's relay. */
+/** Probe without opening the project. */
 export const hasColdAutoSettleCandidate = (
 	project: Pick<StoredProject, "slug" | "folders">,
 	now: number,

@@ -164,7 +164,7 @@ export const backfillSessionPicks = () =>
 					SELECT initialized FROM session_pick_backfill_state WHERE singleton = 1`;
 					if (current?.initialized === 1) return;
 					// The flag is daemon-wide, so queue every project's sessions:
-					// each relay drains only its own rows below.
+					// each project drains only its own rows below.
 					yield* sql`INSERT OR IGNORE INTO session_pick_backfill (session_id)
 					SELECT id FROM sessions WHERE model_id IS NULL OR model_provider IS NULL
 						OR variant IS NULL OR context_window IS NULL`;

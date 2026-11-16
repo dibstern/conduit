@@ -3,7 +3,7 @@
 // Internally powered by an Effect fiber running an explicit reconnect loop.
 // Conduit is the single retry owner: the SDK's internal SSE retry is disabled
 // via sseMaxRetryAttempts so transport errors surface here instead of being
-// swallowed. Keeps the callback-based public API for relay wiring.
+// swallowed. Keeps the callback-based public API for project wiring.
 
 import { Duration, Effect, Fiber } from "effect";
 import type { OpenCodeConnectionStatus } from "../../contracts/ws-rpc.js";
@@ -47,7 +47,7 @@ export interface SSEStreamCallbacks {
 	reconnecting: (info: { attempt: number; delay: number }) => void;
 	error: (error: Error) => void;
 	heartbeat: () => void;
-	/** OpenCode instance lifecycle; only relay channels report it. */
+	/** OpenCode instance lifecycle; only project channels report it. */
 	status: (
 		status: OpenCodeConnectionStatus,
 		managedStopped?: boolean,

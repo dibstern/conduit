@@ -18,7 +18,7 @@ export interface DaemonInfo {
 	sessionCount: number;
 	processingCount: number;
 	version: string;
-	/** QR code art string for the relay URL (optional). */
+	/** QR code art string for the app URL (optional). */
 	qrCode?: string;
 	/** Caption shown under the QR code, e.g. "Scan or visit: http://…/setup" (optional). */
 	qrCaption?: string;
@@ -34,11 +34,11 @@ export interface MenuOptions extends PromptOptions {
 	onProjects?: () => void | Promise<void>;
 	/** Callback: show the settings menu. */
 	onSettings?: () => void | Promise<void>;
-	/** Callback: shut down the relay daemon. */
+	/** Callback: shut down the daemon. */
 	onShutdown?: () => void | Promise<void>;
 	/** Callback: exit the CLI but keep the daemon running. */
 	onKeepAliveExit?: () => void | Promise<void>;
-	/** Callback: open the relay URL in a browser. */
+	/** Callback: open the app URL in a browser. */
 	onOpenBrowser?: () => void | Promise<void>;
 }
 
@@ -108,7 +108,7 @@ const MENU_ITEMS = [
  * 4. Dispatches to callbacks based on selection
  * 5. After each submenu action, re-renders the main menu (loop)
  *
- * Hotkey `o` opens the relay URL in a browser and re-renders.
+ * Hotkey `o` opens the app URL in a browser and re-renders.
  * The hotkey works by intercepting the key on stdin before promptSelect
  * processes it. When "o" is detected, promptSelect is cancelled via a
  * synthetic Ctrl+C routed through a wrapper exit function that detects

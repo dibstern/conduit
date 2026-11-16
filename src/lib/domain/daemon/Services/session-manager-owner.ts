@@ -19,7 +19,7 @@ export interface ProjectSessionManager {
 	readonly coordination: SessionManagerCoordination;
 }
 
-/** Each project's session manager state, held by the daemon so relay rebuilds keep it. */
+/** Each project's session manager state, held by the daemon so a reopened project keeps it. */
 export class SessionManagerOwner extends Context.Service<
 	SessionManagerOwner,
 	{
@@ -76,7 +76,7 @@ export const SessionManagerOwnerLive = Layer.effect(
 													Effect.catchTag("OwnerScopeClosedError", () =>
 														Effect.succeed(false),
 													),
-													// No row yet: write as a relay would. Anything else fails the write.
+													// No row yet: write as an open project would. Anything else fails the write.
 													Effect.catchTag(
 														"OwnerScopeProvenanceError",
 														(error) =>

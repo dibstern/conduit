@@ -337,7 +337,7 @@ export class PtyHostClient {
 							?.reject(new Error(message.message));
 				} else {
 					// Install the replay before resolving attach. Output in the same
-					// socket read is buffered until the relay registers its handlers.
+					// socket read is buffered until the project registers its handlers.
 					if (message.type === "attached")
 						this.sessions.set(
 							message.pty.id,

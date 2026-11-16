@@ -1,4 +1,4 @@
-// Translates OpenCode SSE events → relay WebSocket messages.
+// Translates OpenCode SSE events → browser WebSocket messages.
 // Stateful: tracks seen parts for lifecycle detection.
 
 import type { UntaggedBrowserMessage } from "../../shared-types.js";

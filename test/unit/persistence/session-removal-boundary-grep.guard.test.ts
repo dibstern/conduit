@@ -194,7 +194,7 @@ See the note at the top of ${REMOVAL_SEAM[0]} (bead conduit-test-ni8.5.12).`;
 					text: "\tconst sql = `DELETE\nFROM sessions WHERE id = ?`;",
 				},
 				{
-					path: "src/lib/relay/session-reaper.ts",
+					path: "src/lib/session/session-reaper.ts",
 					text: "\tconst sql = `delete\n\t\tfrom  sessions\n\t\twhere id = ?`;",
 				},
 			]).map(({ path }) => path),
@@ -202,7 +202,7 @@ See the note at the top of ${REMOVAL_SEAM[0]} (bead conduit-test-ni8.5.12).`;
 			"src/lib/persistence/projectors/session-handlers.ts",
 			"src/lib/handlers/session-handler.ts",
 			"src/lib/session/session-cleanup.ts",
-			"src/lib/relay/session-reaper.ts",
+			"src/lib/session/session-reaper.ts",
 		]);
 	});
 });

@@ -1,5 +1,5 @@
 // Schema validation for incoming daemon→client WebSocket messages.
-// Validates against BrowserMessageSchema (the full union of relay message types).
+// Validates against BrowserMessageSchema (the full union of browser message types).
 //
 // Design:
 //   - Cached decoder: The Schema decoder is created once on first call and
@@ -26,7 +26,7 @@ export class ProtocolDecodeError extends Error {
 		raw: unknown;
 		cause: unknown;
 	}) {
-		super(`Invalid relay message for type "${options.messageType}"`);
+		super(`Invalid browser message for type "${options.messageType}"`);
 		this.name = "ProtocolDecodeError";
 		this.raw = options.raw;
 		this.messageType = options.messageType;

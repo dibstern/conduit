@@ -1,5 +1,5 @@
 // Effect-based HTTP router using @effect/platform. This is the production HTTP
-// route graph for both daemon and relay server modes; Node's request callback
+// route graph for the daemon; Node's request callback
 // only delegates into the handler built from this router.
 //
 // Routes:

@@ -93,7 +93,7 @@ export const makeOverridesStateLive = (
 		}),
 	);
 
-/** Session entries keep their owner even when updated outside a relay context. */
+/** Session entries keep their owner even when updated outside a project context. */
 const updateSession = (
 	sessionId: string,
 	update: (entry: SessionState) => SessionState,
@@ -348,7 +348,7 @@ export const clearSession = (sessionId: string) =>
 		yield* FiberMap.remove(timeoutFibers, sessionId);
 	});
 
-/** Permanent removal clears project state; relay replacement never calls this. */
+/** Permanent removal clears project state; a reopen never calls this. */
 export const clearProject = (projectId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;

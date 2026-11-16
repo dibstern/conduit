@@ -97,16 +97,16 @@ export const retirePendingPrompts = (
 /**
  * 82tn.14: a removed project's open asks resolve with its owner scope, as a retired runner's do
  * (CONTRACT.md 3.11 has no rule for them; nearest reading: its runners retire at removal). A detach
- * keeps them for the next daemon; the binding of a replaced relay (`relayScope` closed) does nothing.
+ * keeps them for the next daemon; the binding of a closed generation (`projectScope` closed) does nothing.
  */
-export const retireAsksOnProjectRemoval = (relayScope: Scope.Scope) =>
+export const retireAsksOnProjectRemoval = (projectScope: Scope.Scope) =>
 	Effect.gen(function* () {
 		const owners = yield* Effect.serviceOption(OwnerScopes);
 		if (Option.isNone(owners)) return;
 		const { projectId } = yield* EventStoreEffectTag;
 		let live = true;
 		yield* Scope.addFinalizer(
-			relayScope,
+			projectScope,
 			Effect.sync(() => (live = false)),
 		);
 		const context = yield* Effect.context<

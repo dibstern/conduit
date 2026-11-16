@@ -339,7 +339,7 @@
 	$effect(() => {
 		if (sessionViewState.compact) taskDrawer.task = null;
 	});
-	// Terminals, project settings and relay readiness follow the shown session's (or draft's) project.
+	// Terminals, project settings and project readiness follow the shown session's (or draft's) project.
 	const shownProject = $derived(selection.scope?.project ?? null);
 	$effect(() => {
 		const project = shownProject;

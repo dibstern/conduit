@@ -124,7 +124,7 @@ const discoveryFailure = (reason: string, authRequired = false) =>
 	});
 
 // Local SDK transcript paths use process-global environment variables. Session
-// agents live in child runners; serialize all in-daemon text calls across relays.
+// agents live in child runners; serialize all in-daemon text calls across projects.
 const textGenerationLock = Semaphore.makeUnsafe(1);
 const catalogs = new WeakMap<
 	CursorSdkPort,

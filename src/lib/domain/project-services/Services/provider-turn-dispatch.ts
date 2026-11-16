@@ -175,7 +175,7 @@ export const resolveSessionFolders = (
 		const config = yield* ConfigTag;
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		const read = yield* Effect.serviceOption(ReadQueryEffectTag);
-		// Snapshot-only callers can resolve without relay services. Live relays
+		// Snapshot-only callers can resolve without project services. Open projects
 		// provide both services, including in the provider turn's captured context.
 		// A second tab may have read session.created before the draft's launch
 		// move finished. Wait and reread; rollback must never fall back to main.
@@ -655,7 +655,7 @@ const prepareEngineTurnInput = (
 			},
 		);
 		if (traits.runsOpenCodeServer) {
-			// The daemon's streams, so a turn built with no relay still hears its folder.
+			// The daemon's streams, so a turn built outside a project generation still hears its folder.
 			const streams = yield* Effect.serviceOption(OpenCodeProjectStreams);
 			if (streams._tag === "Some")
 				yield* streams.value.includeDirectory(

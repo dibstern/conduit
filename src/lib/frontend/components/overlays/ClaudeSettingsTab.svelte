@@ -177,9 +177,9 @@
 	});
 
 	/**
-	 * Writes the whole overrides object — the relay stores it with replacement
+	 * Writes the whole overrides object — the server stores it with replacement
 	 * semantics — showing the new value immediately and dropping back to the
-	 * relay's if it rejects the write.
+	 * server's if it rejects the write.
 	 */
 	async function persistOverrides(
 		key: ClaudeSettingKey,

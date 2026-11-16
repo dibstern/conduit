@@ -114,7 +114,7 @@ export const makeDaemonSharedStoreLayer = (
 			);
 		}),
 	).pipe(Layer.provideMerge(store));
-	// This dependency also keeps the store alive until every downstream relay
+	// This dependency also keeps the store alive until every downstream project
 	// and background consumer has released its own scope.
 	return Layer.effectDiscard(
 		Effect.gen(function* () {

@@ -1,5 +1,5 @@
 // Connects a PTY session to the upstream OpenCode WebSocket endpoint.
-// Extracted from relay-stack.ts so it can be tested and understood independently.
+// Kept apart so it can be tested and understood independently.
 
 import type { PtyEvent } from "../contracts/ws-rpc.js";
 import type { Logger } from "../logger.js";
@@ -27,7 +27,7 @@ export interface PtyUpstreamDeps {
 	log: Logger;
 	WebSocketClass: typeof import("ws").WebSocket;
 	onClose?: () => void;
-	/** Interrupt a pending socket acquisition when the relay's scope closes. */
+	/** Interrupt a pending socket acquisition when the project's scope closes. */
 	signal?: AbortSignal;
 }
 
@@ -35,7 +35,7 @@ type RawData = import("ws").RawData;
 
 /**
  * Open an upstream WebSocket to OpenCode's `/pty/:id/connect` endpoint and wire
- * it to the relay's PTY manager, whose feed every PTY subscriber reads.
+ * it to the project's PTY manager, whose feed every PTY subscriber reads.
  *
  * @param deps   - Explicit dependencies (ptyManager, client, etc.)
  * @param ptyId  - The PTY session identifier

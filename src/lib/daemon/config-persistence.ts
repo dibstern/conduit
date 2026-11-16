@@ -618,7 +618,7 @@ export function loadDaemonConfigResult(
 	);
 }
 
-/** Daemonless relays use this once; only absence permits install defaults. */
+/** Daemonless callers use this once; only absence permits install defaults. */
 export function loadAccountsState(
 	configDir: string,
 	launchLogin: ClaudeConfigDir,

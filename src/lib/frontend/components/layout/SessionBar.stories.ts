@@ -230,7 +230,7 @@ const meta = {
 		// connecting, so the sheet stories' connectedSocket() can open the
 		// socket the RPC client then keeps for the rest of the file.
 		const restoreSocket = connectingSocket();
-		// Every dial, retries included, probes the attached project's relay
+		// Every dial, retries included, probes the attached project's
 		// status. Answer that probe; anything else still reaches the network guard.
 		const guardedFetch = globalThis.fetch;
 		globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) =>

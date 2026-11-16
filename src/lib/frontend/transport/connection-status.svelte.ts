@@ -13,7 +13,7 @@ export const connectionState = $state({
 let controlSocket: WebSocket | null = null;
 let lastMessageAt = 0;
 let projectStatusGeneration = 0;
-/** The shown session's or draft's project, whose relay readiness the overlay shows. */
+/** The shown session's or draft's project, whose readiness the overlay shows. */
 let statusProject: string | null = null;
 // Advances on proof of authentication, so a slower probe sent before it
 // cannot send the user back to the PIN page.
@@ -23,7 +23,7 @@ export function getIsConnected(): boolean {
 	return connectionState.status === "connected";
 }
 
-/** Non-blocking relay readiness for the current dial. */
+/** Non-blocking project readiness for the current dial. */
 function fetchProjectStatus(slug: string): void {
 	const generation = ++projectStatusGeneration;
 	const isCurrent = () =>
@@ -51,7 +51,7 @@ function fetchProjectStatus(slug: string): void {
 		});
 }
 
-/** Follow the readiness of the shown session's or draft's project relay. */
+/** Follow the readiness of the shown session's or draft's project. */
 export function viewProjectStatus(project: string | null): void {
 	if (project === statusProject) return;
 	statusProject = project;

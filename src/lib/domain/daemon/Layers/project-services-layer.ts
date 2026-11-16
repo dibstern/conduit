@@ -135,7 +135,7 @@ import { startProject } from "./project-startup.js";
  * Builds each registered project's context on request, from the registry and
  * the daemon's own services (82tn.16). What a project generation owns (status
  * snapshot, OpenCode creation gate, model catalog, store binding) is made once
- * in the project's owner scope, so it outlives any relay and goes with removal.
+ * in the project's owner scope, so it outlives any generation and goes with removal.
  */
 export const makeProjectServicesLive = (options: {
 	readonly configDir: string;
@@ -153,7 +153,7 @@ export const makeProjectServicesLive = (options: {
 			);
 			// Goal summaries read the daemon's config from memory when it has one (82tn.18).
 			const configSnapshot = yield* Effect.serviceOption(ConfigSnapshotTag);
-			// A relay's calls ran with the SDK its process uses; a cold project's must too.
+			// An open project's calls run with the SDK its process uses; a cold project's must too.
 			const testSdk = (yield* loadClaudeSdkTestModule.pipe(Effect.orDie))
 				?.claudeSdk;
 			const daemon = {
@@ -212,7 +212,7 @@ export const makeProjectServicesLive = (options: {
 			const statusCore = yield* Effect.serviceOption(StatusPollerCoreTag);
 			const push = yield* PushManagerTag;
 			const localPty = yield* LocalPtyServiceTag;
-			const log = createLogger("relay");
+			const log = createLogger("project");
 			const generations = new Map<
 				string,
 				Context.Context<ProjectGenerationParts>
@@ -307,7 +307,7 @@ export const makeProjectServicesLive = (options: {
 											Context.get(ingestionShared, ProviderAdapters).registry,
 										),
 									);
-									// Once per project, so a replaced relay keeps its pending
+									// Once per project, so a reopened project keeps its pending
 									// interactions, translator and ingress (82tn.16 slice 4).
 									const ingestion = yield* Layer.build(
 										makeProjectIngestionLive(push.getLegacyManager).pipe(
@@ -323,15 +323,15 @@ export const makeProjectServicesLive = (options: {
 											),
 										),
 									);
-									// A relay's title in flight and its discovered catalogs outlived
-									// the relay that started them (82tn.16 slice 5).
+									// A title in flight and the discovered catalogs outlive the
+									// generation that started them (82tn.16 slice 5).
 									const titles = yield* Layer.build(
 										makeSessionTitleServiceLive().pipe(
 											Layer.provideMerge(ProjectSettingsLive),
 											Layer.provide(Layer.succeedContext(projectBase)),
 										),
 									);
-									// Stateless readers, built here so no relay has to (slice 7).
+									// Stateless readers, built once here (slice 7).
 									const readers = yield* Layer.build(
 										Layer.mergeAll(
 											ToolContentServiceLive,
@@ -370,7 +370,7 @@ export const makeProjectServicesLive = (options: {
 											),
 										),
 									);
-									// Terminals, once per project, so a replaced relay keeps them and a
+									// Terminals, once per project, so a reopened project keeps them and a
 									// main-folder change leaves them running: each call reads the folder
 									// then, as t3code restarts a terminal only on a reopen with a changed
 									// cwd (apps/server/src/terminal/Manager.ts:2938-2955).
@@ -395,7 +395,7 @@ export const makeProjectServicesLive = (options: {
 											OpenCodeSettingsServiceLive,
 										).pipe(Layer.provide(Layer.succeedContext(projectBase))),
 									);
-									// One message poller per project, so a replaced relay keeps its
+									// One message poller per project, so a reopened project keeps its
 									// polls; a session counts as viewed while any tab on the daemon
 									// shows it (t3code CommandOutputHub.ts:170-191).
 									const poller = yield* Layer.build(
@@ -403,7 +403,7 @@ export const makeProjectServicesLive = (options: {
 											Layer.provide(Layer.succeedContext(projectBase)),
 										),
 									);
-									// The project's OpenCode stream and status poller, so no relay holds
+									// The project's OpenCode stream and status poller, so no generation holds
 									// them (lane 16q); t3code starts its reactors once, in the server
 									// scope (apps/server/src/server.ts:540-627).
 									const snapshot = makeProjectStatusSnapshot();
@@ -438,7 +438,7 @@ export const makeProjectServicesLive = (options: {
 										),
 									);
 									// Recaps and goal summaries hold in-flight work and a cache, so one
-									// per project outlives a replaced relay; their one-shot query is the
+									// per project outlives a reopen; their one-shot query is the
 									// daemon's, which honours the process test module.
 									const summaries = yield* Layer.build(
 										Layer.merge(
@@ -564,7 +564,7 @@ export const makeProjectServicesLive = (options: {
 						Context.add(OrchestrationEngineTag, engine),
 						Context.add(SessionManagerStateTag, manager.state),
 						Context.add(SessionManagerCoordinationTag, manager.coordination),
-						// Dismissals are the daemon's, keyed by session, as its relay reads them.
+						// Dismissals are the daemon's, keyed by session, as the project reads them.
 						Context.add(
 							SessionWorkspaceHintStateTag,
 							Context.get(shared, SessionActivityTag).hintDismissals,

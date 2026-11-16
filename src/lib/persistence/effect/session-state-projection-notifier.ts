@@ -1,7 +1,7 @@
 // Session State Projection Notifier (port)
 // Declared here, next to the projection runner that calls it, and implemented
-// in the relay -- the only layer that knows about sockets. Defining it the
-// other way round would point a dependency arrow from persistence at the relay,
+// in the project services -- the only layer that knows about sockets. Defining it the
+// other way round would point a dependency arrow from persistence at them,
 // which nothing else in the tree does and which would be the first such edge.
 
 import { Context, type Effect } from "effect";

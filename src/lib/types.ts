@@ -41,8 +41,8 @@ export type {
 export { tagWithSessionId } from "./shared-types.js";
 
 // Re-export SSEEvent as OpenCodeEvent for backward compatibility.
-// SSEEvent = SDK Event union + gap events (see relay/opencode-events.ts).
-// New code should import SSEEvent directly from relay/opencode-events.ts.
+// SSEEvent = SDK Event union + gap events (see provider/opencode/opencode-events.ts).
+// New code should import SSEEvent directly from provider/opencode/opencode-events.ts.
 
 export type {
 	SSEEvent,
@@ -147,7 +147,7 @@ export interface ClaudeSdkSeam {
 	readonly subagentSdk?: import("./provider/claude/claude-subagent-materializer.js").ClaudeSubagentSdk;
 }
 
-/** Config for creating a per-project relay that receives attached sockets. */
+/** One project's config, read by the services ProjectServices builds for it. */
 export interface ProjectServicesConfig {
 	/** Immediate cached environment snapshot; shell resolution runs in the background. */
 	shellEnv?: (
@@ -157,7 +157,7 @@ export interface ProjectServicesConfig {
 	prepareShellEnv?: (directory: string) => Promise<boolean>;
 	/** Project working directory */
 	projectDir: string;
-	/** Additional Claude workspace folders, fixed for this relay's lifetime. */
+	/** Additional Claude workspace folders, fixed for this generation's lifetime. */
 	extraFolders?: readonly string[];
 	/** URL slug for this project */
 	slug: string;
@@ -167,7 +167,7 @@ export interface ProjectServicesConfig {
 	getWorktreeCleanup?: () => import("effect").Effect.Effect<
 		import("./contracts/worktree.js").WorktreeCleanup | "off"
 	>;
-	/** Notify the daemon's other live relays; standalone relays use a no-op. */
+	/** Notify the daemon's other open projects; standalone test harnesses use a no-op. */
 	publishGlobalSetting: (
 		tag: import("./contracts/ws-rpc.js").GlobalSettingTag,
 	) => import("effect").Effect.Effect<void>;

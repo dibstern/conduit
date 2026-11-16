@@ -3,7 +3,7 @@ import type { OrchestrationEngine } from "../../../provider/orchestration-engine
 import type { DraftPreWarmTag } from "../../project-services/Services/draft-prewarm.js";
 import type { ProviderAdapterRecoveryError } from "./provider-adapters.js";
 
-/** The daemon owns the engine, draft reservations and drain; relays borrow them. */
+/** The daemon owns the engine, draft reservations and drain; projects borrow them. */
 export class DaemonOrchestration extends Context.Service<
 	DaemonOrchestration,
 	{

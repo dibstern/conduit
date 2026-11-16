@@ -767,7 +767,7 @@ export const makeProviderAdaptersLive = (
 										yield* adapter
 											.attachSessionsEffect(
 												// The daemon drain still owns unstarted sends across a
-												// relay gap; replacement must not settle them as orphans.
+												// reopen gap; replacement must not settle them as orphans.
 												sessions
 													.filter(
 														({

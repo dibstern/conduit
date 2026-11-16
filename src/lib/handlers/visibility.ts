@@ -1,4 +1,4 @@
-// Global hide-lists for the agent/model dropdowns. Persisted in relay settings.
+// Global hide-lists for the agent/model dropdowns. Persisted in global settings.
 
 import { Data, Effect } from "effect";
 import {

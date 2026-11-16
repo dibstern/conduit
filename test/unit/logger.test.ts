@@ -86,23 +86,23 @@ describe("createLogger", () => {
 
 	it("child logger includes parent and child tags", () => {
 		const lines = collectLines();
-		const parent = createLogger("relay");
+		const parent = createLogger("project");
 		const child = parent.child("sse");
 		child.info("connected");
 		const parsed = parseFirst(lines);
-		expect(parsed.component).toContain("relay");
+		expect(parsed.component).toContain("project");
 		expect(parsed.component).toContain("sse");
 		expect(parsed.msg).toBe("connected");
 	});
 
 	it("child logger nests component tags in order", () => {
 		const lines = collectLines();
-		const root = createLogger("relay");
+		const root = createLogger("project");
 		const child = root.child("sse");
 		const grandchild = child.child("reconnect");
 		grandchild.info("attempt");
 		const parsed = parseFirst(lines);
-		expect(parsed.component).toEqual(["relay", "sse", "reconnect"]);
+		expect(parsed.component).toEqual(["project", "sse", "reconnect"]);
 	});
 
 	it("passes extra args as merged message", () => {
@@ -208,10 +208,10 @@ describe("log format", () => {
 	it("pretty format outputs human-readable text with tags", () => {
 		setLogFormat("pretty");
 		const lines = collectLines();
-		const log = createLogger("relay");
+		const log = createLogger("project");
 		log.info("hello");
 		const output = line(lines, 0);
-		expect(output).toContain("[relay]");
+		expect(output).toContain("[project]");
 		expect(output).toContain("hello");
 		expect(() => JSON.parse(output)).toThrow();
 	});
@@ -219,7 +219,7 @@ describe("log format", () => {
 	it("pretty format aligns message bodies to consistent column", () => {
 		setLogFormat("pretty");
 		const lines = collectLines();
-		const root = createLogger("relay");
+		const root = createLogger("project");
 		const short = root.child("sse");
 		const long = root.child("status-poller");
 

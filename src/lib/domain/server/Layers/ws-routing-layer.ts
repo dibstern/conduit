@@ -98,7 +98,7 @@ export class WebSocketProjectRouterTag extends Context.Service<
  * Each project's RPC context, built by the daemon from the project's own
  * services (82tn.16). A call names its project as t3code's commands name their
  * thread (Orchestrator.ts:1910); its streams end with the project's generation,
- * so replacing a relay leaves a tab's streams running.
+ * so reopening the project leaves a tab's streams running.
  */
 export class ProjectRpcContextsTag extends Context.Service<
 	ProjectRpcContextsTag,
@@ -172,7 +172,7 @@ export const ProjectRpcContextsLive = Layer.effect(
 			});
 		return (slug) =>
 			Effect.gen(function* () {
-				// The relay still wires the project's live provider events until S6.
+				// Opening the project wires its live provider events.
 				yield* projectRouter.ensureProjectOpen(slug);
 				yield* projectRouter.touchLastUsed(slug);
 				return Context.merge(daemon, yield* projects.forProject(slug));
@@ -300,8 +300,8 @@ const handleFailure = (
 /**
  * Scoped Layer that attaches the WebSocket upgrade handler to the HTTP server.
  *
- * The handler authenticates requests, lazy-starts relays, waits for relay
- * readiness, and hands off to the relay's WS handler on success.
+ * The handler authenticates requests and hands each accepted socket to the
+ * shared /rpc handler; projects open on the first RPC that names them.
  *
  * Finalizer removes the upgrade listener to prevent leaks in tests.
  */

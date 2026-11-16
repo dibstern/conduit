@@ -16,7 +16,7 @@ export type ClaudeSettingsResolutionStatus =
 	| "error"
 	| "unavailable";
 
-// What the relay says this project's Claude settings are. The `apply*`,
+// What the server says this project's Claude settings are. The `apply*`,
 // `handle*` and resolution functions below are the only writers.
 
 const serverClaudeSettings = $state({
@@ -27,10 +27,10 @@ const serverClaudeSettings = $state({
 });
 
 // The panel shows a toggle's new position the moment it is clicked, before the
-// relay has confirmed the write: `pendingOverrides` is that unconfirmed value,
+// server has confirmed the write: `pendingOverrides` is that unconfirmed value,
 // and reads fall through to the server's when it is null. `editedKeys` is the
 // set of settings this user has touched, which drives the "set here" marks.
-// Applying a relay response never touches `editedKeys`.
+// Applying a server response never touches `editedKeys`.
 
 const clientClaudeSettings = $state({
 	pendingOverrides: null as ClaudeSettingsOverrides | null,
@@ -42,12 +42,12 @@ const clientClaudeSettings = $state({
 let pendingWrite: symbol | null = null;
 
 /** Read view over both halves. The server half is readable but has no setter:
- *  write it by applying a relay response. */
+ *  write it by applying a server response. */
 export const claudeSettingsState = {
 	get projectSlug(): string | null {
 		return serverClaudeSettings.projectSlug;
 	},
-	/** The value of an in-flight write if there is one, else the relay's. */
+	/** The value of an in-flight write if there is one, else the server's. */
 	get overrides(): ClaudeSettingsOverrides {
 		return (
 			clientClaudeSettings.pendingOverrides ?? serverClaudeSettings.overrides
@@ -64,7 +64,7 @@ export const claudeSettingsState = {
 	},
 };
 
-/** The relay has spoken, so an in-flight write is now either confirmed or
+/** The server has spoken, so an in-flight write is now either confirmed or
  *  overtaken — either way it is no longer the value to show. */
 function setServerOverrides(overrides: ClaudeSettingsOverrides): void {
 	serverClaudeSettings.overrides = { ...overrides };
@@ -92,8 +92,8 @@ export function handleClaudeSettingsInfo(message: {
 }
 
 /**
- * Show a write before the relay has confirmed it, and hand back the undo for
- * *that* write: call it when the relay refuses. It drops back to the relay's
+ * Show a write before the server has confirmed it, and hand back the undo for
+ * *that* write: call it when the server refuses. It drops back to the server's
  * value rather than to a remembered one, and does nothing at all once a newer
  * write — or a broadcast that landed meanwhile — owns what is on screen.
  */

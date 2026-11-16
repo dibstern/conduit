@@ -232,7 +232,7 @@ export const makeProjectionRunnerEffect = (
 					//
 					// Live producers wrap append and projection in one transaction. These
 					// nested transactions are savepoints; failures roll back the whole write.
-					// Relay startup recovers historical events before enabling live producers.
+					// Project startup recovers historical events before enabling live producers.
 					// getFailures() is not involved because the error reaches the caller.
 					for (const projector of matching) {
 						const changed = yield* sql.withTransaction(

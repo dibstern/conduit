@@ -1934,7 +1934,7 @@ export const SetDefaultSessionMode = Rpc.make("SetDefaultSessionMode", {
 	error: WsRpcError,
 });
 
-/** Resolve draft defaults without attaching or starting a project relay. */
+/** Resolve draft defaults without attaching or opening a project. */
 export const ResolveSessionMode = Rpc.make("ResolveSessionMode", {
 	payload: Schema.TaggedStruct("ResolveSessionMode", {
 		projectSlug: NonEmptyString,
@@ -4329,7 +4329,7 @@ export const ProjectSettingSchema = Schema.Union([
 	),
 ]);
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
-/** Persisted settings shared by all projects; live facts stay per relay. */
+/** Persisted settings shared by all projects; live facts stay per project. */
 export type GlobalProjectSetting = Extract<
 	ProjectSetting,
 	{
@@ -4343,7 +4343,7 @@ export type GlobalProjectSetting = Extract<
 			| "titleGeneration";
 	}
 >;
-/** Global writes signal each relay to compute catalog-dependent facts locally. */
+/** Global writes signal each project to compute catalog-dependent facts locally. */
 export type GlobalSettingTag = GlobalProjectSetting["_tag"] | "harnessDefaults";
 const ProjectSettingsEnvelopeSchema = EnvelopeSchema(ProjectSettingSchema);
 export type ProjectSettingsEnvelope = typeof ProjectSettingsEnvelopeSchema.Type;

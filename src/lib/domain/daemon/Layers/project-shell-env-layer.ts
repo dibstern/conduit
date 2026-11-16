@@ -26,7 +26,7 @@ export const makeProjectShellEnvLive = (
 		),
 	);
 
-/** Project relays are lazy; resolve environments as soon as registration exists. */
+/** Projects open lazily; resolve environments as soon as registration exists. */
 export const ProjectShellEnvWiringLive: Layer.Layer<
 	never,
 	never,

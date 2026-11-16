@@ -40,7 +40,7 @@ export class SessionSetupTag extends Context.Service<
 			directory: string,
 		) => Effect.Effect<void>;
 		readonly wait: (sessionId: string) => Effect.Effect<void>;
-		/** Once per project per process: a relay rebuild must not fail a live run. */
+		/** Once per project per process: a reopen must not fail a live run. */
 		readonly recover: (
 			projectId: string,
 		) => Effect.Effect<void, SetupCommandError>;
@@ -255,7 +255,7 @@ const forkInto =
 			uninterruptible: "inherit",
 		}).pipe(Effect.as(true));
 
-/** Standalone relay (no daemon): its own project, its relay scope. */
+/** Standalone test harness (no daemon): its own project, its own scope. */
 export const SessionSetupLive = Layer.effect(
 	SessionSetupTag,
 	Effect.gen(function* () {
@@ -285,7 +285,7 @@ export const SessionSetupLive = Layer.effect(
 
 /**
  * Daemon-owned setup: one instance for every project. A run lives in its
- * session's owner scope, so deleting the session ends it and a relay rebuild
+ * session's owner scope, so deleting the session ends it and a reopen
  * does not.
  */
 export const DaemonSessionSetupLive = Layer.effect(

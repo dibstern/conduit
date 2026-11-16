@@ -14,7 +14,7 @@ export type {
 	SidebarRead,
 } from "../../daemon/Services/shell-subscription.js";
 
-/** Standalone relays retain their local store and bus, and serve only their project. */
+/** Standalone test harnesses retain their local store and bus, and serve only their project. */
 export const subscribeShell = (
 	options: {
 		readonly resumeFromSequence?: number;

@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 // Handles push events to show notifications and manages notification clicks
-// to focus/open the relay. Only successful alert receipts are cached;
+// to focus/open the app. Only successful alert receipts are cached;
 // application assets still require a live server connection.
 
 import type { PermissionId } from "../shared-types.js";

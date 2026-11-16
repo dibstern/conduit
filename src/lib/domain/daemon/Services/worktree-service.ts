@@ -33,7 +33,7 @@ export type WorktreeSetupUpdate =
 	| WorktreeSetupResult;
 
 export interface WorktreeService {
-	/** Serialize cleanup with terminal creation, including from other project relays. */
+	/** Serialize cleanup with terminal creation, including from other projects. */
 	readonly withCheckoutUse: <A, E, R>(
 		effect: Effect.Effect<A, E, R>,
 	) => Effect.Effect<A, E, R>;

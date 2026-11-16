@@ -481,11 +481,11 @@ export async function startForegroundDaemon(
 			(lease) =>
 				Effect.gen(function* () {
 					if (yield* fullStopRequested) {
-						// Read intent after request and relay scopes have drained.
+						// Read intent after request and project scopes have drained.
 						const registered = projectState
 							? Array.from(HashMap.values(yield* Ref.get(projectState)))
 							: [];
-						// Registrations include detached runners whose relay never started.
+						// Registrations include detached runners whose project never opened.
 						yield* Effect.validate(
 							registered,
 							({ project }) =>

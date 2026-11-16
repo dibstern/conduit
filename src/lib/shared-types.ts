@@ -619,9 +619,9 @@ export interface PtyInfo {
 	pid: number;
 }
 
-// These are relay-specific history types for paged transcript RPC responses.
+// These are conduit-specific history types for paged transcript RPC responses.
 // They represent a loose superset of the SDK's Part and Message
-// types with relay-specific extensions (renderedHtml, index signatures).
+// types with conduit-specific extensions (renderedHtml, index signatures).
 //
 // SDK type mapping:
 //   PartType   ← SDK Part["type"]    (derived in sdk-types.ts)
@@ -632,7 +632,7 @@ export interface PtyInfo {
 /**
  * Shape of HistoryMessage parts (tool calls, text, reasoning, etc.).
  *
- * Loosely mirrors SDK `Part` with relay-specific extensions.
+ * Loosely mirrors SDK `Part` with conduit-specific extensions.
  * The `type` field uses SDK-derived `PartType` for discriminated narrowing,
  * widened with `"thinking"` to cover Claude SDK thinking blocks which the
  * MessageProjector stores in SQLite with `type='thinking'` (not an OpenCode
@@ -699,7 +699,7 @@ export interface ModelExecution {
  * A single message from the OpenCode REST history API.
  *
  * Loosely mirrors SDK `Message` (UserMessage | AssistantMessage) but with
- * optional fields for transport compatibility and relay-specific extensions.
+ * optional fields for transport compatibility and conduit-specific extensions.
  */
 export interface HistoryMessage {
 	id: string;

@@ -1,4 +1,4 @@
-// Single source of truth for all environment variables read by the relay.
+// Single source of truth for all environment variables read by conduit.
 // Import from here instead of reading process.env directly.
 
 import { existsSync } from "node:fs";

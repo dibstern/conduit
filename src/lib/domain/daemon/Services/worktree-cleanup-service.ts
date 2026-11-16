@@ -20,7 +20,7 @@ export const WorktreeCleanupQueueLive = Layer.effect(
 	),
 );
 
-// Standalone test relays can save the setting, but only the daemon runs a sweep.
+// Standalone test harnesses can save the setting, but only the daemon runs a sweep.
 export const requestWorktreeCleanup = (projectSlug?: string) =>
 	Effect.gen(function* () {
 		const queue = yield* Effect.serviceOption(WorktreeCleanupQueueTag);

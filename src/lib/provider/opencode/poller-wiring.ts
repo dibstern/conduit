@@ -1,7 +1,7 @@
 // Poller Wiring (G3)
 // Wires pollerManager "events" handler and sseStream "event" → poller bridge.
 //
-// Extracted from createProjectRelay() — all closure captures are explicit params.
+// All closure captures are explicit params.
 
 import { Effect } from "effect";
 import {
@@ -284,7 +284,7 @@ export const wirePollersEffect = (deps: EffectPollerWiringDeps) =>
 				deps.pollerManager.notifySSEEvent(sid);
 			}
 		};
-		// Held for the caller's scope, so a closed relay leaves no listener behind.
+		// Held for the caller's scope, so a closed project leaves no listener behind.
 		yield* Effect.acquireRelease(
 			Effect.sync(() => {
 				deps.pollerManager.on("events", onPolled);

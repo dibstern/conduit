@@ -1,5 +1,5 @@
-// Manages the mapping between OpenCode sessions and the relay's representation.
-// OpenCode (SQLite) is always the source of truth — the relay never duplicates
+// Manages the mapping between OpenCode sessions and conduit's representation.
+// OpenCode (SQLite) is always the source of truth — conduit never duplicates
 // storage. This layer proxies session CRUD and maintains in-memory active state.
 
 import { EventEmitter } from "node:events";

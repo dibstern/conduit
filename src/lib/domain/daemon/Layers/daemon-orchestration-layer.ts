@@ -399,7 +399,7 @@ export const DaemonOrchestrationLive = Layer.effect(
 				yield* adapters.recover;
 				if (started) return;
 				started = true;
-				// Before the outbox drains, as relay start cleared them before its command gate opened.
+				// Before the outbox drains, as project start cleared them before its command gate opened.
 				yield* clearOrphanedAsks;
 				channel("conduit.orchestration.engine").publish({
 					event: "drain-started",

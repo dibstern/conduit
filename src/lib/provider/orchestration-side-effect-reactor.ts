@@ -2174,7 +2174,7 @@ export class ProviderSideEffectReactor {
 								operation: row.effect_type,
 								cause,
 							});
-						// The question lives in the session's workspace, which a fork may not share with the relay.
+						// The question lives in the session's workspace, which a fork may not share with the caller's project.
 						const session = yield* Effect.tryPromise({
 							try: () => client.session.get(row.session_id),
 							catch: failure,
@@ -2463,7 +2463,7 @@ export class ProviderSideEffectReactor {
 					liveContext?.shellEnv !== undefined
 						? liveContext.shellConfig
 						: call?.shellConfig;
-				// Daemon sends can outlive the caller's relay. Resolve its borrow
+				// Daemon sends can outlive the caller's generation. Resolve its borrow
 				// when each interaction arrives, including after adapter intake.
 				const currentInteractions = this.options.makeInteractions?.(
 					payload.sessionId,
@@ -3428,7 +3428,7 @@ export class ProviderSideEffectReactor {
 	 * Event sink handed to the provider during execution. Provider OUTPUT always
 	 * streams to the durable ProviderRuntimeIngestion (the mandatory persistence
 	 * seam). Daemon interactions resolve the current project borrow per callback;
-	 * standalone relays use their caller's sink for their own scoped lifetime.
+	 * standalone harnesses use their caller's sink for their own scoped lifetime.
 	 */
 	private makeReactorEventSink(
 		interactions?: EventSink,
@@ -3437,8 +3437,8 @@ export class ProviderSideEffectReactor {
 		// Keep each request's ID mapping and detach flag until its waiter settles.
 		const pending = new Set<{ readonly sink: EventSink }>();
 		let detaching = false;
-		// Streamed output bypasses the relay sink, so mark the session alive here
-		// or the relay's processing timeout fires mid-turn on long turns.
+		// Streamed output bypasses the project event sink, so mark the session alive
+		// here or the processing timeout fires mid-turn on long turns.
 		const push: EventSink["push"] = (event) =>
 			Effect.suspend(() => {
 				interactions?.noteActivity?.(event);

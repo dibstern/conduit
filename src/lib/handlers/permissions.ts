@@ -1,6 +1,6 @@
 //
 // Browser ids name Conduit's persisted prompts. OpenCode answers use the
-// provider reference on that row, so questions survive relay restarts.
+// provider reference on that row, so questions survive project reopens.
 
 import { Data, Effect, Exit, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
@@ -299,7 +299,7 @@ const restartProcessingTimeout = (sessionId: string, runId?: string | null) =>
  *
  * The OpenCode REST paths come through here, so does a recovered question
  * skipped with no turn left to record it, and so does an OpenCode permission
- * the relay timed out. A live approval owned by the provider runtime is
+ * conduit timed out. A live approval owned by the provider runtime is
  * resolved through its event sink, which records the resolution itself;
  * appending a second one would be a duplicate event, not a second fact.
  *
@@ -487,7 +487,7 @@ export const retireAsyncQuestions = (sessionId: string, inputId: string) =>
 	});
 
 /**
- * An OpenCode permission the relay timed out with no turn awaiting it: recorded
+ * An OpenCode permission conduit timed out with no turn awaiting it: recorded
  * as rejected, which takes its card down. OpenCode itself is not told.
  */
 export const recordPermissionTimedOut = (entry: {

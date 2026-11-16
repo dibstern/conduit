@@ -55,7 +55,7 @@ export const readPersistedAutoSettleFacts = (
 			WHERE status = 'pending' AND session_id IN (${placeholders})`,
 			ids,
 		);
-		// 8.3 (2849): liveness asks the ledger; a store with no live relay reads its row (3.12).
+		// 8.3 (2849): liveness asks the ledger; a store with no open project reads its row (3.12).
 		const open = yield* sql.unsafe<{ session_id: string }>(
 			`SELECT session_id FROM run_ledger_sessions
 			WHERE state = 'Open' AND session_id IN (${placeholders})`,

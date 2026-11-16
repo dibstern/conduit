@@ -5,7 +5,7 @@
 // way and say so in the same words (ni8.5 R5; decisions 6A, 6E, 6K, 3K, 6H).
 //
 // **Retry transient endings.** The errors a feed can meet are mostly
-// temporary — a relay still starting, a busy database — and a feed that has
+// temporary — a project still opening, a busy database — and a feed that has
 // ended has stopped updating whether or not it meant to. So all three restart
 // the feed from scratch, and a defect is only different in being logged as a
 // bug. An unknown turn is terminal: restarting cannot make its target valid.

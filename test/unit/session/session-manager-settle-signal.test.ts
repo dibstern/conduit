@@ -60,8 +60,8 @@ describe("SessionManagerService settle signal", () => {
 			);
 			const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 			const openCodeApi = makeMockOpenCodeAPI();
-			// Same wiring as project-relay-layers: one shared bus for the
-			// persistence stack and the relay services.
+			// Same wiring as ProjectServices: one shared bus for the
+			// persistence stack and the project services.
 			const layer = Layer.provideMerge(
 				Layer.provideMerge(standaloneSessionManagerLive, SessionWorkspaceLive),
 				Layer.mergeAll(
