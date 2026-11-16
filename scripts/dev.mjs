@@ -213,7 +213,7 @@ async function restart() {
 		const inode = statSync(rpc.DEFAULT_SOCKET_PATH, {
 			throwIfNoEntry: false,
 		})?.ino;
-		// A daemon busy booting relays can miss the default 10s reply window,
+		// A daemon busy opening projects can miss the default 10s reply window,
 		// yet still restart, so a timeout falls through to the socket check.
 		await rpc
 			.sendRpcRequest(
