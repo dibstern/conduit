@@ -360,6 +360,12 @@ describe("Cursor skills through the built daemon and runner", () => {
 		evidence["afterMove"] = afterMove.commands;
 		for (let i = 0; i < 300; i++)
 			skill(join(moved, ".cursor", "skills", `bounded-${i}`));
+		// Skill scans are cached per workspace; Reload rescans.
+		await fixture.requestRpc({
+			_tag: "ReloadProviderSession",
+			sessionId,
+			commandId: randomUUID(),
+		});
 		const bounded = await fixture.requestRpc({
 			_tag: "GetCommands",
 			sessionId,

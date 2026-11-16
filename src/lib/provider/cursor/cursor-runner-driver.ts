@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect, Result, Schema, Semaphore } from "effect";
 import type { Account } from "../../contracts/account.js";
@@ -12,7 +13,11 @@ import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
 import type { TurnFacts } from "../runner/turn-facts.js";
 import { skillCommand } from "../skill-discovery.js";
 import { modelParameterChoices } from "../turn-settings.js";
-import type { ModelInfo, ProviderCapabilities } from "../types.js";
+import type {
+	DiscoveredSkill,
+	ModelInfo,
+	ProviderCapabilities,
+} from "../types.js";
 import { CursorAccountResources } from "./cursor-account-resources.js";
 import {
 	type CursorCredentialLookup,
@@ -139,10 +144,19 @@ const catalogs = new WeakMap<
 		>;
 	}
 >();
+// A scan reads every SKILL.md the workspace and home can see (~130ms for a few
+// hundred), and one session open discovers three times. Concurrent opens share
+// one scan through the lock; Reload passes refresh to rescan.
+const skillScanLock = Semaphore.makeUnsafe(1);
+const skillScans = new Map<
+	string,
+	{ readonly expiresAt: number; readonly skills: readonly DiscoveredSkill[] }
+>();
 export const discoverCursorEffect = (
 	account: Account,
 	workspaceRoot?: string,
 	extraFolders: readonly string[] = [],
+	refresh = false,
 ): Effect.Effect<
 	ProviderCapabilities,
 	ProviderInstanceFailure,
@@ -158,6 +172,7 @@ export const discoverCursorEffect = (
 					account,
 					workspaceRoot,
 					extraFolders,
+					refresh,
 				),
 			)
 			.pipe(
@@ -175,6 +190,7 @@ const discoverCursorCatalog = (
 	account?: Account,
 	workspaceRoot?: string,
 	extraFolders: readonly string[] = [],
+	refresh = false,
 ): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> =>
 	Effect.gen(function* () {
 		const runtime = yield* Effect.tryPromise({
@@ -248,7 +264,27 @@ const discoverCursorCatalog = (
 			}),
 		);
 		const skills = workspaceRoot
-			? yield* discoverCursorSkillsEffect(workspaceRoot, { dirs: extraFolders })
+			? yield* skillScanLock.withPermits(1)(
+					Effect.gen(function* () {
+						// User skills live under HOME, so it is part of the folder set.
+						const key = JSON.stringify([
+							homedir(),
+							workspaceRoot,
+							extraFolders,
+						]);
+						const cached = skillScans.get(key);
+						if (!refresh && cached && cached.expiresAt > Date.now())
+							return cached.skills;
+						const skills = yield* discoverCursorSkillsEffect(workspaceRoot, {
+							dirs: extraFolders,
+						});
+						skillScans.set(key, {
+							expiresAt: Date.now() + 30 * 60_000,
+							skills,
+						});
+						return skills;
+					}),
+				)
 			: [];
 		return {
 			models,
@@ -307,7 +343,7 @@ export const makeCursorRunnerDriver = (
 		});
 	return {
 		driverKind: "cursor",
-		discoverEffect: (directory, account, _options, call) =>
+		discoverEffect: (directory, account, options, call) =>
 			Effect.gen(function* () {
 				const selected = call?.account ?? account;
 				if (!selected)
@@ -324,6 +360,7 @@ export const makeCursorRunnerDriver = (
 					selected,
 					workspace.cwd,
 					workspace.dirs,
+					options?.refresh,
 				).pipe(Effect.provideService(CursorAccountResources, resources));
 			}),
 		generateTextEffect: (input) => {
