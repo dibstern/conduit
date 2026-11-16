@@ -270,6 +270,20 @@ describe("Stop delivery preserves its captured cohort", () => {
 		const successorId = randomUUID();
 		let passed = false;
 		try {
+			// The seed turn's end probe can outlast its send. Until it reads idle the session's native
+			// work stays fenced, and a Stop rightly aborts that work: the Stop is empty only after it.
+			// test-waits-allow polling: the probe's outcome reaches only the store.
+			await vi.waitFor(
+				() =>
+					expect(
+						db
+							.prepare(
+								"SELECT status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'probe'",
+							)
+							.all(sessionId),
+					).toEqual([{ status: "completed" }]),
+				{ timeout: 15_000 },
+			);
 			db.exec(`CREATE TRIGGER hold_empty_stop BEFORE UPDATE OF status ON provider_command_outbox
 				WHEN NEW.command_id = '${commandId}' AND NEW.status = 'running'
 				BEGIN SELECT RAISE(IGNORE); END`);
