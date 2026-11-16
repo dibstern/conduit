@@ -16,6 +16,7 @@ import {
 	type ProjectionRunnerError,
 } from "../../../persistence/effect/projection-runner-effect.js";
 import { runTerminalStatus } from "../../../persistence/effect/projectors-effect.js";
+import type { EndedOutboxRow } from "../../../persistence/effect/run-ledger-arm.js";
 import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
 import { canonicalEvent, createEventId } from "../../../persistence/events.js";
 import {
@@ -1087,6 +1088,7 @@ export class EffectOpenCodeRuntimeIngress
 			options?: {
 				beforeCommit?: Effect.Effect<void, SqlError>;
 				beforeProject?: Effect.Effect<void, SqlError>;
+				endedSend?: EndedOutboxRow;
 				settleSession?: boolean;
 				requeueFailedInputs?: false;
 			},
@@ -1327,6 +1329,20 @@ export class EffectOpenCodeRuntimeIngress
 												beforeProject: current(),
 												settleSession,
 												requeueFailedInputs: false,
+												// CONTRACT.md 3.4: the turn.error ends the claimed row. Without a start's
+												// outcome the start stays a fence member past main's terminal
+												// (AMENDMENT-2026-11-16 E2) and the next send never goes out.
+												endedSend: {
+													command_id: command.command_id,
+													session_id: sessionId,
+													provider_id: instanceId,
+													attempt_count: command.attempt_count,
+													status: "failed",
+													error_code: failure.code,
+													next_attempt_at: null,
+													updated_at: Date.now(),
+													token: command.run_id,
+												},
 											},
 										);
 									} else

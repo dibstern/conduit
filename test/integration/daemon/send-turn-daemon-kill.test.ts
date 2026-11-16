@@ -541,6 +541,15 @@ describe("a send claimed before daemon SIGKILL", () => {
 			db.prepare(
 				"UPDATE events SET data = json_set(data, '$.steer', json('true')) WHERE session_id = ? AND type = 'input.sent' AND json_extract(data, '$.inputId') = ?",
 			).run(sessionId, inputId);
+			// The Run Ledger folded this input.sent before the edit, so it is marked a steer there
+			// too: restart recovery reads the ledger to tell a start from a steer.
+			expect(
+				db
+					.prepare(
+						"UPDATE run_ledger_entries SET entry_json = json_set(entry_json, '$.command.delivery', 'steer') WHERE session_id = ? AND json_extract(entry_json, '$.command.verb') = 'admit' AND json_extract(entry_json, '$.command.inputId') = ?",
+					)
+					.run(sessionId, inputId).changes,
+			).toBe(1);
 			// The steer reached OpenCode, so it possibly reached the agent: it is placed as
 			// sent at its Run's end and never re-sent (CONTRACT.md 217, row 206; 970-972).
 			db.exec(

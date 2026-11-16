@@ -3,6 +3,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { formatErrorDetail } from "../../../errors.js";
+import type { EndedOutboxRow } from "../../../persistence/effect/run-ledger-arm.js";
 import { createEventId } from "../../../persistence/events.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import { LoggerTag } from "./services.js";
@@ -84,12 +85,15 @@ export const makeFailTurn = Effect.gen(function* () {
 			requeueFailedInputs,
 			settleSession = true,
 			retryable = false,
+			endedSend,
 		}: {
 			beforeCommit?: Effect.Effect<void, SqlError>;
 			beforeProject?: Effect.Effect<void, SqlError>;
 			requeueFailedInputs?: false;
 			settleSession?: boolean;
 			retryable?: boolean;
+			/** The outbox row the turn.error ends (CONTRACT.md 3.4). */
+			endedSend?: EndedOutboxRow;
 		} = {},
 	): Effect.Effect<void> => {
 		const runId = owner.runId;
@@ -150,11 +154,15 @@ export const makeFailTurn = Effect.gen(function* () {
 				effectiveRunId ? { ...event, runId: effectiveRunId } : event,
 			);
 			return yield* (
-				beforeCommit || beforeProject || requeueFailedInputs === false
+				beforeCommit ||
+				beforeProject ||
+				endedSend ||
+				requeueFailedInputs === false
 					? ingestion.ingestBatch(ownedEvents, {
 							...(requeueFailedInputs === false ? { requeueFailedInputs } : {}),
 							...(beforeCommit ? { beforeCommit } : {}),
 							...(beforeProject ? { beforeProject } : {}),
+							...(endedSend ? { endedSend } : {}),
 						})
 					: ingestion.ingestBatch(ownedEvents)
 			).pipe(

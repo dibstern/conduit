@@ -22,6 +22,11 @@ import type {
 	ProjectionRunnerEffectTag,
 	ProjectionRunnerError,
 } from "../../../persistence/effect/projection-runner-effect.js";
+import {
+	type EndedOutboxRow,
+	endedRowOutcome,
+	loadLedger,
+} from "../../../persistence/effect/run-ledger-arm.js";
 import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
 import {
 	type CanonicalEvent,
@@ -37,6 +42,7 @@ import {
 	restoreRuntimeToolStart,
 	translateProviderRuntimeEventToDomain,
 } from "../../../provider/provider-runtime-event-to-domain.js";
+import { inputPlacement } from "../../../provider/run-ledger/run-ledger-decider.js";
 import {
 	commitRunnerOutput,
 	createRunnerPermissionReplies,
@@ -112,6 +118,12 @@ export interface ProviderRuntimeIngestion {
 			 * transaction and appended after the batch's session creation, ahead of its other events.
 			 */
 			readonly evidence?: Effect.Effect<readonly CanonicalEvent[], SqlError>;
+			/**
+			 * The outbox row the batch's terminal ends. A start writes its effect_outcome (CONTRACT.md
+			 * 3.4) after the batch's events, so main's terminal still names the Run's end. A steer may
+			 * have reached the provider and is placed as sent (row 206), so it writes none.
+			 */
+			readonly endedSend?: EndedOutboxRow;
 			/** Read current owners and settle them inside the append transaction. */
 			readonly settleRuns?: {
 				readonly sessionId: string;
@@ -602,6 +614,18 @@ export const makeProviderRuntimeIngestionLive = (
 													domainEvents.push(...result.events);
 													nextState = result.state;
 												}
+											}
+											if (ingestOptions.endedSend) {
+												const row = ingestOptions.endedSend;
+												const ledger = yield* loadLedger(row.session_id).pipe(
+													Effect.provideService(SqlClient.SqlClient, sql),
+												);
+												if (
+													ledger &&
+													inputPlacement(ledger.state, row.command_id)
+														?.steer === false
+												)
+													domainEvents.push(endedRowOutcome(row));
 											}
 											// Check under the same write permit and transaction as local
 											// deletion. Neither seeding nor publication may revive a deletion.
