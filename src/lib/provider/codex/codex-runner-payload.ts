@@ -1003,21 +1003,28 @@ export class CodexRunnerPayload implements RunnerPayload {
 							)
 								yield* acceptInput();
 							// J2, J3 (AMENDMENT-2026-11-16): Codex's echo of a steer joins it to this open
-							// turn's run. An echo without clientId joins the steer whose turn/steer reply
-							// named its turn. Once the turn settles nothing reads its steers, so a later
-							// reply or echo joins nothing (failure modes 90, 91).
+							// turn's run. Codex sends each userMessage as item/started and item/completed;
+							// only item/started joins, so one echo consumes one steer. An echo without
+							// clientId joins the oldest steer whose turn/steer reply named its turn and whose
+							// text it repeats: the turn's own input echo, read after that reply, is not a
+							// steer's. Once the turn settles nothing reads its steers, so a later reply or
+							// echo joins nothing (failure modes 90, 91).
 							if (
-								(decoded.method === "item/started" ||
-									decoded.method === "item/completed") &&
+								decoded.method === "item/started" &&
 								decoded.params.item.type === "userMessage" &&
 								!("raw" in decoded.params.item)
 							) {
-								const { clientId } = decoded.params.item;
+								const { clientId, content } = decoded.params.item;
 								const { turnId } = decoded.params;
+								const text = content
+									.flatMap((part) => (part.type === "text" ? [part.text] : []))
+									.join("");
 								const steer =
 									clientId == null
 										? [...active.steers.values()].find(
-												(pending) => pending.turnId === turnId,
+												(pending) =>
+													pending.turnId === turnId &&
+													pending.input.prompt === text,
 											)
 										: active.steers.get(clientId);
 								if (steer) {

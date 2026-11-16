@@ -7,7 +7,9 @@
 // turn/steer reply rather than at Codex's echo; an echo without clientId never
 // joins; an accepted steer Codex never echoes before turn/completed joins the
 // closed run (90); a reply read after the turn settled joins or writes to the
-// closed run (91).
+// closed run (91); one echo without clientId, read as both item/started and
+// item/completed, joins two pending steers of the same turn; the turn's own
+// input echo, read after a steer's reply, joins that steer.
 import {
 	existsSync,
 	mkdtempSync,
@@ -661,14 +663,25 @@ describe("Codex runner preparation", () => {
 	// reply only places it. An echo without clientId joins on the reply's turnId while the turn is
 	// open. Nothing joins or reaches the closed run after its turn settled (90, 91).
 	for (const variant of [
-		{ name: "joins at the echo", joins: true },
-		{ name: "joins an echo without clientId on its reply's turn", joins: true },
+		{ name: "joins at the echo", readsReply: true, joins: true },
+		{
+			name: "joins an echo without clientId on its reply's turn",
+			readsReply: true,
+			joins: true,
+		},
+		{
+			name: "joins no echo of its turn's own input read after its reply",
+			readsReply: true,
+			joins: false,
+		},
 		{
 			name: "stays pending when no echo precedes turn/completed",
+			readsReply: false,
 			joins: false,
 		},
 		{
 			name: "joins nothing from a reply read after the turn settled",
+			readsReply: false,
 			joins: false,
 		},
 	] as const)
@@ -701,6 +714,11 @@ describe("Codex runner preparation", () => {
 				const echoed = (row: (typeof rows)[number]) =>
 					row.message?.params?.item?.["type"] === "userMessage" &&
 					row.message.params.item["clientId"] === "fixture-steer";
+				// The turn's own input, echoed without clientId; read late, it reaches the turn loop
+				// only after a steer's reply named this turn.
+				const opening = (row: (typeof rows)[number]) =>
+					row.message?.params?.item?.["type"] === "userMessage" &&
+					row.message.params.item["clientId"] === null;
 				const reply = rows.findIndex(
 					({ message }) => message?.id === 4 && message.method === undefined,
 				);
@@ -726,15 +744,29 @@ describe("Codex runner preparation", () => {
 									};
 								})
 							: variant.name ===
-									"stays pending when no echo precedes turn/completed"
-								? rows.filter((row) => !echoed(row))
-								: rows.flatMap((row, index) =>
-										echoed(row) || index === reply
+									"joins no echo of its turn's own input read after its reply"
+								? rows.flatMap((row, index) =>
+										echoed(row) || opening(row)
 											? []
-											: index === completed
-												? [row, { ...rows[reply], at: settledAt + 1 }]
+											: index === reply
+												? [
+														row,
+														...rows
+															.filter(opening)
+															.map((echo) => ({ ...echo, at: row.at + 1 })),
+													]
 												: [row],
-									);
+									)
+								: variant.name ===
+										"stays pending when no echo precedes turn/completed"
+									? rows.filter((row) => !echoed(row))
+									: rows.flatMap((row, index) =>
+											echoed(row) || index === reply
+												? []
+												: index === completed
+													? [row, { ...rows[reply], at: settledAt + 1 }]
+													: [row],
+										);
 				const trace = join(root, "steer.jsonl");
 				writeFileSync(
 					trace,
@@ -745,7 +777,7 @@ describe("Codex runner preparation", () => {
 				const gate = join(root, "gate");
 				writeFileSync(
 					gate,
-					String(variant.joins ? (rows[reply]?.at ?? 0) : settledAt),
+					String(variant.readsReply ? (rows[reply]?.at ?? 0) : settledAt),
 				);
 				yield* Effect.acquireRelease(
 					Effect.sync(() => {
@@ -823,7 +855,7 @@ describe("Codex runner preparation", () => {
 							"requestedRunId" in data &&
 							data.requestedRunId === "run-steer",
 					);
-				if (variant.joins) {
+				if (variant.readsReply) {
 					expect(yield* Fiber.join(steering)).toMatchObject({
 						status: "accepted",
 					});
@@ -861,4 +893,149 @@ describe("Codex runner preparation", () => {
 				).toEqual([]);
 			}),
 		);
+
+	// J3: the item/started echo is the join. Codex sends each userMessage as item/started and
+	// item/completed; an echo without clientId must join one pending steer, not one per frame.
+	it.live("one echo without clientId joins one of two steers on its turn", () =>
+		Effect.gen(function* () {
+			const root = yield* Effect.acquireRelease(
+				Effect.sync(() => mkdtempSync(join(tmpdir(), "codex-runner-echo-"))),
+				(path) =>
+					Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+			);
+			const rows: {
+				at: number;
+				message?: {
+					id?: number;
+					method?: string;
+					params?: Record<string, unknown> & {
+						item?: Record<string, unknown>;
+					};
+				};
+			}[] = readFileSync(
+				fileURLToPath(
+					new URL(
+						"../../../fixtures/codex-app-server-traces/steer.jsonl",
+						import.meta.url,
+					),
+				),
+				"utf8",
+			)
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			const request = rows.findIndex(
+				({ message }) => message?.method === "turn/steer",
+			);
+			const reply = rows.findIndex(
+				({ message }) => message?.id === 4 && message.method === undefined,
+			);
+			const second = [
+				{
+					...rows[request],
+					message: {
+						...rows[request]?.message,
+						id: 5,
+						params: {
+							...rows[request]?.message?.params,
+							clientUserMessageId: "fixture-steer-2",
+						},
+					},
+				},
+				{ ...rows[reply], message: { ...rows[reply]?.message, id: 5 } },
+			];
+			const kept = rows.flatMap((row, index) => {
+				if (index === reply) return [row, ...second];
+				const item = row.message?.params?.item;
+				if (item?.["clientId"] !== "fixture-steer" || !row.message?.params)
+					return [row];
+				const { clientId: _clientId, ...rest } = item;
+				return [
+					{
+						...row,
+						message: {
+							...row.message,
+							params: { ...row.message.params, item: rest },
+						},
+					},
+				];
+			});
+			const trace = join(root, "steer.jsonl");
+			writeFileSync(
+				trace,
+				`${kept.map((row) => JSON.stringify(row)).join("\n")}\n`,
+			);
+			const events: ProviderRuntimeEvent[] = [];
+			const started = yield* Deferred.make<void>();
+			const ended = yield* Deferred.make<void>();
+			const runner = yield* makeCodexSessionRunner(
+				{
+					workspaceRoot: root,
+					daemonConfigDir: root,
+					environment: () => ({
+						CODEX_HOME: root,
+						NODE_ENV: "test",
+						CONDUIT_CODEX_APP_SERVER_TRACE: trace,
+					}),
+				},
+				(output) =>
+					Effect.gen(function* () {
+						if (output.type !== "event") return {};
+						events.push(output.event);
+						if (output.event.type === "run.started")
+							yield* Deferred.succeed(started, undefined);
+						if (output.event.type === "turn.completed")
+							yield* Deferred.succeed(ended, undefined);
+						return {};
+					}),
+			);
+			const admission = yield* makeRunnerAdmission(runner, "codex");
+			const send = (inputId: string, runId: string, prompt: string) =>
+				admitRunnerCommand(admission, runner, {
+					type: "send-turn",
+					sinkId: inputId,
+					aborted: false,
+					input: {
+						sessionId: "session",
+						inputId,
+						runId,
+						prompt,
+						history: [],
+						providerState: {},
+						workspaceRoot: root,
+						extraFolders: [],
+						configDir: configuredClaudeConfigDir(root),
+						folderSource: "account",
+						model: { providerId: "codex", modelId: "gpt-5.4" },
+						facts: {
+							_tag: "Codex",
+							skill: { _tag: "None" },
+							truncate: { _tag: "None" },
+						},
+					},
+				});
+			const turn = yield* send("input", "run", "Say hello").pipe(
+				Effect.forkScoped,
+			);
+			yield* Deferred.await(started);
+			expect(
+				yield* send("steer", "run-steer", "Use the steered instruction"),
+			).toMatchObject({ status: "accepted" });
+			expect(
+				yield* send("steer-2", "run-steer-2", "Use the steered instruction"),
+			).toMatchObject({ status: "accepted" });
+			yield* Fiber.join(turn);
+			yield* Deferred.await(ended);
+			expect(
+				events.flatMap(({ type, runId, data }) =>
+					type === "run.started" &&
+					typeof data === "object" &&
+					data !== null &&
+					"requestedRunId" in data
+						? [`${runId} ${String(data.requestedRunId)}`]
+						: [],
+				),
+			).toEqual(["run run", "run run-steer"]);
+		}),
+	);
 });
