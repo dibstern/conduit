@@ -205,6 +205,21 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 				controlReplaySafe: true,
 			});
 			api.session.abort = vi.fn(stop);
+			// The ledger's native_session probe reads the session as OpenCode would: busy while a turn
+			// holds it, idle after (AMENDMENT-2026-11-16 E2: main's terminal no longer ends that work).
+			api.session.get = vi.fn(async (id: string) => ({
+				id,
+				directory: scratch,
+				projectID: "test-project",
+				title: "run now",
+				version: "test",
+				time: { created: 1, updated: 1 },
+			}));
+			api.session.statuses = vi.fn(async () =>
+				activeTurns.has(sessionId)
+					? { [sessionId]: { type: "busy" as const } }
+					: {},
+			);
 			api.session.prompt = vi.fn(async (sessionId, options) => {
 				const inputId = options.text.split(" ")[0] ?? "";
 				const messageId = options.messageId;

@@ -1886,8 +1886,11 @@ describe("OpenCode on the Run Ledger", () => {
 				proof();
 			}
 			const { after, aborts } = proof();
-			// Nobody pressed Stop: no interrupt and no abort reached OpenCode.
-			expect(after.controls).toEqual([]);
+			// Nobody pressed Stop: no interrupt and no abort reached OpenCode. A probe is no Stop: each
+			// OpenCode terminal issues one (AMENDMENT-2026-11-16 E2, E4).
+			expect(after.controls.filter(({ effect }) => effect !== "probe")).toEqual(
+				[],
+			);
 			expect(aborts).toEqual([]);
 			expect(calls).toContainEqual(
 				expect.objectContaining({ text, outcome: "answered" }),

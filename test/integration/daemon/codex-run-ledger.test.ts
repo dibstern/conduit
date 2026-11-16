@@ -484,8 +484,8 @@ describe("Codex on the Run Ledger", () => {
 			{ timeout: TIMEOUT },
 		);
 		const ledger = read(fixture, sessionId);
-		// The steer is a Run Input of the Run it steered: its own main run's terminal is the steer's
-		// alone and ends no Run (3.9, 4.8). The killed Run ends once, at its loss; the next one once.
+		// No echo joined the steer, so it is its own pending Run (AMENDMENT-2026-11-16 J1); the loss
+		// covers its send and ends that Run too (failure mode 87). Each Run ends once.
 		expect(
 			ledger.runs.map((run) => ({
 				status: run.status,
@@ -495,7 +495,7 @@ describe("Codex on the Run Ledger", () => {
 			})),
 		).toEqual([
 			{ status: "error", ends: ["error"] },
-			{ status: "error", ends: [] },
+			{ status: "error", ends: ["error"] },
 			{ status: "completed", ends: ["completed"] },
 		]);
 		// The new runner's app-server writes its own capture: one turn/start, no steer (F280).

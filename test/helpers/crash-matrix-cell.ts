@@ -89,8 +89,12 @@ export const crashMatrixInvariants = (
 				const ends = store.ends.filter(({ runId }) => runId === run.id);
 				// The ledger owns the outcome, which may differ from main's row (CONTRACT 5774-5776,
 				// 857-859): a Stop asked ends interrupted though main's row reads error.
-				return run.status === "joined" || store.steerRuns.includes(run.id)
-					? ends.length === 0
+				// AMENDMENT-2026-11-16 J1, J2: an unstarted steer is its own pending Run. A join folds it
+				// into the Run it steered with no end; a loss or retirement that covers it first ends it
+				// once (failure mode 87).
+				if (run.status === "joined") return ends.length === 0;
+				return store.steerRuns.includes(run.id)
+					? ends.length <= 1
 					: ends.length === 1;
 			}),
 		everyRunningEffectHasOneOwner: store.unowned.length === 0,
