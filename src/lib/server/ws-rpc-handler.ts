@@ -4,7 +4,13 @@ import type { Duplex } from "node:stream";
 import { TLSSocket } from "node:tls";
 import { Context, Effect, type Fiber, Layer, Option, Tracer } from "effect";
 import { NetAddress } from "effect/net";
-import { type RpcMessage, RpcSerialization, RpcServer } from "effect/rpc";
+import {
+	type Rpc,
+	type RpcGroup,
+	type RpcMessage,
+	RpcSerialization,
+	RpcServer,
+} from "effect/rpc";
 import { Socket, SocketServer } from "effect/socket";
 import { Statement } from "effect/sql";
 import type { WebSocket } from "ws";
@@ -111,7 +117,14 @@ export const withSlowRpcLogging = (
 					if (
 						message._tag !== "Request" ||
 						typeof message.tag !== "string" ||
-						(typeof message.id !== "string" && typeof message.id !== "number")
+						(typeof message.id !== "string" &&
+							typeof message.id !== "number") ||
+						// Waits on the providers' quota endpoints by design, so its time
+						// says nothing about the server.
+						message.tag ===
+							("QuotaForAccounts" satisfies Rpc.Tag<
+								RpcGroup.Rpcs<typeof WsRpcGroup>
+							>)
 					)
 						return handle(clientId, message);
 					const payload = isRecord(message.payload) ? message.payload : {};
