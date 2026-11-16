@@ -24,7 +24,10 @@ import {
 } from "../claude/claude-sdk-env.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
-import { viewLedger } from "../run-ledger/run-ledger-decider.js";
+import {
+	inputPlacement,
+	viewLedger,
+} from "../run-ledger/run-ledger-decider.js";
 import type { TurnResult } from "../types.js";
 import { legacyRunnerRunQuery } from "./runner-legacy-classification.js";
 import { runnerFailure, runnerSinkId } from "./runner-protocol.js";
@@ -300,17 +303,27 @@ export const settleUnclaimedRunnerCommands = <E>(
 								// sent once under its commandId, appending no terminal. A steer that Run issued
 								// stays its input (3.9) and goes back too, sent after its start (L2 case 2). A
 								// Queued Run is not yet delivered either: an unlaunch's relaunch, claimed but not
-								// held, is its start's retry (CONTRACT 664, 675-676, 687-691).
+								// held, is its start's retry (CONTRACT 664, 675-676, 687-691). A steer pending
+								// behind that Run heads its own Run (AMENDMENT-2026-11-16 J1) and, never joined,
+								// was not delivered either, so D50 returns it the same way.
 								const ledger = yield* loadLedger(row.session_id).pipe(
 									Effect.provideService(SqlClient.SqlClient, sql),
 								);
 								const active = ledger && viewLedger(ledger.state).active;
+								const placement =
+									ledger &&
+									row.user_message_id !== null &&
+									inputPlacement(ledger.state, row.user_message_id);
 								if (
 									(active?.tag === "Starting" || active?.tag === "Queued") &&
 									(active.runId === evidence.send.runId ||
 										active.inputs.some(
 											({ inputId }) => inputId === row.user_message_id,
-										)) &&
+										) ||
+										(placement &&
+											placement.steer &&
+											!placement.start &&
+											placement.runOpen)) &&
 									(yield* sql`SELECT 1 FROM provider_runs
 										WHERE id IN (${evidence.send.runId}, ${active.runId}) AND session_id = ${row.session_id}
 											AND (runner_id IS NOT NULL OR held_transmission IS NOT NULL)`)
