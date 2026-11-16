@@ -245,17 +245,17 @@ const failSteer = (sql: SqlClient.SqlClient, provider: string, code: string) =>
 		provider_id, effect_type, payload_json, run_id, status, attempt_count, error_code, requested_at, updated_at)
 		VALUES (2, 'u2', 'test-project', 's1', ${provider}, 'send_turn', '{}', 'r2', 'failed', 1, ${code}, 1008, 1009)`;
 
-/** r1's end: main's `turn.error` with `code` (a runner failure's `runner_stopped`, a retire's `provider_failure`). */
-const runEnded = (provider: string, code: string) =>
+/** A run's end: main's `turn.error` with `code` (a runner failure's `runner_stopped`, a retire's `provider_failure`). */
+const runEnded = (provider: string, code: string, runId = "r1") =>
 	canonicalEvent(
 		"turn.error",
 		"s1",
 		{
-			messageId: "m1",
+			messageId: `m-${runId}`,
 			error: "Provider process stopped",
 			code,
 		},
-		{ provider, createdAt: 1011, metadata: { runId: "r1" } },
+		{ provider, createdAt: 1011, metadata: { runId } },
 	);
 
 const steerEvents = (sql: SqlClient.SqlClient) =>
@@ -494,12 +494,13 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 						const sql = yield* SqlClient.SqlClient;
 						const commit = yield* makeCommitAndSignal;
 						yield* commit(
+							// The hold names the steer's own run, as runner-retirement.ts writes it.
 							steered("claude", [
 								canonicalEvent(
 									"run.dispatched",
 									"s1",
 									{
-										runId: "r1",
+										runId: "r2",
 										runnerId: "rn",
 										commandId: "u2",
 										transmission: 1,
@@ -507,13 +508,18 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 									{
 										provider: "claude",
 										createdAt: 1009,
-										metadata: { runId: "r1" },
+										metadata: { runId: "r2" },
 									},
 								),
 							]),
 						);
 						yield* failSteer(sql, "claude", code);
-						yield* commit([runEnded("claude", code)]);
+						// AMENDMENT-2026-11-16 J4, J5: no result joined u2, so it is its own pending Run r2, and
+						// r1's end leaves it; main's terminal for r2, in the same write, ends that Run.
+						yield* commit([
+							runEnded("claude", code),
+							runEnded("claude", code, "r2"),
+						]);
 						// 10, 10a, 11: main's placement, with its text, image and run; no requeue.
 						expect(
 							(yield* steerEvents(sql)).map((event) => [
@@ -554,20 +560,20 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 				canonicalEvent(
 					"run.dispatched",
 					"s1",
-					{ runId: "r1", runnerId: "rn", commandId: "u2", transmission: 1 },
-					{ provider: "claude", createdAt: 1009, metadata: { runId: "r1" } },
+					{ runId: "r2", runnerId: "rn", commandId: "u2", transmission: 1 },
+					{ provider: "claude", createdAt: 1009, metadata: { runId: "r2" } },
 				),
 				canonicalEvent(
 					"run.released",
 					"s1",
 					{
-						runId: "r1",
+						runId: "r2",
 						runnerId: "rn",
 						commandId: "u2",
 						transmission: 1,
 						reason: "NotSent",
 					},
-					{ provider: "claude", createdAt: 1010, metadata: { runId: "r1" } },
+					{ provider: "claude", createdAt: 1010, metadata: { runId: "r2" } },
 				),
 			],
 			"runner_stopped",
@@ -579,8 +585,8 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 				canonicalEvent(
 					"run.dispatched",
 					"s1",
-					{ runId: "r1", runnerId: "rn", commandId: "u2", transmission: 1 },
-					{ provider: "claude", createdAt: 1009, metadata: { runId: "r1" } },
+					{ runId: "r2", runnerId: "rn", commandId: "u2", transmission: 1 },
+					{ provider: "claude", createdAt: 1009, metadata: { runId: "r2" } },
 				),
 			],
 			"provider_error",

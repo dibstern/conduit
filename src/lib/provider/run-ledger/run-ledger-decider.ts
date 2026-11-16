@@ -137,10 +137,13 @@ interface Send<Effect extends SendEffect = SendEffect> {
 	readonly effect: Effect;
 	readonly held: boolean;
 	commandId?: string | undefined;
-	/** Its Run, null for a send no Run reads (an idle Stop's, a Run-less end_session). */
-	readonly runId: string | null;
+	/**
+	 * Its Run, null for a send no Run reads (an idle Stop's, a Run-less end_session). A pending steer's
+	 * moves into the Run its host joins it to (J2, AMENDMENT-2026-11-16).
+	 */
+	runId: string | null;
 	/** Its execution (3.3). */
-	readonly exec: number;
+	exec: number;
 	/** L2 case 3: the current process at issue, null while pending, then resolved once. */
 	runnerId: string | null;
 	label: Label | null;
@@ -2272,29 +2275,13 @@ function observe(
 					if (input === undefined)
 						return noop("run.requested for an input never admitted");
 					input.reservation ??= observation.runId;
-					// D53 (CONTRACT.md 965-967, 984): a steer joined at admit whose Run ended before main sent
-					// it never joined; main's writer places it, so this run.requested reserves its own Run.
-					const joined = findRun(book, input.runId);
-					if (
-						joined?.phase === "Ended" &&
-						!deliverySends(book, joined).some(
-							(item) => item.effect.inputId === observation.inputId,
-						)
-					)
-						input.runId = undefined;
-					const active = activeInputRun(book);
-					// 3.9 GAP (CONTRACT.md 984, "a steer sent while it is active joins it"): a steer admitted
-					// before its Run launched joins it at its send, main's run.requested.
-					if (
-						input.runId === undefined &&
-						input.delivery === "steer" &&
-						(active?.phase === "Launched" || active?.phase === "Queued")
-					) {
-						active.inputs.push(observation.inputId);
-						input.runId = active.runId;
-					}
 					if (input.runId === undefined) {
-						if (active !== undefined)
+						// J1 (AMENDMENT-2026-11-16): a steer reserves its own Run, pending behind an active one
+						// until its host joins it; a start waits for the active Run's end.
+						if (
+							activeInputRun(book) !== undefined &&
+							input.delivery !== "steer"
+						)
 							return noop("run.requested while another Run is active");
 						// 3.4: the Run is reserved at main's run.requested, under main's runId.
 						book.runs.push({
@@ -2311,13 +2298,13 @@ function observe(
 					const run = findRun(book, input.runId);
 					if (run === undefined || run.phase === "Ended")
 						return noop("run.requested for an ended Run (3.8)");
-					// 3.9: a steer is delivered into its Run's live query unless it opens the Run.
-					const steer =
+					// 4.8: a joined steer's own run is the steer's alone; a pending steer's is its Run's (J5).
+					const joined =
 						input.delivery === "steer" && run.inputs[0] !== observation.inputId;
 					book.mainRuns.set(observation.runId, {
 						runId: run.runId,
 						open: true,
-						...(steer ? { steer } : {}),
+						...(joined ? { steer: true } : {}),
 					});
 					if (run.phase === "Queued") launch(run);
 					const send =
@@ -2326,7 +2313,9 @@ function observe(
 						) ??
 						issue(
 							book,
-							steer
+							// 3.9: a steer is delivered into a live query unless it opens the active Run.
+							joined ||
+								(input.delivery === "steer" && activeInputRun(book) !== run)
 								? {
 										kind: "steer",
 										runId: run.runId,
@@ -2358,46 +2347,51 @@ function observe(
 					);
 					if (input === undefined || run === undefined)
 						return noop("run.started for an unknown run");
-					// 3.9 (CONTRACT.md 148, 956): a run main observed for a native message, the requested Run
-					// joined into it, names that Run; main's terminal comes under it.
+					const pending = findRun(book, input.runId);
+					if (pending === undefined || pending.phase === "Ended")
+						return noop("run.started for a steer whose own Run is gone (J2)");
+					// 3.9 (CONTRACT.md 148, 956): a run main observed for a native message names the Run it
+					// started; J4 (AMENDMENT-2026-11-16): a pending steer's own run.started, or a join naming a
+					// Run that already ended, starts the steer's own Run and maps the observed runId to it.
+					const own = pending === run || run.phase === "Ended";
 					const observed = !book.mainRuns.has(observation.runId);
-					if (run.phase === "Ended") {
-						// 3.9 (CONTRACT.md 978-981): a steer its Run's end left unconsumed, the Run's own joined
-						// steer included, is a Run of its own, its reservation's, Launched with its send.
-						const runId = input.reservation ?? observation.requestedRunId;
-						if (findRun(book, runId) !== undefined)
-							return noop(
-								"run.started for a steer whose reservation names an existing Run (3.9)",
-							);
-						book.runs.push({
-							runId,
-							origin: "input",
-							wakeLabels: [],
-							inputs: [observation.inputId],
-							phase: "Launched",
-							asked: false,
-							exec: { ...newExec(1), evidence: true },
-						});
-						input.runId = runId;
-						for (const id of [observation.requestedRunId, runId])
-							book.mainRuns.set(id, { runId, open: true });
-						if (observed)
-							book.mainRuns.set(observation.runId, { runId, open: true });
-						return changed;
-					}
 					if (observed)
 						book.mainRuns.set(observation.runId, {
-							runId: run.runId,
+							runId: own ? pending.runId : run.runId,
 							open: true,
 						});
-					if (input.runId === run.runId) return observed ? changed : noop();
-					// 3.9: the input joins the Run main started it in.
-					const from = findRun(book, input.runId);
-					const at = from?.inputs.indexOf(observation.inputId) ?? -1;
-					if (at >= 0) from?.inputs.splice(at, 1);
-					if (!run.inputs.includes(observation.inputId))
-						run.inputs.push(observation.inputId);
-					input.runId = run.runId;
+					const steers = deliverySends(book, pending);
+					if (
+						steers[0]?.effect.kind !== "steer" ||
+						(own && pending.exec.evidence)
+					)
+						return observed ? changed : noop();
+					if (own) {
+						pending.exec.evidence = true;
+						return changed;
+					}
+					// J2, J5: evidence for a covered send changes no Run, its join included (2.3, 3.6).
+					if (steers.some((send) => send.txs.some((tx) => tx.covered)))
+						return noop("run.started for a covered steer (J2)");
+					// J2: the join moves the steer and its sends into the open Run. Its pending Run never
+					// started, so it leaves the book with no end, no Tombstone and no outcome.
+					for (const send of runSends(book, pending)) {
+						send.runId = run.runId;
+						send.exec = run.exec.n;
+					}
+					book.runs.splice(book.runs.indexOf(pending), 1);
+					for (const [runId, entry] of book.mainRuns)
+						if (entry.runId === pending.runId)
+							book.mainRuns.set(runId, {
+								...entry,
+								runId: run.runId,
+								steer: true,
+							});
+					run.inputs.push(...pending.inputs);
+					for (const inputId of pending.inputs) {
+						const joined = book.inputs.get(inputId);
+						if (joined !== undefined) joined.runId = run.runId;
+					}
 					return changed;
 				}
 				case "run_terminal": {
@@ -3122,15 +3116,8 @@ function apply(book: Book, entry: Entry, step: Step): Outcome {
 					)
 						return rejected("input already admitted to an active Run");
 					// D58, 3.4: main's handoff; main's run.requested reserves the Run.
-					const input: Input = { delivery: command.delivery };
-					book.inputs.set(command.inputId, input);
-					// 3.9 GAP (CONTRACT.md 984 leaves when a steer joins open): following the oracle, a
-					// steer joins the active Run at admission once it is Launched.
-					const run = activeInputRun(book);
-					if (command.delivery === "steer" && run?.phase === "Launched") {
-						run.inputs.push(command.inputId);
-						input.runId = run.runId;
-					}
+					// J1 (AMENDMENT-2026-11-16): admission never joins.
+					book.inputs.set(command.inputId, { delivery: command.delivery });
 					return changed;
 				}
 				case "observe":
@@ -3575,12 +3562,15 @@ export function inputPlacement(
 			send.effect.inputId === inputId,
 	);
 	return {
+		// AMENDMENT-2026-11-16 J1: a pending steer heads its own Run but is sent as a steer.
 		start: !(
 			input.delivery === "steer" &&
 			run !== undefined &&
-			run.inputs[0] !== inputId
+			(run.inputs[0] !== inputId ||
+				sends.some((send) => send.effect.kind === "steer"))
 		),
 		steer: input.delivery === "steer",
+		runOpen: run !== undefined && run.phase !== "Ended",
 		place:
 			input.failed !== undefined
 				? "failed"

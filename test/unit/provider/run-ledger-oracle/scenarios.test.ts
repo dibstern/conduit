@@ -6,6 +6,7 @@ import { reviewTraces } from "./review-traces.js";
 import {
 	begin,
 	Driver,
+	join,
 	main,
 	request,
 	running,
@@ -77,6 +78,7 @@ describe("[32.5] a steer's own unstarted run ending leaves its owner's Run", () 
 				const d = new Driver(provider, mode);
 				const a = running(d);
 				const first = begin(d, "B", "steer");
+				join(d, a.runId, "B", first.runId);
 				// A fresh-run retry's failed try, then the cap's error on the retry.
 				terminal(d, first.runId, "error");
 				const retry = request(d, "B");

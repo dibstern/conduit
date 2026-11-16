@@ -2517,7 +2517,9 @@ describe("generated D34 coverage", () => {
 		"Run now on a not-yet-delivered Run", // 3.6 D50
 		"End on a not-yet-delivered Run", // 3.6, 5.1
 		"permanent start outcome refused an undelivered Run", // 3.6 D50
-		"joined Run's not_sent start retried in its execution", // 3.6, H4, 8.3
+		// "joined Run's not_sent start retried in its execution" is counted, not barred: a Run whose start
+		// was never sent was reached only by a steer joined before that start went out, which J1
+		// (AMENDMENT-2026-11-16) removes; a steer now joins only a Run whose start its host took.
 		"joined Run ended by its runner's retirement", // 3.6, L1
 		"Q28 adoption with not_received", // Q28, 7.2
 		"Q28 journal settle", // Q28, 7.3

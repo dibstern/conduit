@@ -19,8 +19,9 @@ import {
 
 /**
  * CONTRACT.md 3465-3466: the six seed 82_103_204 evidence-order permutations, in new-model terms. A
- * direct steer B joins A's open Run (main's run.requested, D60); with a retry, main sends B again under
- * a fresh runId (3.6, 692-698). Every order of each fact set on B's transmission at one instant (the
+ * direct OpenCode steer B is its own pending Run behind A's open Run (AMENDMENT-2026-11-16 J1;
+ * OpenCode has no join event, J3); with a retry, main sends B again under a fresh runId (3.6,
+ * 692-698). Every order of each fact set on B's transmission at one instant (the
  * native stream's activity before its result, 11A), then the native
  * probe's idle, A's query end and an alarm, leaves the same public decisions on both the oracle and
  * the decider.
@@ -221,6 +222,10 @@ describe("Public transmission-evidence permutations (seed 82_103_204)", () => {
 					{ minLength: 1, maxLength: 4 },
 				),
 				(set) => {
+					// J1 makes B's send its own Run's, so a permanent outcome folded first ends B's Run refused
+					// (3.8 condition 2.2) and any later fact for B is evidence after a Tombstone (3.5), as for any
+					// start. Only the preprobed recovery keeps B open across that order.
+					fc.pre(preprobed || !set.includes("permanent") || set.length === 1);
 					// 11A (CONTRACT.md 887-889): activity after a result is a later turn, so the native stream's
 					// activity keeps its place before its result; every other fact arrives in any order.
 					const orders = [...permutations(set)].filter(

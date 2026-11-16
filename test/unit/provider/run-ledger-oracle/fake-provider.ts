@@ -14,12 +14,7 @@ import type {
 	TaskKey,
 	Unsolicited,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
-import {
-	joinedSteerOutlived,
-	mainGateRefusal,
-	openCodeLateTurn,
-	pendingCases,
-} from "./pending.js";
+import { mainGateRefusal, openCodeLateTurn, pendingCases } from "./pending.js";
 
 /** Numeric selectors remain useful after fast-check shrinks a trace. */
 export interface TraceAction {
@@ -259,15 +254,11 @@ export class FakeProvider {
 				stopped: boolean;
 		  }
 		| undefined;
-	/** Steers main sent and has not started (3.9): each joins `parent`, or runs as its own Run once `parent` ended. */
+	/**
+	 * Steers main sent and has not started (3.9): each joins `parent` once the native turn takes it, or
+	 * runs as its own Run once `parent` ended (AMENDMENT-2026-11-16 J1-J4).
+	 */
 	private readonly mainSteers: {
-		readonly inputId: string;
-		readonly runId: string;
-		readonly parent: string;
-		readonly issue: IssuedEffect;
-	}[] = [];
-	/** Steers a run.started joined to main's open run (3.9): one that run's end leaves unconsumed is main's next open Run. */
-	private readonly joinedSteers: {
 		readonly inputId: string;
 		readonly runId: string;
 		readonly parent: string;
@@ -285,6 +276,13 @@ export class FakeProvider {
 	private readonly mainEvents: Observation[] = [];
 	/** Main's starts and steers the driver has not read (D60): decide issues none of them. */
 	private readonly mainIssues: { issue: IssuedEffect; token: SendToken }[] = [];
+	/**
+	 * J1 (AMENDMENT-2026-11-16): each input's latest run.requested, by input id. A held steer's
+	 * run.dispatched names it, its own pending Run; every host reads main's run events.
+	 */
+	private readonly steerRuns = new Map<string, string>();
+	/** J2: each steer's own run main's run.started joined to its open parent, to that parent. */
+	private readonly joinedRuns = new Map<string, string>();
 	private readonly bindings = new WeakMap<
 		IssuedEffect,
 		{ readonly send: Send; readonly transmission: number }
@@ -341,8 +339,6 @@ export class FakeProvider {
 	private readonly retiredHolds = new Set<string>();
 	/** Runs whose own direct start main's gate refused at removal: D50 leaves them unchecked (pending.ts). */
 	private readonly mainGateRefused = new Set<string>();
-	/** Pended (pending.ts joinedSteerOutlived): steer Runs main joined into an open Run by run.started. */
-	private readonly joinedSteerRuns = new Set<string>();
 	private readonly terminals = new Map<string, RunEnded>();
 	private readonly seenEvents = new Set<string>();
 	private readonly processFacts = new Set<string>();
@@ -643,7 +639,10 @@ export class FakeProvider {
 		);
 		// 3.4: run.dispatched names the Run by runId and the issue by commandId.
 		this.holdBindings.set(send.token, {
-			runId: effect.runId,
+			runId:
+				effect.kind === "steer"
+					? (this.steerRuns.get(effect.inputId) ?? effect.runId)
+					: effect.runId,
 			commandId: issued.commandId,
 			transmission: n,
 		});
@@ -952,6 +951,17 @@ export class FakeProvider {
 	 * started is unconsumed, so possibly reached. A hold whose run.dispatched the ledger has not read is
 	 * an undispatched issue, which has not reached. A wake joined to a user Run is never its delivery (8.3).
 	 */
+	/**
+	 * A start's Run, or a steer's: J1 (AMENDMENT-2026-11-16) its own pending Run, named by its hold or
+	 * direct token, until main's run.started joins it to its parent (J2).
+	 */
+	private runsOf(send: Send): readonly string[] {
+		if (send.effect.kind === "start") return [send.effect.runId];
+		if (send.effect.kind !== "steer") return [];
+		const { runId: parent } = send.effect;
+		const own = this.holdBindings.get(send.token)?.runId ?? send.token;
+		return this.joinedRuns.get(own) === parent ? [parent] : [own];
+	}
 	reached(runId: string): boolean {
 		return (
 			this.wakeExecutions.has(runId) ||
@@ -965,8 +975,7 @@ export class FakeProvider {
 					transportRank,
 					sealedPossibly,
 				}) =>
-					(send.effect.kind === "start" || send.effect.kind === "steer") &&
-					send.effect.runId === runId &&
+					this.runsOf(send).includes(runId) &&
 					!this.unlaunchedTries.has(send.token) &&
 					// Any answer on a hold before its run.dispatched names a token the ledger has not bound (3.4).
 					(!this.holdBindings.has(send.token) ||
@@ -1003,8 +1012,7 @@ export class FakeProvider {
 			sealedOnly &&
 			[...this.sends.values()].some(
 				({ send }) =>
-					(send.effect.kind === "start" || send.effect.kind === "steer") &&
-					send.effect.runId === runId &&
+					this.runsOf(send).includes(runId) &&
 					!this.unlaunchedTries.has(send.token) &&
 					this.holdBindings.has(send.token) &&
 					!this.dispatchRead.has(send.token),
@@ -1012,10 +1020,7 @@ export class FakeProvider {
 		)
 			return false;
 		for (const { send } of this.sends.values())
-			if (
-				(send.effect.kind === "start" || send.effect.kind === "steer") &&
-				send.effect.runId === runId
-			)
+			if (this.runsOf(send).includes(runId))
 				this.unlaunchedTries.add(send.token);
 		// A gated try of the dropped execution was never transmitted: its relaunch is main's re-send (4.8).
 		const gated =
@@ -1158,12 +1163,10 @@ export class FakeProvider {
 		return [
 			...new Set(
 				[...this.sends.values()].flatMap(({ send, label }) =>
-					(send.effect.kind === "start" || send.effect.kind === "steer") &&
 					runnerOf(label) === runner &&
 					!this.unbound.has(send.token) &&
-					!this.unlaunchedTries.has(send.token) &&
-					!this.terminals.has(send.effect.runId)
-						? [send.effect.runId]
+					!this.unlaunchedTries.has(send.token)
+						? this.runsOf(send).filter((runId) => !this.terminals.has(runId))
 						: [],
 				),
 			),
@@ -1871,6 +1874,20 @@ export class FakeProvider {
 		if (observation.tag === "Main") {
 			if (this.readMainEvents.has(observation.eventId)) return;
 			this.readMainEvents.add(observation.eventId);
+			// J1: a host that bound main's steer before reading its run.requested names that Run now.
+			if (observation.kind === "run_requested") {
+				this.steerRuns.set(observation.inputId, observation.runId);
+				for (const [token, binding] of this.holdBindings)
+					if (
+						binding.commandId === observation.inputId &&
+						this.sends.get(token)?.send.effect.kind === "steer" &&
+						!this.dispatchRead.has(token)
+					)
+						this.holdBindings.set(token, {
+							...binding,
+							runId: observation.runId,
+						});
+			}
 			// 3.9 (CONTRACT.md 978-982): a steer its Run's end left pending is a Run of its own, and its
 			// host's run.started starts it, so it has reached (D50), whether main names the ended Run or the
 			// steer's own (REDESIGN-9's late steer).
@@ -1879,12 +1896,12 @@ export class FakeProvider {
 				this.terminals.has(this.steerParents.get(observation.inputId) ?? "")
 			)
 				this.hostStarted.add(observation.requestedRunId);
-			if (
+			else if (
 				observation.kind === "run_started" &&
-				observation.requestedRunId !== observation.runId &&
-				pendingCases.has(joinedSteerOutlived)
+				observation.runId !== observation.requestedRunId &&
+				!this.terminals.has(observation.runId)
 			)
-				this.joinedSteerRuns.add(observation.requestedRunId);
+				this.joinedRuns.set(observation.requestedRunId, observation.runId);
 			// 3.8 GAP 5, 9: OpenCode's turn.error ends the turn and its query in one write, so main's error
 			// terminal is the native turn's end whichever of the pair folds first.
 			if (
@@ -2158,7 +2175,8 @@ export class FakeProvider {
 						observation.outcome.tag === "not_sent") &&
 					!this.unlaunchedTries.has(observation.token)
 				)
-					this.unlaunch(effect.runId, true);
+					for (const runId of this.runsOf(native.send))
+						this.unlaunch(runId, true);
 				return;
 			}
 			// A permanent outcome means the provider never received the command (3.4, D34).
@@ -2402,7 +2420,8 @@ export class FakeProvider {
 				this.refreshQuery(native);
 				// D50: a release that leaves the Run never reached unlaunches it; a dropped execution's try no longer moves it.
 				if (!this.unlaunchedTries.has(observation.token))
-					this.unlaunch(effect.runId, true);
+					for (const runId of this.runsOf(native.send))
+						this.unlaunch(runId, true);
 				break;
 			case "delivery_indeterminate":
 				// D50 (CONTRACT.md 669-671): a dropped execution's send resolves no further; the drop ended its work.
@@ -2676,8 +2695,7 @@ export class FakeProvider {
 			before.active !== undefined &&
 			before.active.tag !== "Interrupting" &&
 			(before.active.tag === "Queued" || !this.reached(before.active.runId)) &&
-			!this.mainGateRefused.has(before.active.runId) &&
-			!this.joinedSteerRuns.has(before.active.runId)
+			!this.mainGateRefused.has(before.active.runId)
 				? before.active.runId
 				: undefined;
 		const truth = this.groundTruth();
@@ -4095,6 +4113,7 @@ export class FakeProvider {
 				commandId: effect.inputId,
 				effect,
 			};
+			this.steerRuns.set(effect.inputId, runId);
 			if (direct)
 				this.mainSends.set(`${effect.inputId}\u0000${effect.kind}`, [
 					{ token: tokened(runId), effect },
@@ -4292,9 +4311,72 @@ export class FakeProvider {
 						);
 						return first;
 					}
-					const steer = this.mainSteers.shift();
-					if (steer && open?.runId === steer.parent)
-						this.joinedSteers.push(steer);
+					// J2, J3 (AMENDMENT-2026-11-16): a steer joins its open parent only once the native turn
+					// took it; until then it stays pending, and at its parent's end it is a Run of its own.
+					const head = this.mainSteers[0];
+					const sent =
+						head &&
+						[...this.sends.values()].find(
+							({ send }) =>
+								send.effect.kind === "steer" &&
+								send.effect.inputId === head.inputId &&
+								send.effect.runId === head.parent,
+						);
+					const taken = sent?.accepted === true;
+					// The native turn takes a steer it can still receive, into the parent's turn its start
+					// opened on the same process: its input_accepted, then main's join.
+					const turn = head && this.nativeStart(head.parent);
+					if (
+						sent &&
+						turn &&
+						!taken &&
+						open?.runId === head.parent &&
+						!this.untransmitted(turn.send) &&
+						!this.unlaunchedTries.has(turn.send.token) &&
+						!turn.ended &&
+						!turn.covered &&
+						turn.label === sent.label &&
+						!this.untransmitted(sent.send) &&
+						!sent.notConsumed &&
+						!sent.covered &&
+						!sent.ended &&
+						sent.transportRank !== 1 &&
+						sent.transportRank !== 2 &&
+						sent.label === this.label &&
+						!this.unlaunchedTries.has(sent.send.token)
+					) {
+						this.mainSteers.shift();
+						// A held steer's run.dispatched still waiting is folded first: the runner had it.
+						const dispatched = this.dispatchFirst(
+							(n) => n.token === sent.send.token,
+						);
+						const accepted: LedgerCommand = {
+							verb: "observe",
+							observation: {
+								tag: "Answer",
+								token: sent.send.token,
+								kind: "input_accepted",
+							},
+						};
+						this.commit.push(
+							...(dispatched ? [accepted] : []),
+							emit({
+								tag: "Main",
+								eventId: `main:${this.serial++}`,
+								kind: "run_started",
+								runId: head.parent,
+								inputId: head.inputId,
+								requestedRunId: head.runId,
+							}),
+						);
+						return dispatched
+							? { verb: "observe", observation: dispatched }
+							: accepted;
+					}
+					const steer =
+						head && (open?.runId !== head.parent || taken)
+							? this.mainSteers.shift()
+							: undefined;
 					if (steer && !open)
 						this.mainRun = {
 							runId: steer.runId,
@@ -4398,31 +4480,9 @@ export class FakeProvider {
 											? ({ outcome: "interrupted", code: "abandoned" } as const)
 											: ({ outcome: "interrupted" } as const);
 					if (!terminal) continue;
-					// 3.9 (CONTRACT.md 978-983): a joined steer the Run's end leaves unconsumed, not declined or failed,
-					// is a Run of its own and main's open Run; its run.started was read. Nearest reading at any end.
-					// A steer main issued but nothing ever sent is unconsumed too, unless swept (3.4); case (d), 989-991.
-					const outlived = this.joinedSteers.find((steer) => {
-						if (steer.parent !== open.runId) return false;
-						const sent = [...this.sends.values()].filter(
-							({ send }) =>
-								send.effect.kind === "steer" &&
-								send.effect.inputId === steer.inputId &&
-								send.effect.runId === steer.parent,
-						);
-						return sent.length === 0
-							? !this.swept.has(`${steer.inputId}\u0000steer`)
-							: sent.some(
-									({ accepted, ended, notConsumed, transportRank }) =>
-										!accepted && !ended && !notConsumed && transportRank !== 2,
-								);
-					});
-					this.mainRun = outlived && {
-						runId: outlived.runId,
-						inputId: outlived.inputId,
-						issue: outlived.issue,
-						started: true,
-						stopped: false,
-					};
+					// J1, J4 (AMENDMENT-2026-11-16): a steer still pending at its parent's end is already a Run
+					// of its own; main starts it next (case 1).
+					this.mainRun = undefined;
 					// 3113-3117: after an abandonment main claims a next start, then the abandoned runner retires.
 					if (terminal.code === "abandoned" && native) {
 						const runner = runnerOf(native.label);

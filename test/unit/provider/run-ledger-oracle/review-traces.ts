@@ -108,6 +108,7 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 		run(d) {
 			// HL-K R1 finding 1, art-hlk2r/run.log:7328-7329. Quarantine was deleted by 5.1.
 			const a = running(d);
+			const runA = d.view().active?.runId;
 			admit(d, "B");
 			const b = d.latest("steer");
 			observe(d, b, {
@@ -118,14 +119,18 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 			expect(completed.ended).toMatchObject([
 				{ outcome: "completed", reason: { tag: "completed" } },
 			]);
-			// D59, L6 (CONTRACT.md 777-783): B's work is main's until main's terminal ends A's run; then a
-			// Run now commit bounds it by the ledger stop deadline.
+			// J1, J4 (AMENDMENT-2026-11-16): A's result did not take B, so B is a Run of its own; main's
+			// late join names the Ended A and starts it. Run now stops it, and its work is main's until
+			// main's terminal for B's run, so no ledger stop deadline arms (D59, L6, CONTRACT.md 777-783).
 			main(d, 2);
 			admit(d, "C", true);
+			const own = d.view().active;
+			expect(own).toMatchObject({ tag: "Interrupting", by: "run_now" });
+			expect(own?.runId).not.toBe(runA);
 			expect(starts(d, "C")).toHaveLength(0);
-			fire(d);
+			expect(d.alarmAt).toBeUndefined();
 			// REDESIGN-7 deleted close and D59 kill_and_respawn: retirement is main's act, seen as
-			// process_lost (3.13). Its successor is main's claim after the terminal (D60).
+			// process_lost (3.13); it ends B's Run with its Stop's outcome. Its successor is main's claim after the terminal (D60).
 			const released = step(d, {
 				verb: "settle",
 				settlement: {
@@ -134,7 +139,9 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 					retiredAt: d.now,
 				},
 			});
-			expect(released.ended).toEqual([]);
+			expect(released.ended).toMatchObject([
+				{ runId: own?.runId, reason: { tag: "interrupted" } },
+			]);
 			main(d, 2);
 			main(d, 0);
 			expect(starts(d, "C")).toHaveLength(1);

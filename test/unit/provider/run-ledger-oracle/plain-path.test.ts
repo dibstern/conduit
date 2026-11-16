@@ -30,6 +30,7 @@ import {
 	complete,
 	Driver,
 	fire,
+	join,
 	main,
 	noLifecycleChange,
 	observe,
@@ -1643,15 +1644,17 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 			const runId = `main-A-${d.next()}`;
 			main(d, { kind: "run_requested", runId, inputId: "A", direct: false });
 			admit(d, "B", "steer");
+			// J1 (AMENDMENT-2026-11-16): the steer's run.requested reserves its own pending Run.
+			const steerRunId = `main-B-${d.next()}`;
 			main(d, {
 				kind: "run_requested",
-				runId: `main-B-${d.next()}`,
+				runId: steerRunId,
 				inputId: "B",
 				direct: false,
 			});
 			observe(d, "hold-B-1" as SendToken, {
 				kind: "run_dispatched",
-				runId,
+				runId: steerRunId,
 				runnerId: "r1",
 				commandId: "B",
 				transmission: 1,
@@ -1668,30 +1671,32 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
-	it("a steer admitted before its Run launched joins it at its send, so with that steer held and unsealed a start's release leaves the Run launched and retirement ends it (3.9, 3.6 D50, D52)", () => {
+	it("a steer admitted before its Run launched is its own pending Run, so a start's release unlaunches only the start's Run and retirement ends the steer's (J1, 3.6 D50, D52)", () => {
 		// Long seed 82103300 (codex), failure mode 132: the steer's run.requested came after its Run
 		// launched but its admission before, so the ledger dropped it; the start's release then
-		// unlaunched a Run whose steer's hold had no seal, and retirement left it unended. A steer sent
-		// while a Run is active joins it (CONTRACT.md 984, a gap on when), and unlaunch waits until
-		// every start and steer of the execution is sealed (645-654, 845-846).
+		// unlaunched a Run whose steer's hold had no seal, and retirement left it unended. Since
+		// AMENDMENT-2026-11-16 J1 the steer is its own pending Run until its host joins it, so the
+		// release unlaunches A and retirement ends the Run the steer possibly reached (2.3).
 		agreed("codex", (d) => {
 			admit(d, "A");
 			admit(d, "B", "steer");
 			const runId = `main-A-${d.next()}`;
-			for (const [inputId, mainRunId] of [
+			const runs = [
 				["A", runId],
 				["B", `main-B-${d.next()}`],
-			] as const)
+			] as const;
+			for (const [inputId, mainRunId] of runs)
 				main(d, {
 					kind: "run_requested",
 					runId: mainRunId,
 					inputId,
 					direct: false,
 				});
-			for (const inputId of ["A", "B"])
+			// J1 (AMENDMENT-2026-11-16): B's steer is its own pending Run, dispatched under its own run.
+			for (const [inputId, mainRunId] of runs)
 				observe(d, `hold-${inputId}-1` as SendToken, {
 					kind: "run_dispatched",
-					runId,
+					runId: mainRunId,
 					runnerId: "r1",
 					commandId: inputId,
 					transmission: 1,
@@ -1701,38 +1706,42 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 				kind: "run_released",
 				reason: { tag: "Refused", why: "exiting" },
 			});
-			expect(d.view().active).toMatchObject({ runId: a.runId });
+			expect(d.view().active).toMatchObject({ runId: a.runId, tag: "Queued" });
 			expect(lose(d, "r1").ended).toMatchObject([
-				{ runId: a.runId, reason: { tag: "process_lost" } },
+				{ runId: runs[1][1], reason: { tag: "process_lost" } },
 			]);
+			expect(d.view().active).toMatchObject({ runId: a.runId, tag: "Queued" });
 		});
 	});
 
-	it("a steer main sends into its unlaunched Run joins it, so retirement after the steer's hold ends that Run (3.9, 3.6 D50)", () => {
+	it("a steer main sends while its Run is unlaunched is its own pending Run, so retirement after the steer's hold ends the steer's Run (J1, 3.6 D50)", () => {
 		// Long seed 82103301 (claude), failure mode 132: a release unlaunched the Run, main still read
 		// it open and sent a steer into it, and the ledger dropped the steer's run.requested, so
-		// retirement left the Run the steer possibly reached unended (CONTRACT.md 984, 689-690).
+		// retirement left the Run the steer possibly reached unended (CONTRACT.md 689-690). Since
+		// AMENDMENT-2026-11-16 J1 that Run is the steer's own.
 		agreed("claude", (d) => {
 			const a = begin(d);
 			observe(d, a.token, { kind: "run_released", reason: "NotSent" });
 			expect(d.view().active).toMatchObject({ tag: "Queued" });
 			admit(d, "B", "steer");
+			const steerRunId = `main-B-${d.next()}`;
 			main(d, {
 				kind: "run_requested",
-				runId: `main-B-${d.next()}`,
+				runId: steerRunId,
 				inputId: "B",
 				direct: false,
 			});
 			observe(d, "hold-B-1" as SendToken, {
 				kind: "run_dispatched",
-				runId: a.runId,
+				runId: steerRunId,
 				runnerId: "r1",
 				commandId: "B",
 				transmission: 1,
 			});
 			expect(lose(d, "r1").ended).toMatchObject([
-				{ runId: a.runId, reason: { tag: "process_lost" } },
+				{ runId: steerRunId, reason: { tag: "process_lost" } },
 			]);
+			expect(d.view().active).toMatchObject({ runId: a.runId, tag: "Queued" });
 		});
 	});
 
@@ -2023,7 +2032,7 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 			});
 	});
 
-	it("(32.2.6) a steer the unlaunched Run issued is tried again in the relaunched execution after its start (3.9, L2 case 2, CONTRACT.md 680-681)", () => {
+	it("(32.2.6) a pending steer a release unlaunched is tried again in its own Run and joins the relaunched Run at its host's join (J1, J2, L2, CONTRACT.md 680-681)", () => {
 		agreed("claude", (d) => {
 			const a = begin(d);
 			const b = begin(d, "B", "steer");
@@ -2031,7 +2040,8 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 			for (const token of [a.token, b.token])
 				observe(d, token, { kind: "run_released", reason: "NotSent" });
 			expect(d.view().active).toMatchObject({ runId: a.runId, tag: "Queued" });
-			expect(visibleInput(d, "B")?.state).toEqual({ tag: "Queued" });
+			// J1 (AMENDMENT-2026-11-16): B is its own pending Run, not in A's view.
+			expect(visibleInput(d, "B")).toBeUndefined();
 			const relaunched = (input: string, runId: string, commandId: string) => {
 				const token = `hold-${input}-relaunch` as SendToken;
 				observe(d, token, {
@@ -2049,9 +2059,11 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 				runId: a.runId,
 				tag: "Starting",
 			});
-			expect(visibleInput(d, "B")?.state).toEqual({ tag: "Dispatching" });
+			expect(visibleInput(d, "B")).toBeUndefined();
 			observe(d, a2, { kind: "started" });
 			observe(d, a2, { kind: "input_accepted", nativeMessageId: "native-A" });
+			join(d, a.runId, "B", b.runId);
+			expect(visibleInput(d, "B")?.state).toEqual({ tag: "Dispatching" });
 			observe(d, b2, { kind: "input_accepted", nativeMessageId: "native-B" });
 			expect(visibleInput(d, "B")?.state).toEqual({
 				tag: "Accepted",
@@ -2407,10 +2419,10 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 		for (const trace of fixed) agreed(provider, trace.run);
 	});
 
-	it("a sibling steer's unsettled delivery_unknown blocks its input's automatic resend until a probe settles it (32.2.6 AC3, 3.5)", () => {
+	it("a sibling start's unsettled delivery_unknown blocks its input's automatic resend until a probe settles it (32.2.6 AC3, 3.5)", () => {
 		agreed("opencode", (d) => {
-			running(d);
-			const b1 = begin(d, "B", "steer");
+			// AMENDMENT-2026-11-16 J3: OpenCode steering is queue, so the siblings are B's starts.
+			const b1 = begin(d, "B");
 			observe(d, b1.token, {
 				kind: "effect_outcome",
 				outcome: { tag: "delivery_unknown" },
@@ -2479,7 +2491,11 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 			const a = running(d);
 			const b = begin(d, "B", "steer");
 			complete(d, a.token);
-			expect(d.view().active).toBeUndefined();
+			// J4 (AMENDMENT-2026-11-16): the steer is already its own Run when A ends.
+			expect(d.view().active).toMatchObject({
+				runId: b.runId,
+				tag: "Starting",
+			});
 			main(d, {
 				kind: "run_started",
 				runId: b.runId,

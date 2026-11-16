@@ -278,6 +278,23 @@ export function begin(
 	return request(d, inputId);
 }
 
+/**
+ * J2 (AMENDMENT-2026-11-16): a pending steer's host names it in the open Run, main's run.started under the
+ * open run's runId and the steer's own requested run.
+ */
+export const join = (
+	d: Driver,
+	openRunId: string,
+	inputId: string,
+	steerRunId: string,
+) =>
+	main(d, {
+		kind: "run_started",
+		runId: openRunId,
+		inputId,
+		requestedRunId: steerRunId,
+	});
+
 export function running(d: Driver, inputId = "A") {
 	const send = begin(d, inputId);
 	observe(d, send.token, { kind: "started" });
@@ -390,19 +407,20 @@ export const scenarios: readonly OracleScenario[] = [
 		title: "[2C] an owned idle boundary cannot accept a delivered steer",
 		provider: "opencode",
 		run(d) {
-			running(d);
-			const b = begin(d, "B", "steer");
-			observe(d, b.token, {
+			// AMENDMENT-2026-11-16 J1: OpenCode steers by queue, so a steer into A has no join event and is
+			// its own pending Run; the case is A's start.
+			const a = begin(d);
+			observe(d, a.token, {
 				kind: "effect_outcome",
 				outcome: { tag: "succeeded" },
 			});
-			expect(visibleInput(d, "B")?.state).toEqual({
+			expect(visibleInput(d, "A")?.state).toEqual({
 				tag: "Delivered",
 				certainty: "sent",
 			});
-			complete(d, b.token);
-			expect(visibleInput(d, "B")?.state.tag).not.toBe("Accepted");
-			expect(transmissions(d, "B")).toHaveLength(1);
+			complete(d, a.token);
+			expect(visibleInput(d, "A")?.state.tag).not.toBe("Accepted");
+			expect(transmissions(d, "A")).toHaveLength(1);
 		},
 	},
 	{
@@ -583,42 +601,43 @@ export const scenarios: readonly OracleScenario[] = [
 			"[R3] acceptance of one transmission retains only that transmission, not a failed sibling",
 		provider: "opencode",
 		run(d) {
-			running(d);
-			const b1 = begin(d, "B", "steer");
-			observe(d, b1.token, {
+			// AMENDMENT-2026-11-16 J1: an OpenCode steer into A is its own pending Run (no join event), so
+			// the case is A's start; its turn started, so its Run is not unlaunched (D50).
+			const a1 = begin(d);
+			observe(d, a1.token, { kind: "started" });
+			observe(d, a1.token, {
 				kind: "effect_outcome",
 				outcome: { tag: "retryable", retryAt: d.now + 1 },
 			});
-			// 3.6 (CONTRACT.md 692-698): main tries B again, a new transmission under its own runId (3.4).
-			const b2 = request(d, "B");
-			expect(b2.token).not.toBe(b1.token);
-			observe(d, b1.token, {
+			// 3.6 (CONTRACT.md 692-698): main tries A again, a new transmission under its own runId (3.4).
+			const a2 = request(d, "A");
+			expect(a2.token).not.toBe(a1.token);
+			observe(d, a1.token, {
 				kind: "input_accepted",
-				nativeMessageId: "native-B",
+				nativeMessageId: "native-A",
 			});
-			// 3.5 (CONTRACT.md 601-602): b2's retryable outcome with consumption None ends b2's work;
-			// b1's acceptance keeps only b1's, and the input stays Accepted (594-595).
-			observe(d, b2.token, {
+			// 3.5 (CONTRACT.md 601-602): a2's retryable outcome with consumption None ends a2's work;
+			// a1's acceptance keeps only a1's, and the input stays Accepted (594-595).
+			observe(d, a2.token, {
 				kind: "effect_outcome",
 				outcome: { tag: "retryable", retryAt: d.now + 1 },
 			});
-			expect(visibleInput(d, "B")?.state).toEqual({
+			expect(visibleInput(d, "A")?.state).toEqual({
 				tag: "Accepted",
-				nativeMessageId: "native-B",
+				nativeMessageId: "native-A",
 			});
-			expect(transmissions(d, "B")).toHaveLength(1);
+			expect(transmissions(d, "A")).toHaveLength(1);
 			const stopped = stop(d, d.now + 1_000);
 			expect(d.view().live).toContainEqual(
 				expect.objectContaining({
-					effect: expect.objectContaining({ kind: "steer", inputId: "B" }),
+					effect: expect.objectContaining({ kind: "start", inputId: "A" }),
 				}),
 			);
 			const probe = stopped.issued.find(
 				({ effect }) => effect.kind === "probe",
 			);
 			assert(probe, "an OpenCode Stop probes the native session (5.1)");
-			// 9 (CONTRACT.md 3101-3102): the idle covers the confirmed sends, A's and b1; nothing of B is
-			// retained past it.
+			// 9 (CONTRACT.md 3101-3102): the idle covers the confirmed a1; nothing of A is retained past it.
 			observe(d, tokenOf(probe), {
 				kind: "probe_result",
 				finding: { tag: "native_idle" },
@@ -633,6 +652,8 @@ export const scenarios: readonly OracleScenario[] = [
 		run(d) {
 			const a = running(d);
 			const b = begin(d, "B", "steer");
+			// AMENDMENT-2026-11-16 J6: A's result names B, so the runner joins B before A's terminal.
+			join(d, a.runId, "B", b.runId);
 			observe(d, b.token, {
 				kind: "runner_reply",
 				outcome: { tag: "succeeded" },
@@ -666,20 +687,20 @@ export const scenarios: readonly OracleScenario[] = [
 		title: "[step1] uncertain intake does not block durable later admission",
 		provider: "opencode",
 		run(d) {
-			running(d);
-			const b = begin(d, "B", "steer");
-			observe(d, b.token, {
+			// AMENDMENT-2026-11-16 J1: an OpenCode steer has no join event, so the case is A's start.
+			const a = begin(d);
+			observe(d, a.token, {
 				kind: "effect_outcome",
 				outcome: { tag: "delivery_unknown" },
 			});
 			admit(d, "C");
 			// D58: a queued input waits in main's inbox until its run.requested.
 			expect(visibleInput(d, "C")).toBeUndefined();
-			expect(visibleInput(d, "B")?.state).toEqual({
+			expect(visibleInput(d, "A")?.state).toEqual({
 				tag: "Delivered",
 				certainty: "unknown",
 			});
-			expect(transmissions(d, "B")).toHaveLength(1);
+			expect(transmissions(d, "A")).toHaveLength(1);
 		},
 	},
 	{
@@ -882,8 +903,10 @@ export const scenarios: readonly OracleScenario[] = [
 		title: "[2C] Cursor steer delivery acknowledgement is not a Run result",
 		provider: "cursor",
 		run(d) {
-			running(d);
+			const a = running(d);
 			const b = begin(d, "B", "steer");
+			// AMENDMENT-2026-11-16 J3: complete_delivered is Cursor's join.
+			join(d, a.runId, "B", b.runId);
 			const delivered = observe(d, b.token, {
 				kind: "runner_reply",
 				outcome: { tag: "succeeded" },
@@ -918,16 +941,21 @@ export const scenarios: readonly OracleScenario[] = [
 		title: "[step1] a declined Cursor steer waits as Queued without pausing",
 		provider: "cursor",
 		run(d) {
-			running(d);
+			const a = running(d);
 			const b = begin(d, "B", "steer");
+			// AMENDMENT-2026-11-16 J7: revert_to_followup declines B, which never joined A: it waits as its
+			// own Run behind A and A runs on.
 			const declined = observe(d, b.token, {
 				kind: "input_declined",
 				reason: "steer-declined",
 			});
 			expect(declined.ended).toEqual([]);
 			expect(d.view()).toMatchObject({
-				active: { tag: "Running" },
+				active: { runId: a.runId, tag: "Running" },
 			});
+			expect(visibleInput(d, "B")).toBeUndefined();
+			expect(complete(d, a.token)).toMatchObject([{ runId: a.runId }]);
+			expect(d.view().active?.runId).toBe(b.runId);
 			expect(visibleInput(d, "B")?.state).toEqual({ tag: "Queued" });
 		},
 	},
@@ -1835,9 +1863,21 @@ export const scenarios: readonly OracleScenario[] = [
 			const a = running(d);
 			const b = begin(d, "B", "steer");
 			// 3.9 (CONTRACT.md 973-977): the refusal fails B, final, its text back in the composer.
-			observe(d, b.token, {
+			// AMENDMENT-2026-11-16 J1, failure mode 85: B is its own pending Run, which ends failed; A runs on.
+			const refused = observe(d, b.token, {
 				kind: "effect_outcome",
 				outcome: { tag: "permanent", code: "HTTP400" },
+			});
+			expect(refused.ended).toMatchObject([
+				{
+					runId: b.runId,
+					outcome: "error",
+					reason: { tag: "refused", code: "HTTP400" },
+				},
+			]);
+			expect(d.view().active).toMatchObject({
+				runId: a.runId,
+				tag: "Running",
 			});
 			complete(d, a.token);
 		},
@@ -1854,6 +1894,227 @@ export const scenarios: readonly OracleScenario[] = [
 				state: "cancelled",
 				commandId: "A",
 			});
+		},
+	},
+	// AMENDMENT-2026-11-16 (vkira) J1-J5: a dispatched steer is its own pending Run until its host's join.
+	{
+		id: "VK-84",
+		title:
+			"[J1, J4] a Claude steer A's result does not name is its own Run, and the session stays busy",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			const b = begin(d, "B", "steer");
+			observe(d, b.token, {
+				kind: "runner_reply",
+				outcome: { tag: "succeeded" },
+			});
+			expect(visibleInput(d, "B")).toBeUndefined();
+			const first = observe(d, a.token, {
+				kind: "result",
+				outcome: "completed",
+			});
+			expect(first.ended).toMatchObject([
+				{ runId: a.runId, outcome: "completed" },
+			]);
+			expect(d.view()).toMatchObject({
+				anythingMayAct: true,
+				active: { runId: b.runId },
+			});
+			// J4: its host's run.started under its own run starts it; its result ends its own Run.
+			main(d, {
+				kind: "run_started",
+				runId: b.runId,
+				inputId: "B",
+				requestedRunId: b.runId,
+			});
+			expect(d.view().active).toMatchObject({
+				runId: b.runId,
+				tag: "Running",
+			});
+			expect(complete(d, b.token)).toMatchObject([
+				{ runId: b.runId, outcome: "completed" },
+			]);
+		},
+	},
+	{
+		id: "VK-85",
+		title:
+			"[J5] main's terminal for a pending steer's own run ends that Run with main's code, not A",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			const b = begin(d, "B", "steer");
+			const failed = main(d, {
+				kind: "run_terminal",
+				runId: b.runId,
+				outcome: "error",
+				code: "provider_send_attempts_exhausted",
+			});
+			expect(failed.ended).toMatchObject([
+				{
+					runId: b.runId,
+					outcome: "error",
+					reason: { code: "provider_send_attempts_exhausted" },
+				},
+			]);
+			expect(d.view().active).toMatchObject({
+				runId: a.runId,
+				tag: "Running",
+			});
+		},
+	},
+	{
+		id: "VK-86",
+		title:
+			"[J5, J6.3] a Stop asks A only; a steer still queued is not failed and runs as its own Run",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			const b = begin(d, "B", "steer");
+			observe(d, b.token, {
+				kind: "runner_reply",
+				outcome: { tag: "succeeded" },
+			});
+			stop(d);
+			expect(d.latest("interrupt").effect).toMatchObject({
+				runIds: [a.runId],
+			});
+			const stopped = observe(d, a.token, {
+				kind: "result",
+				outcome: "interrupted",
+			});
+			expect(stopped.ended).toMatchObject([
+				{ runId: a.runId, outcome: "interrupted" },
+			]);
+			expect(d.view().active?.runId).toBe(b.runId);
+			expect(visibleInput(d, "B")?.state.tag).not.toBe("Failed");
+		},
+	},
+	{
+		id: "VK-87",
+		title:
+			"[J5, 2.3] process loss covers a pending steer; its later join and result change no Run",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			const b = begin(d, "B", "steer");
+			const lost = step(d, {
+				verb: "settle",
+				settlement: { kind: "process_lost", runnerId: "r1", retiredAt: d.now },
+			});
+			expect(lost.ended.map(({ runId }) => runId).sort()).toEqual(
+				[a.runId, b.runId].sort(),
+			);
+			noLifecycleChange(d, {
+				verb: "observe",
+				observation: {
+					tag: "Main",
+					eventId: `main-${d.next()}`,
+					kind: "run_started",
+					runId: a.runId,
+					inputId: "B",
+					requestedRunId: b.runId,
+				},
+			});
+			const late = observe(d, b.token, {
+				kind: "result",
+				outcome: "completed",
+			});
+			expect(late.ended).toEqual([]);
+		},
+	},
+	{
+		id: "VK-88",
+		title:
+			"[J2] a join naming A after A ended starts the steer's pending Run, never a second Run",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			const b = begin(d, "B", "steer");
+			complete(d, a.token);
+			expect(d.view().active).toMatchObject({
+				runId: b.runId,
+				tag: "Starting",
+			});
+			join(d, a.runId, "B", b.runId);
+			expect(d.view().active).toMatchObject({
+				runId: b.runId,
+				tag: "Running",
+			});
+			expect(complete(d, b.token)).toMatchObject([{ runId: b.runId }]);
+			expect(d.view().active).toBeUndefined();
+		},
+	},
+	{
+		id: "VK-89",
+		title:
+			"[J2] a join for a steer whose pending Run already ended changes nothing",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			const b = begin(d, "B", "steer");
+			main(d, {
+				kind: "run_terminal",
+				runId: b.runId,
+				outcome: "error",
+				code: "provider_send_attempts_exhausted",
+			});
+			noLifecycleChange(d, {
+				verb: "observe",
+				observation: {
+					tag: "Main",
+					eventId: `main-${d.next()}`,
+					kind: "run_started",
+					runId: a.runId,
+					inputId: "B",
+					requestedRunId: b.runId,
+				},
+			});
+			expect(visibleInput(d, "B")).toBeUndefined();
+		},
+	},
+	{
+		id: "VK-93",
+		title:
+			"[J2, J4] two steers pending behind A: the first joins A; once A ends the second is the active Run",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			const b = begin(d, "B", "steer");
+			const c = begin(d, "C", "steer");
+			join(d, a.runId, "B", b.runId);
+			expect(visibleInput(d, "B")).toBeDefined();
+			expect(visibleInput(d, "C")).toBeUndefined();
+			expect(complete(d, a.token)).toMatchObject([{ runId: a.runId }]);
+			expect(d.view().active?.runId).toBe(c.runId);
+			expect(visibleInput(d, "B")).toBeUndefined();
+			// J2: no step undoes a join; B's late own terminal is B's alone.
+			const late = main(d, {
+				kind: "run_terminal",
+				runId: b.runId,
+				outcome: "completed",
+			});
+			expect(late.ended).toEqual([]);
+			expect(d.view().active?.runId).toBe(c.runId);
+		},
+	},
+	{
+		id: "VK-94",
+		title:
+			"[J4, 3.9 case (d)] a steer sent while a pending steer is the active Run joins it only on its own join",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			const b = begin(d, "B", "steer");
+			complete(d, a.token);
+			join(d, a.runId, "B", b.runId);
+			const c = begin(d, "C", "steer");
+			expect(d.view().active?.runId).toBe(b.runId);
+			expect(visibleInput(d, "C")).toBeUndefined();
+			join(d, b.runId, "C", c.runId);
+			expect(visibleInput(d, "C")).toBeDefined();
+			expect(d.latest("steer").effect).toMatchObject({ inputId: "C" });
 		},
 	},
 ];

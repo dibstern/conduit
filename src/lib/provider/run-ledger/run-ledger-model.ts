@@ -496,6 +496,8 @@ export interface InputPlacement {
 	readonly start: boolean;
 	/** Main handed it off as a steer (`input.sent`); declined, `steerDeclined` returns it (3.9). */
 	readonly steer: boolean;
+	/** Its Run has not ended: the open Run, or its own pending Run (AMENDMENT-2026-11-16 J1). */
+	readonly runOpen: boolean;
 	/** D53: `sent` when reached, or possibly reached and not unconsumed; `failed` is final (3.9). */
 	readonly place: "sent" | "failed" | "unplaced";
 	/** 4.8: its transmissions in its reservation, but `not_sent` ones and the claim's own. */

@@ -1,10 +1,7 @@
 import { Effect, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { AttachmentRefSchema } from "../../contracts/attachment-ref.js";
-import {
-	inputPlacement,
-	viewLedger,
-} from "../../provider/run-ledger/run-ledger-decider.js";
+import { inputPlacement } from "../../provider/run-ledger/run-ledger-decider.js";
 import { type CanonicalEvent, canonicalEvent } from "../events.js";
 import { loadLedger } from "./run-ledger-arm.js";
 
@@ -61,8 +58,7 @@ export const requeueFailedSteers = <E>(
 				const ledger = yield* loadLedger(row.session_id).pipe(
 					Effect.provideService(SqlClient.SqlClient, sql),
 				);
-				const place =
-					ledger && inputPlacement(ledger.state, row.input_id)?.place;
+				const placement = ledger && inputPlacement(ledger.state, row.input_id);
 				const requeued = canonicalEvent("input.requeued", row.session_id, {
 					sessionId: row.session_id,
 					inputId: row.input_id,
@@ -70,16 +66,15 @@ export const requeueFailedSteers = <E>(
 					reason: row.error_code === "steer-declined" ? "declined" : "failed",
 				});
 				// Row 206 (CONTRACT.md 217) at any end of its Run (970-972): a steer the view reads possibly
-				// reached is placed, never re-sent. While its Run is active main's requeue stays (3.6, gap).
+				// reached is placed, never re-sent. While its Run is open (the active Run, or its own pending Run,
+				// AMENDMENT-2026-11-16 J1) main's requeue stays (3.6, gap).
 				// A decline never reached the agent: `steerDeclined`'s requeue returns it (973), though a
 				// direct send's decline reaches the view as no outcome, so possibly reached (gap).
 				if (
 					ledger &&
-					place === "sent" &&
-					row.error_code !== "steer-declined" &&
-					!viewLedger(ledger.state).active?.inputs.some(
-						(input) => input.inputId === row.input_id,
-					)
+					placement?.place === "sent" &&
+					!placement.runOpen &&
+					row.error_code !== "steer-declined"
 				) {
 					const provider = { provider: ledger.provider };
 					const meta = {
@@ -136,7 +131,7 @@ export const requeueFailedSteers = <E>(
 					];
 				}
 				// Row 207 (CONTRACT.md 218): the requeue and main's Cancel event in the same batch.
-				return place === "failed" && options?.cancelFinal
+				return placement?.place === "failed" && options?.cancelFinal
 					? [
 							requeued,
 							canonicalEvent("input.cancelled", row.session_id, {
