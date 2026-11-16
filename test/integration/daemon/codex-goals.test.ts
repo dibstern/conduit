@@ -630,11 +630,13 @@ describe("Codex goals through the daemon and detached runner", () => {
 					at: 0,
 					message: { id: 900, result: { turnId: successor } },
 				},
-				{
-					dir: "in",
+				// Codex echoes a steer as item/started then item/completed (steer.jsonl); the
+				// start is the join.
+				...(["item/started", "item/completed"] as const).map((method) => ({
+					dir: "in" as const,
 					at: 0,
 					message: {
-						method: "item/completed",
+						method,
 						params: {
 							threadId: second["threadId"],
 							turnId: successor,
@@ -646,7 +648,7 @@ describe("Codex goals through the daemon and detached runner", () => {
 							},
 						},
 					},
-				},
+				})),
 			);
 			writeTrace(trace);
 			const sending = goalSend(browser, id);

@@ -130,14 +130,6 @@ interface ActiveTurn {
 	readonly sink: EventSink;
 	/** The runs whose sends this turn carries: its start's and its steers'. */
 	readonly runIds: Set<string>;
-	/**
-	 * Steers sent into this turn that Codex has not echoed, by input id, with their turn/steer
-	 * reply's turnId once read. The echo is the join (J2, J3 AMENDMENT-2026-11-16).
-	 */
-	readonly steers: Map<
-		string,
-		{ readonly input: SessionTurn; turnId?: string }
-	>;
 	readonly interactions: CodexInteractions;
 	readonly started: Deferred.Deferred<string | undefined>;
 	readonly cancelled: Deferred.Deferred<void>;
@@ -165,6 +157,21 @@ interface CodexSession {
 	readonly rateLimits: Map<string, typeof RateLimitSnapshotSchema.Type>;
 	subagents?: CodexSubagents;
 	tokenUsageTotal?: typeof TokenUsageBreakdownSchema.Type | undefined;
+	/**
+	 * Steers Codex accepted and has not echoed, by input id: the turn each was sent into, its sink,
+	 * held until the echo, and, once read, its turn/steer reply's turnId. They outlive that turn:
+	 * the echo is the join while it is open, and after it ends the start of the steer's own Run
+	 * (J2, J3, J4 AMENDMENT-2026-11-16).
+	 */
+	readonly steers: Map<
+		string,
+		{
+			readonly input: SessionTurn;
+			readonly sink: EventSink;
+			readonly host: ActiveTurn;
+			turnId?: string;
+		}
+	>;
 	/** The last send and its sink: a turn Codex starts while idle runs on them. */
 	last?: { readonly input: SessionTurn; readonly sink: EventSink } | undefined;
 	/** The goal as the last turn left it; main's copy is the send's, not the wake's. */
@@ -403,6 +410,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 						? { continuationInputId: identity.continuationInputId }
 						: {}),
 					rateLimits: new Map(),
+					steers: new Map(),
 					terminals: {
 						lock: yield* Semaphore.make(1),
 						seen: new Map(),
@@ -447,7 +455,6 @@ export class CodexRunnerPayload implements RunnerPayload {
 					tokenUsageBaseline: current.tokenUsageTotal,
 				}),
 				runIds: new Set(input.runId ? [input.runId] : []),
-				steers: new Map(),
 				started: yield* Deferred.make<string | undefined>(),
 				cancelled: yield* Deferred.make<void>(),
 				cancelRequested: false,
@@ -1005,10 +1012,12 @@ export class CodexRunnerPayload implements RunnerPayload {
 							// J2, J3 (AMENDMENT-2026-11-16): Codex's echo of a steer joins it to this open
 							// turn's run. Codex sends each userMessage as item/started and item/completed;
 							// only item/started joins, so one echo consumes one steer. An echo without
-							// clientId joins the oldest steer whose turn/steer reply named its turn and whose
-							// text it repeats: the turn's own input echo, read after that reply, is not a
-							// steer's. Once the turn settles nothing reads its steers, so a later reply or
-							// echo joins nothing (failure modes 90, 91).
+							// clientId joins the oldest steer whose text it repeats and whose turn/steer
+							// reply named its turn: the turn's own input echo, read after that reply, is
+							// not a steer's. A steer whose turn ended unechoed is its own Run (J4): the
+							// later turn that echoes it, by clientId or, in a wake with no input of its
+							// own, by text, starts that Run and ends it; the ended run takes nothing
+							// (failure modes 90, 91).
 							if (
 								decoded.method === "item/started" &&
 								decoded.params.item.type === "userMessage" &&
@@ -1021,15 +1030,29 @@ export class CodexRunnerPayload implements RunnerPayload {
 									.join("");
 								const steer =
 									clientId == null
-										? [...active.steers.values()].find(
+										? [...current.steers.values()].find(
 												(pending) =>
-													pending.turnId === turnId &&
+													(pending.host === active
+														? pending.turnId === turnId
+														: wake !== undefined) &&
 													pending.input.prompt === text,
 											)
-										: active.steers.get(clientId);
+										: current.steers.get(clientId);
 								if (steer) {
 									const { input: steered } = steer;
-									active.steers.delete(steered.inputId);
+									current.steers.delete(steered.inputId);
+									yield* this.sinks.releaseSinkEffect(steer.sink);
+									if (
+										steer.host !== active &&
+										steered.runId &&
+										!active.state.items.runId
+									) {
+										active.state = {
+											...active.state,
+											items: { ...active.state.items, runId: steered.runId },
+										};
+										active.runIds.add(steered.runId);
+									}
 									if (steered.runId && active.state.items.runId)
 										yield* push("run.started", {
 											inputId: steered.inputId,
@@ -1331,7 +1354,10 @@ export class CodexRunnerPayload implements RunnerPayload {
 				if (!claim()) return { ...declined, status: "cancelled" as const };
 				if (input.runId) active.runIds.add(input.runId);
 				// Registered before the request: Codex may echo the steer before its reply is read.
-				active.steers.set(input.inputId, { input });
+				// The steer's sink outlives its reply: a turn Codex starts for it once this one ended
+				// runs on it (J4).
+				this.sinks.retainSink(sink);
+				session.steers.set(input.inputId, { input, sink, host: active });
 				const reply = yield* session.child.client
 					.request(
 						"turn/steer",
@@ -1351,13 +1377,15 @@ export class CodexRunnerPayload implements RunnerPayload {
 					)
 					.pipe(Effect.option);
 				if (Option.isNone(reply)) {
-					active.steers.delete(input.inputId);
+					session.steers.delete(input.inputId);
+					yield* this.sinks.releaseSinkEffect(sink);
 					return declined;
 				}
 				// The reply only places the steer and names its turn for an echo without clientId; the
 				// echo joins it to the run (J2).
-				const pending = active.steers.get(input.inputId);
+				const pending = session.steers.get(input.inputId);
 				if (pending) pending.turnId = reply.value.turnId;
+				session.last = { input, sink };
 				if (!input.continuation)
 					yield* this.emit({
 						type: "place-user-message",

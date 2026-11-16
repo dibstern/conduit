@@ -661,28 +661,32 @@ describe("Codex runner preparation", () => {
 
 	// J2, J3 (AMENDMENT-2026-11-16): Codex's userMessage echo is a steer's join; the turn/steer
 	// reply only places it. An echo without clientId joins on the reply's turnId while the turn is
-	// open. Nothing joins or reaches the closed run after its turn settled (90, 91).
+	// open. Nothing joins or reaches the closed run after its turn settled (90, 91). A steer its
+	// turn ended without echoing is its own Run (J4): the later turn Codex runs it in starts that
+	// Run, under its own run id, and ends it (90). `starts` names the run its run.started names.
 	for (const variant of [
-		{ name: "joins at the echo", readsReply: true, joins: true },
+		{ name: "joins at the echo", readsReply: true, starts: "run" },
 		{
 			name: "joins an echo without clientId on its reply's turn",
 			readsReply: true,
-			joins: true,
+			starts: "run",
 		},
 		{
 			name: "joins no echo of its turn's own input read after its reply",
 			readsReply: true,
-			joins: false,
 		},
 		{
 			name: "stays pending when no echo precedes turn/completed",
 			readsReply: false,
-			joins: false,
 		},
 		{
 			name: "joins nothing from a reply read after the turn settled",
 			readsReply: false,
-			joins: false,
+		},
+		{
+			name: "starts its own Run at a later turn's echo after turn/completed",
+			readsReply: true,
+			starts: "run-steer",
 		},
 	] as const)
 		it.live(`a steer ${variant.name}`, () =>
@@ -697,7 +701,10 @@ describe("Codex runner preparation", () => {
 					message?: {
 						id?: number;
 						method?: string;
-						params?: { item?: Record<string, unknown> };
+						params?: {
+							item?: Record<string, unknown>;
+							turn?: { id?: string };
+						};
 					};
 				}[] = readFileSync(
 					fileURLToPath(
@@ -760,13 +767,42 @@ describe("Codex runner preparation", () => {
 								: variant.name ===
 										"stays pending when no echo precedes turn/completed"
 									? rows.filter((row) => !echoed(row))
-									: rows.flatMap((row, index) =>
-											echoed(row) || index === reply
-												? []
-												: index === completed
-													? [row, { ...rows[reply], at: settledAt + 1 }]
-													: [row],
-										);
+									: variant.name ===
+											"starts its own Run at a later turn's echo after turn/completed"
+										? rows.flatMap((row, index) => {
+												if (echoed(row)) return [];
+												if (index !== completed) return [row];
+												// Codex runs the unechoed steer as a new turn while idle: its start,
+												// the steer's echo and its end, on the new turn's id.
+												const ended =
+													rows[completed]?.message?.params?.turn?.id ?? "";
+												return [
+													row,
+													...rows
+														.filter(
+															(next, index) =>
+																next.message?.method === "turn/started" ||
+																echoed(next) ||
+																index === completed,
+														)
+														.map((next, offset) => ({
+															...JSON.parse(
+																JSON.stringify(next).replaceAll(
+																	ended,
+																	"wake-turn",
+																),
+															),
+															at: settledAt + 1 + offset,
+														})),
+												];
+											})
+										: rows.flatMap((row, index) =>
+												echoed(row) || index === reply
+													? []
+													: index === completed
+														? [row, { ...rows[reply], at: settledAt + 1 }]
+														: [row],
+											);
 				const trace = join(root, "steer.jsonl");
 				writeFileSync(
 					trace,
@@ -791,6 +827,7 @@ describe("Codex runner preparation", () => {
 				const events: ProviderRuntimeEvent[] = [];
 				const started = yield* Deferred.make<void>();
 				const ended = yield* Deferred.make<void>();
+				const ownEnded = yield* Deferred.make<void>();
 				const runner = yield* makeCodexSessionRunner(
 					{
 						workspaceRoot: root,
@@ -808,7 +845,10 @@ describe("Codex runner preparation", () => {
 							if (output.event.type === "run.started")
 								yield* Deferred.succeed(started, undefined);
 							if (output.event.type === "turn.completed")
-								yield* Deferred.succeed(ended, undefined);
+								yield* Deferred.succeed(
+									output.event.runId === "run-steer" ? ownEnded : ended,
+									undefined,
+								);
 							return {};
 						}),
 				);
@@ -868,11 +908,13 @@ describe("Codex runner preparation", () => {
 				});
 				yield* Fiber.join(turn);
 				yield* Deferred.await(ended);
+				// The steer's own Run ends at the terminal of the turn that ran it.
+				if (variant.starts === "run-steer") yield* Deferred.await(ownEnded);
 				expect(joins()).toEqual(
-					variant.joins
+					variant.starts
 						? [
 								expect.objectContaining({
-									runId: "run",
+									runId: variant.starts,
 									data: expect.objectContaining({
 										inputId: "steer",
 										requestedRunId: "run-steer",
