@@ -727,8 +727,9 @@ function reconcile(world: World, step: Step): void {
 				if (ended !== undefined) endRun(world, step, run, ended);
 				continue;
 			}
-			// 3.8 GAP 5: a Run with a main run and no result ends only once main's terminal folded,
-			// unless 2.1 to 2.3 applies, so OpenCode's query_ended and turn.error fold either order.
+			// AMENDMENT-2026-11-16 E1 (replaces 3.8 GAP 5): a Run with a main run and no result ends only
+			// once main's terminal folded, unless 2.1 to 2.3 applies, so OpenCode's query_ended and
+			// turn.error fold either order; a mainEnded start is no member condition 2 counts.
 			const mains = [...world.mainRuns.values()].filter(
 				(main) => main.runId === run.runId,
 			);
@@ -1455,11 +1456,11 @@ function unsolicited(
 			if (wake === undefined) {
 				if (world.provider !== "opencode")
 					return noop("no wake execution on its label (8.3)");
-				return queryEnded(world, label) ? changed : noop();
+				return queryEnded(world, step, label) ? changed : noop();
 			}
 			if (place === "older") wake.older = true;
 			endWork(wake, "own");
-			if (world.provider === "opencode") queryEnded(world, label);
+			if (world.provider === "opencode") queryEnded(world, step, label);
 			return changed;
 		case "interaction_requested":
 			return requestInteraction(world, label, observation);
@@ -1495,17 +1496,30 @@ function unsolicited(
 /**
  * OpenCode's query end ends its label's starts and steers (9). An abort or cancel_request acts on
  * the native session, not the query, so a query end never covers them (CONTRACT.md 334-338, 3101-3106).
+ * AMENDMENT-2026-11-16 E3, E4: nor does it end a start or steer main's terminal left a fence member;
+ * it probes the native session for one unless a probe is outstanding.
  */
-function queryEnded(world: World, label: Label): boolean {
+function queryEnded(world: World, step: Step, label: Label): boolean {
 	let moved = false;
+	let fenced: Send | undefined;
 	for (const send of world.sends)
 		if (send.effect.kind === "start" || send.effect.kind === "steer")
 			for (const tx of send.txs)
-				if (tx.label === label && tx.ended === undefined) {
-					endWork(tx, "evidence");
-					moved = true;
-				}
-	return moved;
+				if (tx.label === label && tx.ended === undefined)
+					if (tx.mainEnded) fenced = send;
+					else {
+						endWork(tx, "evidence");
+						moved = true;
+					}
+	if (
+		fenced === undefined ||
+		world.sends.some(
+			(send) => send.probe?.target.tag === "native_session" && !send.probe.done,
+		)
+	)
+		return moved;
+	probe(world, step, fenced.runId, { tag: "native_session" });
+	return true;
 }
 
 function commandReceipt(
@@ -1749,8 +1763,8 @@ function answer(
 			if (world.provider !== "opencode")
 				// 9: query_ended ends no Claude send's work, only a wake's.
 				return noop();
-			endWork(tx, "evidence");
-			if (tx.label !== null) queryEnded(world, tx.label);
+			if (!tx.mainEnded) endWork(tx, "evidence");
+			if (tx.label !== null) queryEnded(world, step, tx.label);
 			if (live && run !== undefined) run.exec.endEvidence = true;
 			return changed;
 		case "effect_outcome":
@@ -2190,6 +2204,7 @@ function nextMode(world: World): "fresh" | "resume" {
 /** Main's run events (3.4, D60): decide issues no start or steer from one. */
 function mainEvent(
 	world: World,
+	step: Step,
 	observation: Extract<
 		Extract<LedgerCommand, { verb: "observe" }>["observation"],
 		{ tag: "Main" }
@@ -2321,20 +2336,31 @@ function mainEvent(
 			// main's stop_unconfirmed terminal. The Run's end waits for none (CONTRACT.md 788-789, 797-799,
 			// 3101-3106; a reading, reported as a gap). A runner's interrupt-timeout abandonment is its
 			// Run's outcome, not its work's end: its starts and steers stay members until retirement
-			// covers them (3113-3117).
+			// covers them (3113-3117). AMENDMENT-2026-11-16 E2, E4: OpenCode has no runner host, so its
+			// start or steer that may still act (3.5) stays a member too, and a native_session probe can
+			// cover it; the stop's deadline step still ends it (L6).
+			let fenced = false;
 			for (const send of runSends(world, run))
-				for (const tx of send.txs)
-					if (
-						(world.provider === "opencode" &&
+				for (const tx of send.txs) {
+					const work =
+						send.effect.kind === "start" || send.effect.kind === "steer";
+					const opencode =
+						world.provider === "opencode" &&
+						observation.code !== "stop_unconfirmed";
+					if (opencode && work && mayStillAct(world, send, tx)) {
+						tx.mainEnded = true;
+						fenced = true;
+					} else if (
+						(opencode &&
 							(send.effect.kind === "interrupt" ||
 								send.effect.kind === "cancel_request") &&
-							observation.code !== "stop_unconfirmed" &&
 							tx.transport.tag === "Issued") ||
-						(observation.code === "abandoned" &&
-							(send.effect.kind === "start" || send.effect.kind === "steer"))
+						(observation.code === "abandoned" && work)
 					)
 						tx.mainEnded = true;
 					else endWork(tx, "main");
+				}
+			if (fenced) probe(world, step, run.runId, { tag: "native_session" });
 			run.exec.fold.push({
 				seq: world.seq,
 				outcome: observation.outcome,
@@ -2895,7 +2921,7 @@ function apply(world: World, command: LedgerCommand, step: Step): Outcome {
 				case "Answer":
 					return answer(world, step, observation);
 				case "Main":
-					return mainEvent(world, observation);
+					return mainEvent(world, step, observation);
 				case "Unsolicited": {
 					const raisedAt = world.snapshotEntry;
 					const known = world.seen.size;

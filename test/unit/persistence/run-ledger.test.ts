@@ -237,7 +237,9 @@ describe("Run Ledger ledger regressions the arm reaches", () => {
 					const errored = yield* settled;
 					expect(errored.ends).toMatchObject([{ outcome: "error" }]);
 					expect(errored.view?.active).toBeUndefined();
-					expect(errored.row).toEqual(quiescent);
+					// AMENDMENT-2026-11-16 E2: the start stays a fence member, and its native_session
+					// probe's deadline is the session's alarm until a covering idle probe.
+					expect(errored.row).toEqual([{ state: "Open", alarm_at: 31005 }]);
 					yield* project([
 						canonicalEvent(
 							"session.status",

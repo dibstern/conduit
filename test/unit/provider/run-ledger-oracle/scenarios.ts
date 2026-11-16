@@ -2117,6 +2117,230 @@ export const scenarios: readonly OracleScenario[] = [
 			expect(d.latest("steer").effect).toMatchObject({ inputId: "C" });
 		},
 	},
+	// AMENDMENT-2026-11-16 (vkira) E1-E5: OpenCode work outlives main's terminal until a covering probe.
+	{
+		id: "VK-95",
+		title:
+			"[E1, E2, E4] OpenCode terminal first: the Run ends with main's code; its start stays a member until its idle",
+		provider: "opencode",
+		run(d) {
+			const a = running(d);
+			const ended = main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			expect(ended.ended).toMatchObject([
+				{ runId: a.runId, outcome: "error", reason: { code: "TurnError" } },
+			]);
+			expect(ended.issued).toMatchObject([
+				{ effect: { kind: "probe", target: { tag: "native_session" } } },
+			]);
+			expect(d.view()).toMatchObject({ anythingMayAct: true });
+			expect(d.view().active).toBeUndefined();
+			// E3, E4: query_ended ends no mainEnded start, and the outstanding probe is not doubled.
+			const query = observe(d, a.token, { kind: "query_ended" });
+			expect(query.ended).toEqual([]);
+			expect(query.issued).toEqual([]);
+			expect(d.view().anythingMayAct).toBe(true);
+			observe(d, tokenOf(d.latest("probe")), {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().anythingMayAct).toBe(false);
+		},
+	},
+	{
+		id: "VK-96",
+		title:
+			"[E1] OpenCode query_ended first: the start's work ends there and the terminal ends the Run, no probe",
+		provider: "opencode",
+		run(d) {
+			const a = running(d);
+			expect(observe(d, a.token, { kind: "query_ended" }).ended).toEqual([]);
+			const ended = main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			expect(ended.ended).toMatchObject([{ runId: a.runId, outcome: "error" }]);
+			expect(ended.issued).toEqual([]);
+			expect(d.view().anythingMayAct).toBe(false);
+		},
+	},
+	{
+		id: "VK-97",
+		title:
+			"[E2, E3] OpenCode terminal first with an unconfirmed start: idle does not cover it; its recovery probe settles it, never re-sent",
+		provider: "opencode",
+		run(d) {
+			const a = begin(d);
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+			});
+			main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			observe(d, tokenOf(d.latest("probe")), {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().anythingMayAct).toBe(true);
+			// 3.7, D20: the recovery probe reads absent; the idle probe it chains settles the send.
+			fire(d);
+			const recovery = d.latest("probe");
+			expect(recovery.effect).toMatchObject({ target: { tag: "input" } });
+			observe(d, tokenOf(recovery), {
+				kind: "probe_result",
+				finding: { tag: "input_absent" },
+			});
+			const chained = d.latest("probe");
+			expect(chained.effect).toMatchObject({
+				target: { tag: "native_session" },
+			});
+			observe(d, tokenOf(chained), {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().anythingMayAct).toBe(false);
+			expect(
+				d.issued.filter(({ effect }) => effect.kind === "start"),
+			).toHaveLength(1);
+		},
+	},
+	{
+		id: "VK-98",
+		title:
+			"[E3, E5] OpenCode terminal first, then process loss: coverage ends the start's work; a late result changes nothing",
+		provider: "opencode",
+		run(d) {
+			const a = running(d);
+			main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			const lost = step(d, {
+				verb: "settle",
+				settlement: { kind: "process_lost", runnerId: "r1", retiredAt: d.now },
+			});
+			expect(lost.ended).toEqual([]);
+			expect(d.view().anythingMayAct).toBe(false);
+			const late = observe(d, a.token, {
+				kind: "result",
+				outcome: "completed",
+			});
+			expect(late.ended).toEqual([]);
+			expect(late.issued).toEqual([]);
+		},
+	},
+	{
+		id: "VK-99",
+		title:
+			"[E5] OpenCode terminal first, then a late turn start or activity: the fence and alarm hold, the Tombstone stands",
+		provider: "opencode",
+		run(d) {
+			const a = begin(d);
+			main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			const alarm = d.alarmAt;
+			expect(alarm).toBeDefined();
+			for (const evidence of [
+				{ kind: "started" },
+				{ kind: "activity" },
+			] as const) {
+				const late = observe(d, a.token, evidence);
+				expect(late.ended).toEqual([]);
+				expect(d.view()).toMatchObject({ anythingMayAct: true });
+				expect(d.view().active).toBeUndefined();
+				expect(d.alarmAt).toBe(alarm);
+			}
+		},
+	},
+	{
+		id: "VK-100",
+		title:
+			"[E3, E4] OpenCode terminal first and the probe reads busy: the fence holds to the probe's cap; query_ended probes again",
+		provider: "opencode",
+		run(d) {
+			const a = running(d);
+			main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			observe(d, tokenOf(d.latest("probe")), {
+				kind: "probe_result",
+				finding: { tag: "native_busy" },
+			});
+			for (const _ of [1, 2, 3, 4, 5]) fire(d);
+			expect(d.view().anythingMayAct).toBe(true);
+			const query = observe(d, a.token, { kind: "query_ended" });
+			expect(query.issued).toMatchObject([
+				{ effect: { kind: "probe", target: { tag: "native_session" } } },
+			]);
+		},
+	},
+	{
+		id: "VK-101",
+		title:
+			"[E2] a runner host's terminal ends start and steer work at once, as before",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			const b = begin(d, "B", "steer");
+			join(d, a.runId, "B", b.runId);
+			const ended = main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			expect(ended.ended).toMatchObject([{ runId: a.runId }]);
+			expect(ended.issued).toEqual([]);
+			expect(d.view().anythingMayAct).toBe(false);
+		},
+	},
+	{
+		id: "VK-102",
+		title:
+			"[E2, D59, L6] an OpenCode Stop: its abort keeps the fence to the Stop's probe; the deadline step ends all",
+		provider: "opencode",
+		run(d) {
+			const a = running(d);
+			stop(d);
+			const stopProbe = d.latest("probe");
+			main(d, { kind: "run_terminal", runId: a.runId, outcome: "interrupted" });
+			expect(d.view().anythingMayAct).toBe(true);
+			observe(d, tokenOf(stopProbe), {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().anythingMayAct).toBe(false);
+			const b = running(d, "B");
+			stop(d, d.now + 1_000);
+			const deadline = main(d, {
+				kind: "run_terminal",
+				runId: b.runId,
+				outcome: "interrupted",
+				code: "stop_unconfirmed",
+			});
+			expect(deadline.issued).toEqual([]);
+			expect(d.view().anythingMayAct).toBe(false);
+		},
+	},
 ];
 
 export const sourceOnlyCases = [

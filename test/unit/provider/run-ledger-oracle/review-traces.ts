@@ -63,11 +63,12 @@ function admit(d: TraceDriver, inputId: string, runNow = false) {
 
 /**
  * D60: main claims its inbox (0), starts (1), ends (2) or relaunches (3) a run through the fake's own
- * draw, else makes the next move it can; a step with nothing for main to do draws no command.
+ * draw, else makes the next move it can; a step with nothing for main to do draws no command. Variant 7
+ * with an odd input is OpenCode's turn.error: main's error terminal, then its query_ended next.
  */
-export function main(d: TraceDriver, variant: 0 | 1 | 2 | 3) {
+export function main(d: TraceDriver, variant: number, input = 0) {
 	const { command } = d.host.next(
-		{ operation: 28, selection: 0, index: 0, variant, input: 0, advance: 0 },
+		{ operation: 28, selection: 0, index: 0, variant, input, advance: 0 },
 		{ issued: d.issued, view: d.view(), now: d.now, alarmAt: d.alarmAt },
 	);
 	return command.verb === "observe" ? step(d, command) : undefined;
@@ -80,6 +81,26 @@ function running(d: TraceDriver) {
 	observe(d, send, { kind: "started" });
 	observe(d, send, { kind: "input_accepted", nativeMessageId: "native-A" });
 	return send;
+}
+
+/** A's start, issued and not yet confirmed. */
+function unconfirmed(d: TraceDriver) {
+	admit(d, "A");
+	main(d, 1);
+	return d.latest("start");
+}
+
+/**
+ * AMENDMENT-2026-11-16 E1, E2, E4: OpenCode's turn.error terminal folds first and ends A's Run; its start
+ * stays a member, and the native_session probe it issued is returned.
+ */
+function terminalFirst(d: TraceDriver) {
+	expect(main(d, 7, 1)?.ended).toHaveLength(1);
+	return d.latest(
+		"probe",
+		(effect) =>
+			effect.kind === "probe" && effect.target.tag === "native_session",
+	);
 }
 
 function fire(d: TraceDriver, at = d.alarmAt) {
@@ -158,22 +179,22 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 			"[3.4, 3.5, 3.8] an old transport failure cannot rehome a successor's admission or re-arm its deadline",
 		provider: "opencode",
 		run(d) {
-			// HL-K R1 finding 2, art-hlk2r/run.log:7331-7332.
-			running(d);
-			admit(d, "B");
-			const b = d.latest("steer");
-			observe(d, b, {
+			// HL-K R1 finding 2, art-hlk2r/run.log:7331-7332. AMENDMENT-2026-11-16: an OpenCode steer is
+			// its own Run (J1, J3), so the finding is seeded on A's start. A confirmed start, so query_ended
+			// ends its work (9; an unconfirmed one may still run late, 655-662).
+			const a = running(d);
+			observe(d, a, {
 				kind: "effect_outcome",
 				outcome: { tag: "delivery_unknown" },
 			});
-			observe(d, b, { kind: "query_ended" });
+			observe(d, a, { kind: "query_ended" });
 			admit(d, "C", true);
 			const before = d.view();
 			const alarm = d.alarmAt;
 			for (const now of [d.now + 10, d.now + 20]) {
 				const late = observe(
 					d,
-					b,
+					a,
 					{
 						kind: "effect_outcome",
 						outcome: { tag: "permanent", code: "OldTransportFailed" },
@@ -185,8 +206,8 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 				expect(d.view()).toEqual(before);
 				expect(d.alarmAt).toBe(alarm);
 			}
+			// A's Run ended at its query end (3.8 condition 2); C waits for main's terminal (D60).
 			expect(starts(d, "C")).toHaveLength(0);
-			expect(input(d, "B")).toMatchObject({ inputId: "B" });
 		},
 	},
 	{
@@ -195,73 +216,67 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 			"[3.5, 3.8, 9] a late retained OpenCode result permits covering idle proof and preserves the Tombstone",
 		provider: "opencode",
 		run(d) {
-			// HL-K R1 finding 3, art-hlk2r/run.log:7334-7335.
-			running(d);
-			admit(d, "B");
-			const b = d.latest("steer");
-			observe(d, b, {
+			// HL-K R1 finding 3, art-hlk2r/run.log:7334-7335, seeded on A's start (AMENDMENT-2026-11-16).
+			const a = unconfirmed(d);
+			observe(d, a, {
 				kind: "effect_outcome",
 				outcome: { tag: "delivery_unknown" },
 			});
-			// GAP 5 (CONTRACT.md 871-876): with no result, the Run waits at query_ended for main's terminal.
-			expect(observe(d, b, { kind: "query_ended" }).ended).toEqual([]);
-			admit(d, "C", true);
-			const late = observe(d, b, { kind: "result", outcome: "completed" });
+			// E1, E2, E4: main's terminal ends the Run; the start stays a member and a probe is issued.
+			const probe = terminalFirst(d);
+			// E5: a late result changes no Tombstone, but confirms delivery.
+			const late = observe(d, a, { kind: "result", outcome: "completed" });
 			expect(late.ended).toEqual([]);
-			fire(d);
-			const released = observe(
-				d,
-				d.latest(
-					"probe",
-					(effect) =>
-						effect.kind === "probe" && effect.target.tag === "native_session",
-				),
-				{ kind: "probe_result", finding: { tag: "native_idle" } },
-			);
-			// D60: C starts as main's claim once A's run ends.
-			expect(main(d, 2)?.ended).toHaveLength(1);
+			expect(d.view().active).toBeUndefined();
+			// E3, E4: the query_ended folded next ends no start, and the outstanding probe is not doubled.
+			admit(d, "C");
+			expect(
+				d.issued.filter(({ effect }) => effect.kind === "probe"),
+			).toHaveLength(1);
+			main(d, 0);
+			expect(starts(d, "C")).toHaveLength(0);
+			expect(d.view().anythingMayAct).toBe(true);
+			const released = observe(d, probe, {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(released.ended).toEqual([]);
 			main(d, 0);
 			expect(starts(d, "C")).toHaveLength(1);
-			expect(released.ended).toEqual([]);
 		},
 	},
 	{
 		id: "R1-4",
 		title:
-			"[3.5 replaces retained retryable work; 9] an unaccepted retryable send ends and cannot strand the native fence",
+			"[3.5 replaces retained retryable work; 9] an unaccepted retryable send is never re-sent and cannot strand the native fence",
 		provider: "opencode",
 		run(d) {
-			// HL-K R1 finding 4, art-hlk2r/run.log:7337; 11.2 supplies its behavioural summary.
-			running(d);
-			admit(d, "B");
-			const b = d.latest("steer");
-			observe(d, b, { kind: "query_ended" });
-			const retryable = observe(d, b, {
+			// HL-K R1 finding 4, art-hlk2r/run.log:7337; 11.2 supplies its behavioural summary. Seeded on
+			// A's start, terminal first (AMENDMENT-2026-11-16 E2, E3).
+			const a = unconfirmed(d);
+			const probe = terminalFirst(d);
+			admit(d, "C");
+			main(d, 0);
+			expect(starts(d, "C")).toHaveLength(0);
+			// E3: idle covers only a confirmed send.
+			observe(d, probe, {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			main(d, 0);
+			expect(starts(d, "C")).toHaveLength(0);
+			expect(d.view().anythingMayAct).toBe(true);
+			// 3.5: a retryable outcome on an unconsumed send means it was not reached, so it leaves the
+			// fence; retryPending refuses a mainEnded send, so it is never sent again.
+			const retryable = observe(d, a, {
 				kind: "effect_outcome",
 				outcome: { tag: "retryable", retryAt: d.now + 1 },
 			});
 			expect(retryable.ended).toEqual([]);
-			admit(d, "C", true);
-			fire(d);
-			const released = observe(
-				d,
-				d.latest(
-					"probe",
-					(effect) =>
-						effect.kind === "probe" && effect.target.tag === "native_session",
-				),
-				{ kind: "probe_result", finding: { tag: "native_idle" } },
-			);
-			// D60: C starts as main's claim once A's run ends.
-			main(d, 2);
+			expect(retryable.effects).toEqual([]);
 			main(d, 0);
 			expect(starts(d, "C")).toHaveLength(1);
-			expect(released.ended).toEqual([]);
-			expect(
-				d.issued.filter(
-					({ effect }) => effect.kind === "steer" && effect.inputId === "B",
-				),
-			).toHaveLength(1);
+			expect(starts(d, "A")).toHaveLength(1);
 		},
 	},
 	{
@@ -270,40 +285,32 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 			"[3.5, 3.8, 9] late native acceptance survives retryable transport until covering idle proof",
 		provider: "opencode",
 		run(d) {
-			// HL-K R2 finding 1, art-hlk2g/run.log:2016-2017.
-			running(d);
-			admit(d, "B");
-			const b = d.latest("steer");
-			observe(d, b, { kind: "query_ended" });
-			const accepted = observe(d, b, {
+			// HL-K R2 finding 1, art-hlk2g/run.log:2016-2017, seeded on A's start, terminal first
+			// (AMENDMENT-2026-11-16 E2, E5).
+			const a = unconfirmed(d);
+			const probe = terminalFirst(d);
+			const accepted = observe(d, a, {
 				kind: "input_accepted",
-				nativeMessageId: "native-B",
+				nativeMessageId: "native-A",
 			});
 			expect(accepted.ended).toEqual([]);
-			const retryable = observe(d, b, {
+			const retryable = observe(d, a, {
 				kind: "effect_outcome",
 				outcome: { tag: "retryable", retryAt: d.now + 1 },
 			});
 			expect(retryable.ended).toEqual([]);
-			admit(d, "C", true);
+			admit(d, "C");
 			expect(starts(d, "C")).toHaveLength(0);
 			expect(d.view().anythingMayAct).toBe(true);
 			expect(d.alarmAt).toBeDefined();
-			fire(d);
-			const covered = observe(
-				d,
-				d.latest(
-					"probe",
-					(effect) =>
-						effect.kind === "probe" && effect.target.tag === "native_session",
-				),
-				{ kind: "probe_result", finding: { tag: "native_idle" } },
-			);
+			const covered = observe(d, probe, {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
 			expect(covered.ended).toEqual([]);
-			// D60: C starts as main's claim once A's run ends.
-			main(d, 2);
 			main(d, 0);
 			expect(starts(d, "C")).toHaveLength(1);
+			expect(starts(d, "A")).toHaveLength(1);
 		},
 	},
 	{
@@ -312,19 +319,18 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 			"[3.4, 3.8, 9] process loss releases retained work of an Ended owner before advancing its successor",
 		provider: "opencode",
 		run(d) {
-			// HL-K R2 finding 2, art-hlk2g/run.log:2019; 11.2 supplies its behavioural summary.
-			running(d);
-			admit(d, "B");
-			const b = d.latest("steer");
-			observe(d, b, {
+			// HL-K R2 finding 2, art-hlk2g/run.log:2019; 11.2 supplies its behavioural summary. Seeded on
+			// A's start, terminal first (AMENDMENT-2026-11-16 E2, E3, E5).
+			const a = unconfirmed(d);
+			observe(d, a, {
 				kind: "effect_outcome",
 				outcome: { tag: "delivery_unknown" },
 			});
-			const endedRunId = d.view().active?.runId;
-			assert(endedRunId !== undefined, "the source Run is active");
-			// GAP 5 (CONTRACT.md 871-876): with no result, the Run waits at query_ended for main's terminal.
-			expect(observe(d, b, { kind: "query_ended" }).ended).toEqual([]);
-			admit(d, "C", true);
+			terminalFirst(d);
+			expect(d.view().active).toBeUndefined();
+			admit(d, "C");
+			main(d, 0);
+			expect(starts(d, "C")).toHaveLength(0);
 			const lost = step(d, {
 				verb: "settle",
 				settlement: {
@@ -333,12 +339,10 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 					retiredAt: d.now,
 				},
 			});
-			expect(lost.ended.some(({ runId }) => runId === endedRunId)).toBe(false);
-			// D60: C starts as main's claim once A's run ends.
-			main(d, 2);
+			expect(lost.ended).toEqual([]);
 			main(d, 0);
 			expect(starts(d, "C")).toHaveLength(1);
-			const late = observe(d, b, { kind: "result", outcome: "completed" });
+			const late = observe(d, a, { kind: "result", outcome: "completed" });
 			expect(late.effects).toEqual([]);
 			expect(late.ended).toEqual([]);
 		},

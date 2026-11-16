@@ -652,7 +652,8 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 						expect(
 							yield* sql`SELECT json_extract(data, '$.token') AS token, json_extract(data, '$.transmission') AS transmission,
 								json_extract(data, '$.outcome.tag') AS tag, json_extract(data, '$.outcome.code') AS code
-								FROM events WHERE type = 'evidence.effect_outcome'`,
+								FROM events WHERE type = 'evidence.effect_outcome'
+								AND json_extract(data, '$.commandId') = 'u2'`,
 						).toEqual(
 							evidence
 								? [

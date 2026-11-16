@@ -1301,13 +1301,19 @@ export class ProviderSideEffectReactor {
 									// row's outcome"; it names a direct send's token, its runId (3.4), as the decider
 									// reads it, not (commandId, transmission) (gap). A decline is not a failure:
 									// `steerDeclined` returns it (CONTRACT.md 973), stored as `steer-declined` as
-									// the inbox's requeue reads it.
-									if (input?.start !== false) return;
+									// the inbox's requeue reads it. AMENDMENT-2026-11-16 E2: a start whose call failed
+									// writes its outcome too, retryable or permanent, so main's terminal does not keep a
+									// transmission the provider never took as a fence member.
+									const steer = input?.start === false;
+									if (!steer && !failure) return;
 									const [failed] = yield* this.options.sql<{
+										status: string;
 										error_code: string | null;
-									}>`SELECT error_code FROM provider_command_outbox
+										next_attempt_at: number | null;
+									}>`SELECT status, error_code, next_attempt_at FROM provider_command_outbox
 										WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
-											AND attempt_count = ${row.attempt_count} AND status = 'failed' AND updated_at = ${now}
+											AND attempt_count = ${row.attempt_count} AND updated_at = ${now}
+											AND status IN ('failed', ${steer ? "failed" : "retryable_failed"})
 											AND COALESCE(error_code, '') NOT IN ('interrupted', 'cancelled', 'steer-declined')`;
 									if (!failed) return;
 									return yield* this.appendInWrite(project, row.project_key, [
@@ -1318,10 +1324,19 @@ export class ProviderSideEffectReactor {
 												commandId: row.command_id,
 												transmission: row.attempt_count,
 												token: runId,
-												outcome: {
-													tag: "permanent",
-													code: failed.error_code ?? "provider_failure",
-												},
+												outcome:
+													failed.status === "failed"
+														? {
+																tag: "permanent",
+																code: failed.error_code ?? "provider_failure",
+															}
+														: {
+																tag: "retryable",
+																retryAt: failed.next_attempt_at ?? now,
+																...(failed.error_code
+																	? { code: failed.error_code }
+																	: {}),
+															},
 											},
 											{ provider: row.provider_id, createdAt: now },
 										),

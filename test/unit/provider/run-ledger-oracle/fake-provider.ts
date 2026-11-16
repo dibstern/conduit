@@ -14,7 +14,7 @@ import type {
 	TaskKey,
 	Unsolicited,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
-import { mainGateRefusal, openCodeLateTurn, pendingCases } from "./pending.js";
+import { mainGateRefusal, pendingCases } from "./pending.js";
 
 /** Numeric selectors remain useful after fast-check shrinks a trace. */
 export interface TraceAction {
@@ -1902,8 +1902,9 @@ export class FakeProvider {
 				!this.terminals.has(observation.runId)
 			)
 				this.joinedRuns.set(observation.requestedRunId, observation.runId);
-			// 3.8 GAP 5, 9: OpenCode's turn.error ends the turn and its query in one write, so main's error
-			// terminal is the native turn's end whichever of the pair folds first.
+			// AMENDMENT-2026-11-16 E1-E3, 9: OpenCode's turn.error ends the turn and its query in one write,
+			// so main's error terminal is the native turn's end whichever of the pair folds first; the
+			// ledger keeps the start a member until a covering idle probe.
 			if (
 				this.provider === "opencode" &&
 				observation.kind === "run_terminal" &&
@@ -1930,8 +1931,10 @@ export class FakeProvider {
 						native.unfinished = false;
 					}
 			// 3.9 (CONTRACT.md 978-980): a steer outlives its Run only at a completed end or a Stop; at main's
-			// error terminal its work, and its starts', ends with the Run's, as main (D59, 4106-4107).
+			// error terminal its work, and its starts', ends with the Run's, as main (D59, 4106-4107). Not
+			// OpenCode's: with no runner host they stay members (AMENDMENT-2026-11-16 E2).
 			if (
+				this.provider !== "opencode" &&
 				observation.kind === "run_terminal" &&
 				observation.outcome === "error"
 			)
@@ -1949,11 +1952,19 @@ export class FakeProvider {
 				observation.outcome === "interrupted"
 			) {
 				const { runId } = observation;
+				// AMENDMENT-2026-11-16 E2: only the deadline step ends an OpenCode start or steer as main.
+				const kept =
+					this.provider === "opencode" &&
+					observation.code !== "stop_unconfirmed";
 				for (const { send } of this.sends.values())
 					if (
-						("runId" in send.effect && send.effect.runId === runId) ||
-						(send.effect.kind === "interrupt" &&
-							send.effect.runIds.includes(runId))
+						(("runId" in send.effect && send.effect.runId === runId) ||
+							(send.effect.kind === "interrupt" &&
+								send.effect.runIds.includes(runId))) &&
+						!(
+							kept &&
+							(send.effect.kind === "start" || send.effect.kind === "steer")
+						)
 					)
 						this.forcedSends.add(send.token);
 				if (this.turning) this.forcedTurn = true;
@@ -2339,13 +2350,6 @@ export class FakeProvider {
 					);
 					if (release >= 0) this.notifications.splice(release, 1);
 					this.refreshQuery(native);
-					// Pended (pending.ts openCodeLateTurn): OpenCode's late turn of a Run main already ended.
-					if (
-						this.provider === "opencode" &&
-						this.terminals.has(effect.runId) &&
-						pendingCases.has(openCodeLateTurn)
-					)
-						this.forcedSends.add(native.send.token);
 					// The turn flag is the current query's; a replaced label's send keeps its own facts (3.3). An
 					// unlaunch's drop ended a dropped send's work, so its late start runs no turn (D50, CONTRACT.md
 					// 670-672).
@@ -4177,10 +4181,19 @@ export class FakeProvider {
 					const head = this.mainInbox[0];
 					// 2.1 (CONTRACT.md 57, 262), 3.9 (978-982): a steer its parent's end left pending is a Run of
 					// its own, so main claims nothing until it starts as main's open Run (case 1).
+					// Row 202 (3.5): main's direct start reads the fence before its claim, so it waits while a
+					// start or steer main's terminal left a member may still act (AMENDMENT-2026-11-16 E2).
 					if (
 						!head ||
 						(open && head.delivery === "queue") ||
-						(!open && this.mainSteers.length > 0)
+						(!open && this.mainSteers.length > 0) ||
+						(!open &&
+							direct &&
+							this.ledgerView?.live.some(
+								({ effect }) =>
+									(effect.kind === "start" || effect.kind === "steer") &&
+									this.terminals.has(effect.runId),
+							))
 					)
 						continue;
 					this.mainInbox.shift();

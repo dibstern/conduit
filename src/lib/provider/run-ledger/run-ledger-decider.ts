@@ -767,7 +767,7 @@ interface RunSummary {
 	readonly forced: boolean;
 	/** Condition 1: Run-end evidence recorded with authority. */
 	readonly endEvidence: boolean;
-	/** GAP 5: no result and main's run still open. */
+	/** AMENDMENT-2026-11-16 E1 (replaces 3.8 GAP 5): no result and main's run still open; a mainEnded start is no condition 2 member. */
 	readonly awaiting: boolean;
 	/** Main appended its terminal for each of its runs. */
 	readonly mainEnded: boolean;
@@ -1285,6 +1285,35 @@ function probe(
 	reprobe(book, fact, step, send, send.probe);
 }
 
+/**
+ * 9: OpenCode's query end ends its label's starts and steers, never an abort or cancel_request, which
+ * act on the native session (CONTRACT.md 334-338, 3101-3106). AMENDMENT-2026-11-16 E3, E4: nor a start
+ * or steer main's terminal left a fence member; it probes the native session for one unless a
+ * native_session probe is outstanding.
+ */
+function queryEnded(book: Book, fact: Fact, step: Step, label: Label): boolean {
+	let moved = false;
+	let fenced: Send | undefined;
+	for (const send of book.sends)
+		if (delivers(send))
+			for (const tx of send.txs)
+				if (tx.label === label && tx.ended === undefined)
+					if (tx.mainEnded) fenced = send;
+					else {
+						tx.ended = "evidence";
+						moved = true;
+					}
+	if (
+		fenced === undefined ||
+		book.sends.some(
+			(send) => send.probe?.target.tag === "native_session" && !send.probe.done,
+		)
+	)
+		return moved;
+	probe(book, fact, step, fenced.runId, { tag: "native_session" });
+	return true;
+}
+
 function launch(run: Run): void {
 	run.phase = "Launched";
 	run.retryAt = undefined;
@@ -1577,16 +1606,10 @@ const evidenceTable: EvidenceTable = {
 	query_ended: {
 		class: "lifecycle",
 		produces: delivers,
-		merge(book, _fact, { tx, run, live }) {
+		merge(book, fact, { tx, run, live, step }) {
 			// 9: query_ended ends only an owned execution's work, and its own by the work-ended column.
 			if (runEnd(book) !== "query_ended") return noop();
-			// 9: it ends its label's starts and steers; an abort or cancel_request acts on the native
-			// session, not the query, so a query end never covers them (CONTRACT.md 334-338, 3101-3106).
-			for (const send of book.sends)
-				if (delivers(send))
-					for (const other of send.txs)
-						if (tx.label !== null && other.label === tx.label)
-							other.ended ??= "evidence";
+			if (tx.label !== null) queryEnded(book, fact, step, tx.label);
 			if (live && run !== undefined) run.exec.endEvidence = true;
 			return changed;
 		},
@@ -2178,18 +2201,9 @@ function unsolicited(
 				if (older) wake.older = true;
 				wake.ended = "own";
 			}
-			// 9: OpenCode's query end ends its label's starts and steers, never an abort or
-			// cancel_request (CONTRACT.md 334-338, 3101-3106).
-			let moved = wake !== undefined;
-			if (runEnd(book) === "query_ended")
-				for (const send of book.sends)
-					if (delivers(send))
-						for (const tx of send.txs)
-							if (tx.label === label && tx.ended === undefined) {
-								tx.ended = "evidence";
-								moved = true;
-							}
-			return moved ? changed : unchanged();
+			const moved =
+				runEnd(book) === "query_ended" && queryEnded(book, fact, step, label);
+			return moved || wake !== undefined ? changed : unchanged();
 		}
 		case "interaction_requested": {
 			// Gap (CONTRACT.md 1041-1044, L1 349-350): an interaction raised on a retired runner's
@@ -2414,19 +2428,30 @@ function observe(
 					// main's stop_unconfirmed terminal. The Run's end waits for none (CONTRACT.md 788-789, 797-799,
 					// 3101-3106; a reading, reported as a gap). A runner's interrupt-timeout abandonment is its
 					// Run's outcome, not its work's end: its starts and steers stay members until retirement
-					// covers them (3113-3117).
+					// covers them (3113-3117). AMENDMENT-2026-11-16 E2, E4: with no runner host, a start or
+					// steer that may still act (3.5) stays a member too, and a native_session probe can cover
+					// it; the stop's deadline step still ends it (L6).
+					const kept =
+						!nativePolicies[book.provider].capabilities.runnerHost &&
+						observation.code !== "stop_unconfirmed";
+					let fenced = false;
 					for (const send of runSends(book, run))
 						for (const tx of send.txs)
-							if (
-								((send.effect.kind === "interrupt" ||
-									send.effect.kind === "cancel_request") &&
+							if (kept && delivers(send) && mayStillAct(book, send, tx)) {
+								tx.mainEnded = true;
+								fenced = true;
+							} else if (
+								(kept &&
+									(send.effect.kind === "interrupt" ||
+										send.effect.kind === "cancel_request") &&
 									rules(book).fences(send.effect) &&
-									observation.code !== "stop_unconfirmed" &&
 									tx.transport.tag === "Issued") ||
 								(observation.code === "abandoned" && delivers(send))
 							)
 								tx.mainEnded = true;
 							else tx.ended ??= "main";
+					if (fenced)
+						probe(book, fact, step, run.runId, { tag: "native_session" });
 					run.exec.fold.push({
 						seq: book.seq,
 						outcome: observation.outcome,
@@ -2526,8 +2551,13 @@ function observe(
 				observation.kind,
 				observation,
 			);
-			// 3.5, 9: a start's or steer's own work ends by its provider's work-ended column.
-			if (delivers(send) && rules(book).workEnded(tx.answers))
+			// 3.5, 9: a start's or steer's own work ends by its provider's work-ended column, except an
+			// OpenCode one main's terminal left a fence member (AMENDMENT-2026-11-16 E3).
+			if (
+				delivers(send) &&
+				!(tx.mainEnded && runEnd(book) === "query_ended") &&
+				rules(book).workEnded(tx.answers)
+			)
 				tx.ended ??= "evidence";
 			return outcome;
 		}
