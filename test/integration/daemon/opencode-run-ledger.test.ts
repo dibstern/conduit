@@ -1453,7 +1453,7 @@ describe("OpenCode on the Run Ledger", () => {
 			at: number;
 			model: string;
 			text: string;
-			outcome: "answered" | "held" | "released" | "aborted";
+			outcome: "answered" | "held" | "released" | "aborted" | "rejected";
 		};
 		let model: Server | undefined;
 		let calls: ModelCall[] = [];
@@ -1466,7 +1466,10 @@ describe("OpenCode on the Run Ledger", () => {
 			);
 			model = undefined;
 		});
-		/** OpenAI-compatible model: a last user message containing HOLD streams nothing until released. */
+		/**
+		 * OpenAI-compatible model: a last user message containing HOLD streams nothing until released;
+		 * one containing FAIL is refused with a 400, which OpenCode does not retry.
+		 */
 		const serveModel = async () => {
 			calls = [];
 			model = createServer(async (request, response) => {
@@ -1502,6 +1505,16 @@ describe("OpenCode on the Run Ledger", () => {
 					response.write(chunk({}, "stop"));
 					response.end("data: [DONE]\n\n");
 				};
+				if (input.model === "main" && text.includes("FAIL")) {
+					call.outcome = "rejected";
+					response.writeHead(400, { "Content-Type": "application/json" });
+					response.end(
+						JSON.stringify({
+							error: { message: "refused", type: "invalid_request_error" },
+						}),
+					);
+					return;
+				}
 				if (!input.stream) {
 					response.writeHead(200, { "Content-Type": "application/json" });
 					response.end(
@@ -1723,6 +1736,66 @@ describe("OpenCode on the Run Ledger", () => {
 			expect(after.ends).toEqual([
 				{ runId: sentRun, reason: "completed" },
 				{ runId: heldRun, reason: "provider_error" },
+			]);
+		});
+
+		it("a model error ends its Run at main's terminal, and the next send waits for a native_session probe to read the session idle (AMENDMENT-2026-11-16 95)", async () => {
+			const { fixture, browser, sessionId } = await startReal();
+			await Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId,
+					originId: browser.originId,
+					inputId: randomUUID(),
+					delivery: "queue",
+					text: "FAIL now",
+				}),
+			);
+			await until(
+				() => expect(read(fixture, sessionId).ends).toHaveLength(1),
+				20_000,
+			);
+			const ended = {
+				...read(fixture, sessionId),
+				...probing(fixture, sessionId),
+			};
+			await browser.send(sessionId, "after the error");
+			// Settled: both Runs ended and nothing left to probe.
+			await until(() => {
+				expect(read(fixture, sessionId).ends).toHaveLength(2);
+				expect(probing(fixture, sessionId).probes).toEqual([
+					{ target: "native_session", status: "completed" },
+					{ target: "native_session", status: "completed" },
+				]);
+			}, 20_000);
+
+			const after = {
+				...read(fixture, sessionId),
+				...probing(fixture, sessionId),
+			};
+			live("model-error", fixture, sessionId, { ended, after });
+			// The Run ends at main's terminal, with main's code (E1).
+			expect(ended.ends).toEqual([
+				{ runId: ended.runs[0]?.id, reason: "provider_error" },
+			]);
+			// Each OpenCode terminal issues one native_session probe (E2); the first one's idle reading
+			// covers the error's confirmed start (E3).
+			expect(after.findings.map(({ target }) => target)).toEqual([
+				"native_session",
+				"native_session",
+			]);
+			const [released] = after.findings;
+			expect(released).toMatchObject({
+				target: "native_session",
+				finding: "native_idle",
+			});
+			// The next start goes out only after that reading released the fence.
+			const next = calls.find(({ text }) => text.includes("after the error"));
+			expect(next?.at).toBeGreaterThanOrEqual(
+				released?.at ?? Number.POSITIVE_INFINITY,
+			);
+			expect(after.ends).toEqual([
+				{ runId: after.runs[0]?.id, reason: "provider_error" },
+				{ runId: after.runs[1]?.id, reason: "completed" },
 			]);
 		});
 
