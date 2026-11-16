@@ -224,7 +224,10 @@ export async function captureClaudeRunnerFileSettings(
 ): Promise<ClaudeRunnerFileSettings> {
 	configDirectory(options, configDir);
 	const before = claudeRunnerFileSettingsFingerprint(options, configDir);
-	const resolved = await resolver({
+	// machinePolicy is the host's policy read, not file settings: SDKs before
+	// 0.3.325 omit it and it changes on a 30-minute re-read, so a runner
+	// launched before that bump never compared equal and never upgraded.
+	const { machinePolicy: _hostRead, ...resolved } = await resolver({
 		cwd: options.cwd ?? process.cwd(),
 		settingSources: options.settingSources ?? ["user", "project", "local"],
 	});
