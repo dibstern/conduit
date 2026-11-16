@@ -136,6 +136,8 @@ interface ActiveTurn {
 	cancelRequested: boolean;
 	submitted: boolean;
 	interruptSent: boolean;
+	/** The native turn whose opening userMessage echo, its own input, has been read. */
+	openedTurnId?: string;
 }
 
 interface CodexSession {
@@ -1009,35 +1011,40 @@ export class CodexRunnerPayload implements RunnerPayload {
 										!active.state.acceptedTurnId))
 							)
 								yield* acceptInput();
-							// J2, J3 (AMENDMENT-2026-11-16): Codex's echo of a steer joins it to this open
-							// turn's run. Codex sends each userMessage as item/started and item/completed;
-							// only item/started joins, so one echo consumes one steer. An echo without
-							// clientId joins the oldest steer whose text it repeats and whose turn/steer
-							// reply named its turn: the turn's own input echo, read after that reply, is
-							// not a steer's. A steer whose turn ended unechoed is its own Run (J4): the
-							// later turn that echoes it, by clientId or, in a wake with no input of its
-							// own, by text, starts that Run and ends it; the ended run takes nothing
+							// J2, J3 (AMENDMENT-2026-11-16): an echo joins a steer by identity, never by
+							// text, and only on its thread's executing turn while that turn is open. Codex
+							// sends each userMessage as item/started and item/completed; only item/started
+							// joins, so one echo consumes one steer. A tagged echo takes the steer its
+							// clientId names: on its host's turn it joins that run; once that turn ended
+							// unechoed, the later turn that runs it starts the steer's own Run (J4). An
+							// untagged echo takes only a steer this turn sent whose turn/steer reply named
+							// this turn, and never the turn's opening echo: that is the turn's own input,
+							// which names the same turn. An echo naming any other turn takes nothing
 							// (failure modes 90, 91).
 							if (
 								decoded.method === "item/started" &&
 								decoded.params.item.type === "userMessage" &&
 								!("raw" in decoded.params.item)
 							) {
-								const { clientId, content } = decoded.params.item;
-								const { turnId } = decoded.params;
-								const text = content
-									.flatMap((part) => (part.type === "text" ? [part.text] : []))
-									.join("");
-								const steer =
-									clientId == null
-										? [...current.steers.values()].find(
-												(pending) =>
-													(pending.host === active
-														? pending.turnId === turnId
-														: wake !== undefined) &&
-													pending.input.prompt === text,
-											)
-										: current.steers.get(clientId);
+								const { clientId } = decoded.params.item;
+								const { threadId, turnId } = decoded.params;
+								const executing =
+									threadId === current.threadId &&
+									turnId === active.state.executingTurnId &&
+									!active.state.settled;
+								const opening = executing && active.openedTurnId !== turnId;
+								if (opening) active.openedTurnId = turnId;
+								const steer = !executing
+									? undefined
+									: clientId != null
+										? current.steers.get(clientId)
+										: opening
+											? undefined
+											: [...current.steers.values()].find(
+													(pending) =>
+														pending.host === active &&
+														pending.turnId === turnId,
+												);
 								if (steer) {
 									const { input: steered } = steer;
 									current.steers.delete(steered.inputId);
