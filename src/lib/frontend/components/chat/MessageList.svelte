@@ -10,7 +10,7 @@
 	import TranscriptJump from "../ui/TranscriptJump.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import { tick, untrack } from "svelte";
-	import type { ChatMessage } from "../../types.js";
+	import type { ChatMessage, SystemMessage as SystemMessageType } from "../../types.js";
 	import {
 		consumeScrollRequest,
 		localSendsIn,
@@ -609,6 +609,9 @@
 		{@const log = turnLog(turn, resumeDividers)}
 		{@const segment = log.segment}
 		{@const hasActivity = log.entries.length > 0}
+		<!-- A live row status (compaction in progress, provider retry) reports
+		     what is happening now, so it follows the reply instead of preceding it. -->
+		{@const rowStatus = turn.notices.filter((notice) => notice.compaction === "started" || notice.retry)}
 		<div data-live-turn={turn.live ? "" : undefined}>
 		{#if turn.user}
 			<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
@@ -645,10 +648,8 @@
 		{/if}
 		<!-- Notices sit between the final work and reply: they are lifted out of
 		     the activity log so a failure is never hidden behind a collapsed panel. -->
-		{#each turn.notices as notice (notice.uuid)}
-			<div class="msg-container">
-				<SystemMessage message={notice} driver={viewedSessionId ? getSessionDriver(viewedSessionId) : undefined} accountId={activeSession?.accountId ?? undefined} />
-			</div>
+		{#each turn.notices.filter((notice) => !rowStatus.includes(notice)) as notice (notice.uuid)}
+			{@render systemNotice(notice)}
 		{/each}
 		{#each segment.reply as reply (reply.uuid)}
 			{#if !log.resumedParts.has(reply.uuid)}{@render resumed(reply.uuid)}{/if}
@@ -657,6 +658,9 @@
 					hideHeader={reply === segment.reply[0] && hasActivity} turnUser={primary ? turn.user : undefined}
 					modelExecution={turn.user?.modelExecution} />
 			</div>
+		{/each}
+		{#each rowStatus as notice (notice.uuid)}
+			{@render systemNotice(notice)}
 		{/each}
 		<!-- A turn that did work carries its bill on the strip. A text-only
 		     turn has no ledger, so it renders the same bill on its own line —
@@ -679,6 +683,12 @@
 		{#if turn.id === newestEndedTurnId}
 			<div data-turn-end aria-hidden="true"></div>
 		{/if}
+		</div>
+	{/snippet}
+
+	{#snippet systemNotice(notice: SystemMessageType)}
+		<div class="msg-container">
+			<SystemMessage message={notice} driver={viewedSessionId ? getSessionDriver(viewedSessionId) : undefined} accountId={activeSession?.accountId ?? undefined} />
 		</div>
 	{/snippet}
 

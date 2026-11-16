@@ -11,6 +11,7 @@ import {
 
 const SESSION = "sess-turn-opening";
 const PROMPT = "Review the change.";
+const REPLY = "The change reads cleanly so far.";
 const histories = new WeakMap<Page, (typeof HistoryMessageSchema.Type)[]>();
 const positions = new WeakMap<
 	Page,
@@ -471,6 +472,45 @@ export const turnOpeningHandlers: StepHandler[] = [
 			await expect(
 				world.page.locator("#messages .compaction-rule"),
 			).toHaveCount(0);
+		},
+	},
+	{
+		name: "deliver reply text after the first step",
+		match: /^the turn opening reply text arrives$/,
+		run: async ({ world }) => {
+			const history = histories.get(world.page);
+			const step = history?.at(-1);
+			if (!history || step?.id !== "turn-opening-assistant")
+				throw new Error("Turn opening step was not delivered");
+			history[history.length - 1] = {
+				...step,
+				parts: [
+					...(step.parts ?? []),
+					{ id: "turn-opening-reply", type: "text", text: REPLY },
+				],
+			};
+			requireRpcControl(world.page).setDetailRows(
+				SESSION,
+				history.flatMap(detailRowsOf),
+			);
+			await expect(
+				world.page.locator("#messages").getByText(REPLY, { exact: true }),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert mid-turn compaction notice follows the reply",
+		match: /^the mid-turn compaction notice sits below the reply text$/,
+		run: async ({ world }) => {
+			const notice = world.page.locator("#messages .system-notice");
+			const reply = world.page
+				.locator("#messages")
+				.getByText(REPLY, { exact: true });
+			const noticeBox = await notice.boundingBox();
+			const replyBox = await reply.boundingBox();
+			if (!noticeBox || !replyBox)
+				throw new Error("Compaction notice or reply is unavailable");
+			expect(noticeBox.y).toBeGreaterThanOrEqual(replyBox.y + replyBox.height);
 		},
 	},
 	{

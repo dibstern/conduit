@@ -115,6 +115,21 @@ Scenario: Mid-turn compaction stays a status message
   Then the mid-turn compaction is a status message
   And the turn opening is replaced by a Working card timed 5s
 
+Scenario Outline: Mid-turn compaction after a reply sits below the reply
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And the turn opening prompt was sent 5 seconds ago
+  When the first ordinary turn opening step arrives
+  And the turn opening reply text arrives
+  And the turn opening session starts compacting
+  Then the mid-turn compaction is a status message
+  And the mid-turn compaction notice sits below the reply text
+
+Examples:
+  | jev      |
+  | inactive |
+  | active   |
+
 Scenario: The live compaction rule stays still under reduced motion
   Given the conduit app is served with the connected mockup
   And reduced motion is enabled for the turn opening
