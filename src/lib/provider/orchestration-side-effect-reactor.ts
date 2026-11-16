@@ -34,8 +34,8 @@ import { PersistenceProjectTag } from "../domain/persistence/Services/persistenc
 import {
 	type InputDrafts,
 	InputDraftsTag,
-} from "../domain/relay/Services/input-drafts.js";
-import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
+} from "../domain/project-services/Services/input-drafts.js";
+import type { ProviderRuntimeIngestion } from "../domain/project-services/Services/provider-runtime-ingestion-service.js";
 import * as Failure from "../effect/failure-classification.js";
 import type { AttachmentStore } from "../persistence/attachment-store.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
@@ -85,8 +85,8 @@ import type {
 	OrchestrationEngine,
 	ProviderCallRequest,
 } from "./orchestration-engine.js";
+import { toEventSinkError } from "./project-event-sink.js";
 import type { ProviderRegistry } from "./provider-registry.js";
-import { toEventSinkError } from "./relay-event-sink.js";
 import { resolveTurnImages } from "./resolve-turn-images.js";
 import {
 	fenceHolds,

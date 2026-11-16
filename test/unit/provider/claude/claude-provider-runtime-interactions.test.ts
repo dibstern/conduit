@@ -19,17 +19,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+} from "../../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+} from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	makeOverridesStateLive,
 	makeProcessingTimeoutHooks,
 	type OverridesStateTag,
 	startProcessingTimeout,
-} from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { ClaudeEventPersistEffectTag } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
@@ -47,8 +47,8 @@ import type {
 } from "../../../../src/lib/provider/claude/types.js";
 import { ClaudeBoundaryError } from "../../../../src/lib/provider/event-sink-errors.js";
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
+import { createRelayEventSink } from "../../../../src/lib/provider/project-event-sink.js";
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
-import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
 import { makeRunnerReceiptStore } from "../../../../src/lib/provider/runner/runner-receipts.js";
 import type {
 	SessionCommand,

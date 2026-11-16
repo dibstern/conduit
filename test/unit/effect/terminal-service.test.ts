@@ -13,7 +13,7 @@ import {
 	ConnectPtyUpstreamTag,
 	LoggerTag,
 	PtyManagerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	type LocalPtyService,
 	LocalPtyServiceTag,
@@ -21,7 +21,7 @@ import {
 	OpenCodeTerminalServiceLive,
 	OpenCodeTerminalServiceTag,
 	TerminalServiceError,
-} from "../../../src/lib/domain/relay/Services/terminal-service.js";
+} from "../../../src/lib/domain/project-services/Services/terminal-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import {
 	PtyManager,

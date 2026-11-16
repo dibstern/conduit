@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { EnvelopeSchema } from "../../../src/lib/contracts/ws-rpc.js";
-import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
+import type { Envelope } from "../../../src/lib/domain/project-services/Services/read-model-subscription.js";
 import { EnvelopeSchema as FrontendEnvelopeSchema } from "../../../src/lib/frontend/transport/ws-rpc.js";
 
 describe("subscription envelope contract", () => {

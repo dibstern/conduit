@@ -6,9 +6,9 @@ import {
 	getPermissionMode,
 	makeOverridesStateLive,
 	setPermissionMode,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
+import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
 import { makeRunnerAuthority } from "../../../src/lib/provider/runner/runner-authority.js";
 import { runnerSinkId } from "../../../src/lib/provider/runner/runner-protocol.js";
 import {

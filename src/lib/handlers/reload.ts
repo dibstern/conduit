@@ -10,8 +10,8 @@ import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../domain/relay/Services/services.js";
-import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+} from "../domain/project-services/Services/services.js";
+import { SessionWorkspaceTag } from "../domain/project-services/Services/session-workspace.js";
 import { formatErrorDetail } from "../errors.js";
 
 export interface ReloadProviderSessionInput {

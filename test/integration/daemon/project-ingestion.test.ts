@@ -75,18 +75,18 @@ import {
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { RateLimiterTag } from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
-import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
-import { DirectoryListingServiceTag } from "../../../src/lib/domain/relay/Services/directory-listing-service.js";
-import { GoalSummaryServiceTag } from "../../../src/lib/domain/relay/Services/goal-summary-service.js";
-import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { ProjectSettingsTag } from "../../../src/lib/domain/relay/Services/project-settings.js";
-import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { RateLimiterTag } from "../../../src/lib/domain/project-services/Layers/rate-limiter-layer.js";
+import { AlertsTag } from "../../../src/lib/domain/project-services/Services/alerts.js";
+import { DirectoryListingServiceTag } from "../../../src/lib/domain/project-services/Services/directory-listing-service.js";
+import { GoalSummaryServiceTag } from "../../../src/lib/domain/project-services/Services/goal-summary-service.js";
+import { PendingInteractionServiceTag } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
+import { ProjectSettingsTag } from "../../../src/lib/domain/project-services/Services/project-settings.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnServiceTag,
 	ProviderTurns,
-} from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
-import { RecapServiceTag } from "../../../src/lib/domain/relay/Services/recap-service.js";
+} from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
+import { RecapServiceTag } from "../../../src/lib/domain/project-services/Services/recap-service.js";
 import {
 	AgentLivenessTag,
 	ConfigTag,
@@ -94,13 +94,13 @@ import {
 	OpenCodeSettingsServiceTag,
 	PollerManagerTag,
 	TranslatorTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
-import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
-import { SessionWorkspaceHintStateTag } from "../../../src/lib/domain/relay/Services/session-workspace-hint-state.js";
-import { SSEStreamTag } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
-import { OpenCodeTerminalServiceTag } from "../../../src/lib/domain/relay/Services/terminal-service.js";
-import { ToolContentServiceTag } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionInboxTag } from "../../../src/lib/domain/project-services/Services/session-inbox.js";
+import { SessionTitleServiceTag } from "../../../src/lib/domain/project-services/Services/session-title-service.js";
+import { SessionWorkspaceHintStateTag } from "../../../src/lib/domain/project-services/Services/session-workspace-hint-state.js";
+import { SSEStreamTag } from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
+import { OpenCodeTerminalServiceTag } from "../../../src/lib/domain/project-services/Services/terminal-service.js";
+import { ToolContentServiceTag } from "../../../src/lib/domain/project-services/Services/tool-content-service.js";
 import { ProjectRpcContextsTag } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { MessagePollerManager } from "../../../src/lib/provider/opencode/message-poller-impl.js";

@@ -11,16 +11,16 @@ import { Effect, Exit, Layer, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { applySessionCommand } from "../../../src/lib/domain/project-services/Services/session-command.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {

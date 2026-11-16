@@ -7,28 +7,28 @@ import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
-import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
-import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
-import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
+import { AgentServiceTag } from "../../../src/lib/domain/project-services/Services/agent-service.js";
+import { AlertsLive } from "../../../src/lib/domain/project-services/Services/alerts.js";
+import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
+import { PendingInteractionServiceLive } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
+import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnServiceLive,
 	ProviderTurnServiceTag,
-} from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
+} from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import {
 	makeOverridesStateLive,
 	setModel,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { SessionTitleServiceTag } from "../../../src/lib/domain/project-services/Services/session-title-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";

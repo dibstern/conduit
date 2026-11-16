@@ -4,7 +4,7 @@ import { expect } from "vitest";
 import {
 	DaemonSessionQueryServiceLive,
 	DaemonSessionQueryServiceTag,
-} from "../../../src/lib/domain/relay/Services/daemon-session-query-service.js";
+} from "../../../src/lib/domain/project-services/Services/daemon-session-query-service.js";
 
 describe("standalone DaemonSessionQueryServiceLive", () => {
 	it.effect(

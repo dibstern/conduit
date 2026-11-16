@@ -4,22 +4,22 @@
 // - A path or symlink escapes its selected folder, with or without a root.
 // - Tree walking follows an escaping directory symlink.
 // - Turn start stops recovering a missing existing-origin worktree.
-import "../../../src/lib/domain/relay/Services/session-command.js";
+import "../../../src/lib/domain/project-services/Services/session-command.js";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Option, PubSub } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
-import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
-import { resolveSessionFolders } from "../../../src/lib/domain/relay/Services/provider-turn-dispatch.js";
-import { OpenCodeFileServiceTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { AlertsTag } from "../../../src/lib/domain/project-services/Services/alerts.js";
+import { resolveSessionFolders } from "../../../src/lib/domain/project-services/Services/provider-turn-dispatch.js";
+import { OpenCodeFileServiceTag } from "../../../src/lib/domain/project-services/Services/services.js";
+import { applySessionCommand } from "../../../src/lib/domain/project-services/Services/session-command.js";
 import {
 	makeSessionOpenCodeClient,
 	resolveSessionRequestFolders,
 	SessionWorkspaceTag,
-} from "../../../src/lib/domain/relay/Services/session-workspace.js";
+} from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import { filesHandlers } from "../../../src/lib/server/ws-rpc/files.js";
 import {
 	makeMockConfig,

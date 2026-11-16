@@ -1,0 +1,573 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "@effect/vitest";
+import { Effect, Layer, Queue, Schema, Stream } from "effect";
+import { RpcClientError } from "effect/rpc/RpcClientError";
+import { SocketCloseError } from "effect/socket/Socket";
+import { afterEach, beforeEach, expect, vi } from "vitest";
+import {
+	accountsStateFromConfig,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
+import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	SessionDetailEnvelopeSchema,
+	WsRpcError,
+} from "../../../src/lib/contracts/ws-rpc.js";
+import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import {
+	AccountDirectory,
+	makeAccountDirectory,
+} from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import type { Envelope } from "../../../src/lib/domain/project-services/Services/read-model-subscription.js";
+import {
+	type SessionDetailItem,
+	subscribeSessionDetail,
+} from "../../../src/lib/domain/project-services/Services/session-detail-subscription.js";
+import { encodeSessionDetail } from "../../../src/lib/domain/project-services/Services/session-detail-wire.js";
+import {
+	SessionEventBusLive,
+	type SessionEventBusTag,
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
+import { resumeStream } from "../../../src/lib/frontend/transport/resume.js";
+import { decodeSessionDetail } from "../../../src/lib/frontend/transport/session-detail-wire.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import type { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+
+let isolatedRoot: string;
+beforeEach(() => {
+	isolatedRoot = mkdtempSync(join(tmpdir(), "conduit-detail-wire-login-"));
+	vi.stubEnv("HOME", isolatedRoot);
+	vi.stubEnv("CLAUDE_CONFIG_DIR", join(isolatedRoot, "inherited-login"));
+});
+afterEach(() => {
+	vi.unstubAllEnvs();
+	rmSync(isolatedRoot, { recursive: true, force: true });
+});
+
+const wireRoundTrip = (
+	envelope: SessionDetailEnvelope,
+): SessionDetailEnvelope =>
+	Schema.decodeUnknownSync(SessionDetailEnvelopeSchema)(
+		JSON.parse(
+			JSON.stringify(Schema.encodeSync(SessionDetailEnvelopeSchema)(envelope)),
+		),
+	);
+
+const part = (id: string, text: string): SessionDetailItem => ({
+	_tag: "part",
+	messageId: "m",
+	sortOrder: 0,
+	part: { id, type: "text", text },
+});
+const row = (text: string): SessionDetailItem => part("p", text);
+
+const testLayer = () => {
+	const dir = mkdtempSync(join(process.cwd(), ".suffix-test-"));
+	return Layer.mergeAll(
+		Layer.succeed(AccountDirectory)(
+			makeAccountDirectory(
+				Effect.succeed(
+					accountsStateFromConfig(
+						defaultDaemonConfig(),
+						configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
+					),
+				),
+				Effect.succeed(NO_OPENCODE_HEALTH),
+			),
+		),
+		makePersistenceEffectLayer(
+			join(dir, "events.db"),
+			"test-project",
+			undefined,
+			SessionEventBusLive,
+		),
+		SessionEventBusLive,
+		Layer.effectDiscard(
+			Effect.addFinalizer(() =>
+				Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+			),
+		),
+	);
+};
+
+describe("session detail wire", () => {
+	it.effect("an upsert outside the bounded snapshot sends a whole part", () =>
+		Effect.gen(function* () {
+			const outside = part("old-part", "Older text");
+			const input: SessionDetailEnvelope[] = [
+				{
+					_tag: "snapshot",
+					rows: [row("Newer")],
+					sequence: 1,
+					hasMore: true,
+					cursor: "m",
+				},
+				{ _tag: "synchronized" },
+				{ _tag: "upsert", item: outside, sequence: 2 },
+			];
+			const wire = [
+				...(yield* Stream.fromIterable(input).pipe(
+					encodeSessionDetail,
+					Stream.map(wireRoundTrip),
+					Stream.runCollect,
+				)),
+			];
+			expect(wire[2]).toEqual(input[2]);
+			expect([
+				...(yield* Stream.fromIterable(wire).pipe(
+					decodeSessionDetail,
+					Stream.runCollect,
+				)),
+			]).toEqual(input);
+		}),
+	);
+
+	for (const seed of ["snapshot", "replay", "live"] as const) {
+		it.effect(
+			`caps retained prefixes at eight with ${seed} seeding and decodes evicted rows`,
+			() =>
+				Effect.gen(function* () {
+					const message = (id: number, text: string): SessionDetailItem =>
+						part(String(id), text);
+					const rows = Array.from({ length: 24 }, (_, id) =>
+						message(id, "Hello"),
+					);
+					const input: SessionDetailEnvelope[] = [
+						{
+							_tag: "snapshot",
+							rows: seed === "snapshot" ? rows : [],
+							sequence: 0,
+						},
+						...(seed === "live" ? [{ _tag: "synchronized" } as const] : []),
+						...(seed === "snapshot"
+							? []
+							: rows.map((item, id) => ({
+									_tag: "upsert" as const,
+									item,
+									sequence: id + 1,
+								}))),
+						...(seed === "live" ? [] : [{ _tag: "synchronized" } as const]),
+					];
+					const probeStart = input.length;
+					// Newest first: misses cannot evict a prefix we have not probed yet.
+					for (let id = 23; id >= 0; id--)
+						input.push({
+							_tag: "upsert",
+							item: message(id, "Hello world"),
+							sequence: input.length,
+						});
+					// Touch the oldest remaining entry, insert another, then check LRU promotion.
+					// The decoder evicts in lockstep: evicting early, or not promoting,
+					// loses a prefix the encoder still sends a suffix of.
+					for (const id of [7, 24, 7, 6])
+						input.push({
+							_tag: "upsert",
+							item: message(id, "Hello world!"),
+							sequence: input.length,
+						});
+					const wire: SessionDetailEnvelope[] = [];
+					const decoded = yield* Stream.fromIterable(input).pipe(
+						encodeSessionDetail,
+						Stream.map(wireRoundTrip),
+						Stream.tap((envelope) =>
+							Effect.sync(() => {
+								wire.push(envelope);
+							}),
+						),
+						decodeSessionDetail,
+						Stream.runCollect,
+					);
+					expect([...decoded]).toEqual(input);
+					const probes = wire.slice(probeStart, probeStart + 24);
+					expect(
+						probes.filter(
+							(envelope) => envelope._tag === "upsert" && envelope.textSuffix,
+						),
+					).toHaveLength(8);
+					for (const envelope of probes.slice(8))
+						expect(envelope).not.toHaveProperty("textSuffix");
+					expect(wire.at(-2)).toHaveProperty("textSuffix");
+					expect(wire.at(-1)).not.toHaveProperty("textSuffix");
+				}),
+		);
+	}
+	for (const damage of ["missed", "reordered", "duplicated"] as const) {
+		it.effect(`a ${damage} suffix repairs the transcript`, () =>
+			Effect.gen(function* () {
+				const encoded = [
+					...(yield* Stream.fromIterable<SessionDetailEnvelope>([
+						{ _tag: "snapshot", rows: [row("A")], sequence: 1 },
+						{ _tag: "synchronized" },
+						{ _tag: "upsert", item: row("AB"), sequence: 2 },
+						{ _tag: "upsert", item: row("ABC"), sequence: 3 },
+					]).pipe(encodeSessionDetail, Stream.runCollect)),
+				];
+				const [snapshot, synchronized, first, last] = encoded;
+				if (!snapshot || !synchronized || !first || !last)
+					throw new Error("missing wire envelope");
+				const broken =
+					damage === "missed"
+						? [last]
+						: damage === "reordered"
+							? [last, first]
+							: [first, first, last];
+				let attempts = 0;
+				const delivered = yield* resumeStream(() =>
+					Stream.fromIterable<SessionDetailEnvelope>(
+						attempts++ === 0
+							? [snapshot, synchronized, ...broken]
+							: [
+									{ _tag: "snapshot", rows: [row("ABC")], sequence: 3 },
+									{ _tag: "synchronized" },
+								],
+					).pipe(Stream.map(wireRoundTrip), decodeSessionDetail),
+				).pipe(Stream.runCollect);
+				expect(attempts).toBe(2);
+				expect([...delivered].slice(-2)).toEqual([
+					{ _tag: "snapshot", rows: [row("ABC")], sequence: 3 },
+					{ _tag: "synchronized" },
+				]);
+			}),
+		);
+	}
+
+	it.effect(
+		"rewrites, truncation, removed parts and replacement snapshots remain authoritative",
+		() =>
+			Effect.gen(function* () {
+				const input: SessionDetailEnvelope[] = [
+					{ _tag: "snapshot", rows: [row("Hello")], sequence: 1 },
+					{ _tag: "synchronized" },
+					{ _tag: "upsert", item: row("Other"), sequence: 2 },
+					{ _tag: "upsert", item: row("Oh"), sequence: 3 },
+					{ _tag: "remove", id: JSON.stringify(["m", "p"]), sequence: 4 },
+					{ _tag: "upsert", item: row("Restored"), sequence: 5 },
+					{ _tag: "snapshot", rows: [row("Base")], sequence: 6 },
+					{ _tag: "synchronized" },
+					{ _tag: "upsert", item: row("Base plus"), sequence: 7 },
+				];
+				const source = Stream.fromIterable(input).pipe(encodeSessionDetail);
+				const first = yield* source.pipe(Stream.runCollect);
+				const second = yield* source.pipe(Stream.runCollect);
+				expect(second).toEqual(first);
+				expect([...first].slice(0, 8)).toEqual(input.slice(0, 8));
+				expect([
+					...(yield* source.pipe(
+						Stream.map(wireRoundTrip),
+						decodeSessionDetail,
+						Stream.runCollect,
+					)),
+				]).toEqual(input);
+			}),
+	);
+
+	it.effect(
+		"a resumed subscriber with stale server sent state and no client buffer repairs by length check",
+		() =>
+			Effect.gen(function* () {
+				// Retain the server's sent prefix, then reconnect only the client. This
+				// deliberately violates our usual per-execution reset discipline.
+				const sent = yield* Stream.fromIterable<SessionDetailEnvelope>([
+					{ _tag: "snapshot", rows: [row("Hello")], sequence: 7 },
+					{ _tag: "synchronized" },
+					{ _tag: "upsert", item: row("Hello world"), sequence: 8 },
+				]).pipe(encodeSessionDetail, Stream.runCollect);
+				const staleSuffix = sent.at(-1);
+				if (staleSuffix === undefined) throw new Error("missing suffix");
+				expect(staleSuffix).toMatchObject({
+					textSuffix: { from: 5, total: 11 },
+				});
+				const requests: (number | undefined)[] = [];
+				const delivered = yield* resumeStream(
+					(cursor) => {
+						requests.push(cursor);
+						return Stream.fromIterable<SessionDetailEnvelope>(
+							cursor === undefined
+								? [
+										{
+											_tag: "snapshot",
+											rows: [row("Hello world")],
+											sequence: 8,
+										},
+										{ _tag: "synchronized" },
+									]
+								: [{ _tag: "synchronized" }, staleSuffix],
+						).pipe(Stream.map(wireRoundTrip), decodeSessionDetail);
+					},
+					{ from: 7 },
+				).pipe(Stream.runCollect);
+				expect(requests).toEqual([7, undefined]);
+				expect([...delivered]).toEqual([
+					{ _tag: "synchronized" },
+					{ _tag: "snapshot", rows: [row("Hello world")], sequence: 8 },
+					{ _tag: "synchronized" },
+				]);
+			}),
+	);
+
+	it.effect(
+		"replay seeds decoding before duplicate suppression and remains whole on the wire",
+		() =>
+			Effect.gen(function* () {
+				let attempt = 0;
+				const wire: SessionDetailEnvelope[] = [];
+				const delivered = yield* resumeStream(() => {
+					const envelopes: SessionDetailEnvelope[] =
+						attempt++ === 0
+							? [
+									{ _tag: "snapshot", rows: [], sequence: 0 },
+									{ _tag: "synchronized" },
+									{ _tag: "upsert", item: row("Hello"), sequence: 1 },
+								]
+							: [
+									{ _tag: "upsert", item: row("Hello"), sequence: 1 },
+									{ _tag: "synchronized" },
+									{ _tag: "upsert", item: row("Hello world"), sequence: 2 },
+								];
+					const source = Stream.fromIterable(envelopes).pipe(
+						encodeSessionDetail,
+						Stream.map(wireRoundTrip),
+						Stream.tap((env) => Effect.sync(() => wire.push(env))),
+					);
+					return (
+						attempt === 1
+							? Stream.concat(
+									source,
+									Stream.fail(
+										new RpcClientError({
+											reason: new SocketCloseError({
+												code: 1006,
+												closeReason: "disconnect",
+											}),
+										}),
+									),
+								)
+							: source
+					).pipe(decodeSessionDetail);
+				}).pipe(Stream.runCollect);
+				expect(wire[3]).toEqual({
+					_tag: "upsert",
+					item: row("Hello"),
+					sequence: 1,
+				});
+				expect(wire[5]).toMatchObject({
+					textSuffix: { from: 5, total: 11 },
+				});
+				expect([...delivered]).toEqual([
+					{ _tag: "snapshot", rows: [], sequence: 0 },
+					{ _tag: "synchronized" },
+					{ _tag: "upsert", item: row("Hello"), sequence: 1 },
+					{ _tag: "synchronized" },
+					{ _tag: "upsert", item: row("Hello world"), sequence: 2 },
+				]);
+			}),
+	);
+	it.effect(
+		"a corrupted total requests a whole-row snapshot and streaming continues correctly",
+		() =>
+			Effect.gen(function* () {
+				yield* (yield* ProjectionRunnerEffectTag).recover();
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					canonicalEvent(
+						"session.created",
+						"s",
+						{ sessionId: "s", title: "Repair", provider: "claude" },
+						{ provider: "claude", createdAt: 1 },
+					),
+					canonicalEvent(
+						"message.created",
+						"s",
+						{ sessionId: "s", messageId: "m", role: "assistant" },
+						{ provider: "claude", createdAt: 2 },
+					),
+					canonicalEvent(
+						"text.delta",
+						"s",
+						{ messageId: "m", partId: "p", text: "Hello" },
+						{ provider: "claude", createdAt: 3 },
+					),
+				]);
+				const issued: (number | undefined)[] = [];
+				const context = yield* Effect.context<
+					ReadQueryEffectTag | SessionEventBusTag | AccountDirectory
+				>();
+				let corrupt = true;
+				const output = yield* Queue.unbounded<SessionDetailEnvelope>();
+				yield* resumeStream((resumeFromSequence) => {
+					issued.push(resumeFromSequence);
+					return subscribeSessionDetail({
+						sessionId: "s",
+						...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
+					}).pipe(
+						Stream.map(wireRoundTrip),
+						Stream.map((envelope) => {
+							if (
+								corrupt &&
+								envelope._tag === "upsert" &&
+								envelope.textSuffix
+							) {
+								corrupt = false;
+								return {
+									...envelope,
+									textSuffix: {
+										...envelope.textSuffix,
+										total: envelope.textSuffix.total + 1,
+									},
+								};
+							}
+							return envelope;
+						}),
+						Stream.mapError(
+							(error) => new WsRpcError({ message: String(error) }),
+						),
+						decodeSessionDetail,
+						Stream.provideContext(context),
+					);
+				}).pipe(
+					Stream.runForEach((envelope) => Queue.offer(output, envelope)),
+					Effect.forkScoped,
+				);
+				expect((yield* Queue.take(output))._tag).toBe("snapshot");
+				expect(yield* Queue.take(output)).toEqual({ _tag: "synchronized" });
+				yield* commit([
+					canonicalEvent(
+						"text.delta",
+						"s",
+						{ messageId: "m", partId: "p", text: " world" },
+						{ provider: "claude", createdAt: 4 },
+					),
+				]);
+				// The part moves first and its suffix is the damaged one, so the
+				// header behind it never arrives: the repair brings it.
+				const repair = yield* Queue.take(output);
+				expect(repair._tag).toBe("snapshot");
+				if (repair._tag !== "snapshot")
+					throw new Error("expected whole-row repair");
+				expect(repair.rows).toMatchObject([
+					{ _tag: "part", part: { text: "Hello world" } },
+					// 82tn.51: no pending cut row follows the messages any more.
+					{ _tag: "message", message: { id: "m" } },
+					{
+						_tag: "window",
+						window: {
+							kind: "latest",
+							firstMessageId: "m",
+							lastMessageId: "m",
+							hasEarlier: false,
+							hasLater: false,
+						},
+					},
+				]);
+				expect(yield* Queue.take(output)).toEqual({ _tag: "synchronized" });
+				expect(issued).toEqual([undefined, undefined]);
+				yield* commit([
+					canonicalEvent(
+						"text.delta",
+						"s",
+						{ messageId: "m", partId: "p", text: "!" },
+						{ provider: "claude", createdAt: 5 },
+					),
+				]);
+				expect(yield* Queue.take(output)).toMatchObject({
+					_tag: "upsert",
+					item: { _tag: "part", part: { text: "Hello world!" } },
+				});
+				expect(yield* Queue.take(output)).toMatchObject({
+					_tag: "upsert",
+					item: { _tag: "message", message: { id: "m" } },
+				});
+			}).pipe(Effect.provide(testLayer(), { local: true })),
+	);
+	it.effect(
+		"delivers linear UTF-8 bytes across N persisted streaming part writes",
+		() =>
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.recover();
+				const commit = yield* makeCommitAndSignal;
+				const measurements: {
+					writes: number;
+					finalBytes: number;
+					deliveredBytes: number;
+				}[] = [];
+				for (const writes of [32, 64, 128, 256]) {
+					const sessionId = `s${writes}`;
+					yield* commit([
+						canonicalEvent(
+							"session.created",
+							sessionId,
+							{ sessionId, title: "Bytes", provider: "claude" },
+							{ provider: "claude", createdAt: 1 },
+						),
+						canonicalEvent(
+							"message.created",
+							sessionId,
+							{ sessionId, messageId: sessionId, role: "assistant" },
+							{ provider: "claude", createdAt: 2 },
+						),
+					]);
+					const output = yield* Queue.unbounded<Envelope<SessionDetailItem>>();
+					let deliveredBytes = 0;
+					yield* subscribeSessionDetail({ sessionId }).pipe(
+						Stream.map((envelope) => {
+							const json = JSON.stringify(
+								Schema.encodeSync(SessionDetailEnvelopeSchema)(envelope),
+							);
+							deliveredBytes += Buffer.byteLength(json);
+							return Schema.decodeUnknownSync(SessionDetailEnvelopeSchema)(
+								JSON.parse(json),
+							);
+						}),
+						decodeSessionDetail,
+						// Each write also moves the message header; count parts.
+						Stream.filter(
+							(envelope) =>
+								envelope._tag !== "upsert" || envelope.item._tag === "part",
+						),
+						Stream.runForEach((envelope) => Queue.offer(output, envelope)),
+						Effect.forkScoped,
+					);
+					yield* Queue.take(output);
+					yield* Queue.take(output);
+					const piece = "🦊é".repeat(16);
+					for (let i = 0; i < writes; i++) {
+						yield* commit([
+							canonicalEvent(
+								"text.delta",
+								sessionId,
+								{ messageId: sessionId, partId: `${sessionId}-p`, text: piece },
+								{ provider: "claude", createdAt: i + 3 },
+							),
+						]);
+						const delivered = yield* Queue.take(output);
+						if (i === writes - 1)
+							expect(delivered).toMatchObject({
+								item: { part: { text: piece.repeat(writes) } },
+							});
+					}
+					measurements.push({
+						writes,
+						finalBytes: Buffer.byteLength(piece.repeat(writes)),
+						deliveredBytes,
+					});
+				}
+				console.log("wire bytes", JSON.stringify(measurements));
+				for (let i = 1; i < measurements.length; i++) {
+					const previous = measurements[i - 1];
+					const current = measurements[i];
+					if (!previous || !current) throw new Error("missing measurement");
+					expect(current.deliveredBytes / previous.deliveredBytes).toBeLessThan(
+						2.2,
+					);
+					expect(current.deliveredBytes).toBeLessThan(current.finalBytes * 10);
+				}
+			}).pipe(Effect.provide(testLayer(), { local: true })),
+	);
+});

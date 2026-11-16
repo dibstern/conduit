@@ -2,13 +2,13 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterAll, expect, it } from "vitest";
-import { EffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
+import { EffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { makeFailTurn } from "../../../src/lib/domain/relay/Services/turn-failure.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { LoggerTag } from "../../../src/lib/domain/project-services/Services/services.js";
+import { makeFailTurn } from "../../../src/lib/domain/project-services/Services/turn-failure.js";
 import type {
 	Message,
 	SessionStatus,

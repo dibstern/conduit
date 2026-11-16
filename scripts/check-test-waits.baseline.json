@@ -1334,7 +1334,7 @@
 	"test/integration/persistence/shared-store-scope.test.ts": {
 		"polling": 1
 	},
-	"test/integration/relay/pending-input-run-now.test.ts": {
+	"test/integration/project-services/pending-input-run-now.test.ts": {
 		"timeout-override": 1
 	},
 	"test/media/media-generation.test.ts": {
@@ -1419,17 +1419,17 @@
 		"polling": 3,
 		"timeout-override": 1
 	},
-	"test/unit/domain/relay/opencode-command-completion-ownership.test.ts": {
+	"test/unit/domain/project-services/opencode-command-completion-ownership.test.ts": {
 		"polling": 3
 	},
-	"test/unit/domain/relay/opencode-run-recovery.test.ts": {
+	"test/unit/domain/project-services/opencode-run-recovery.test.ts": {
 		"polling": 1
 	},
-	"test/unit/domain/relay/opencode-runtime-ingress-projection.test.ts": {
+	"test/unit/domain/project-services/opencode-runtime-ingress-projection.test.ts": {
 		"polling": 2,
 		"real-wait": 19
 	},
-	"test/unit/domain/relay/scoped-runtime-reads.test.ts": {
+	"test/unit/domain/project-services/scoped-runtime-reads.test.ts": {
 		"polling": 2
 	},
 	"test/unit/e2e/claude-trace-replayer.test.ts": {
@@ -1558,7 +1558,7 @@
 	"test/unit/provider/orchestration-side-effect-reactor.test.ts": {
 		"polling": 2
 	},
-	"test/unit/provider/relay-event-sink.test.ts": {
+	"test/unit/provider/project-event-sink.test.ts": {
 		"polling": 2
 	},
 	"test/unit/provider/run-ledger-oracle/plain-path.test.ts": {
@@ -1573,22 +1573,22 @@
 	"test/unit/provider/runner-retirement-fence.test.ts": {
 		"real-wait": 3
 	},
-	"test/unit/relay/interim-badge-broadcast.test.ts": {
+	"test/unit/project-services/interim-badge-broadcast.test.ts": {
 		"polling": 8
 	},
-	"test/unit/relay/monitoring-wiring.test.ts": {
+	"test/unit/project-services/monitoring-wiring.test.ts": {
 		"polling": 1
 	},
-	"test/unit/relay/opencode-health-removal.test.ts": {
+	"test/unit/project-services/opencode-health-removal.test.ts": {
 		"polling": 1
 	},
-	"test/unit/relay/push-notification-done.test.ts": {
+	"test/unit/project-services/push-notification-done.test.ts": {
 		"polling": 1
 	},
-	"test/unit/relay/shared-opencode-reconnect.test.ts": {
+	"test/unit/project-services/shared-opencode-reconnect.test.ts": {
 		"polling": 20
 	},
-	"test/unit/relay/sse-stream.test.ts": {
+	"test/unit/project-services/sse-stream.test.ts": {
 		"polling": 6,
 		"real-wait": 3
 	},

@@ -13,19 +13,19 @@ import { isOpenCodeNotRunningError } from "../../domain/daemon/Services/opencode
 import {
 	type AlertsTag,
 	publishAlert,
-} from "../../domain/relay/Services/alerts.js";
+} from "../../domain/project-services/Services/alerts.js";
 import {
 	type ConfigTag,
 	StatusPollerTag,
-} from "../../domain/relay/Services/services.js";
+} from "../../domain/project-services/Services/services.js";
 import {
 	projectSessionManager,
 	type SessionManagerServiceTag,
-} from "../../domain/relay/Services/session-manager-service.js";
+} from "../../domain/project-services/Services/session-manager-service.js";
 import {
 	clearProcessingTimeout,
 	type OverridesStateTag,
-} from "../../domain/relay/Services/session-overrides-state.js";
+} from "../../domain/project-services/Services/session-overrides-state.js";
 import * as Failure from "../../effect/failure-classification.js";
 import type { Message } from "../../instance/sdk-types.js";
 import type { Logger } from "../../logger.js";

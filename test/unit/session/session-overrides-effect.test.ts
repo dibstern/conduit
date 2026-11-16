@@ -35,7 +35,7 @@ import {
 	setPermissionMode,
 	setVariant,
 	startProcessingTimeout,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 
 const TIMEOUT_MS = 120_000;
 

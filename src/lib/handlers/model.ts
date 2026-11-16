@@ -24,41 +24,41 @@ import {
 	cloneContextWindowOptions,
 	loadModelCatalog,
 	publishDiscoveredModels,
-} from "../domain/relay/Services/model-catalog.js";
+} from "../domain/project-services/Services/model-catalog.js";
 import {
 	ProjectSettingsTag,
 	publishGlobalProjectSetting,
 	publishProjectSetting,
 	readTitleGenerationState,
 	refreshModelSettings,
-} from "../domain/relay/Services/project-settings.js";
+} from "../domain/project-services/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-} from "../domain/relay/Services/services.js";
+} from "../domain/project-services/Services/services.js";
 import {
 	selectSessionContextWindow,
 	selectSessionModel,
 	selectSessionVariant,
-} from "../domain/relay/Services/session-model-settings.js";
+} from "../domain/project-services/Services/session-model-settings.js";
 import {
 	getDefaultModel,
 	getDefaultPermissionMode,
 	getPermissionMode,
 	type ModelOverride,
 	OverridesStateTag,
-} from "../domain/relay/Services/session-overrides-state.js";
-import { storedSessionPick } from "../domain/relay/Services/session-pick.js";
+} from "../domain/project-services/Services/session-overrides-state.js";
+import { storedSessionPick } from "../domain/project-services/Services/session-pick.js";
 
-export { loadModelCatalog } from "../domain/relay/Services/model-catalog.js";
+export { loadModelCatalog } from "../domain/project-services/Services/model-catalog.js";
 
 import {
 	loadRelaySettings,
 	parseDefaultModel,
 	saveRelaySettings,
-} from "../daemon/relay-settings.js";
+} from "../daemon/global-settings.js";
 import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";

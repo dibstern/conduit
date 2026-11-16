@@ -11,12 +11,12 @@ import { MessageSurfacingSettings } from "../../../src/lib/domain/daemon/Service
 import {
 	makeRecapServiceLive,
 	RecapServiceTag,
-} from "../../../src/lib/domain/relay/Services/recap-service.js";
+} from "../../../src/lib/domain/project-services/Services/recap-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";

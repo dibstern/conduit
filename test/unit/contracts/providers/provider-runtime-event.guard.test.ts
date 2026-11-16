@@ -45,9 +45,9 @@ describe("ProviderRuntimeEvent contracts", () => {
 		expect(filesImportingContract).toEqual(
 			expect.arrayContaining([
 				"src/lib/provider/types.ts",
-				"src/lib/provider/relay-event-sink.ts",
+				"src/lib/provider/project-event-sink.ts",
 				"src/lib/provider/provider-runtime-event-to-domain.ts",
-				"src/lib/domain/relay/Services/provider-runtime-ingestion-service.ts",
+				"src/lib/domain/project-services/Services/provider-runtime-ingestion-service.ts",
 			]),
 		);
 	});
@@ -88,7 +88,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 		}
 
 		const effectIngressPath =
-			"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts";
+			"src/lib/domain/project-services/Services/opencode-runtime-ingress-service.ts";
 		const effectIngress = readFileSync(
 			join(REPO_ROOT, effectIngressPath),
 			"utf8",
@@ -107,7 +107,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 	it("does not keep a legacy sync OpenCode runtime ingress", () => {
 		const legacyIngress = join(
 			REPO_ROOT,
-			"src/lib/domain/relay/Services/opencode-runtime-ingress-legacy.ts",
+			"src/lib/domain/project-services/Services/opencode-runtime-ingress-legacy.ts",
 		);
 
 		expect(existsSync(legacyIngress)).toBe(false);

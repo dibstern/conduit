@@ -3,25 +3,25 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
-import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
-import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
-import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
+import { AgentServiceTag } from "../../../src/lib/domain/project-services/Services/agent-service.js";
+import { AlertsLive } from "../../../src/lib/domain/project-services/Services/alerts.js";
+import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
+import { PendingInteractionServiceLive } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
+import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderTurnServiceLive } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import {
 	hasActiveProcessingTimeout,
 	makeOverridesStateLive,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { SessionTitleServiceTag } from "../../../src/lib/domain/project-services/Services/session-title-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	handleAskUserResponse,
 	handleQuestionReject,

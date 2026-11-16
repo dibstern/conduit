@@ -13,7 +13,7 @@ import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { SessionDetailEnvelopeSchema } from "../../../src/lib/contracts/ws-rpc.js";
-import type { ReadModelRead } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
+import type { ReadModelRead } from "../../../src/lib/domain/project-services/Services/read-model-subscription.js";
 import {
 	applyTranscriptEnvelope,
 	type TranscriptEntry,

@@ -185,7 +185,7 @@ function appendCalls(sourceNodes: readonly ts.Node[]) {
 	);
 }
 
-const relay = "src/lib/domain/relay/Services/";
+const relay = "src/lib/domain/project-services/Services/";
 const claudePath = "src/lib/persistence/effect/claude-event-persist-effect.ts";
 const writers = [
 	`${relay}session-command.ts`,

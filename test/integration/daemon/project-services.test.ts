@@ -37,12 +37,12 @@ import {
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
-import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { StatusPollerTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { SSEStreamTag } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
+} from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
+import { SSEStreamTag } from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";

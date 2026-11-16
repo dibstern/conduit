@@ -3,7 +3,7 @@
 // - A second tab reads session.created before its own launch workspace is recorded.
 // - Project-wide work overlaps a session operation in either acquisition order.
 // - Interrupting a holder or waiter leaks a permit or splits a still-used session lock.
-import "../../../src/lib/domain/relay/Services/session-command.js";
+import "../../../src/lib/domain/project-services/Services/session-command.js";
 
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer } from "effect";
@@ -14,12 +14,12 @@ import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeWorktreeLive } from "../../../src/lib/domain/daemon/Layers/worktree-layer.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
-import { resolveSessionFolders } from "../../../src/lib/domain/relay/Services/provider-turn-dispatch.js";
-import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { resolveSessionFolders } from "../../../src/lib/domain/project-services/Services/provider-turn-dispatch.js";
+import { applySessionCommand } from "../../../src/lib/domain/project-services/Services/session-command.js";
 import {
 	resolveSessionRequestFolders,
 	SessionWorkspaceTag,
-} from "../../../src/lib/domain/relay/Services/session-workspace.js";
+} from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,

@@ -10,7 +10,7 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
-import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {

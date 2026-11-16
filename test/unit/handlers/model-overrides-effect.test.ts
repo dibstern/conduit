@@ -4,20 +4,20 @@ import { join } from "node:path";
 import { describe, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import {
 	getModel,
 	getVariant,
 	makeOverridesStateLive,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { switchModelForSession } from "../../../src/lib/handlers/model.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { Logger } from "../../../src/lib/logger.js";

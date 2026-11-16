@@ -12,13 +12,13 @@ import { Effect, Layer, Logger, References } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
-import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { applySessionCommand } from "../../../src/lib/domain/project-services/Services/session-command.js";
+import { sessionPickEvents } from "../../../src/lib/domain/project-services/Services/session-pick.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";

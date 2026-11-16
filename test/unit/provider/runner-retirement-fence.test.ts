@@ -35,29 +35,29 @@ import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
-import { ContinuationTag } from "../../../src/lib/domain/relay/Services/continuation.js";
+import { ContinuationTag } from "../../../src/lib/domain/project-services/Services/continuation.js";
 import {
 	InputDraftsTag,
 	makeInputDrafts,
-} from "../../../src/lib/domain/relay/Services/input-drafts.js";
+} from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+} from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderTurnServiceTag } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import {
 	SessionEventBusLive,
 	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import {
 	SessionInboxLive,
 	SessionInboxTag,
-} from "../../../src/lib/domain/relay/Services/session-inbox.js";
-import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
+} from "../../../src/lib/domain/project-services/Services/session-inbox.js";
+import { sessionPickEvents } from "../../../src/lib/domain/project-services/Services/session-pick.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import {
 	currentRunnerWriteOrigin,
@@ -8574,7 +8574,7 @@ for (const order of [
 					}
 					const handedOff = yield* Deferred.make<void>();
 					const sendTurn = vi.fn<
-						import("../../../src/lib/domain/relay/Services/provider-turn-service.js").ProviderTurnService["sendTurn"]
+						import("../../../src/lib/domain/project-services/Services/provider-turn-service.js").ProviderTurnService["sendTurn"]
 					>((input) =>
 						f.persist
 							.persistUserMessage("s", "steer text", {

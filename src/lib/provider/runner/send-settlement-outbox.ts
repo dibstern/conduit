@@ -3,7 +3,7 @@ import { SqlClient } from "effect/sql";
 import { AccountSchema } from "../../contracts/account.js";
 import { AttachmentRefSchema } from "../../contracts/attachment-ref.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import type { InputDrafts } from "../../domain/relay/Services/input-drafts.js";
+import type { InputDrafts } from "../../domain/project-services/Services/input-drafts.js";
 import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
 import type { CommitAndSignalProject } from "../../persistence/effect/commit-and-signal.js";
 import { makeEventStoreEffect } from "../../persistence/effect/event-store-effect.js";

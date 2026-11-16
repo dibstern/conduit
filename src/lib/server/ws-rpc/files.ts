@@ -1,9 +1,12 @@
 import { Clock, Effect, Option } from "effect";
 import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
-import { DirectoryListingServiceTag } from "../../domain/relay/Services/directory-listing-service.js";
-import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
-import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
-import { ToolContentServiceTag } from "../../domain/relay/Services/tool-content-service.js";
+import { DirectoryListingServiceTag } from "../../domain/project-services/Services/directory-listing-service.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../domain/project-services/Services/services.js";
+import { resolveSessionRequestFolders } from "../../domain/project-services/Services/session-workspace.js";
+import { ToolContentServiceTag } from "../../domain/project-services/Services/tool-content-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors.js";
 import {

@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import type { ProjectManagementService } from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import type { ProjectManagementService } from "../../../src/lib/domain/project-services/Services/project-management-service.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,

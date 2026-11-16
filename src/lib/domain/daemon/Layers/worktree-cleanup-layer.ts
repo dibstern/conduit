@@ -23,7 +23,7 @@ import {
 	cleanUpProjectWorktrees,
 	type WorktreeCleanupRetry,
 } from "../../../session/worktree-cleanup-sweep.js";
-import type { AlertsTag } from "../../relay/Services/alerts.js";
+import type { AlertsTag } from "../../project-services/Services/alerts.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";

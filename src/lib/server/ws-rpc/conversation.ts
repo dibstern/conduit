@@ -13,24 +13,24 @@ import {
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { SessionActivityTag } from "../../domain/daemon/Services/session-activity.js";
 import { killServer } from "../../domain/persistence/Services/port-watcher.js";
-import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
-import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
-import { RecapServiceTag } from "../../domain/relay/Services/recap-service.js";
+import { RateLimiterTag } from "../../domain/project-services/Layers/rate-limiter-layer.js";
+import { InputDraftsTag } from "../../domain/project-services/Services/input-drafts.js";
+import { RecapServiceTag } from "../../domain/project-services/Services/recap-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../domain/relay/Services/services.js";
+} from "../../domain/project-services/Services/services.js";
 import {
 	type SessionInbox,
 	type SessionInboxOutcome,
 	SessionInboxTag,
-} from "../../domain/relay/Services/session-inbox.js";
-import { persistSessionPermissionMode } from "../../domain/relay/Services/session-manager-permission-mode.js";
+} from "../../domain/project-services/Services/session-inbox.js";
+import { persistSessionPermissionMode } from "../../domain/project-services/Services/session-manager-permission-mode.js";
 import {
 	getPermissionMode,
 	setPermissionMode,
-} from "../../domain/relay/Services/session-overrides-state.js";
+} from "../../domain/project-services/Services/session-overrides-state.js";
 import {
 	confirmEscalation,
 	dismissEscalation,

@@ -2,7 +2,7 @@ import { Clock, Effect, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { vi } from "vitest";
 import { AccountDirectory } from "../../src/lib/domain/daemon/Services/account-directory.js";
-import { ProviderRuntimeIngestionTag } from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { makeCommitAndSignal } from "../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	ProviderInstanceFailure,

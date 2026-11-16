@@ -31,10 +31,10 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { DaemonStoreAvailability } from "../../../src/lib/domain/daemon/Services/daemon-store-availability.js";
 import { ProjectRegistryTag } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
-import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { markUnread } from "../../../src/lib/domain/relay/Services/session-attention.js";
-import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
+import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { markUnread } from "../../../src/lib/domain/project-services/Services/session-attention.js";
+import { SessionEventBusTag } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	makePersistenceProjectLayer,

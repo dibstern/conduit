@@ -6,12 +6,12 @@ import type { SqlError } from "effect/sql/SqlError";
 import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import { sessionCreatedLineage } from "../../contracts/session-ref.js";
-import type { DraftChange } from "../../domain/relay/Services/input-drafts.js";
+import type { DraftChange } from "../../domain/project-services/Services/input-drafts.js";
 import {
 	resolveServerSessionPick,
 	sessionPickEvents,
 	storedSessionPick,
-} from "../../domain/relay/Services/session-pick.js";
+} from "../../domain/project-services/Services/session-pick.js";
 import type { ClaudeSubagentTranscriptSnapshot } from "../../provider/claude/types.js";
 import { currentRunnerOutput } from "../../provider/runner/runner-receipts.js";
 import {

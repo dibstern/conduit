@@ -16,13 +16,13 @@ import {
 import {
 	PendingInteractionServiceTag,
 	type PendingQuestion,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { restoreClaudeQuestionsFromStore } from "../../../src/lib/domain/relay/Services/restore-claude-questions.js";
+} from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { restoreClaudeQuestionsFromStore } from "../../../src/lib/domain/project-services/Services/restore-claude-questions.js";
 import {
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import { handleAskUserResponse } from "../../../src/lib/handlers/permissions.js";
 import {
 	ReadQueryEffectError,

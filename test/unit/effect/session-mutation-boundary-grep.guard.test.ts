@@ -9,7 +9,8 @@ const SRC_ROOT = join(REPO_ROOT, "src");
 // the upstream sync adapter, which is reached only after the canonical event
 // has been appended and projected, and the create and fork calls, which are
 // id-generating and so cannot be expressed as commands on their own.
-const SESSION_COMMAND_SEAM = "src/lib/domain/relay/Services/session-command.ts";
+const SESSION_COMMAND_SEAM =
+	"src/lib/domain/project-services/Services/session-command.ts";
 
 function productionSourceFiles(dir: string): string[] {
 	const files: string[] = [];

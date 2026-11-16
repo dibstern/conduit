@@ -7,7 +7,7 @@ import {
 	delayed,
 	repeating,
 	trackedFetch,
-} from "../../../src/lib/domain/relay/Services/resource.js";
+} from "../../../src/lib/domain/project-services/Services/resource.js";
 
 describe("Effect resource utilities", () => {
 	it("trackedFetch aborts in-flight requests when its scope closes", async () => {

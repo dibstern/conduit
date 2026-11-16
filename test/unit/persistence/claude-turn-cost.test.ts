@@ -8,8 +8,8 @@ import { HistoryMessageSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { sessionPickEvents } from "../../../src/lib/domain/project-services/Services/session-pick.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
 	economics,

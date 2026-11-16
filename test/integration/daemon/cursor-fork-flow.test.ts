@@ -17,20 +17,20 @@ import { expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { forkSession } from "../../../src/lib/domain/relay/Services/session-command.js";
-import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { forkSession } from "../../../src/lib/domain/project-services/Services/session-command.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { sessionPickEvents } from "../../../src/lib/domain/project-services/Services/session-pick.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";

@@ -16,8 +16,8 @@ import {
 import {
 	InstanceManagementServiceError,
 	InstanceManagementServiceTag,
-} from "../../../src/lib/domain/relay/Services/instance-management-service.js";
-import { ScanServiceTag } from "../../../src/lib/domain/relay/Services/scan-service.js";
+} from "../../../src/lib/domain/project-services/Services/instance-management-service.js";
+import { ScanServiceTag } from "../../../src/lib/domain/project-services/Services/scan-service.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";

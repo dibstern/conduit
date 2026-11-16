@@ -21,7 +21,7 @@ import type {
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../src/lib/daemon/relay-settings.js";
+} from "../../../src/lib/daemon/global-settings.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 it("fans global settings out to another live project's subscribers and defaults", async () => {

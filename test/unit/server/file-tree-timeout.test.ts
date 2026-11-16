@@ -5,13 +5,13 @@ import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
+import { AlertsLive } from "../../../src/lib/domain/project-services/Services/alerts.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeFileServiceLive,
 	OpenCodeFileServiceTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import { getFileTreeEntries } from "../../../src/lib/handlers/files.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";

@@ -9,11 +9,11 @@ import {
 	PollerManagerTag,
 	type StatusPollerShape,
 	StatusPollerTag,
-} from "../../domain/relay/Services/services.js";
+} from "../../domain/project-services/Services/services.js";
 import {
 	makeSessionOpenCodeClient,
 	type SessionWorkspaceTag,
-} from "../../domain/relay/Services/session-workspace.js";
+} from "../../domain/project-services/Services/session-workspace.js";
 import type { Message } from "../../instance/sdk-types.js";
 import type { Logger } from "../../logger.js";
 import type { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";

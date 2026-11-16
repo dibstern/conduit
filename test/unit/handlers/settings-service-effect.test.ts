@@ -4,16 +4,16 @@ import { expect, vi } from "vitest";
 
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import { ProjectManagementServiceLive } from "../../../src/lib/domain/project-services/Services/project-management-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeSettingsServiceLive,
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import {
 	getCommandsForSession,
 	getDiscoveredSkillForSession,

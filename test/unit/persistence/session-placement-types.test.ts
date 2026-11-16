@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import {
 	forkPlacement,
 	type SessionCommand,
-} from "../../../src/lib/domain/relay/Services/session-command.js";
+} from "../../../src/lib/domain/project-services/Services/session-command.js";
 
 type CreatedCommand = Extract<SessionCommand, { type: "session.created" }>;
 const base = { sessionId: "session", title: "Session", provider: "claude" };

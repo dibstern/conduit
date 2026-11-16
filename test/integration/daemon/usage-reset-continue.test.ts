@@ -16,23 +16,23 @@ import {
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { AccountDirectoryStateLive } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
-import { ContinuationTag } from "../../../src/lib/domain/relay/Services/continuation.js";
-import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
-import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
+import { AgentServiceTag } from "../../../src/lib/domain/project-services/Services/agent-service.js";
+import { AlertsLive } from "../../../src/lib/domain/project-services/Services/alerts.js";
+import { ContinuationTag } from "../../../src/lib/domain/project-services/Services/continuation.js";
+import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
+import { ProviderTurnServiceTag } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import {
 	SessionInboxLive,
 	SessionInboxTag,
-} from "../../../src/lib/domain/relay/Services/session-inbox.js";
-import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-inbox.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";

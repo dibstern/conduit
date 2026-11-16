@@ -35,8 +35,8 @@ import {
 	type SessionGitChange,
 } from "../../../src/lib/domain/daemon/Services/session-git.js";
 import { PortWatcher } from "../../../src/lib/domain/persistence/Services/port-watcher.js";
-import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { SessionManagerError } from "../../../src/lib/domain/project-services/Services/session-manager-error.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";

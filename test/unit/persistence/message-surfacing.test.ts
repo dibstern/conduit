@@ -11,7 +11,7 @@ import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js
 import type { MessageSurfacingStatus } from "../../../src/lib/contracts/message-surfacing.js";
 import { CategorySet } from "../../../src/lib/domain/daemon/Services/category-set.js";
 import { MessageSurfacingSettings } from "../../../src/lib/domain/daemon/Services/message-surfacing-settings.js";
-import { makeMessageSurfacing } from "../../../src/lib/domain/relay/Services/message-surfacing.js";
+import { makeMessageSurfacing } from "../../../src/lib/domain/project-services/Services/message-surfacing.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 

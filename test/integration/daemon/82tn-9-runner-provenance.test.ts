@@ -10,18 +10,18 @@ import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Servi
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+} from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ConfigTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	makeOverridesStateLive,
 	makeProcessingTimeoutHooks,
 	type OverridesStateTag,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import {
 	makePersistenceProjectLayer,

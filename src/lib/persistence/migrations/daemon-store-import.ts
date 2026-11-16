@@ -24,7 +24,7 @@ import { Data, Effect, Layer } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { AttachmentStoreTag } from "../../domain/persistence/Services/attachment-store.js";
-import { releaseCopiedInputDraftClaims } from "../../domain/relay/Services/input-drafts.js";
+import { releaseCopiedInputDraftClaims } from "../../domain/project-services/Services/input-drafts.js";
 import { legacyRunnerRanking } from "../../provider/runner/runner-registry.js";
 import { makeAttachmentStore } from "../attachment-store.js";
 import {

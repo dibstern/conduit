@@ -13,8 +13,8 @@ import { MessageSurfacingSettings } from "../../../src/lib/domain/daemon/Service
 import {
 	GoalSummaryServiceTag,
 	makeGoalSummaryServiceLive,
-} from "../../../src/lib/domain/relay/Services/goal-summary-service.js";
-import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/goal-summary-service.js";
+import { ConfigTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";

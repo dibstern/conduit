@@ -7,7 +7,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
-import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { LoggerTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { applyLiveSessionSettings } from "../../../src/lib/handlers/model.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";

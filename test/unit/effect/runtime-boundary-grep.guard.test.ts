@@ -1499,7 +1499,7 @@ describe("Effect runtime boundary grep", () => {
 				pattern: /Layer\.succeed\s*\(\s*SessionRegistryTag\s*(?:,|\)\s*\()/,
 			},
 			{
-				path: "src/lib/domain/relay/Services/services.ts",
+				path: "src/lib/domain/project-services/Services/services.ts",
 				pattern: /class SessionRegistryTag\b/,
 			},
 			{
@@ -2067,43 +2067,43 @@ describe("Effect runtime boundary grep", () => {
 				reason: "prompt dispatch must use Effect persistence services only",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-service.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-service.ts",
 				pattern: /\bReadQueryTag\b/,
 				reason:
 					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-list.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-list.ts",
 				pattern: /\bReadQueryTag\b/,
 				reason:
 					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-history.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-history.ts",
 				pattern: /\bReadQueryTag\b/,
 				reason:
 					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-triage.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-triage.ts",
 				pattern: /\bReadQueryTag\b/,
 				reason:
 					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-state-operations.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-state-operations.ts",
 				pattern: /\bReadQueryTag\b/,
 				reason:
 					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-permission-mode.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-permission-mode.ts",
 				pattern: /\bReadQueryTag\b/,
 				reason:
 					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-error.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-error.ts",
 				pattern: /\bReadQueryTag\b/,
 				reason:
 					"SessionManagerService must not fall back to the sync ReadQueryService bridge",
@@ -2136,7 +2136,7 @@ describe("Effect runtime boundary grep", () => {
 				optional: true,
 			},
 			{
-				path: "src/lib/domain/relay/Services/services.ts",
+				path: "src/lib/domain/project-services/Services/services.ts",
 				pattern:
 					/\b(?:ReadQueryTag|ClaudeEventPersistTag|ProviderStateServiceTag|LegacyRelayEventSinkPersist)\b/,
 				reason: "legacy persistence Tags must be deleted",
@@ -2149,7 +2149,7 @@ describe("Effect runtime boundary grep", () => {
 					"HandlerDeps must not advertise retired legacy persistence fields",
 			},
 			{
-				path: "src/lib/provider/relay-event-sink.ts",
+				path: "src/lib/provider/project-event-sink.ts",
 				pattern: /\bLegacyRelayEventSinkPersist\b/,
 				reason: "RelayEventSink persistence should be Effect-only",
 			},
@@ -2244,7 +2244,7 @@ describe("Effect runtime boundary grep", () => {
 					"session lifecycle wiring should consume DaemonEventBus, not legacy SessionManager EventEmitter callbacks",
 			},
 			{
-				path: "src/lib/domain/relay/Services/services.ts",
+				path: "src/lib/domain/project-services/Services/services.ts",
 				pattern: /\b(?:on|off)\(event: "(?:broadcast|session_lifecycle)"/,
 				reason:
 					"SessionManagerShape should not expose EventEmitter bridge methods",
@@ -2276,49 +2276,49 @@ describe("Effect runtime boundary grep", () => {
 					"relay runtime should use SessionManagerServiceTag/SessionManagerStateTag instead of injecting a legacy SessionManager",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-service.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-service.ts",
 				pattern: /\bSessionManagerTag\b/,
 				reason:
 					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-list.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-list.ts",
 				pattern: /\bSessionManagerTag\b/,
 				reason:
 					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-history.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-history.ts",
 				pattern: /\bSessionManagerTag\b/,
 				reason:
 					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-triage.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-triage.ts",
 				pattern: /\bSessionManagerTag\b/,
 				reason:
 					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-state-operations.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-state-operations.ts",
 				pattern: /\bSessionManagerTag\b/,
 				reason:
 					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-permission-mode.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-permission-mode.ts",
 				pattern: /\bSessionManagerTag\b/,
 				reason:
 					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/session-manager-error.ts",
+				path: "src/lib/domain/project-services/Services/session-manager-error.ts",
 				pattern: /\bSessionManagerTag\b/,
 				reason:
 					"SessionManagerServiceLive must not mirror state into the legacy SessionManager bridge",
 			},
 			{
-				path: "src/lib/domain/relay/Services/services.ts",
+				path: "src/lib/domain/project-services/Services/services.ts",
 				pattern: /class SessionManagerTag\b/,
 				reason:
 					"SessionManagerTag should stay deleted after session state moves behind SessionManagerService",
@@ -2422,7 +2422,8 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not keep the deferred status poller runtime facade", () => {
-		const path = "src/lib/domain/relay/Services/session-status-poller.ts";
+		const path =
+			"src/lib/domain/project-services/Services/session-status-poller.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2463,7 +2464,8 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not build a status poller runtime bridge in the status poller layer", () => {
-		const path = "src/lib/domain/relay/Layers/status-poller-layer.ts";
+		const path =
+			"src/lib/domain/project-services/Layers/status-poller-layer.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2650,7 +2652,8 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("does not read status-poller parent maps through a runtime sync bridge", () => {
-		const path = "src/lib/domain/relay/Layers/status-poller-layer.ts";
+		const path =
+			"src/lib/domain/project-services/Layers/status-poller-layer.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2676,9 +2679,10 @@ describe("Effect runtime boundary grep", () => {
 
 	it("keeps Effect OpenCode runtime ingress inside the project runtime", () => {
 		const hookPath =
-			"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts";
+			"src/lib/domain/project-services/Services/opencode-runtime-ingress-service.ts";
 		const hookSource = readFileSync(join(REPO_ROOT, hookPath), "utf8");
-		const relayPath = "src/lib/domain/relay/Layers/project-ingestion-layer.ts";
+		const relayPath =
+			"src/lib/domain/project-services/Layers/project-ingestion-layer.ts";
 		const relaySource = readFileSync(join(REPO_ROOT, relayPath), "utf8");
 		const retiredBridgePatterns = [
 			{
@@ -2729,7 +2733,7 @@ describe("Effect runtime boundary grep", () => {
 		const openCodeRuntimeIngressSource = readFileSync(
 			join(
 				REPO_ROOT,
-				"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts",
+				"src/lib/domain/project-services/Services/opencode-runtime-ingress-service.ts",
 			),
 			"utf8",
 		);
@@ -2748,7 +2752,7 @@ describe("Effect runtime boundary grep", () => {
 		const providerTurnServiceSource = readFileSync(
 			join(
 				REPO_ROOT,
-				"src/lib/domain/relay/Services/provider-turn-dispatch.ts",
+				"src/lib/domain/project-services/Services/provider-turn-dispatch.ts",
 			),
 			"utf8",
 		);

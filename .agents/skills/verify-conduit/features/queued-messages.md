@@ -68,7 +68,7 @@ Evidence from 2026-10-28: `test-results/verify-conduit/b-queue/evidence/` (Claud
 
 - `wait-settle` waits for the pending-input tray to empty or pause, then requires a 750 ms quiet window without turn or queue changes. One call covers the queue drain.
 - Without `--claude-delay-ms`, the default Claude trace finishes before you can queue.
-- **Run now on Claude ends the first turn `error` with `{"error":"cancelled","code":"cancelled"}`**, and the transcript shows a red `cancelled cancelled` banner. Plain Stop on the same harness ends `interrupted`, and `test/integration/relay/pending-input-run-now.test.ts:1240` expects `interrupted` for Claude. Likely a product bug, possibly a replay artifact (`b-queue/evidence/11-run-now-*`). Not fixed.
+- **Run now on Claude ends the first turn `error` with `{"error":"cancelled","code":"cancelled"}`**, and the transcript shows a red `cancelled cancelled` banner. Plain Stop on the same harness ends `interrupted`, and `test/integration/project-services/pending-input-run-now.test.ts:1240` expects `interrupted` for Claude. Likely a product bug, possibly a replay artifact (`b-queue/evidence/11-run-now-*`). Not fixed.
 - Cursor: Stop with a queue under `--cursor-trace steer` lets the trace finish, so the queue drains instead of pausing (see [stopping.md](./stopping.md)).
 - OpenCode: the stored user text is the recording's prompt, not what you typed. Type the recording's prompts exactly.
 - `pending-input-send-now` shows only for usage-limit or scheduled queues. No recording reaches it here, so it is unverified.

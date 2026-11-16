@@ -24,7 +24,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { ConfigTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { settingsHandlers } from "../../../src/lib/server/ws-rpc/settings.js";
 

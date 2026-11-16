@@ -5,21 +5,21 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { StatusPollerLive } from "../../../src/lib/domain/relay/Layers/status-poller-layer.js";
-import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+import { StatusPollerLive } from "../../../src/lib/domain/project-services/Layers/status-poller-layer.js";
+import { PendingInteractionServiceLive } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	StatusPollerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { makeSessionManagerStateLive } from "../../../src/lib/domain/project-services/Services/session-manager-state.js";
 import {
 	makePollerPubSubLive,
 	makePollerStateLive,
 	PollerPubSubTag,
-} from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+} from "../../../src/lib/domain/project-services/Services/session-status-poller.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { activeRunEvents, publishRun } from "../../helpers/ledger-tasks.js";

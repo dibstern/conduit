@@ -54,8 +54,8 @@ import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/sessio
 import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { SessionManagerStateTag } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
+import { SessionManagerStateTag } from "../../../src/lib/domain/project-services/Services/session-manager-state.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";

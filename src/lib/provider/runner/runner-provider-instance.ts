@@ -22,12 +22,12 @@ import {
 	Usage,
 	type UsageService,
 } from "../../domain/daemon/Services/usage.js";
-import type { InputDrafts } from "../../domain/relay/Services/input-drafts.js";
-import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
+import type { InputDrafts } from "../../domain/project-services/Services/input-drafts.js";
+import type { PendingInteractionService } from "../../domain/project-services/Services/pending-interaction-service.js";
 import type {
 	ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionError,
-} from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+} from "../../domain/project-services/Services/provider-runtime-ingestion-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors-utils.js";
 import { createLogger } from "../../logger.js";
@@ -45,8 +45,8 @@ import {
 	ProviderInstanceFailure,
 } from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
+import type { RelayEventSinkDeps } from "../project-event-sink.js";
 import type { ProviderRegistry } from "../provider-registry.js";
-import type { RelayEventSinkDeps } from "../relay-event-sink.js";
 import type { NativeCommandView } from "../run-ledger/run-ledger-model.js";
 import { settleToolChildRuns } from "../session-run-settlement.js";
 import type {

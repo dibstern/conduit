@@ -24,9 +24,9 @@ import { ProjectContext } from "../domain/daemon/Services/project-context.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import { AttachmentStoreTag } from "../domain/persistence/Services/attachment-store.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
-import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
-import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
-import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+import { ProviderRuntimeIngestionTag } from "../domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { OrchestrationEngineTag } from "../domain/project-services/Services/services.js";
+import { SessionWorkspaceTag } from "../domain/project-services/Services/session-workspace.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
@@ -103,7 +103,7 @@ export const makeProviderCallContextResolver = (options: {
 	readonly shellEnv: NonNullable<OrchestrationRuntimeLayerOptions["shellEnv"]>;
 	readonly prepareShellEnv?: OrchestrationRuntimeLayerOptions["prepareShellEnv"];
 	readonly sessionWorkspace: Pick<
-		import("../domain/relay/Services/session-workspace.js").SessionWorkspace,
+		import("../domain/project-services/Services/session-workspace.js").SessionWorkspace,
 		"get"
 	>;
 	readonly sessionBindingReadModel: ProviderSessionBindingReadModel;

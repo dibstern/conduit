@@ -30,9 +30,9 @@ import {
 } from "../../daemon/Services/project-registry-service.js";
 import { ProjectServices } from "../../daemon/Services/project-services.js";
 import { AttachmentStoreTag } from "../../persistence/Services/attachment-store.js";
-import { ProjectSettingsTag } from "../../relay/Services/project-settings.js";
-import { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
-import { StatusPollerCoreTag } from "../../relay/Services/session-status-poller.js";
+import { ProjectSettingsTag } from "../../project-services/Services/project-settings.js";
+import { RelayStatusSnapshotTag } from "../../project-services/Services/project-status-snapshot.js";
+import { StatusPollerCoreTag } from "../../project-services/Services/session-status-poller.js";
 import { PushManagerTag } from "../Services/push-service.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
 import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";

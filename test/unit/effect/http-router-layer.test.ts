@@ -27,16 +27,16 @@ import {
 import {
 	type ProjectSettings,
 	ProjectSettingsTag,
-} from "../../../src/lib/domain/relay/Services/project-settings.js";
+} from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import {
 	type RelayStatusSnapshot,
 	type RelayStatusSnapshotService,
 	RelayStatusSnapshotTag,
-} from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+} from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	type RelayOpenCodeStream,
 	SSEStreamTag,
-} from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
+} from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,

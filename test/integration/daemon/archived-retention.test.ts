@@ -7,12 +7,12 @@ import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
+import { SessionManagerError } from "../../../src/lib/domain/project-services/Services/session-manager-error.js";
 import {
 	createLocalSessionId,
 	projectSessionManager,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
+} from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
+import { sessionPickEvents } from "../../../src/lib/domain/project-services/Services/session-pick.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {

@@ -17,32 +17,32 @@ import { expect, it, vi } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import type { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { AgentServiceTag } from "../../../src/lib/domain/project-services/Services/agent-service.js";
 import {
 	InputDraftsLive,
 	type InputDraftsTag,
-} from "../../../src/lib/domain/relay/Services/input-drafts.js";
+} from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import type { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
+} from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
+import type { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderTurnServiceTag } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import type { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
+import type { SessionInboxTag } from "../../../src/lib/domain/project-services/Services/session-inbox.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import {
 	makeOverridesStateLive,
 	type OverridesStateTag,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import {
 	handleAskUserResponse,
 	handlePermissionResponse,

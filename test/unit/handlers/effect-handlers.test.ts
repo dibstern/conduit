@@ -4,17 +4,17 @@ import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
 import {
 	AgentServiceTag,
 	filterAgents,
-} from "../../../src/lib/domain/relay/Services/agent-service.js";
-import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
-import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
-import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
-import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
+} from "../../../src/lib/domain/project-services/Services/agent-service.js";
+import { AlertsLive } from "../../../src/lib/domain/project-services/Services/alerts.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import { ProviderTurnServiceLive } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
+import { SessionTitleServiceTag } from "../../../src/lib/domain/project-services/Services/session-title-service.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	makeMockAccountDirectory,
 	standaloneSessionManagerLive,
@@ -32,31 +32,31 @@ import { describe, it, layer } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
-import { loadRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
+import { loadRelaySettings } from "../../../src/lib/daemon/global-settings.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
-import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
+import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+} from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	ProjectManagementServiceLive,
 	ProjectManagementServiceTag,
-} from "../../../src/lib/domain/relay/Services/project-management-service.js";
+} from "../../../src/lib/domain/project-services/Services/project-management-service.js";
 import {
 	ProjectSettingsLive,
 	publishProjectSetting,
 	subscribeProjectSettings,
-} from "../../../src/lib/domain/relay/Services/project-settings.js";
+} from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
-} from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
-import type { SessionManagerShape } from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
+import type { SessionManagerShape } from "../../../src/lib/domain/project-services/Services/services.js";
 // Batch 2 imports
 import {
 	AgentLivenessTag,
@@ -67,18 +67,18 @@ import {
 	OrchestrationEngineTag,
 	PollerManagerTag,
 	StatusPollerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionManagerError } from "../../../src/lib/domain/project-services/Services/session-manager-error.js";
 import {
 	projectSessionManager,
 	type SessionManagerService,
 	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
+import { makeSessionManagerStateLive } from "../../../src/lib/domain/project-services/Services/session-manager-state.js";
 import {
 	selectSessionContextWindow,
 	selectSessionModel,
-} from "../../../src/lib/domain/relay/Services/session-model-settings.js";
+} from "../../../src/lib/domain/project-services/Services/session-model-settings.js";
 import {
 	getAgent,
 	getContextWindow,
@@ -93,7 +93,7 @@ import {
 	setModel,
 	setPermissionMode,
 	setVariant,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { switchContextWindowForSession } from "../../../src/lib/handlers/context-window.js";
 import {
 	getModelsResponse,

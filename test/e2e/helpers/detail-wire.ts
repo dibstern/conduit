@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { Schema } from "effect";
 import { SessionDetailEnvelopeSchema } from "../../../src/lib/contracts/ws-rpc.js";
-import type { ReadModelRead } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
+import type { ReadModelRead } from "../../../src/lib/domain/project-services/Services/read-model-subscription.js";
 import { expect } from "./process-harness-fixture.js";
 
 /** Match nested RPC requests and chunks without depending on frame batching. */

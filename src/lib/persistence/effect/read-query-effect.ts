@@ -28,7 +28,7 @@ import type {
 	TodoItem,
 } from "../../contracts/ws-rpc.js";
 import type { SessionBackground } from "../../domain/daemon/Services/session-activity.js";
-import { SessionWorkspaceHintStateTag } from "../../domain/relay/Services/session-workspace-hint-state.js";
+import { SessionWorkspaceHintStateTag } from "../../domain/project-services/Services/session-workspace-hint-state.js";
 import {
 	claudeWorkspaceMismatch,
 	decodeClaudeWorktreeState,

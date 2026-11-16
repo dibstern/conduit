@@ -3,7 +3,7 @@ import { Cause, Effect, Exit, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 
-import { fetchWithRetry } from "../../../src/lib/domain/relay/Services/retry-fetch.js";
+import { fetchWithRetry } from "../../../src/lib/domain/project-services/Services/retry-fetch.js";
 import { OpenCodeConnectionError } from "../../../src/lib/errors.js";
 
 describe("Effect-based retry fetch", () => {

@@ -2,8 +2,8 @@ import { Context, Duration, Effect, Layer, Option, Schedule } from "effect";
 import { ENV } from "../../../env.js";
 import { recordPermissionTimedOut } from "../../../handlers/permissions.js";
 import { createLogger } from "../../../logger.js";
-import { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
-import { LoggerTag } from "../../relay/Services/services.js";
+import { PendingInteractionServiceTag } from "../../project-services/Services/pending-interaction-service.js";
+import { LoggerTag } from "../../project-services/Services/services.js";
 import {
 	allProjects,
 	ProjectRegistryTag,

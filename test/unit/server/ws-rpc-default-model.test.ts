@@ -6,11 +6,11 @@ import { Effect, Layer } from "effect";
 import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
 import {
 	getDefaultModel,
 	getDefaultVariant,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,

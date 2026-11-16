@@ -8,7 +8,7 @@ import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { saveDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
-import { setAgent } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { setAgent } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {

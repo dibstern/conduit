@@ -6,7 +6,8 @@ const REPO_ROOT = process.cwd();
 const SRC_ROOT = join(REPO_ROOT, "src");
 
 // The single writer of per-viewer read state (ADR-0004, scope amendment).
-const SESSION_ATTENTION = "src/lib/domain/relay/Services/session-attention.ts";
+const SESSION_ATTENTION =
+	"src/lib/domain/project-services/Services/session-attention.ts";
 // The one-time seed from main's read_at (hk9m.7). It runs once per database
 // and only fills rows where seen_version IS NULL, so it never lowers a mark.
 const READ_STATE_SEED =

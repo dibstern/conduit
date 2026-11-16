@@ -8,9 +8,9 @@ import {
 	makeSharedSessionDirectoryLive,
 	SessionDirectory,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
-import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { ConfigTag } from "../../../src/lib/domain/project-services/Services/services.js";
+import { makeSessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";

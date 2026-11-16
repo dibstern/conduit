@@ -7,9 +7,9 @@ import {
 	LoggerTag,
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
-} from "../domain/relay/Services/services.js";
-import { getDefaultModel } from "../domain/relay/Services/session-overrides-state.js";
-import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+} from "../domain/project-services/Services/services.js";
+import { getDefaultModel } from "../domain/project-services/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../domain/project-services/Services/session-workspace.js";
 import { skillCommand, skillRefFor } from "../provider/skill-discovery.js";
 import { harnessForModelProvider } from "../provider/turn-settings.js";
 

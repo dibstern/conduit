@@ -16,7 +16,7 @@ const builders: Readonly<Record<string, string>> = {
 const unrelatedDefaultReads = {
 	"src/lib/contracts/start-selection.ts": 1,
 	"src/lib/domain/daemon/Services/instance-manager-service.ts": 1,
-	"src/lib/domain/relay/Services/model-catalog.ts": 2,
+	"src/lib/domain/project-services/Services/model-catalog.ts": 2,
 	"src/lib/frontend/components/layout/UsageFooterMeter.svelte": 2,
 	"src/lib/frontend/components/model/InstanceModelPicker.svelte": 4,
 	"src/lib/frontend/components/model/ModelSelectionPanel.svelte": 2,

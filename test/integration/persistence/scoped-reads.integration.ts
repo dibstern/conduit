@@ -21,13 +21,13 @@ import {
 import { advanceTouchesScope } from "../../../src/lib/contracts/read-model-advance.js";
 import { ToolCallId } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { markUnread } from "../../../src/lib/domain/relay/Services/session-attention.js";
+import { markUnread } from "../../../src/lib/domain/project-services/Services/session-attention.js";
 import {
 	makeSessionEventBusLive,
 	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { strandedChildren } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
-import { ToolContentServiceLive } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
+import { strandedChildren } from "../../../src/lib/domain/project-services/Services/session-status-poller.js";
+import { ToolContentServiceLive } from "../../../src/lib/domain/project-services/Services/tool-content-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {

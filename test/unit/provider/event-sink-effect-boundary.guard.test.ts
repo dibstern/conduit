@@ -39,7 +39,7 @@ describe("EventSink Effect boundary", () => {
 
 	it("does not reintroduce runtime bridges for Claude EventSink persistence", () => {
 		const prompt = source("src/lib/handlers/prompt.ts");
-		const relayEventSink = source("src/lib/provider/relay-event-sink.ts");
+		const relayEventSink = source("src/lib/provider/project-event-sink.ts");
 
 		expect(prompt).not.toMatch(/Effect\.runPromise\([^)]*persistEvent/);
 		expect(prompt).not.toMatch(/persistEvent:\s*\([^)]*\)\s*=>/);
@@ -48,7 +48,7 @@ describe("EventSink Effect boundary", () => {
 	});
 
 	it("keeps missing pending interaction failures typed", () => {
-		const relayEventSink = source("src/lib/provider/relay-event-sink.ts");
+		const relayEventSink = source("src/lib/provider/project-event-sink.ts");
 
 		expect(relayEventSink).toContain("MissingPendingInteractions");
 		expect(relayEventSink).not.toMatch(

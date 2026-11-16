@@ -9,12 +9,12 @@ import type { ClaudeSessionForkSdk } from "../../../provider/claude/claude-sessi
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import type { ProviderRegistry } from "../../../provider/provider-registry.js";
 import type { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
-import type { InputDraftsTag } from "../../relay/Services/input-drafts.js";
-import type { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
-import type { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
-import type { OrchestrationEngineTag } from "../../relay/Services/services.js";
-import type { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
-import type { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+import type { InputDraftsTag } from "../../project-services/Services/input-drafts.js";
+import type { PendingInteractionServiceTag } from "../../project-services/Services/pending-interaction-service.js";
+import type { ProviderRuntimeIngestionTag } from "../../project-services/Services/provider-runtime-ingestion-service.js";
+import type { OrchestrationEngineTag } from "../../project-services/Services/services.js";
+import type { OverridesStateTag } from "../../project-services/Services/session-overrides-state.js";
+import type { SessionWorkspaceTag } from "../../project-services/Services/session-workspace.js";
 
 /** Project-owned services borrowed only while that project's relay is alive. */
 export type ProviderAdapterProjectContext =

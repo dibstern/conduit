@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { WsRpcError, type WsRpcGroup } from "../../contracts/ws-rpc.js";
-import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
+import { resolveSessionRequestFolders } from "../../domain/project-services/Services/session-workspace.js";
 
 export type WsRpcHandlerMap = Parameters<typeof WsRpcGroup.of>[0];
 

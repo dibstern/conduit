@@ -3,22 +3,22 @@ import type { Alert } from "../../src/lib/contracts/ws-rpc.js";
 import {
 	type AlertLedger,
 	AlertLedgerTag,
-} from "../../src/lib/domain/relay/Services/alert-ledger.js";
+} from "../../src/lib/domain/project-services/Services/alert-ledger.js";
 import {
 	AlertsLive,
 	AlertsTag,
-} from "../../src/lib/domain/relay/Services/alerts.js";
+} from "../../src/lib/domain/project-services/Services/alerts.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
+} from "../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	ProjectSettingsLive,
 	ProjectSettingsTag,
-} from "../../src/lib/domain/relay/Services/project-settings.js";
-import { ConfigTag } from "../../src/lib/domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../../src/lib/domain/relay/Services/session-manager-service.js";
-import { makeOverridesStateLive } from "../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../src/lib/domain/project-services/Services/project-settings.js";
+import { ConfigTag } from "../../src/lib/domain/project-services/Services/services.js";
+import { SessionManagerServiceTag } from "../../src/lib/domain/project-services/Services/session-manager-service.js";
+import { makeOverridesStateLive } from "../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import {
 	handleSSEEventEffect,
 	type SSEWiringDeps,

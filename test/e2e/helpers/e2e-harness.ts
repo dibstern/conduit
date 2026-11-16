@@ -22,7 +22,7 @@ import {
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../src/lib/daemon/relay-settings.js";
+} from "../../../src/lib/daemon/global-settings.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSdkClient } from "../../../src/lib/instance/sdk-factory.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";

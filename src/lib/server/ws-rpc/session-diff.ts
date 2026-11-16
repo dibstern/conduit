@@ -17,8 +17,8 @@ import {
 	type SessionDiffSession,
 } from "../../domain/daemon/Services/session-diff.js";
 import { WorkingTreeEdits } from "../../domain/daemon/Services/working-tree-edits.js";
-import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
-import { readSessionWorktreeOwnership } from "../../domain/relay/Services/session-worktree-deletion.js";
+import { resolveSessionRequestFolders } from "../../domain/project-services/Services/session-workspace.js";
+import { readSessionWorktreeOwnership } from "../../domain/project-services/Services/session-worktree-deletion.js";
 import { recordedOwnershipForFolder } from "../../persistence/effect/session-worktree-ownership.js";
 import { toolFileChanges } from "../../persistence/tool-wire-projection.js";
 import { guardWorkspacePath } from "../../session/workspace-directories.js";

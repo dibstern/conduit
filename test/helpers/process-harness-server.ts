@@ -44,7 +44,7 @@ function recordServerMetrics(
 	const readModelReads: { at: number; source: string; kind: string }[] = [];
 	subscribe("conduit:sidebar-read", (message) => {
 		const read =
-			message as import("../../src/lib/domain/relay/Services/shell-subscription.js").SidebarRead;
+			message as import("../../src/lib/domain/project-services/Services/shell-subscription.js").SidebarRead;
 		sidebarReads.push({ at: Date.now(), ms: read.ms, rows: read.rows });
 	});
 	let subprocess: SubprocessMetrics | undefined;
@@ -61,7 +61,7 @@ function recordServerMetrics(
 	});
 	subscribe("conduit:read-model-read", (message) => {
 		const read =
-			message as import("../../src/lib/domain/relay/Services/read-model-subscription.js").ReadModelRead;
+			message as import("../../src/lib/domain/project-services/Services/read-model-subscription.js").ReadModelRead;
 		readModelReads.push({
 			at: performance.timeOrigin + performance.now(),
 			source: read.source,
@@ -560,11 +560,11 @@ async function main(): Promise<void> {
 			pathToFileURL(
 				join(
 					codeRoot,
-					"lib/domain/relay/Services",
+					"lib/domain/project-services/Services",
 					`session-overrides-state.${extension}`,
 				),
 			).href
-		)) as typeof import("../../src/lib/domain/relay/Services/session-overrides-state.js");
+		)) as typeof import("../../src/lib/domain/project-services/Services/session-overrides-state.js");
 		const record = (entry: Record<string, unknown>) =>
 			appendFileSync(
 				join(root, "daemon-overrides.ndjson"),
@@ -650,11 +650,11 @@ async function main(): Promise<void> {
 			pathToFileURL(
 				join(
 					codeRoot,
-					"lib/domain/relay/Services",
+					"lib/domain/project-services/Services",
 					`session-workspace.${extension}`,
 				),
 			).href
-		)) as typeof import("../../src/lib/domain/relay/Services/session-workspace.js");
+		)) as typeof import("../../src/lib/domain/project-services/Services/session-workspace.js");
 		const { OrchestrationEngine } = (await import(
 			pathToFileURL(
 				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
@@ -662,21 +662,25 @@ async function main(): Promise<void> {
 		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
 		const { ConfigTag } = (await import(
 			pathToFileURL(
-				join(codeRoot, "lib/domain/relay/Services", `services.${extension}`),
+				join(
+					codeRoot,
+					"lib/domain/project-services/Services",
+					`services.${extension}`,
+				),
 			).href
-		)) as typeof import("../../src/lib/domain/relay/Services/services.js");
+		)) as typeof import("../../src/lib/domain/project-services/Services/services.js");
 		const { projectSessionManager } = (await import(
 			pathToFileURL(
 				join(
 					codeRoot,
-					"lib/domain/relay/Services",
+					"lib/domain/project-services/Services",
 					`session-manager-service.${extension}`,
 				),
 			).href
-		)) as typeof import("../../src/lib/domain/relay/Services/session-manager-service.js");
+		)) as typeof import("../../src/lib/domain/project-services/Services/session-manager-service.js");
 		const resolveCall = OrchestrationEngine.prototype.resolveCallContextEffect;
 		type Workspace =
-			import("../../src/lib/domain/relay/Services/session-workspace.js").SessionWorkspace;
+			import("../../src/lib/domain/project-services/Services/session-workspace.js").SessionWorkspace;
 		const owners = new Map<Workspace, number>();
 		const heldLaunches = new Set<string>();
 		let first: Workspace | undefined;
@@ -1219,11 +1223,11 @@ async function main(): Promise<void> {
 			pathToFileURL(
 				join(
 					codeRoot,
-					"lib/domain/relay/Services",
+					"lib/domain/project-services/Services",
 					`input-drafts.${extension}`,
 				),
 			).href
-		)) as typeof import("../../src/lib/domain/relay/Services/input-drafts.js");
+		)) as typeof import("../../src/lib/domain/project-services/Services/input-drafts.js");
 		const { AccountDirectory } = (await import(
 			pathToFileURL(
 				join(

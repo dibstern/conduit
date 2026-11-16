@@ -1,0 +1,1876 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "@effect/vitest";
+import {
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	Queue,
+	Ref,
+	Schema,
+	Scope,
+	Stream,
+} from "effect";
+import { SqlClient } from "effect/sql";
+import { beforeEach, expect, vi } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { decodeProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import { ResumePoint } from "../../../src/lib/contracts/ws-rpc.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { subscribeDaemonShell } from "../../../src/lib/domain/daemon/Services/shell-subscription.js";
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
+import {
+	makeProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import type { Envelope } from "../../../src/lib/domain/project-services/Services/read-model-subscription.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import {
+	announceBackgroundWork,
+	markSeen,
+} from "../../../src/lib/domain/project-services/Services/session-attention.js";
+import {
+	forkOpenCodeSession,
+	forkSession,
+} from "../../../src/lib/domain/project-services/Services/session-command.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
+import { subscribeSessionFamily } from "../../../src/lib/domain/project-services/Services/session-family-subscription.js";
+import { persistSessionPermissionMode } from "../../../src/lib/domain/project-services/Services/session-manager-permission-mode.js";
+import { deleteSession } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
+import { makeSessionManagerStateLive } from "../../../src/lib/domain/project-services/Services/session-manager-state.js";
+import { setForkEntry } from "../../../src/lib/domain/project-services/Services/session-manager-state-operations.js";
+import { sessionPickEvents } from "../../../src/lib/domain/project-services/Services/session-pick.js";
+import { subscribeShell } from "../../../src/lib/domain/project-services/Services/shell-subscription.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { forkSessionForClient } from "../../../src/lib/handlers/session.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import {
+	EventStoreEffectTag,
+	makeEventStoreEffect,
+} from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
+import {
+	type ReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../../src/lib/persistence/effect/read-query-effect.js";
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+} from "../../../src/lib/persistence/events.js";
+import {
+	CLAUDE_FORK_SOURCE_KEY,
+	defaultClaudeSessionForkSdk,
+} from "../../../src/lib/provider/claude/claude-session-fork.js";
+import {
+	type SessionInfo,
+	SessionInfoSchema,
+} from "../../../src/lib/shared-types.js";
+import { publishLedgerTasks, publishRun } from "../../helpers/ledger-tasks.js";
+import {
+	makeMockAccountDirectory,
+	makeMockConfig,
+	makeMockLogger,
+	makeMockOpenCodeAPI,
+	makeOpenCodeInstancesStub,
+	makeTestHandlerLayer,
+} from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+
+const getSessionMessages = vi.spyOn(
+	defaultClaudeSessionForkSdk,
+	"readTranscript",
+);
+const sdkForkSession = vi.spyOn(defaultClaudeSessionForkSdk, "forkSession");
+const claudeQuery = vi.fn(() => {
+	throw new Error("Unexpected Claude query");
+});
+beforeEach(() => {
+	getSessionMessages.mockClear();
+	sdkForkSession.mockClear();
+	claudeQuery.mockClear();
+});
+// A fresh temp-file persistence stack + the real SessionEventBus per test. The
+// shell source reads the sessions projection and nothing else, so what is under
+// test is a contract WITH the store: the version column the projectors stamp,
+// the advance the commit seam publishes post-COMMIT, and the query that turns
+// one into the other. Writes go through `commit` — the real seam — because an
+// advance that the seam did not publish is a signal the production path would
+// never produce.
+//
+// The same module-singleton bus layer reference is passed to the persistence
+// layer AND merged at the top level, so Effect memoization unifies the persist
+// path's publisher, the test driver's publisher and the subscription's listener
+// onto one PubSub. No clock anywhere: the version column removed the window.
+
+const makeShellTestLayer = (
+	handlerApi?: ReturnType<typeof makeMockOpenCodeAPI>,
+) => {
+	const dir = mkdtempSync(join(tmpdir(), "conduit-shell-sub-"));
+	const filename = join(dir, "events.db");
+	const persistenceLayer = makePersistenceEffectLayer(
+		filename,
+		"test-project",
+		undefined,
+		SessionEventBusLive,
+	);
+	const cleanup = Layer.effectDiscard(
+		Effect.addFinalizer(() =>
+			Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+		),
+	);
+	return Layer.mergeAll(
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(OpenCodeInstancesTag)(
+			makeOpenCodeInstancesStub({
+				opencode: handlerApi ?? makeMockOpenCodeAPI(),
+			}),
+		),
+		RelayStatusSnapshotLive,
+		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+		persistenceLayer,
+		InputDraftsLive.pipe(Layer.provide(persistenceLayer)),
+		...(handlerApi === undefined
+			? []
+			: [makeTestHandlerLayer({ api: handlerApi, persistenceLayer })]),
+		SessionEventBusLive,
+		Layer.succeed(OrchestrationEngineTag)(
+			withDispatchEffect({
+				dispatch: async () => ({
+					models: [
+						{
+							id: "sonnet",
+							name: "Sonnet",
+							providerId: "claude",
+							variants: { high: {} },
+							contextWindowOptions: [
+								{ value: "200k", label: "200K", isDefault: true },
+							],
+						},
+					],
+				}),
+			}),
+		),
+		Layer.effect(SessionActivityTag, makeSessionActivity),
+		Layer.succeed(ConfigTag)(
+			makeMockConfig({
+				slug: "test-project",
+				configDir: dir,
+				claudeSdk: {
+					query: claudeQuery,
+					titleQuery: async function* () {},
+					fork: defaultClaudeSessionForkSdk,
+				},
+			}),
+		),
+		Layer.succeed(LoggerTag)(makeMockLogger()),
+		cleanup,
+	);
+};
+
+// Monotonic clock → deterministic recency ordering across the suite.
+let clock = 0;
+const at = () => ++clock;
+
+const sessionCreated = (
+	sessionId: string,
+	title = "Shell",
+	parentId?: string,
+): CanonicalEvent =>
+	canonicalEvent(
+		"session.created",
+		sessionId,
+		{
+			sessionId,
+			title,
+			provider: "claude",
+			...(parentId === undefined ? {} : { parentId }),
+		},
+		{ provider: "claude", createdAt: at() },
+	);
+const sessionRenamed = (sessionId: string, title: string): CanonicalEvent =>
+	canonicalEvent(
+		"session.renamed",
+		sessionId,
+		{ sessionId, title },
+		{ provider: "claude", createdAt: at() },
+	);
+
+const forkSourceEvents = (
+	sessionId: string,
+	harness: "claude" | "opencode" = "claude",
+) => [
+	canonicalEvent(
+		"session.created",
+		sessionId,
+		{ sessionId, title: "Shell", provider: harness },
+		{ provider: harness, createdAt: at() },
+	),
+	...sessionPickEvents(sessionId, {
+		harness,
+		model: {
+			providerId: harness === "claude" ? "claude" : "openai",
+			modelId: harness === "claude" ? "sonnet" : "gpt-4",
+		},
+		effort: harness === "claude" ? "high" : "",
+		contextWindow: harness === "claude" ? "200k" : "",
+	}),
+];
+const messageCreated = (
+	sessionId: string,
+	messageId: string,
+	createdAt = at(),
+): CanonicalEvent =>
+	canonicalEvent(
+		"message.created",
+		sessionId,
+		{ messageId, role: "user", sessionId },
+		{ provider: "claude", createdAt },
+	);
+const textDelta = (
+	sessionId: string,
+	messageId: string,
+	text: string,
+): CanonicalEvent =>
+	canonicalEvent(
+		"text.delta",
+		sessionId,
+		{ messageId, partId: `${messageId}-0`, text },
+		{ provider: "claude", createdAt: at() },
+	);
+const sessionDeleted = (sessionId: string): CanonicalEvent =>
+	canonicalEvent(
+		"session.deleted",
+		sessionId,
+		{ sessionId },
+		{ provider: "claude", createdAt: at() },
+	);
+
+// Recover projections once so projectBatch is permitted.
+const recoverProjections = Effect.gen(function* () {
+	const runner = yield* ProjectionRunnerEffectTag;
+	yield* runner.recover();
+});
+
+/** The ingestion choke point: append → project → COMMIT → publish the advance. */
+const commit = (events: readonly CanonicalEvent[]) =>
+	Effect.flatMap(makeCommitAndSignal, (commitAndSignal) =>
+		commitAndSignal(events),
+	);
+
+// The production choke point, for the tests that need the seam's own publish
+// rather than the hand-rolled one above: `commitAndSignal` appends, projects and
+// announces the read-model advance in one uninterruptible step.
+const commitThroughSeam = (events: readonly CanonicalEvent[]) =>
+	Effect.flatMap(makeCommitAndSignal, (commitAndSignal) =>
+		commitAndSignal.write((project) =>
+			Effect.gen(function* () {
+				const eventStore = yield* EventStoreEffectTag;
+				const stored = yield* eventStore.appendBatch(events);
+				yield* project(stored);
+				return stored;
+			}),
+		),
+	);
+
+/** The number the envelopes speak in. */
+const readModelVersion = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const rows = yield* sql<{ value: number }>`
+		SELECT value FROM read_model_counter WHERE id = 1`;
+	return rows[0]?.value ?? 0;
+});
+
+/** Wrap the real read side, counting session re-queries. */
+const countingReadQuery = (
+	real: ReadQueryEffect,
+	requeries: Ref.Ref<number>,
+): ReadQueryEffect => ({
+	...real,
+	readSessionList: (...args) =>
+		Ref.update(requeries, (n) => n + 1).pipe(
+			Effect.andThen(real.readSessionList(...args)),
+		),
+});
+
+// Drain the subscription into a queue so the test pulls envelopes one at a
+// time. `readQuery` lets a test substitute a wrapped read side (re-query
+// counting, mid-read commits) while everything else stays real.
+const openShell = (options?: {
+	readonly resumeFromSequence?: number;
+	readonly resumePoint?: ResumePoint;
+	readonly readQuery?: ReadQueryEffect;
+}) =>
+	Effect.gen(function* () {
+		const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
+		const run = Stream.runForEach(subscribeShell(options), (env) =>
+			env._tag === "projects" ? Effect.void : Queue.offer(q, env),
+		);
+		const fiber = yield* (
+			options?.readQuery === undefined
+				? run
+				: run.pipe(Effect.provideService(ReadQueryEffectTag, options.readQuery))
+		).pipe(Effect.forkScoped);
+		return { q, fiber };
+	});
+
+const takeN = <A>(q: Queue.Queue<A>, n: number): Effect.Effect<A[]> =>
+	Effect.forEach(Array.from({ length: n }), () => Queue.take(q));
+
+const SID = "session-shell";
+
+describe("subscribeShell", () => {
+	for (const kind of ["root", "child", "side-thread"] as const) {
+		it.effect(
+			"Stop availability advances the live sidebar when a retained steer becomes indeterminate or is placed" +
+				(kind === "root" ? "" : ` (${kind})`),
+			() =>
+				Effect.gen(function* () {
+					yield* recoverProjections;
+					const sql = yield* SqlClient.SqlClient;
+					const write = yield* makeCommitAndSignal;
+					const meta = (runId: string) => ({
+						provider: "claude",
+						metadata: { runId },
+					});
+					yield* write([
+						...(kind === "root"
+							? [sessionCreated(SID)]
+							: [
+									sessionCreated("parent"),
+									canonicalEvent("session.created", SID, {
+										sessionId: SID,
+										title: "Child",
+										provider: "claude",
+										parentId: "parent",
+										sideThread: kind === "side-thread",
+									}),
+								]),
+						canonicalEvent(
+							"run.requested",
+							SID,
+							{ runId: "reply-run", inputId: "reply" },
+							meta("reply-run"),
+						),
+						canonicalEvent(
+							"message.created",
+							SID,
+							{
+								sessionId: SID,
+								messageId: "reply",
+								inputId: "reply",
+								role: "user",
+							},
+							meta("reply-run"),
+						),
+						canonicalEvent(
+							"run.started",
+							SID,
+							{ inputId: "reply", requestedRunId: "reply-run" },
+							meta("reply-run"),
+						),
+						canonicalEvent("input.admitted", SID, {
+							sessionId: SID,
+							inputId: "steer",
+							delivery: "steer",
+							request: { text: "Correction" },
+						}),
+						canonicalEvent("input.sent", SID, {
+							sessionId: SID,
+							inputId: "steer",
+							steer: true,
+						}),
+						canonicalEvent(
+							"run.requested",
+							SID,
+							{ runId: "steer-run", inputId: "steer" },
+							meta("steer-run"),
+						),
+					]);
+					yield* write.write((_, stamp) =>
+						Effect.gen(function* () {
+							yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
+					VALUES (1, 'steer', 'test-project', ${SID}, 'claude', 'send_turn', 'steer-run', '{}', 'running', 1, 1, 1)`;
+							yield* stamp((version) =>
+								sql<{
+									id: string;
+								}>`UPDATE sessions SET version = ${version} WHERE id = ${SID} RETURNING id`.pipe(
+									Effect.map((rows) => rows.map(({ id }) => id)),
+								),
+							);
+						}),
+					);
+					// 82tn.32.30: busy, and so Stop, follow the view's active Run; these facts skip the arm.
+					publishRun((yield* SessionActivityTag).background, SID);
+					const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
+					const stream =
+						kind === "root"
+							? subscribeShell()
+							: subscribeSessionFamily({ sessionId: SID });
+					yield* Stream.runForEach(stream, (envelope) =>
+						envelope._tag === "projects" ||
+						(envelope._tag === "upsert" && envelope.item.id !== SID)
+							? Effect.void
+							: Queue.offer(q, envelope),
+					).pipe(Effect.forkScoped);
+					yield* takeN(q, 2);
+					yield* write([
+						canonicalEvent(
+							"turn.completed",
+							SID,
+							{ messageId: "reply-answer" },
+							meta("reply-run"),
+						),
+					]);
+					expect(yield* Queue.take(q)).toMatchObject({
+						_tag: "upsert",
+						item: { id: SID, status: "busy", canStop: false },
+					});
+					yield* write.write((_, stamp) =>
+						Effect.gen(function* () {
+							yield* sql`UPDATE provider_command_outbox SET error_code = 'delivery_indeterminate' WHERE command_id = 'steer'`;
+							yield* stamp((version) =>
+								sql<{
+									id: string;
+								}>`UPDATE sessions SET version = ${version} WHERE id = ${SID} RETURNING id`.pipe(
+									Effect.map((rows) => rows.map(({ id }) => id)),
+								),
+							);
+						}),
+					);
+					yield* Effect.yieldNow;
+					yield* Effect.yieldNow;
+					expect(yield* Queue.size(q)).toBe(1);
+					expect(yield* Queue.take(q)).toMatchObject({
+						_tag: "upsert",
+						item: { id: SID, status: "busy", canStop: true },
+					});
+					yield* write([
+						canonicalEvent(
+							"message.created",
+							SID,
+							{
+								sessionId: SID,
+								messageId: "steer",
+								inputId: "steer",
+								role: "user",
+							},
+							meta("steer-run"),
+						),
+					]);
+					expect(yield* Queue.take(q)).toMatchObject({
+						_tag: "upsert",
+						item: { id: SID, status: "busy", canStop: true },
+					});
+					expect(
+						yield* sql`SELECT status, started_at FROM provider_runs WHERE id = 'steer-run'`,
+					).toEqual([{ status: "pending", started_at: null }]);
+				}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+		);
+	}
+
+	it.effect(
+		"a project's sidebar ignores another project's committed advance",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID, "Project A")]);
+				const real = yield* ReadQueryEffectTag;
+				const reads = yield* Ref.make(0);
+				const { q } = yield* openShell({
+					readQuery: countingReadQuery(real, reads),
+				});
+				yield* takeN(q, 2);
+				const otherStore = yield* makeEventStoreEffect.pipe(
+					Effect.provideService(PersistenceProjectTag, {
+						projectId: "other-project",
+					}),
+				);
+				yield* commit([sessionCreated("other-session", "Project B")]).pipe(
+					Effect.provideService(EventStoreEffectTag, otherStore),
+				);
+				yield* Effect.yieldNow;
+				expect(yield* Ref.get(reads)).toBe(1);
+				expect(yield* Queue.size(q)).toBe(0);
+				yield* commit([sessionRenamed(SID, "Updated A")]);
+				expect(yield* Queue.take(q)).toMatchObject({
+					_tag: "upsert",
+					item: { title: "Updated A" },
+				});
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+	it.effect(
+		"a resume point from another store replaces the sidebar snapshot",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID, "Original")]);
+				const cursor = yield* readModelVersion;
+				yield* commit([sessionRenamed(SID, "Updated")]);
+				const resumePoint = ResumePoint.make(
+					Schema.encodeSync(Schema.StringFromBase64Url)(
+						JSON.stringify({
+							store: "another-store",
+							project: "test-project",
+							sequence: cursor,
+						}),
+					),
+				);
+				const { q } = yield* openShell({
+					resumeFromSequence: cursor,
+					resumePoint,
+				});
+				const [snapshot, synchronized] = yield* takeN(q, 2);
+				expect(snapshot?._tag).toBe("snapshot");
+				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
+				expect(snapshot.rows.map(({ title }) => title)).toEqual(["Updated"]);
+				expect(snapshot.resumePoint).toBeDefined();
+				expect(synchronized).toEqual({ _tag: "synchronized" });
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+	for (const provider of ["opencode", "claude"] as const) {
+		it.effect(
+			`${provider} fork commands update an open subscription from the event store`,
+			() =>
+				Effect.gen(function* () {
+					yield* recoverProjections;
+					yield* commit([
+						sessionCreated("parent"),
+						canonicalEvent(
+							"session.created",
+							"child",
+							{ sessionId: "child", title: "Child", provider },
+							{ provider },
+						),
+					]);
+					const { q } = yield* openShell();
+					yield* takeN(q, 2);
+					yield* setForkEntry("child", {
+						parentID: "parent",
+						forkMessageId: "fork-point",
+					});
+					// Recording lineage keeps the Fork in the shell as its own root.
+					const upsert = yield* Queue.take(q);
+					expect(upsert).toMatchObject({
+						_tag: "upsert",
+						item: { id: "child", forkedFrom: "parent" },
+					});
+					expect(upsert).not.toHaveProperty("item.parentID");
+				}).pipe(
+					Effect.provide(
+						Layer.merge(makeShellTestLayer(), makeSessionManagerStateLive()),
+						{ local: true },
+					),
+				),
+		);
+	}
+	for (const entry of ["command", "handler"] as const) {
+		it.effect(
+			`a new Claude fork through the ${entry} publishes lineage and saves its launch source without provider work`,
+			() => {
+				const api = makeMockOpenCodeAPI();
+				return Effect.gen(function* () {
+					yield* recoverProjections;
+					yield* commit([
+						...forkSourceEvents("claude-parent"),
+						messageCreated("claude-parent", "ui-boundary", 1000),
+					]);
+					const state = yield* ProviderStateEffectTag;
+					yield* state.saveUpdates("claude-parent", [
+						{ key: "resumeSessionId", value: "sdk-parent" },
+					]);
+					vi.mocked(getSessionMessages).mockResolvedValue([
+						{
+							type: "assistant",
+							uuid: "transcript-boundary",
+							session_id: "sdk-parent",
+							message: { id: "ui-boundary", role: "assistant", content: [] },
+							parent_tool_use_id: null,
+							parent_agent_id: null,
+						},
+					]);
+					vi.mocked(sdkForkSession).mockResolvedValue({
+						sessionId: "sdk-child",
+					});
+					const { q } = yield* openShell();
+					yield* takeN(q, 2);
+					const child =
+						entry === "command"
+							? yield* forkSession("claude-parent", {
+									messageId: "ui-boundary",
+								})
+							: yield* forkSessionForClient({
+									clientId: "client",
+									sessionId: "claude-parent",
+									messageId: "ui-boundary",
+								});
+					if (!child) throw new Error("Expected a fork");
+					const read = yield* ReadQueryEffectTag;
+					expect(yield* read.getSession(child.id)).toMatchObject({
+						provider: "claude",
+						parent_id: null,
+						forked_from: "claude-parent",
+						fork_point_event: "ui-boundary",
+					});
+					expect(yield* Queue.take(q)).toMatchObject({
+						_tag: "upsert",
+						item: { id: child.id, forkedFrom: "claude-parent" },
+					});
+					expect(child.id).toMatch(/^[0-9a-f-]{36}$/);
+					expect(sdkForkSession).not.toHaveBeenCalled();
+					expect(getSessionMessages).not.toHaveBeenCalled();
+					expect(claudeQuery).not.toHaveBeenCalled();
+					expect(yield* state.nativeThread(child.id, "claude")).toBeUndefined();
+					expect(
+						JSON.parse(
+							(yield* state.getState(child.id))[CLAUDE_FORK_SOURCE_KEY] ??
+								"null",
+						),
+					).toEqual({
+						instanceId: "claude",
+						resumeSessionId: "sdk-parent",
+						configDir: {
+							_tag: "Configured",
+							path: join(tmpdir(), "conduit-test-login"),
+						},
+						messageId: "ui-boundary",
+					});
+					expect(api.session.fork).not.toHaveBeenCalled();
+					expect(api.session.message).not.toHaveBeenCalled();
+					expect(api.session.messagesPage).not.toHaveBeenCalled();
+				}).pipe(
+					Effect.provide(
+						makeShellTestLayer(entry === "handler" ? api : undefined),
+						{ local: true },
+					),
+				);
+			},
+		);
+	}
+	it.effect(
+		"does not create a new Claude fork without a durable boundary key",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([...forkSourceEvents("claude-parent")]);
+				const state = yield* ProviderStateEffectTag;
+				yield* state.saveUpdates("claude-parent", [
+					{ key: "resumeSessionId", value: "sdk-parent" },
+				]);
+				vi.mocked(getSessionMessages).mockResolvedValue([
+					{
+						type: "assistant",
+						uuid: "missing",
+						session_id: "sdk-parent",
+						message: { id: "missing" },
+						parent_tool_use_id: null,
+						parent_agent_id: null,
+					},
+				]);
+				vi.mocked(sdkForkSession).mockResolvedValue({
+					sessionId: "unclassified-child",
+				});
+				vi.mocked(sdkForkSession).mockClear();
+				const result = yield* Effect.result(
+					forkSession("claude-parent", { messageId: "missing" }),
+				);
+				expect(result._tag).toBe("Failure");
+				expect(sdkForkSession).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+	it.effect(
+		"a Claude tip fork retains its canonical cut and source for first launch",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([
+					...forkSourceEvents("claude-parent"),
+					messageCreated("claude-parent", "ui-tip", 1000),
+				]);
+				const state = yield* ProviderStateEffectTag;
+				yield* state.saveUpdates("claude-parent", [
+					{ key: "resumeSessionId", value: "sdk-parent" },
+				]);
+				vi.mocked(getSessionMessages).mockResolvedValue([
+					{
+						type: "assistant",
+						uuid: "transcript-tip",
+						session_id: "sdk-parent",
+						message: { id: "api-final-round", role: "assistant", content: [] },
+						parent_tool_use_id: null,
+						parent_agent_id: null,
+					},
+				]);
+				vi.mocked(sdkForkSession).mockResolvedValue({
+					sessionId: "sdk-tip-child",
+				});
+				const child = yield* forkSession("claude-parent");
+				const read = yield* ReadQueryEffectTag;
+				expect(yield* read.getSession(child.id)).toMatchObject({
+					parent_id: null,
+					forked_from: "claude-parent",
+					fork_point_event: "ui-tip",
+					fork_point_timestamp: 1000,
+					fork_point_message_id: "ui-tip",
+				});
+				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
+				expect(
+					JSON.parse(
+						(yield* state.getState(child.id))[CLAUDE_FORK_SOURCE_KEY] ?? "null",
+					),
+				).toMatchObject({ resumeSessionId: "sdk-parent", messageId: "ui-tip" });
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+	// hk9m.7: the imported turns were the parent's to read, so the fork has no dot.
+	it.effect("a Claude fork starts seen up to its last imported turn end", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([
+				...forkSourceEvents("claude-parent"),
+				messageCreated("claude-parent", "ui-tip", 1000),
+				canonicalEvent("run.requested", "claude-parent", {
+					runId: "parent-run",
+					inputId: "ui-tip",
+				}),
+				canonicalEvent(
+					"run.started",
+					"claude-parent",
+					{ inputId: "ui-tip", requestedRunId: "parent-run" },
+					{ metadata: { runId: "parent-run" } },
+				),
+				canonicalEvent(
+					"turn.completed",
+					"claude-parent",
+					{ messageId: "ui-tip" },
+					{
+						provider: "claude",
+						createdAt: at(),
+						metadata: { runId: "parent-run" },
+					},
+				),
+			]);
+			const state = yield* ProviderStateEffectTag;
+			yield* state.saveUpdates("claude-parent", [
+				{ key: "resumeSessionId", value: "sdk-parent" },
+			]);
+			vi.mocked(getSessionMessages).mockResolvedValue([
+				{
+					type: "assistant",
+					uuid: "transcript-tip",
+					session_id: "sdk-parent",
+					message: { id: "api-final-round", role: "assistant", content: [] },
+					parent_tool_use_id: null,
+					parent_agent_id: null,
+				},
+			]);
+			vi.mocked(sdkForkSession).mockResolvedValue({
+				sessionId: "sdk-seen-child",
+			});
+			const child = yield* forkSession("claude-parent");
+			const read = yield* ReadQueryEffectTag;
+			const row = yield* read.getSession(child.id);
+			expect(row?.last_turn_end_version).not.toBeNull();
+			expect(row).toMatchObject({
+				seen_version: row?.last_turn_end_version,
+				unread: 0,
+			});
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+	it.effect(
+		"rejects a Claude cut absent from persisted history without consulting transcript tool rounds",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([...forkSourceEvents("claude-parent")]);
+				const state = yield* ProviderStateEffectTag;
+				yield* state.saveUpdates("claude-parent", [
+					{ key: "resumeSessionId", value: "sdk-parent" },
+				]);
+				vi.mocked(getSessionMessages).mockResolvedValue([
+					{
+						type: "assistant",
+						uuid: "round-one",
+						session_id: "sdk-parent",
+						message: { id: "ui-boundary", content: [] },
+						parent_tool_use_id: null,
+						parent_agent_id: null,
+					},
+					{
+						type: "user",
+						uuid: "tool-result",
+						session_id: "sdk-parent",
+						message: {
+							content: [{ type: "tool_result", tool_use_id: "call" }],
+						},
+						parent_tool_use_id: null,
+						parent_agent_id: null,
+					},
+					{
+						type: "assistant",
+						uuid: "round-two",
+						session_id: "sdk-parent",
+						message: { id: "api-second-round", content: [] },
+						parent_tool_use_id: null,
+						parent_agent_id: null,
+					},
+				]);
+				vi.mocked(sdkForkSession).mockClear();
+				vi.mocked(sdkForkSession).mockResolvedValue({
+					sessionId: "incorrect-child",
+				});
+				const result = yield* Effect.result(
+					forkSession("claude-parent", { messageId: "ui-boundary" }),
+				);
+				expect(result._tag).toBe("Failure");
+				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+	it.effect(
+		"a Claude fork is not published if its launch source cannot be saved",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([...forkSourceEvents("claude-parent")]);
+				const state = yield* ProviderStateEffectTag;
+				yield* state.saveUpdates("claude-parent", [
+					{ key: "resumeSessionId", value: "sdk-parent" },
+				]);
+				vi.mocked(getSessionMessages).mockResolvedValue([
+					{
+						type: "assistant",
+						uuid: "transcript-tip",
+						session_id: "sdk-parent",
+						message: { id: "api-tip", content: [] },
+						parent_tool_use_id: null,
+						parent_agent_id: null,
+					},
+				]);
+				vi.mocked(sdkForkSession).mockResolvedValue({
+					sessionId: "unresumable-child",
+				});
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`CREATE TRIGGER reject_child_state BEFORE INSERT ON provider_state WHEN NEW.key = 'claude.forkSource' BEGIN SELECT RAISE(ABORT, 'fork source unavailable'); END`;
+				yield* commit([messageCreated("claude-parent", "api-tip", 1000)]);
+				const result = yield* Effect.result(forkSession("claude-parent"));
+				expect(result._tag).toBe("Failure");
+				expect(
+					yield* sql<{
+						count: number;
+					}>`SELECT COUNT(*) AS count FROM sessions WHERE forked_from = 'claude-parent'`,
+				).toEqual([{ count: 0 }]);
+				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+	it.effect(
+		"a Claude fork saves its account source without reading a conflicting daemon transcript store",
+		() =>
+			Effect.gen(function* () {
+				const configDir = mkdtempSync(join(tmpdir(), "claude-fork-config-"));
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() =>
+						rmSync(configDir, { recursive: true, force: true }),
+					),
+				);
+				writeFileSync(
+					join(configDir, "daemon.json"),
+					JSON.stringify({
+						claudeConfigDir: "/isolated-claude-fork-store",
+						projects: [],
+					}),
+				);
+				yield* recoverProjections;
+				yield* commit([
+					...forkSourceEvents("claude-parent"),
+					messageCreated("claude-parent", "api-tip", 1000),
+				]);
+				const state = yield* ProviderStateEffectTag;
+				yield* state.saveUpdates("claude-parent", [
+					{ key: "resumeSessionId", value: "sdk-parent" },
+				]);
+				vi.mocked(getSessionMessages).mockClear();
+				vi.mocked(getSessionMessages).mockResolvedValue([]);
+				const config = yield* ConfigTag;
+				const child = yield* forkSession("claude-parent", {
+					messageId: "api-tip",
+				}).pipe(Effect.provideService(ConfigTag, { ...config, configDir }));
+				expect(
+					JSON.parse(
+						(yield* state.getState(child.id))[CLAUDE_FORK_SOURCE_KEY] ?? "null",
+					),
+				).toMatchObject({
+					resumeSessionId: "sdk-parent",
+					configDir: {
+						_tag: "Configured",
+						path: join(tmpdir(), "conduit-test-login"),
+					},
+					messageId: "api-tip",
+				});
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+	for (const messageId of ["fork-message", undefined]) {
+		// OpenCode keeps message identity across a fork.
+		it.effect(
+			`a new OpenCode fork exposes its Source and fork point ${messageId ?? "at tip"} without a metadata cache`,
+			() => {
+				const api = makeMockOpenCodeAPI();
+				vi.mocked(api.provider.list).mockResolvedValue({
+					connected: ["openai"],
+					defaults: { openai: "gpt-4" },
+					providers: [
+						{
+							id: "openai",
+							name: "OpenAI",
+							models: [{ id: "gpt-4", name: "GPT-4" }],
+						},
+					],
+				});
+				vi.mocked(api.session.messages).mockResolvedValue([
+					{
+						id: "fork-message",
+						role: "user",
+						sessionID: "parent",
+						time: { created: 1 },
+					},
+				]);
+				vi.mocked(api.session.messagesPage).mockResolvedValue([
+					{ id: "fork-message", role: "user", sessionID: "new-fork" },
+				]);
+				vi.mocked(api.session.fork).mockResolvedValue({
+					id: "new-fork",
+					title: "Fork",
+					projectID: "project",
+					directory: "/project",
+					version: "1",
+					time: { created: 1, updated: 1 },
+				});
+				return Effect.gen(function* () {
+					yield* recoverProjections;
+					yield* commit(forkSourceEvents("parent", "opencode"));
+					const { q } = yield* openShell();
+					yield* takeN(q, 2);
+					yield* forkOpenCodeSession(
+						"parent",
+						{
+							driver: "opencode",
+							usageEligible: false,
+							id: AccountIdSchema.make("opencode"),
+							name: "OpenCode",
+						},
+						messageId,
+					);
+					const envelope = yield* Queue.take(q);
+					expect(envelope).toMatchObject({
+						_tag: "upsert",
+						item: { id: "new-fork", forkedFrom: "parent" },
+					});
+				}).pipe(
+					Effect.provide(
+						Layer.merge(
+							makeShellTestLayer(api),
+							Layer.succeed(OpenCodeAPITag)(api),
+						),
+						{ local: true },
+					),
+				);
+			},
+		);
+	}
+	it.effect("successive committed bursts deliver successive current rows", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([sessionCreated(SID)]);
+			const { q } = yield* openShell();
+			yield* takeN(q, 2);
+			yield* commit([sessionRenamed(SID, "First")]);
+			const first = yield* Queue.take(q);
+			yield* commit([sessionRenamed(SID, "Second")]);
+			const second = yield* Queue.take(q);
+			if (first._tag !== "upsert" || second._tag !== "upsert")
+				throw new Error("expected upserts");
+			expect(first.item.title).toBe("First");
+			expect(second.item.title).toBe("Second");
+			expect(second.sequence).toBeGreaterThan(first.sequence);
+			expect(yield* Queue.size(q)).toBe(0);
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect(
+		"snapshot orders rows by recency and excludes unprojected history from its version",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				const readQuery = yield* ReadQueryEffectTag;
+				expect(
+					yield* readQuery.readSessionList({ projectIds: ["test-project"] }),
+				).toEqual({
+					rows: [],
+					version: yield* readModelVersion,
+				});
+				yield* commit([
+					sessionCreated("shell-old"),
+					sessionCreated("shell-new"),
+				]);
+				const projected = yield* readQuery.readSessionList({
+					projectIds: ["test-project"],
+				});
+				expect(projected.rows.map(({ item }) => item.id)).toEqual([
+					"shell-new",
+					"shell-old",
+				]);
+				expect(projected.version).toBe(yield* readModelVersion);
+				const eventStore = yield* EventStoreEffectTag;
+				yield* eventStore.appendBatch([
+					sessionRenamed("shell-old", "unprojected"),
+				]);
+				expect(
+					yield* readQuery.readSessionList({ projectIds: ["test-project"] }),
+				).toEqual(projected);
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect(
+		"EA30 resumed daemon Shell retains Project Provenance for a deleted row",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated("shell-deleted")]);
+				const config = yield* ConfigTag;
+				const projects = Stream.succeed({
+					_tag: "projects" as const,
+					projects: [
+						{
+							slug: config.slug,
+							title: "Test",
+							folders: [config.projectDir] as const,
+						},
+					],
+				});
+				const initial = yield* subscribeDaemonShell({}, projects).pipe(
+					Stream.take(3),
+					Stream.runCollect,
+				);
+				const snapshot = initial[1];
+				if (snapshot?._tag !== "snapshot" || snapshot.resumePoint === undefined)
+					return yield* Effect.die("expected resumable snapshot");
+				yield* commit([sessionDeleted("shell-deleted")]);
+				const resumed = yield* subscribeDaemonShell(
+					{
+						resumeFromSequence: snapshot.sequence,
+						resumeBase: { sequence: snapshot.sequence },
+						resumePoint: snapshot.resumePoint,
+					},
+					projects,
+				).pipe(Stream.take(3), Stream.runCollect);
+				expect(resumed).toMatchObject([
+					{ _tag: "projects" },
+					{
+						_tag: "remove",
+						id: "shell-deleted",
+						projectSlug: "test-project",
+						sequence: yield* readModelVersion,
+						deleted: true,
+					},
+					{ _tag: "synchronized" },
+				]);
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect(
+		"resume after a parent deletion is told both it and its child are deleted",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([
+					sessionCreated("shell-parent"),
+					sessionCreated("shell-child", "Child", "shell-parent"),
+				]);
+				const cursor = yield* readModelVersion;
+				yield* deleteSession("shell-parent");
+				const { q } = yield* openShell({ resumeFromSequence: cursor });
+				const sequence = yield* readModelVersion;
+				const [first, second, last] = yield* takeN(q, 3);
+				expect(last).toEqual({ _tag: "synchronized" });
+				// A device viewing the child, away while it went, must leave it too.
+				expect(
+					[first, second].sort((a, b) =>
+						JSON.stringify(a).localeCompare(JSON.stringify(b)),
+					),
+				).toEqual([
+					{
+						_tag: "remove",
+						id: "shell-child",
+						sequence,
+						deleted: true,
+						projectSlug: "test-project",
+					},
+					{
+						_tag: "remove",
+						id: "shell-parent",
+						sequence,
+						deleted: true,
+						projectSlug: "test-project",
+					},
+				]);
+			}).pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						makeShellTestLayer(),
+						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+						makeSessionManagerStateLive(),
+					),
+					{ local: true },
+				),
+			),
+	);
+
+	it.effect(
+		"resume covers more than a log page and excludes deleted sessions",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated("shell-a")]);
+				yield* commit(
+					Array.from({ length: 1000 }, (_, i) =>
+						messageCreated("shell-a", `m${i}`),
+					),
+				);
+				yield* commit([sessionCreated("shell-b"), sessionCreated("shell-c")]);
+				const persist = yield* ClaudeEventPersistEffectTag;
+				yield* persist.persistEvent(sessionDeleted("shell-c"));
+				const { q } = yield* openShell({ resumeFromSequence: 0 });
+				const envelopes = yield* takeN(q, 4);
+				expect(envelopes.at(-1)).toEqual({ _tag: "synchronized" });
+				expect(
+					envelopes
+						.flatMap((env) => (env._tag === "upsert" ? [env.item.id] : []))
+						.sort(),
+				).toEqual(["shell-a", "shell-b"]);
+				expect(envelopes[2]).toEqual({
+					_tag: "remove",
+					id: "shell-c",
+					sequence: yield* readModelVersion,
+					deleted: true,
+					projectSlug: "test-project",
+				});
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect(
+		"cold start snapshots the list, then upserts the whole current row per advance",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID)]);
+
+				const { q } = yield* openShell();
+				const [snapshot, synchronized] = yield* takeN(q, 2);
+				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
+				expect(synchronized).toEqual({ _tag: "synchronized" });
+				expect(snapshot.rows.map((row) => row.id)).toEqual([SID]);
+				expect(snapshot.sequence).toBe(yield* readModelVersion);
+
+				yield* commit([sessionRenamed(SID, "Renamed")]);
+
+				const delta = yield* Queue.take(q);
+				if (delta._tag !== "upsert") throw new Error("expected upsert");
+				// The re-query returns the CURRENT whole row, so one envelope carries
+				// every change the commit made to it.
+				expect(delta.item.id).toBe(SID);
+				expect(delta.item.title).toBe("Renamed");
+				// The stream carries the single session type (ni8.5 T-1), not the
+				// projection row: everything on the item is in the contract and
+				// nothing outside it rides along.
+				expect(Schema.decodeUnknownSync(SessionInfoSchema)(delta.item)).toEqual(
+					delta.item,
+				);
+				// The sequence is the read-model version, not an event sequence.
+				expect(delta.sequence).toBe(yield* readModelVersion);
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect("two sessions moved by one commit arrive as one upsert each", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([sessionCreated("shell-a"), sessionCreated("shell-b")]);
+
+			const { q } = yield* openShell();
+			yield* takeN(q, 2);
+
+			yield* commit([
+				sessionRenamed("shell-a", "A1"),
+				sessionRenamed("shell-b", "B1"),
+			]);
+
+			const version = yield* readModelVersion;
+			const [first, second] = yield* takeN(q, 2);
+			if (first?._tag !== "upsert" || second?._tag !== "upsert") {
+				throw new Error("expected two upserts");
+			}
+			// Recency order out of the query; both stamped by the same commit, so
+			// both carry the version that commit moved the read model to.
+			expect([first.item.id, second.item.id].sort()).toEqual([
+				"shell-a",
+				"shell-b",
+			]);
+			expect(first.sequence).toBe(version);
+			expect(second.sequence).toBe(version);
+			expect(yield* Queue.size(q)).toBe(0);
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect("traffic that moves no session row emits nothing", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([
+				sessionCreated(SID),
+				canonicalEvent(
+					"message.created",
+					SID,
+					{ messageId: "m1", sessionId: SID, role: "assistant" },
+					{ provider: "claude" },
+				),
+			]);
+
+			const requeries = yield* Ref.make(0);
+			const real = yield* ReadQueryEffectTag;
+			const { q } = yield* openShell({
+				readQuery: countingReadQuery(real, requeries),
+			});
+			yield* takeN(q, 2);
+
+			// Per-token streaming traffic. It advances the message row it belongs
+			// to, so the advance does name this session and the shell does look:
+			// one indexed range scan over `sessions` that comes back empty. That is
+			// what the event-type allowlist — a second copy of the session
+			// projector's event list, free to drift from it — used to buy.
+			yield* commit(
+				Array.from({ length: 200 }, (_, i) => textDelta(SID, "m1", `t${i}`)),
+			);
+			// FIFO: anything leaked above would surface ahead of this rename.
+			yield* commit([sessionRenamed(SID, "Only This")]);
+
+			const delta = yield* Queue.take(q);
+			if (delta._tag !== "upsert") throw new Error("expected upsert");
+			expect(delta.item.title).toBe("Only This");
+			expect(yield* Queue.size(q)).toBe(0);
+			// Base read plus at most one scan per ADVANCE — 200 streamed parts in
+			// one commit are one advance, and a re-query that overtakes a later
+			// advance spends it, so two reads is also a correct outcome here.
+			expect(yield* Ref.get(requeries)).toBeLessThanOrEqual(3);
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect(
+		"session.deleted through the persist choke point projects the row away and the shell emits remove",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID)]);
+
+				const { q } = yield* openShell();
+				const [snapshot] = yield* takeN(q, 2);
+				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
+				expect(snapshot.rows.map((row) => row.id)).toEqual([SID]);
+
+				// The real producer path: append → project (DELETE row) → publish.
+				const persist = yield* ClaudeEventPersistEffectTag;
+				yield* persist.persistEvent(sessionDeleted(SID));
+
+				const readQuery = yield* ReadQueryEffectTag;
+				expect(yield* readQuery.getSession(SID)).toBeUndefined();
+
+				const delta = yield* Queue.take(q);
+				if (delta._tag !== "remove") throw new Error("expected remove");
+				expect(delta.id).toBe(SID);
+				expect(delta.deleted).toBe(true);
+				// A deleted row leaves no version behind (§8), so the removal carries
+				// the advance's own version — the number the client resumes from.
+				expect(delta.sequence).toBe(yield* readModelVersion);
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect(
+		"deleteSession appends the session.deleted tombstone: row gone, shell emits remove live",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID)]);
+				const { q } = yield* openShell();
+				yield* takeN(q, 2);
+
+				// The real service-level delete path (provider delete mocked).
+				yield* deleteSession(SID);
+
+				const readQuery = yield* ReadQueryEffectTag;
+				expect(yield* readQuery.getSession(SID)).toBeUndefined();
+
+				const delta = yield* Queue.take(q);
+				if (delta._tag !== "remove") throw new Error("expected remove");
+				expect(delta.id).toBe(SID);
+			}).pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						makeShellTestLayer(),
+						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+						makeSessionManagerStateLive(),
+					),
+					{ local: true },
+				),
+			),
+	);
+
+	it.effect(
+		"deleting a parent emits remove(parent) and remove(child) live, both deleted",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([
+					sessionCreated("shell-parent"),
+					sessionCreated("shell-child", "Child", "shell-parent"),
+				]);
+
+				const { q } = yield* openShell();
+				yield* takeN(q, 2);
+
+				const readQuery = yield* ReadQueryEffectTag;
+				const before = yield* readQuery.getSession("shell-child");
+				expect(before?.parent_id).toBe("shell-parent");
+
+				// The real service-level delete: the tombstone captures descendant ids
+				// BEFORE the schema cascade deletes them, so the advance can name
+				// every removed row alongside the parent.
+				yield* deleteSession("shell-parent");
+
+				// The child never had a row of its own, but a device viewing it
+				// must leave it: each deleted session is told, at the one version.
+				const sequence = yield* readModelVersion;
+				const removals = yield* takeN(q, 2);
+				expect(
+					removals.sort((a, b) =>
+						JSON.stringify(a).localeCompare(JSON.stringify(b)),
+					),
+				).toEqual([
+					{
+						_tag: "remove",
+						id: "shell-child",
+						sequence,
+						deleted: true,
+						projectSlug: "test-project",
+					},
+					{
+						_tag: "remove",
+						id: "shell-parent",
+						sequence,
+						deleted: true,
+						projectSlug: "test-project",
+					},
+				]);
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						makeShellTestLayer(),
+						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+						makeSessionManagerStateLive(),
+					),
+					{ local: true },
+				),
+			),
+	);
+
+	it.effect(
+		"a cursor the tombstones do not cover gets a snapshot, not a catch-up",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated("shell-a")]);
+				const before = yield* readModelVersion;
+				yield* commit([sessionCreated("shell-b")]);
+				const version = yield* readModelVersion;
+				// The store was upgraded after the device last read: removals before
+				// that left nothing behind.
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE session_sidebar_horizon SET version = ${version}`;
+				// And a cursor the store never reached: it was reset or restored.
+				for (const resumeFromSequence of [before, version + 100]) {
+					const { q } = yield* openShell({ resumeFromSequence });
+					const [snapshot, synchronized] = yield* takeN(q, 2);
+					if (snapshot?._tag !== "snapshot")
+						throw new Error("expected snapshot");
+					expect(snapshot.sequence).toBe(version);
+					expect(snapshot.rows.map(({ id }) => id).sort()).toEqual([
+						"shell-a",
+						"shell-b",
+					]);
+					expect(synchronized).toEqual({ _tag: "synchronized" });
+				}
+				// A covered cursor is still caught up.
+				const { q } = yield* openShell({ resumeFromSequence: version });
+				expect(yield* takeN(q, 1)).toEqual([{ _tag: "synchronized" }]);
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect(
+		"resume catches up: the reconnecting client is told what moved and what left",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([
+					sessionCreated("shell-kept"),
+					sessionCreated("shell-doomed"),
+				]);
+				const cursor = yield* readModelVersion;
+
+				// Both changes land while the client is away: one row moves, one
+				// disappears. The deleted family leaves a tombstone behind, so the
+				// catch-up reports both and nothing else.
+				yield* commit([sessionRenamed("shell-kept", "Kept")]);
+				const renamed = yield* readModelVersion;
+				yield* deleteSession("shell-doomed");
+
+				const { q } = yield* openShell({ resumeFromSequence: cursor });
+				expect(yield* takeN(q, 3)).toMatchObject([
+					{
+						_tag: "upsert",
+						sequence: renamed,
+						item: { id: "shell-kept", title: "Kept" },
+					},
+					{
+						_tag: "remove",
+						id: "shell-doomed",
+						sequence: yield* readModelVersion,
+					},
+					{ _tag: "synchronized" },
+				]);
+
+				// And live continues past the catch-up.
+				yield* commit([sessionRenamed("shell-kept", "Kept again")]);
+				const delta = yield* Queue.take(q);
+				if (delta._tag !== "upsert") throw new Error("expected upsert");
+				expect(delta.item.title).toBe("Kept again");
+				expect(delta.sequence).toBe(yield* readModelVersion);
+			}).pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						makeShellTestLayer(),
+						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+						makeSessionManagerStateLive(),
+					),
+					{ local: true },
+				),
+			),
+	);
+
+	it.effect(
+		"exactly-once across the base read: a commit before its transaction is not re-delivered",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID)]);
+
+				const sql = yield* SqlClient.SqlClient;
+				const withTransaction = sql.withTransaction;
+				// Commit after the advance subscription exists, before the base
+				// acquires its SQL snapshot. The snapshot includes the commit, so
+				// its buffered advance must not deliver the same row again.
+				const raced = yield* Ref.make(false);
+				const transaction = vi
+					.spyOn(sql, "withTransaction")
+					.mockImplementation((body) =>
+						Ref.getAndSet(raced, true).pipe(
+							Effect.flatMap((already) =>
+								already
+									? Effect.void
+									: Effect.orDie(commit([sessionRenamed(SID, "Raced")])),
+							),
+							Effect.andThen(withTransaction(body)),
+						),
+					);
+
+				yield* Effect.gen(function* () {
+					const { q } = yield* openShell();
+					const [snapshot, synchronized] = yield* takeN(q, 2);
+					if (snapshot?._tag !== "snapshot")
+						throw new Error("expected snapshot");
+					expect(synchronized).toEqual({ _tag: "synchronized" });
+					expect(yield* Ref.get(raced)).toBe(true);
+					expect(snapshot.rows[0]?.title).toBe("Raced");
+					expect(snapshot.sequence).toBe(yield* readModelVersion);
+
+					// A re-delivered buffered row would precede this later change.
+					yield* commit([sessionRenamed(SID, "Fresh")]);
+					const delta = yield* Queue.take(q);
+					if (delta._tag !== "upsert") throw new Error("expected upsert");
+					expect(delta.item.title).toBe("Fresh");
+					expect(delta.sequence).toBe(yield* readModelVersion);
+					expect(yield* Queue.size(q)).toBe(0);
+				}).pipe(Effect.ensuring(Effect.sync(() => transaction.mockRestore())));
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect("closing the scope tears down the advance subscription", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([sessionCreated(SID)]);
+
+			const scope = yield* Scope.make();
+			const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
+			const fiber = yield* Stream.runForEach(subscribeShell(), (env) =>
+				env._tag === "projects" ? Effect.void : Queue.offer(q, env),
+			).pipe(Effect.forkIn(scope));
+
+			yield* takeN(q, 2); // running & subscribed
+			yield* Scope.close(scope, Exit.void);
+
+			expect(Exit.hasInterrupts(yield* Fiber.await(fiber))).toBe(true);
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+	// Unread is a turn end past the seen marker, and only SessionAttention
+	// moves the marker (ADR-0004, Scope; conduit-test-hk9m.3).
+	it.effect(
+		"a seen mark reaches a live subscriber with the updated unread state",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commitThroughSeam([
+					sessionCreated(SID),
+					canonicalEvent("run.requested", SID, {
+						runId: "seen-run",
+						inputId: "m1",
+					}),
+					canonicalEvent(
+						"message.created",
+						SID,
+						{
+							sessionId: SID,
+							messageId: "m1",
+							inputId: "m1",
+							role: "user",
+						},
+						{
+							provider: "claude",
+							createdAt: at(),
+							metadata: { runId: "seen-run" },
+						},
+					),
+					canonicalEvent(
+						"run.started",
+						SID,
+						{ inputId: "m1", requestedRunId: "seen-run" },
+						{ metadata: { runId: "seen-run" } },
+					),
+					canonicalEvent(
+						"turn.completed",
+						SID,
+						{ messageId: "m1" },
+						{ provider: "claude", metadata: { runId: "seen-run" } },
+					),
+				]);
+
+				const { q } = yield* openShell();
+				const [snapshot, synchronized] = yield* takeN(q, 2);
+				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
+				expect(synchronized).toEqual({ _tag: "synchronized" });
+				// A turn has ended and nobody has looked: the badge is on.
+				expect(snapshot.rows[0]?.unread).toBe(true);
+				const baseVersion = snapshot.sequence;
+
+				expect(yield* markSeen(SID, Number.MAX_SAFE_INTEGER)).toBe(true);
+				yield* Effect.yieldNow;
+
+				const delta = yield* Queue.take(q);
+				if (delta._tag !== "upsert") throw new Error("expected upsert");
+				expect(delta.item.id).toBe(SID);
+				expect(delta.item.unread).toBeUndefined();
+				expect(delta.sequence).toBeGreaterThan(baseVersion);
+				expect(delta.sequence).toBe(yield* readModelVersion);
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	// Background work outlives the turn that started it, so the session row
+	// says idle while the work runs. Only the in-memory liveness knows.
+	it.effect(
+		"background work starting and ending reaches a live subscriber",
+		() => {
+			return Effect.gen(function* () {
+				const { background: liveness } = yield* SessionActivityTag;
+				yield* recoverProjections;
+				yield* commitThroughSeam([sessionCreated(SID)]);
+				const { q } = yield* openShell();
+				yield* takeN(q, 2);
+
+				const attentionAfter = (types: string[]) =>
+					Effect.gen(function* () {
+						publishLedgerTasks(liveness, {
+							sessionId: SID,
+							kind: "snapshot",
+							tasks: types.map((type, index) => ({
+								id: String(index),
+								type,
+								description: "Task",
+							})),
+						});
+						yield* announceBackgroundWork(SID);
+						yield* Effect.yieldNow;
+						const delta = yield* Queue.take(q).pipe(
+							Effect.timeout("2 seconds"),
+						);
+						if (delta._tag !== "upsert") throw new Error("expected upsert");
+						return delta.item.attention;
+					});
+				expect(yield* attentionAfter(["local_workflow"])).toBe("working");
+				expect(yield* attentionAfter(["monitor"])).toBe("monitoring");
+				// 8.2 (CONTRACT.md 2778-2781): a shell is work.
+				expect(yield* attentionAfter(["local_bash"])).toBe("working");
+				expect(yield* attentionAfter([])).toBe("idle");
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true }));
+		},
+	);
+
+	it.effect(
+		"a view of an unknown session announces nothing and emits nothing",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commitThroughSeam([sessionCreated(SID)]);
+
+				const { q } = yield* openShell();
+				yield* takeN(q, 2);
+
+				expect(
+					yield* markSeen("no-such-session", Number.MAX_SAFE_INTEGER),
+				).toBe(false);
+				yield* Effect.yieldNow;
+				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect("a message-only advance does not re-emit the session row", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commitThroughSeam([
+				sessionCreated(SID),
+				canonicalEvent(
+					"message.created",
+					SID,
+					{ messageId: "m1", sessionId: SID, role: "assistant" },
+					{ provider: "claude" },
+				),
+			]);
+
+			const { q } = yield* openShell();
+			yield* takeN(q, 2);
+
+			// A token advances `messages`, and its advance names the owning
+			// session — but the session ROW did not move. Re-emitting the shell
+			// row on every token would undo the whole point of coalescing.
+			yield* commitThroughSeam([textDelta(SID, "m1", "hello")]);
+			yield* Effect.yieldNow;
+
+			expect(yield* Queue.size(q)).toBe(0);
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect("a projection and its advance still produce ONE upsert", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commitThroughSeam([sessionCreated(SID)]);
+
+			const requeries = yield* Ref.make(0);
+			const real = yield* ReadQueryEffectTag;
+			const { q } = yield* openShell({
+				readQuery: countingReadQuery(real, requeries),
+			});
+			yield* takeN(q, 2);
+
+			// The seam publishes the events AND the advance for the same commit.
+			// The subscriber follows the advance and must emit only once.
+			yield* commitThroughSeam([sessionRenamed(SID, "Renamed")]);
+			yield* Effect.yieldNow;
+
+			const delta = yield* Queue.take(q);
+			if (delta._tag !== "upsert") throw new Error("expected upsert");
+			expect(delta.item.title).toBe("Renamed");
+			expect(yield* Ref.get(requeries)).toBe(2);
+			expect(yield* Queue.size(q)).toBe(0);
+		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+	// ni8.12 group 2: the session's approval mode rides the shell row, so every
+	// open subscriber (every tab) follows a switch with no refetch.
+	it.effect(
+		"a permission-mode switch reaches two open subscribers as the row's permissionMode",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID)]);
+				const tabA = yield* openShell();
+				const tabB = yield* openShell();
+				const [snapshotA] = yield* takeN(tabA.q, 2);
+				yield* takeN(tabB.q, 2);
+				if (snapshotA?._tag !== "snapshot")
+					throw new Error("expected snapshot");
+				expect(snapshotA.rows[0]?.permissionMode).toBeUndefined();
+
+				yield* persistSessionPermissionMode(SID, "plan");
+
+				for (const { q } of [tabA, tabB]) {
+					const delta = yield* Queue.take(q);
+					if (delta._tag !== "upsert") throw new Error("expected upsert");
+					expect(delta.item).toMatchObject({ id: SID, permissionMode: "plan" });
+				}
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect(
+		"a provider-reported permission mode reaches an open subscription",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID)]);
+				const { q } = yield* openShell();
+				yield* takeN(q, 2);
+
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingest(
+					decodeProviderRuntimeEvent({
+						eventId: "rt-permission-mode",
+						type: "session.permission_mode_changed",
+						providerId: "claude",
+						sessionId: SID,
+						createdAt: "2026-10-06T00:00:00.000Z",
+						rawSource: {
+							kind: "claude.sdk.message",
+							providerMessageType: "system",
+						},
+						providerRefs: { providerSessionId: "provider-shell" },
+						data: { sessionId: SID, mode: "acceptEdits" },
+					}),
+				);
+
+				const delta = yield* Queue.take(q);
+				if (delta._tag !== "upsert") throw new Error("expected upsert");
+				expect(delta.item).toMatchObject({
+					id: SID,
+					permissionMode: "acceptEdits",
+				});
+			}).pipe(
+				Effect.provide(
+					Layer.provideMerge(
+						ProviderRuntimeIngestionLive,
+						makeShellTestLayer(),
+					),
+					{ local: true },
+				),
+			),
+	);
+
+	// C1: a compaction's start is transient status. It rides the shell row from
+	// memory and is never appended; its outcome or the session going idle
+	// clears it.
+	it.effect("a compaction in progress rides the shell row, not the log", () => {
+		return Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([sessionCreated(SID)]);
+			const { q } = yield* openShell();
+			yield* takeN(q, 2);
+
+			const ingestion = yield* ProviderRuntimeIngestionTag;
+			const ingest = (
+				eventId: string,
+				type: "session.compaction" | "session.status",
+				data: Record<string, unknown>,
+			) =>
+				ingestion.ingest(
+					decodeProviderRuntimeEvent({
+						eventId,
+						type,
+						providerId: "claude",
+						sessionId: SID,
+						createdAt: "2026-10-06T00:00:00.000Z",
+						rawSource: {
+							kind: "claude.sdk.message",
+							providerMessageType: "system",
+						},
+						providerRefs: { providerSessionId: "provider-shell" },
+						data: { sessionId: SID, ...data },
+					}),
+				);
+			const compactingOnRow = (compacting: string | undefined) =>
+				Effect.gen(function* () {
+					for (;;) {
+						const delta = yield* Queue.take(q);
+						if (
+							delta._tag === "upsert" &&
+							delta.item.id === SID &&
+							delta.item.compacting === compacting
+						)
+							return;
+					}
+				}).pipe(Effect.timeout("2 seconds"));
+			const started = { state: "started", detail: "Compacting conversation…" };
+
+			yield* ingest("rt-compaction-1", "session.compaction", started);
+			yield* compactingOnRow("Compacting conversation…");
+			yield* ingest("rt-compaction-1-done", "session.compaction", {
+				state: "completed",
+				detail: "Context compacted",
+			});
+			yield* compactingOnRow(undefined);
+
+			yield* ingest("rt-compaction-2", "session.compaction", started);
+			yield* compactingOnRow("Compacting conversation…");
+			yield* ingest("rt-idle", "session.status", { status: "idle" });
+			yield* compactingOnRow(undefined);
+
+			const sql = yield* SqlClient.SqlClient;
+			const logged = yield* sql<{ state: string }>`
+				SELECT json_extract(data, '$.state') AS state FROM events
+				WHERE type = 'session.compaction'`;
+			expect(logged.map((event) => event.state)).toEqual(["completed"]);
+		}).pipe(
+			Effect.provide(
+				Layer.provideMerge(
+					Layer.unwrap(
+						Effect.map(SessionActivityTag, (activity) =>
+							makeProviderRuntimeIngestionLive({
+								compactions: activity.compactions,
+							}),
+						),
+					),
+					makeShellTestLayer(),
+				),
+				{ local: true },
+			),
+		);
+	});
+});

@@ -32,15 +32,15 @@ import {
 } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { ProjectServices } from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
-import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
+import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
-import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { LoggerTag } from "../../../src/lib/domain/project-services/Services/services.js";
+import { applySessionCommand } from "../../../src/lib/domain/project-services/Services/session-command.js";
+import { projectSessionManager } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";

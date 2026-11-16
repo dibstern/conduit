@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import { RpcTest } from "effect/rpc";
 import { expect } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { AgentServiceTag } from "../../../src/lib/domain/project-services/Services/agent-service.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 

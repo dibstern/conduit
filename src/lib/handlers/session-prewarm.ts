@@ -2,15 +2,15 @@ import { Effect } from "effect";
 import type { Account } from "../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
-import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import { resolveSessionFolders } from "../domain/relay/Services/provider-turn-dispatch.js";
-import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
+import { AgentServiceTag } from "../domain/project-services/Services/agent-service.js";
+import { resolveSessionFolders } from "../domain/project-services/Services/provider-turn-dispatch.js";
+import { OrchestrationEngineTag } from "../domain/project-services/Services/services.js";
 import {
 	getContextWindow,
 	getModel,
 	getPermissionMode,
 	getVariant,
-} from "../domain/relay/Services/session-overrides-state.js";
+} from "../domain/project-services/Services/session-overrides-state.js";
 import { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { makePrepareTurn } from "../provider/claude/prepare-turn.js";

@@ -6,18 +6,18 @@ import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
-import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import {
 	makeSessionTitleServiceLive,
 	SessionTitleServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-title-service.js";
+} from "../../../src/lib/domain/project-services/Services/session-title-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";

@@ -3,7 +3,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { OwnerScopes } from "../../domain/daemon/Services/owner-scopes.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
+import { PendingInteractionServiceTag } from "../../domain/project-services/Services/pending-interaction-service.js";
 import { type CanonicalEvent, canonicalEvent } from "../events.js";
 import { makeCommitAndSignal } from "./commit-and-signal.js";
 import {

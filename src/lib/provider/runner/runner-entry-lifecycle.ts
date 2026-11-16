@@ -1,7 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import { Cause, Deferred, Effect, Exit, Scope, type Semaphore } from "effect";
-import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
-import type { ProviderRuntimeIngestion } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import type { PendingInteractionService } from "../../domain/project-services/Services/pending-interaction-service.js";
+import type { ProviderRuntimeIngestion } from "../../domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	type RunnerHello,
 	type RunnerSocket,

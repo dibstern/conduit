@@ -3,14 +3,14 @@ import { Effect, Exit, Layer, Option, Scope } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { MessagePollerManagerLive } from "../../../src/lib/domain/relay/Layers/message-poller-manager-layer.js";
+import { MessagePollerManagerLive } from "../../../src/lib/domain/project-services/Layers/message-poller-manager-layer.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	type PollerManagerShape,
 	PollerManagerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";

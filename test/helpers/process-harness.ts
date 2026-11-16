@@ -54,7 +54,7 @@ import {
 	loadDaemonConfigResult,
 } from "../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../src/lib/daemon/daemon-rpc-client.js";
-import type { RelaySettings } from "../../src/lib/daemon/relay-settings.js";
+import type { RelaySettings } from "../../src/lib/daemon/global-settings.js";
 import { decodeSessionDetail } from "../../src/lib/frontend/transport/session-detail-wire.js";
 import {
 	inspectManagedOpenCodeProcess,
@@ -610,7 +610,7 @@ import { Effect } from ${JSON.stringify(pathToFileURL(createRequire(import.meta.
 import { ClaudeDriver } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/provider/claude/claude-provider-instance.js")).href)};
 import { ProviderRegistry } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/provider/provider-registry.js")).href)};
 import { ProviderAdapters } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/domain/daemon/Services/provider-adapters.js")).href)};
-import { ConfigTag } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/domain/relay/Services/services.js")).href)};
+import { ConfigTag } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/domain/project-services/Services/services.js")).href)};
 const root = ${JSON.stringify(this.root)};
 if (process.env.HOME !== join(root, "home") || !process.send) throw new Error("CLI fixture requires isolated HOME and IPC");
 const identitySaveGate = join(root, "managed-identity-save-gated");

@@ -9,9 +9,12 @@ import {
 	UnboundEventStoreEffectTag,
 } from "../../../persistence/effect/event-store-effect.js";
 import { loadLedgerView } from "../../../persistence/effect/run-ledger-arm.js";
-import { AlertsTag, publishAlert } from "../../relay/Services/alerts.js";
-import { LoggerTag } from "../../relay/Services/services.js";
-import { applySessionCommand } from "../../relay/Services/session-command.js";
+import {
+	AlertsTag,
+	publishAlert,
+} from "../../project-services/Services/alerts.js";
+import { LoggerTag } from "../../project-services/Services/services.js";
+import { applySessionCommand } from "../../project-services/Services/session-command.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import {
 	FolderTimeline,

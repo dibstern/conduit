@@ -40,8 +40,8 @@ import {
 	type SessionGit as GitState,
 	SessionGitSchema,
 } from "../../../shared-types.js";
-import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
-import { inspectSessionWorktree } from "../../relay/Services/session-workspace.js";
+import { SessionEventBusTag } from "../../project-services/Services/session-event-bus.js";
+import { inspectSessionWorktree } from "../../project-services/Services/session-workspace.js";
 import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
 import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";

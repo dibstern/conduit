@@ -30,7 +30,7 @@ import {
 	WsRpcError,
 } from "../../contracts/ws-rpc.js";
 import { autoSettleIdleWindowMs } from "../../daemon/config-persistence.js";
-import { saveRelaySettings } from "../../daemon/relay-settings.js";
+import { saveRelaySettings } from "../../daemon/global-settings.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
 import { FolderTimeline } from "../../domain/daemon/Services/folder-timeline.js";
@@ -42,37 +42,40 @@ import { PersistenceProjectTag } from "../../domain/persistence/Services/persist
 import {
 	ContinuationTag,
 	previewContinuation,
-} from "../../domain/relay/Services/continuation.js";
-import { DaemonSessionQueryServiceTag } from "../../domain/relay/Services/daemon-session-query-service.js";
+} from "../../domain/project-services/Services/continuation.js";
+import { DaemonSessionQueryServiceTag } from "../../domain/project-services/Services/daemon-session-query-service.js";
 import {
 	DraftPreWarmTag,
 	draftLaunchKey,
-} from "../../domain/relay/Services/draft-prewarm.js";
-import { GoalSummaryServiceTag } from "../../domain/relay/Services/goal-summary-service.js";
-import { filesAt } from "../../domain/relay/Services/head-move-files.js";
-import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
-import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
-import { setRead } from "../../domain/relay/Services/session-attention.js";
-import { forkSession } from "../../domain/relay/Services/session-command.js";
+} from "../../domain/project-services/Services/draft-prewarm.js";
+import { GoalSummaryServiceTag } from "../../domain/project-services/Services/goal-summary-service.js";
+import { filesAt } from "../../domain/project-services/Services/head-move-files.js";
+import { InputDraftsTag } from "../../domain/project-services/Services/input-drafts.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../domain/project-services/Services/services.js";
+import { setRead } from "../../domain/project-services/Services/session-attention.js";
+import { forkSession } from "../../domain/project-services/Services/session-command.js";
 import {
 	createLocalSessionId,
 	projectSessionManager,
-} from "../../domain/relay/Services/session-manager-service.js";
+} from "../../domain/project-services/Services/session-manager-service.js";
 import {
 	commitHeadMove,
 	previewHeadMove,
 	readHeadBranches,
 	readHeadLog,
 	readSessionResumePlan,
-} from "../../domain/relay/Services/session-rewind.js";
-import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
+} from "../../domain/project-services/Services/session-rewind.js";
+import { SessionSetupTag } from "../../domain/project-services/Services/session-setup.js";
 import {
 	recreateSessionWorktrees,
 	SessionWorkspaceTag,
-} from "../../domain/relay/Services/session-workspace.js";
-import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
-import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
-import { makeSurfacingFeedback } from "../../domain/relay/Services/surfacing-feedback.js";
+} from "../../domain/project-services/Services/session-workspace.js";
+import { dismissWorkspaceHint } from "../../domain/project-services/Services/session-workspace-hint.js";
+import { prepareSessionWorktreeDeletion } from "../../domain/project-services/Services/session-worktree-deletion.js";
+import { makeSurfacingFeedback } from "../../domain/project-services/Services/surfacing-feedback.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { ENV } from "../../env.js";
 import { formatErrorDetail } from "../../errors.js";

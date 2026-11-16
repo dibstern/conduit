@@ -7,7 +7,7 @@ const OLD_EFFECT_DIR = join(REPO_ROOT, "src/lib/effect");
 const DOMAIN_ROOT = join(REPO_ROOT, "src/lib/domain");
 const RELAY_SERVICES_INDEX = join(
 	REPO_ROOT,
-	"src/lib/domain/relay/Services/services.ts",
+	"src/lib/domain/project-services/Services/services.ts",
 );
 
 function tsFiles(dir: string): string[] {

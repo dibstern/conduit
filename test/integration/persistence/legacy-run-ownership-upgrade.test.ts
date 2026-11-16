@@ -6,17 +6,17 @@ import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
-import { ContinuationTag } from "../../../src/lib/domain/relay/Services/continuation.js";
+import { ContinuationTag } from "../../../src/lib/domain/project-services/Services/continuation.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
-import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderTurnServiceTag } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
+import { SessionEventBusTag } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import {
 	SessionInboxLive,
 	SessionInboxTag,
-} from "../../../src/lib/domain/relay/Services/session-inbox.js";
+} from "../../../src/lib/domain/project-services/Services/session-inbox.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";

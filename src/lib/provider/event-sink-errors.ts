@@ -1,6 +1,6 @@
 import { Data } from "effect";
 import type { SqlError } from "effect/sql/SqlError";
-import type { PendingInteractionCancelled } from "../domain/relay/Services/pending-interaction-service.js";
+import type { PendingInteractionCancelled } from "../domain/project-services/Services/pending-interaction-service.js";
 import type { AttachmentMissing } from "../persistence/attachment-store.js";
 import type {
 	ClaudeEventPersistEffectError,

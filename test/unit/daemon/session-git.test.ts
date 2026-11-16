@@ -63,7 +63,7 @@ import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/work
 import {
 	makeSessionEventBusLive,
 	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import {
 	makeCommitAndSignal,
 	makeUnboundCommitAndSignal,

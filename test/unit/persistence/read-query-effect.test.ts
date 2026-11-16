@@ -11,9 +11,9 @@ import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Servi
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { restoreClaudeQuestionsFromStore } from "../../../src/lib/domain/relay/Services/restore-claude-questions.js";
-import { strandedChildren } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+} from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
+import { restoreClaudeQuestionsFromStore } from "../../../src/lib/domain/project-services/Services/restore-claude-questions.js";
+import { strandedChildren } from "../../../src/lib/domain/project-services/Services/session-status-poller.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,

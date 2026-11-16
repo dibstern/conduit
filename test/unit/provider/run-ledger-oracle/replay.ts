@@ -38,22 +38,22 @@ import {
 	ProviderAdapters,
 } from "../../../../src/lib/domain/daemon/Services/provider-adapters.js";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
-import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { SessionWorkspaceLive } from "../../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
-import { ContinuationTag } from "../../../../src/lib/domain/relay/Services/continuation.js";
-import { makeEffectOpenCodeRuntimeIngress } from "../../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
-import { makeProviderRuntimeIngestionLive } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { SessionWorkspaceLive } from "../../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
+import { ContinuationTag } from "../../../../src/lib/domain/project-services/Services/continuation.js";
+import { makeEffectOpenCodeRuntimeIngress } from "../../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
+import { makeProviderRuntimeIngestionLive } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../../src/lib/domain/relay/Services/services.js";
-import { SessionEventBusLive } from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../../src/lib/domain/project-services/Services/services.js";
+import { SessionEventBusLive } from "../../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import {
 	SessionInboxLive,
 	SessionInboxTag,
-} from "../../../../src/lib/domain/relay/Services/session-inbox.js";
-import { sessionPickEvents } from "../../../../src/lib/domain/relay/Services/session-pick.js";
+} from "../../../../src/lib/domain/project-services/Services/session-inbox.js";
+import { sessionPickEvents } from "../../../../src/lib/domain/project-services/Services/session-pick.js";
+import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { OpenCodeApiError } from "../../../../src/lib/errors.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";

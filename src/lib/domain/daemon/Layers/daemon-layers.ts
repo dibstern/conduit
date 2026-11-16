@@ -33,7 +33,7 @@ import {
 	startOnboardingServer,
 } from "../../../daemon/daemon-lifecycle.js";
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
-import { loadRelaySettings } from "../../../daemon/relay-settings.js";
+import { loadRelaySettings } from "../../../daemon/global-settings.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV, resolveTraceConfig } from "../../../env.js";
 import { startContentionMetrics } from "../../../persistence/contention-metrics.js";
@@ -66,20 +66,20 @@ import {
 } from "../../persistence/Services/event-retention-scheduler.js";
 import { makePortWatcherLive } from "../../persistence/Services/port-watcher.js";
 import { makeRunLedgerSchedulerLive } from "../../persistence/Services/run-ledger-scheduler.js";
-import { RateLimiterLive } from "../../relay/Layers/rate-limiter-layer.js";
-import { SessionWorkspaceLive } from "../../relay/Layers/session-workspace-layer.js";
-import { makeStatusPollerCoreLive } from "../../relay/Layers/status-poller-layer.js";
-import { AlertsLive } from "../../relay/Services/alerts.js";
-import { GoalStuckStopReactorLive } from "../../relay/Services/goal-stuck-stop.js";
+import { RateLimiterLive } from "../../project-services/Layers/rate-limiter-layer.js";
+import { SessionWorkspaceLive } from "../../project-services/Layers/session-workspace-layer.js";
+import { makeStatusPollerCoreLive } from "../../project-services/Layers/status-poller-layer.js";
+import { AlertsLive } from "../../project-services/Services/alerts.js";
+import { GoalStuckStopReactorLive } from "../../project-services/Services/goal-stuck-stop.js";
 import {
 	InputDraftsLive,
 	releaseInputDraftClaims,
-} from "../../relay/Services/input-drafts.js";
-import { ProviderTurnsLive } from "../../relay/Services/provider-turn-service.js";
-import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
-import { makeOverridesStateLive } from "../../relay/Services/session-overrides-state.js";
-import { DaemonSessionSetupLive } from "../../relay/Services/session-setup.js";
-import { SessionWorkspaceHintReactorLive } from "../../relay/Services/session-workspace-hint.js";
+} from "../../project-services/Services/input-drafts.js";
+import { ProviderTurnsLive } from "../../project-services/Services/provider-turn-service.js";
+import { SessionEventBusLive } from "../../project-services/Services/session-event-bus.js";
+import { makeOverridesStateLive } from "../../project-services/Services/session-overrides-state.js";
+import { DaemonSessionSetupLive } from "../../project-services/Services/session-setup.js";
+import { SessionWorkspaceHintReactorLive } from "../../project-services/Services/session-workspace-hint.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,

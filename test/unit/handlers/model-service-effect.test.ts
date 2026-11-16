@@ -23,28 +23,27 @@ import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../src/lib/daemon/relay-settings.js";
+} from "../../../src/lib/daemon/global-settings.js";
 import {
 	AccountDirectory,
 	AccountDirectoryFromConfigLive,
 } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { loadModelCatalog } from "../../../src/lib/domain/relay/Services/model-catalog.js";
+import { loadModelCatalog } from "../../../src/lib/domain/project-services/Services/model-catalog.js";
 import {
 	ProjectSettingsLive,
 	ProjectSettingsTag,
 	refreshGlobalDefaults,
 	subscribeProjectSettings,
-} from "../../../src/lib/domain/relay/Services/project-settings.js";
+} from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceLive,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import {
 	getDefaultModel,
 	getDefaultVariant,
@@ -52,7 +51,8 @@ import {
 	makeOverridesStateLive,
 	setDefaultModel,
 	setModel,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	getModelsResponse,
 	savedVariantFor,

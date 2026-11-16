@@ -16,8 +16,8 @@ import {
 	accountSwitchBusyMessage,
 } from "../../contracts/limit-recovery.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
-import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import { InputDraftsTag } from "../../domain/project-services/Services/input-drafts.js";
+import { ProviderRuntimeIngestionTag } from "../../domain/project-services/Services/provider-runtime-ingestion-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { makeClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";

@@ -87,7 +87,7 @@ import {
 	announceBackgroundWork,
 	markSeen,
 	markUnread,
-} from "../../../src/lib/domain/relay/Services/session-attention.js";
+} from "../../../src/lib/domain/project-services/Services/session-attention.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";

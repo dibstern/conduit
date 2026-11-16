@@ -16,7 +16,7 @@ import {
 	makeEventRetention,
 } from "../../../src/lib/domain/persistence/Services/event-retention.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
-import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makeEventStoreEffect } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {

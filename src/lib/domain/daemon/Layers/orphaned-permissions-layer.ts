@@ -7,8 +7,8 @@ import {
 } from "../../../persistence/effect/event-store-effect.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
-import { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
-import { resolveOrphanedClaudePermissions } from "../../relay/Services/resolve-orphaned-claude-permissions.js";
+import { PendingInteractionServiceTag } from "../../project-services/Services/pending-interaction-service.js";
+import { resolveOrphanedClaudePermissions } from "../../project-services/Services/resolve-orphaned-claude-permissions.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { type OwnerScope, OwnerScopes } from "../Services/owner-scopes.js";
 import {

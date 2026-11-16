@@ -21,11 +21,11 @@ import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-adv
 import {
 	markSeen,
 	markUnread,
-} from "../../../src/lib/domain/relay/Services/session-attention.js";
+} from "../../../src/lib/domain/project-services/Services/session-attention.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	makePersistenceEffectLayer,

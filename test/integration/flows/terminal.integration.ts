@@ -8,8 +8,8 @@ import { Cause, Effect, Exit, Option, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodePtySchema } from "../../../src/lib/contracts/providers/opencode-sdk.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { PtyManagerTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { SSEStreamTag } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
+import { PtyManagerTag } from "../../../src/lib/domain/project-services/Services/services.js";
+import { SSEStreamTag } from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
 import {
 	isPtyEvent,
 	type PtyEvent,

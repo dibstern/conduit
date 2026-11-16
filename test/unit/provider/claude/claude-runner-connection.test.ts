@@ -22,11 +22,11 @@ import { BUILD_ID } from "../../../../src/lib/build-id.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+} from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
-} from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../../../src/lib/persistence/effect/migrations.js";
 import { connectClaudeRunner } from "../../../../src/lib/provider/claude/claude-runner-connection.js";
@@ -37,7 +37,7 @@ import {
 	configuredClaudeConfigDir,
 	sdkDefaultClaudeConfigDir,
 } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
-import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
+import { createRelayEventSink } from "../../../../src/lib/provider/project-event-sink.js";
 import { makeRunnerAuthority } from "../../../../src/lib/provider/runner/runner-authority.js";
 import {
 	RUNNER_PROTOCOL_VERSION,

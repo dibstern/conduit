@@ -4,8 +4,8 @@ import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
 	InstanceManagementServiceError,
 	InstanceManagementServiceTag,
-} from "../../domain/relay/Services/instance-management-service.js";
-import { ScanServiceTag } from "../../domain/relay/Services/scan-service.js";
+} from "../../domain/project-services/Services/instance-management-service.js";
+import { ScanServiceTag } from "../../domain/project-services/Services/scan-service.js";
 import { formatErrorDetail } from "../../errors.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 

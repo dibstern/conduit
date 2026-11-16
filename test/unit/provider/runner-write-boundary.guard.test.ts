@@ -9,7 +9,7 @@ interface Source {
 }
 
 const sharedWriters = [
-	"src/lib/domain/relay/Services/provider-runtime-ingestion-service.ts",
+	"src/lib/domain/project-services/Services/provider-runtime-ingestion-service.ts",
 	"src/lib/persistence/effect/claude-event-persist-effect.ts",
 ];
 

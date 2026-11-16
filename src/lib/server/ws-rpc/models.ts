@@ -3,8 +3,8 @@ import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../domain/daemon/Services/opencode-instances-service.js";
-import { AgentServiceTag } from "../../domain/relay/Services/agent-service.js";
-import { ConfigTag } from "../../domain/relay/Services/services.js";
+import { AgentServiceTag } from "../../domain/project-services/Services/agent-service.js";
+import { ConfigTag } from "../../domain/project-services/Services/services.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { switchContextWindowForSession } from "../../handlers/context-window.js";
 import {

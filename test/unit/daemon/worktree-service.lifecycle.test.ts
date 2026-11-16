@@ -16,7 +16,7 @@ import {
 	worktreesRoot,
 } from "../../../src/lib/domain/daemon/Layers/worktree-layer.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
-import { inspectSessionWorktree } from "../../../src/lib/domain/relay/Services/session-workspace.js";
+import { inspectSessionWorktree } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import { worktreeFixture } from "./worktree-service-fixture.js";
 
 // Real git subprocesses: tests measured 3-9 s each under CPU contention.

@@ -11,7 +11,7 @@ import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	ToolContentServiceError,
 	ToolContentServiceTag,
-} from "../../../src/lib/domain/relay/Services/tool-content-service.js";
+} from "../../../src/lib/domain/project-services/Services/tool-content-service.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 

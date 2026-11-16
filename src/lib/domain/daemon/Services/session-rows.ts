@@ -11,7 +11,7 @@ import {
 import { readPublishedSessionGit } from "../../../persistence/effect/session-git-publication.js";
 import { sessionRunOwnersQuery } from "../../../provider/session-run-settlement.js";
 import type { SessionInfo } from "../../../shared-types.js";
-import { withSessionWorktreeStatus } from "../../relay/Services/session-workspace.js";
+import { withSessionWorktreeStatus } from "../../project-services/Services/session-workspace.js";
 import { AccountDirectory } from "./account-directory.js";
 import { ReadRequest } from "./read-request.js";
 import { resolveSessionAccountIds } from "./session-accounts.js";

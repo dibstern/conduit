@@ -15,8 +15,8 @@ import {
 	DraftPreWarmLive,
 	DraftPreWarmTag,
 	draftLaunchKey,
-} from "../../../src/lib/domain/relay/Services/draft-prewarm.js";
-import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/draft-prewarm.js";
+import { LoggerTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { createLogger } from "../../../src/lib/logger.js";
 import { ProviderRegistryLive } from "../../../src/lib/provider/provider-registry.js";
 import type { PreWarmSessionInput } from "../../../src/lib/provider/types.js";

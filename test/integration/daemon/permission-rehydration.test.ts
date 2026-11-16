@@ -13,7 +13,7 @@ import {
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { PendingInteractionServiceTag } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	createDaemonProject,
 	type DaemonProject,

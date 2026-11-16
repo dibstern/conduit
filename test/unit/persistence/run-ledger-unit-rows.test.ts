@@ -37,7 +37,7 @@ import { Duration, Effect, Layer, Schema, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { AttachmentRefSchema } from "../../../src/lib/contracts/attachment-ref.js";
-import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { requeueFailedSteers } from "../../../src/lib/persistence/effect/input-requeue-effect.js";

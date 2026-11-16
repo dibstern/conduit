@@ -3,7 +3,7 @@ import {
 	DaemonTurns,
 	DaemonTurnsLive,
 } from "../../src/lib/domain/daemon/Services/daemon-turns.js";
-import { makeContinuation } from "../../src/lib/domain/relay/Services/continuation.js";
+import { makeContinuation } from "../../src/lib/domain/project-services/Services/continuation.js";
 import { EventStoreEffectTag } from "../../src/lib/persistence/effect/event-store-effect.js";
 
 /**

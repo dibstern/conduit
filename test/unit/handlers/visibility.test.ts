@@ -7,16 +7,16 @@ import { expect } from "vitest";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../src/lib/daemon/relay-settings.js";
+} from "../../../src/lib/daemon/global-settings.js";
 import {
 	ProjectSettingsLive,
 	ProjectSettingsTag,
-} from "../../../src/lib/domain/relay/Services/project-settings.js";
+} from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import {
 	getHiddenEntries,
 	setHiddenEntriesForRelay,

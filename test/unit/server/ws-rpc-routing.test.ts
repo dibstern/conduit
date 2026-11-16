@@ -12,8 +12,8 @@ import {
 	SessionDirectory,
 	SessionDirectoryReadError,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
-import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { ConfigTag } from "../../../src/lib/domain/project-services/Services/services.js";
+import { makeSessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";

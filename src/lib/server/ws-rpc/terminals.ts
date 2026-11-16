@@ -3,7 +3,7 @@ import type { Account } from "../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
-import { OpenCodeTerminalServiceTag } from "../../domain/relay/Services/terminal-service.js";
+import { OpenCodeTerminalServiceTag } from "../../domain/project-services/Services/terminal-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors.js";
 import {

@@ -21,29 +21,29 @@ import { runningRunnerCommands } from "../../../provider/runner/runner-recovery.
 import type { PushNotificationSender } from "../../../server/push.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
-import { makeReadOpenCodeMessages } from "../../relay/Layers/project-ingestion-layer.js";
-import { ContinuationTag } from "../../relay/Services/continuation.js";
-import { OpenCodeRuntimeIngressTag } from "../../relay/Services/opencode-runtime-ingress-service.js";
-import { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
-import { restoreAsyncQuestionsFromStore } from "../../relay/Services/restore-async-questions.js";
-import { restoreClaudeQuestionsFromStore } from "../../relay/Services/restore-claude-questions.js";
+import { makeReadOpenCodeMessages } from "../../project-services/Layers/project-ingestion-layer.js";
+import { ContinuationTag } from "../../project-services/Services/continuation.js";
+import { OpenCodeRuntimeIngressTag } from "../../project-services/Services/opencode-runtime-ingress-service.js";
+import { RelayStatusSnapshotTag } from "../../project-services/Services/project-status-snapshot.js";
+import { restoreAsyncQuestionsFromStore } from "../../project-services/Services/restore-async-questions.js";
+import { restoreClaudeQuestionsFromStore } from "../../project-services/Services/restore-claude-questions.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	TranslatorTag,
-} from "../../relay/Services/services.js";
-import { announceBackgroundWork } from "../../relay/Services/session-attention.js";
-import { SessionInboxTag } from "../../relay/Services/session-inbox.js";
-import type { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
-import { restoreSessionSettings } from "../../relay/Services/session-model-settings.js";
-import { backfillSessionPicks } from "../../relay/Services/session-pick.js";
-import { SessionSetupTag } from "../../relay/Services/session-setup.js";
-import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
-import { SSEStreamTag } from "../../relay/Services/sse-stream-service.js";
-import { OpenCodeTerminalServiceTag } from "../../relay/Services/terminal-service.js";
-import { makeFailTurn } from "../../relay/Services/turn-failure.js";
+} from "../../project-services/Services/services.js";
+import { announceBackgroundWork } from "../../project-services/Services/session-attention.js";
+import { SessionInboxTag } from "../../project-services/Services/session-inbox.js";
+import type { SessionManagerServiceTag } from "../../project-services/Services/session-manager-service.js";
+import { restoreSessionSettings } from "../../project-services/Services/session-model-settings.js";
+import { backfillSessionPicks } from "../../project-services/Services/session-pick.js";
+import { SessionSetupTag } from "../../project-services/Services/session-setup.js";
+import { SessionWorkspaceTag } from "../../project-services/Services/session-workspace.js";
+import { SSEStreamTag } from "../../project-services/Services/sse-stream-service.js";
+import { OpenCodeTerminalServiceTag } from "../../project-services/Services/terminal-service.js";
+import { makeFailTurn } from "../../project-services/Services/turn-failure.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { DaemonTurns } from "../Services/daemon-turns.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";

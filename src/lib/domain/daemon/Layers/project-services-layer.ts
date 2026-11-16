@@ -34,35 +34,35 @@ import { RpcSubscriptionScopeTag } from "../../../server/ws-rpc.js";
 import type { ClaudeSdkSeam } from "../../../types.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import type { PersistenceError } from "../../persistence/Services/persistence-service.js";
-import { MessagePollerManagerLive } from "../../relay/Layers/message-poller-manager-layer.js";
+import { MessagePollerManagerLive } from "../../project-services/Layers/message-poller-manager-layer.js";
 import {
 	AgentLivenessLive,
 	makeProjectIngestionLive,
 	makeProjectOpenCodeIngressLive,
-} from "../../relay/Layers/project-ingestion-layer.js";
-import { makePtyRuntimeLive } from "../../relay/Layers/pty-manager-layer.js";
-import { SessionStateProjectionNotifierLive } from "../../relay/Layers/session-state-projection-notifier-layer.js";
-import { StatusPollerLive } from "../../relay/Layers/status-poller-layer.js";
-import { AgentServiceLive } from "../../relay/Services/agent-service.js";
-import type { AlertsTag } from "../../relay/Services/alerts.js";
-import { DirectoryListingServiceLive } from "../../relay/Services/directory-listing-service.js";
-import { makeGoalSummaryServiceLive } from "../../relay/Services/goal-summary-service.js";
-import { HandoffReceiptsLive } from "../../relay/Services/handoff-receipts.js";
-import type { InputDraftsTag } from "../../relay/Services/input-drafts.js";
-import { OpenCodeSessionCreationGateTag } from "../../relay/Services/opencode-runtime-ingress-service.js";
+} from "../../project-services/Layers/project-ingestion-layer.js";
+import { makePtyRuntimeLive } from "../../project-services/Layers/pty-manager-layer.js";
+import { SessionStateProjectionNotifierLive } from "../../project-services/Layers/session-state-projection-notifier-layer.js";
+import { StatusPollerLive } from "../../project-services/Layers/status-poller-layer.js";
+import { AgentServiceLive } from "../../project-services/Services/agent-service.js";
+import type { AlertsTag } from "../../project-services/Services/alerts.js";
+import { DirectoryListingServiceLive } from "../../project-services/Services/directory-listing-service.js";
+import { makeGoalSummaryServiceLive } from "../../project-services/Services/goal-summary-service.js";
+import { HandoffReceiptsLive } from "../../project-services/Services/handoff-receipts.js";
+import type { InputDraftsTag } from "../../project-services/Services/input-drafts.js";
+import { OpenCodeSessionCreationGateTag } from "../../project-services/Services/opencode-runtime-ingress-service.js";
 import {
 	ProjectSettingsLive,
 	refreshGlobalDefaults,
-} from "../../relay/Services/project-settings.js";
-import {
-	ProviderTurnServiceTag,
-	ProviderTurns,
-} from "../../relay/Services/provider-turn-service.js";
-import { makeRecapServiceLive } from "../../relay/Services/recap-service.js";
+} from "../../project-services/Services/project-settings.js";
 import {
 	makeRelayStatusSnapshot,
 	RelayStatusSnapshotTag,
-} from "../../relay/Services/relay-status-snapshot.js";
+} from "../../project-services/Services/project-status-snapshot.js";
+import {
+	ProviderTurnServiceTag,
+	ProviderTurns,
+} from "../../project-services/Services/provider-turn-service.js";
+import { makeRecapServiceLive } from "../../project-services/Services/recap-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -71,34 +71,34 @@ import {
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	TranslatorTag,
-} from "../../relay/Services/services.js";
-import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
-import { SessionInboxLive } from "../../relay/Services/session-inbox.js";
-import { SessionManagerError } from "../../relay/Services/session-manager-error.js";
+} from "../../project-services/Services/services.js";
+import { SessionEventBusTag } from "../../project-services/Services/session-event-bus.js";
+import { SessionInboxLive } from "../../project-services/Services/session-inbox.js";
+import { SessionManagerError } from "../../project-services/Services/session-manager-error.js";
 import {
 	makeSessionManagers,
 	SessionManagerServiceTag,
-} from "../../relay/Services/session-manager-service.js";
+} from "../../project-services/Services/session-manager-service.js";
 import {
 	SessionManagerCoordinationTag,
 	SessionManagerStateTag,
-} from "../../relay/Services/session-manager-state.js";
-import type { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
-import type { SessionSetupTag } from "../../relay/Services/session-setup.js";
+} from "../../project-services/Services/session-manager-state.js";
+import type { OverridesStateTag } from "../../project-services/Services/session-overrides-state.js";
+import type { SessionSetupTag } from "../../project-services/Services/session-setup.js";
 import {
 	makePollerPubSubLive,
 	makePollerStateLive,
 	StatusPollerCoreTag,
-} from "../../relay/Services/session-status-poller.js";
-import { makeSessionTitleServiceLive } from "../../relay/Services/session-title-service.js";
-import type { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
-import { SessionWorkspaceHintStateTag } from "../../relay/Services/session-workspace-hint-state.js";
-import { SSEStreamLive } from "../../relay/Services/sse-stream-service.js";
+} from "../../project-services/Services/session-status-poller.js";
+import { makeSessionTitleServiceLive } from "../../project-services/Services/session-title-service.js";
+import type { SessionWorkspaceTag } from "../../project-services/Services/session-workspace.js";
+import { SessionWorkspaceHintStateTag } from "../../project-services/Services/session-workspace-hint-state.js";
+import { SSEStreamLive } from "../../project-services/Services/sse-stream-service.js";
 import {
 	LocalPtyServiceTag,
 	OpenCodeTerminalServiceLive,
-} from "../../relay/Services/terminal-service.js";
-import { ToolContentServiceLive } from "../../relay/Services/tool-content-service.js";
+} from "../../project-services/Services/terminal-service.js";
+import { ToolContentServiceLive } from "../../project-services/Services/tool-content-service.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import type { CategorySet } from "../Services/category-set.js";

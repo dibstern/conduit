@@ -5,7 +5,7 @@
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TurnErrorPayload } from "../../../src/lib/contracts/stored-event.js";
-import { SSEStreamTag } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
+import { SSEStreamTag } from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
 import {
 	createDaemonProject,
 	type DaemonProject,

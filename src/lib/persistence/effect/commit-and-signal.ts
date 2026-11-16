@@ -14,7 +14,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
 import { EventRetentionSchedulerTag } from "../../domain/persistence/Services/event-retention-scheduler.js";
-import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
+import { SessionEventBusTag } from "../../domain/project-services/Services/session-event-bus.js";
 import { contentionMetrics } from "../contention-metrics.js";
 import {
 	type CanonicalEvent,

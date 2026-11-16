@@ -40,11 +40,11 @@ import {
 import {
 	type RelayStatusSnapshotService,
 	RelayStatusSnapshotTag,
-} from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+} from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	type RelayOpenCodeStream,
 	SSEStreamTag,
-} from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
+} from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { ConnectionHealth } from "../../../src/lib/types.js";
 import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";

@@ -3,7 +3,7 @@ import { Effect, Result as Either, Layer } from "effect";
 import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { DaemonSessionQueryServiceTag } from "../../../src/lib/domain/relay/Services/daemon-session-query-service.js";
+import { DaemonSessionQueryServiceTag } from "../../../src/lib/domain/project-services/Services/daemon-session-query-service.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 

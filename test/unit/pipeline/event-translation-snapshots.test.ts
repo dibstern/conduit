@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
+import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
 
 const SESSION_ID = "ses-snap-1";
 

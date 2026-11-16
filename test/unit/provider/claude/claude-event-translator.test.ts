@@ -24,7 +24,7 @@ import type {
 	ClaudeSessionContext,
 	SDKMessage,
 } from "../../../../src/lib/provider/claude/types.js";
-import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
+import { createRelayEventSink } from "../../../../src/lib/provider/project-event-sink.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
 import { makeEffectProjectionHarness } from "../../../helpers/effect-projection-harness.js";
 import {

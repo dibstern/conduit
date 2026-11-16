@@ -10,12 +10,12 @@ import { afterAll, expect } from "vitest";
 import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+} from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { LoggerTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { recordPermissionTimedOut } from "../../../src/lib/handlers/permissions.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";

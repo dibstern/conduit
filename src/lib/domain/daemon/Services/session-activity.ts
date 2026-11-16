@@ -29,7 +29,7 @@ import type {
 	SessionActivityView,
 	SessionServer,
 } from "../../../shared-types.js";
-import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { SessionEventBusTag } from "../../project-services/Services/session-event-bus.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 
 export type SessionBackground = {

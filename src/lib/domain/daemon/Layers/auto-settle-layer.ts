@@ -8,7 +8,7 @@ import {
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV } from "../../../env.js";
 import { PortWatcher } from "../../persistence/Services/port-watcher.js";
-import { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
+import { SessionManagerServiceTag } from "../../project-services/Services/session-manager-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {

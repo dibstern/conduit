@@ -13,20 +13,20 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	projectSessionManager,
 	type SessionManagerService,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
-import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
+import { makeSessionManagerStateLive } from "../../../src/lib/domain/project-services/Services/session-manager-state.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";

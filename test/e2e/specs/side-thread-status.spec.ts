@@ -7,7 +7,7 @@ import type {
 	OpenCodeSession,
 } from "../../../src/lib/contracts/providers/opencode-sdk.js";
 import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
-import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
+import type { Envelope } from "../../../src/lib/domain/project-services/Services/read-model-subscription.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, test } from "../helpers/replay-fixture.js";

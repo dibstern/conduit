@@ -5,8 +5,8 @@ import { PersistenceProjectTag } from "../domain/persistence/Services/persistenc
 import {
 	AgentLivenessTag,
 	OrchestrationEngineTag,
-} from "../domain/relay/Services/services.js";
-import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
+} from "../domain/project-services/Services/services.js";
+import { SessionInboxTag } from "../domain/project-services/Services/session-inbox.js";
 import * as Failure from "../effect/failure-classification.js";
 import { isSessionQuiescent } from "./worktree-cleanup-rules.js";
 import { readSessionQuiescence } from "./worktree-cleanup-sweep.js";

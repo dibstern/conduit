@@ -20,8 +20,8 @@ import {
 	AccountDirectoryStateLive,
 } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { AccountResourceScopesTag } from "../../../src/lib/domain/daemon/Services/account-resource-scopes.js";
-import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
+import { ConfigTag } from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import { resolveClaudeSettingsForInstance } from "../../../src/lib/handlers/claude-settings.js";
 import {
 	ClaudeAccountScopes,

@@ -3,14 +3,14 @@ import type { SqlClient } from "effect/sql";
 import {
 	PendingInteractionCancelled,
 	type PendingInteractionService,
-} from "../../domain/relay/Services/pending-interaction-service.js";
-import type { ProviderRuntimeIngestion } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+} from "../../domain/project-services/Services/pending-interaction-service.js";
+import type { ProviderRuntimeIngestion } from "../../domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { createEventId } from "../../persistence/events.js";
 import {
 	createRelayEventSink,
 	type RelayEventSinkDeps,
 	toEventSinkError,
-} from "../relay-event-sink.js";
+} from "../project-event-sink.js";
 
 /** Restore live waiters without appending interactions already in the store. */
 export const makeRecoveredEventSink = (options: {

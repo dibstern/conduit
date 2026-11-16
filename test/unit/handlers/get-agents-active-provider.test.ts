@@ -3,19 +3,19 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { AgentServiceLive } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { AgentServiceLive } from "../../../src/lib/domain/project-services/Services/agent-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	getAgent,
 	makeOverridesStateLive,
 	setAgent,
 	setDefaultModel,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";

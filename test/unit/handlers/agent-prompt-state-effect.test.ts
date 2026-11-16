@@ -1,9 +1,9 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import { setDefaultAgent } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
+import { AgentServiceTag } from "../../../src/lib/domain/project-services/Services/agent-service.js";
+import { setDefaultAgent } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { sessionPickEvents } from "../../../src/lib/domain/project-services/Services/session-pick.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import {
 	MOCK_OPENCODE_GPT4_CATALOG,

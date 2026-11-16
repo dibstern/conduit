@@ -20,9 +20,9 @@ import {
 	SessionProjectNotFound,
 } from "../../../src/lib/domain/daemon/Services/project-context.js";
 import { ProjectNotFound } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";

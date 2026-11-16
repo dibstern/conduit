@@ -4,8 +4,8 @@ import { expect } from "vitest";
 import {
 	ProjectManagementServiceLive,
 	ProjectManagementServiceTag,
-} from "../../../src/lib/domain/relay/Services/project-management-service.js";
-import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/project-management-service.js";
+import { ConfigTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { makeMockConfig } from "../../helpers/mock-factories.js";
 
 describe("standalone ProjectManagementServiceLive", () => {

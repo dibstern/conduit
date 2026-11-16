@@ -10,28 +10,28 @@ import {
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
 import { WsRpcError } from "../contracts/ws-rpc.js";
-import { saveRelaySettings } from "../daemon/relay-settings.js";
+import { saveRelaySettings } from "../daemon/global-settings.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import {
 	PendingInteractionServiceTag,
 	type PendingQuestion,
-} from "../domain/relay/Services/pending-interaction-service.js";
-import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
-import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
+} from "../domain/project-services/Services/pending-interaction-service.js";
+import { publishGlobalProjectSetting } from "../domain/project-services/Services/project-settings.js";
+import { ProviderRuntimeIngestionTag } from "../domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderTurnServiceTag } from "../domain/project-services/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../domain/relay/Services/services.js";
+} from "../domain/project-services/Services/services.js";
 import {
 	OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
 	startProcessingTimeout,
-} from "../domain/relay/Services/session-overrides-state.js";
-import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
-import { makeSilenceNotice } from "../domain/relay/Services/turn-failure.js";
+} from "../domain/project-services/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../domain/project-services/Services/session-workspace.js";
+import { makeSilenceNotice } from "../domain/project-services/Services/turn-failure.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";

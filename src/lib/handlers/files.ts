@@ -3,7 +3,7 @@ import ignore from "ignore";
 import {
 	LoggerTag,
 	OpenCodeFileServiceTag,
-} from "../domain/relay/Services/services.js";
+} from "../domain/project-services/Services/services.js";
 import { guardWorkspacePath } from "../session/workspace-directories.js";
 
 /** Directories we always skip (even if .gitignore is unavailable). */

@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
-import type { SessionState } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import type { SessionState } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 interface Observation {

@@ -23,18 +23,18 @@ import {
 } from "../contracts/ws-rpc.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
-import { subscribeAlerts } from "../domain/relay/Services/alerts.js";
-import { subscribeApprovals } from "../domain/relay/Services/approvals-subscription.js";
-import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
-import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
-import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
-import { RecapServiceTag } from "../domain/relay/Services/recap-service.js";
-import { ConfigTag } from "../domain/relay/Services/services.js";
-import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
-import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
-import { subscribeSessionPromptIndex } from "../domain/relay/Services/session-prompt-index.js";
-import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
-import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
+import { subscribeAlerts } from "../domain/project-services/Services/alerts.js";
+import { subscribeApprovals } from "../domain/project-services/Services/approvals-subscription.js";
+import { InputDraftsTag } from "../domain/project-services/Services/input-drafts.js";
+import { subscribeProjectSettings } from "../domain/project-services/Services/project-settings.js";
+import { subscribePtys } from "../domain/project-services/Services/pty-subscription.js";
+import { RecapServiceTag } from "../domain/project-services/Services/recap-service.js";
+import { ConfigTag } from "../domain/project-services/Services/services.js";
+import { subscribeSessionDetail } from "../domain/project-services/Services/session-detail-subscription.js";
+import { subscribeSessionFamily } from "../domain/project-services/Services/session-family-subscription.js";
+import { subscribeSessionPromptIndex } from "../domain/project-services/Services/session-prompt-index.js";
+import { subscribeShell } from "../domain/project-services/Services/shell-subscription.js";
+import { subscribeSessionTodos } from "../domain/project-services/Services/todo-subscription.js";
 import * as Failure from "../effect/failure-classification.js";
 import {
 	CurrentEventDelivery,

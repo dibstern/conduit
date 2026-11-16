@@ -28,19 +28,19 @@ import {
 import {
 	type ProjectSettings,
 	ProjectSettingsTag,
-} from "../../../src/lib/domain/relay/Services/project-settings.js";
+} from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import {
 	type RelayStatusSnapshotService,
 	RelayStatusSnapshotTag,
-} from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+} from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	makeOverridesStateLive,
 	OverridesStateTag,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import {
 	type RelayOpenCodeStream,
 	SSEStreamTag,
-} from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
+} from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
 import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import { getLogLevel } from "../../../src/lib/logger.js";
 import { isServerSupervised } from "../../../src/lib/server/build-update.js";

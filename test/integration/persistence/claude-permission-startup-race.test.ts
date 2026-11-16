@@ -19,17 +19,17 @@ import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/op
 import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+} from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { resolveOrphanedClaudePermissions } from "../../../src/lib/domain/relay/Services/resolve-orphaned-claude-permissions.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { resolveOrphanedClaudePermissions } from "../../../src/lib/domain/project-services/Services/resolve-orphaned-claude-permissions.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import { handlePermissionResponse } from "../../../src/lib/handlers/permissions.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";

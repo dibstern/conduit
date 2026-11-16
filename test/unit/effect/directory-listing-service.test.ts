@@ -15,7 +15,7 @@ import {
 	DirectoryListingServiceLive,
 	DirectoryListingServiceTag,
 	findFolders,
-} from "../../../src/lib/domain/relay/Services/directory-listing-service.js";
+} from "../../../src/lib/domain/project-services/Services/directory-listing-service.js";
 
 const tempDirectory = Effect.acquireRelease(
 	Effect.tryPromise({

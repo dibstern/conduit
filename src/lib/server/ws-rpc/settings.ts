@@ -15,7 +15,7 @@ import {
 	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 } from "../../daemon/config-persistence.js";
-import { saveRelaySettings } from "../../daemon/relay-settings.js";
+import { saveRelaySettings } from "../../daemon/global-settings.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../../domain/daemon/Services/config-persistence-service.js";
 import {
@@ -38,8 +38,8 @@ import {
 	cleanUpWorktreesNow,
 	requestWorktreeCleanup,
 } from "../../domain/daemon/Services/worktree-cleanup-service.js";
-import { publishGlobalProjectSetting } from "../../domain/relay/Services/project-settings.js";
-import { ConfigTag } from "../../domain/relay/Services/services.js";
+import { publishGlobalProjectSetting } from "../../domain/project-services/Services/project-settings.js";
+import { ConfigTag } from "../../domain/project-services/Services/services.js";
 import * as Failure from "../../effect/failure-classification.js";
 import {
 	getClaudeSettingsOverrides,

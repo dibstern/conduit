@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { expect, it } from "vitest";
 
-const writer = "src/lib/domain/relay/Services/surfacing-feedback.ts";
+const writer = "src/lib/domain/project-services/Services/surfacing-feedback.ts";
 const writes =
 	/\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+surfacing_marks\b|\bsurfacing_mark\s*=(?!=)/gi;
 const sourceFiles = (directory: string): string[] =>

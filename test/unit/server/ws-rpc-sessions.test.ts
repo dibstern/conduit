@@ -12,10 +12,10 @@ import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeUnavailable } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { GoalSummaryServiceTag } from "../../../src/lib/domain/relay/Services/goal-summary-service.js";
-import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
-import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
+import { GoalSummaryServiceTag } from "../../../src/lib/domain/project-services/Services/goal-summary-service.js";
+import { PendingInteractionServiceTag } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
+import { applySessionCommand } from "../../../src/lib/domain/project-services/Services/session-command.js";
+import { SessionManagerError } from "../../../src/lib/domain/project-services/Services/session-manager-error.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import {

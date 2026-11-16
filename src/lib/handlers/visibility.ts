@@ -4,9 +4,12 @@ import { Data, Effect } from "effect";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../daemon/relay-settings.js";
-import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
-import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
+} from "../daemon/global-settings.js";
+import { publishGlobalProjectSetting } from "../domain/project-services/Services/project-settings.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../domain/project-services/Services/services.js";
 
 export interface HiddenEntries {
 	readonly hiddenModels: string[];

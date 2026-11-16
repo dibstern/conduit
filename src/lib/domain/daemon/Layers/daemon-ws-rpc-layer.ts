@@ -34,11 +34,11 @@ import {
 	loadRecentProjects,
 	syncRecentProjects,
 } from "../../../daemon/config-persistence.js";
-import { getRecent } from "../../../daemon/recent-projects.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../daemon/relay-settings.js";
+} from "../../../daemon/global-settings.js";
+import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
@@ -64,22 +64,25 @@ import {
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
 import { PortWatcher } from "../../persistence/Services/port-watcher.js";
-import { AlertsTag, subscribeAlerts } from "../../relay/Services/alerts.js";
-import { subscribeEveryProjectApprovals } from "../../relay/Services/approvals-subscription.js";
-import { makeCategoryTuning } from "../../relay/Services/category-tuning.js";
-import { findFolders } from "../../relay/Services/directory-listing-service.js";
+import {
+	AlertsTag,
+	subscribeAlerts,
+} from "../../project-services/Services/alerts.js";
+import { subscribeEveryProjectApprovals } from "../../project-services/Services/approvals-subscription.js";
+import { makeCategoryTuning } from "../../project-services/Services/category-tuning.js";
+import { findFolders } from "../../project-services/Services/directory-listing-service.js";
 import {
 	InputDraftsTag,
 	makeInputDrafts,
-} from "../../relay/Services/input-drafts.js";
-import { syncGlobalSetting } from "../../relay/Services/project-settings.js";
-import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
-import { setDefaultAgent } from "../../relay/Services/session-overrides-state.js";
-import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+} from "../../project-services/Services/input-drafts.js";
+import { syncGlobalSetting } from "../../project-services/Services/project-settings.js";
+import { SessionEventBusTag } from "../../project-services/Services/session-event-bus.js";
+import { setDefaultAgent } from "../../project-services/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../project-services/Services/session-workspace.js";
 import {
 	readSessionCategoryCounts,
 	readSurfacingFeedback,
-} from "../../relay/Services/surfacing-feedback.js";
+} from "../../project-services/Services/surfacing-feedback.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { CategorySet } from "../Services/category-set.js";

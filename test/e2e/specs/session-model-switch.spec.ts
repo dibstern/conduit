@@ -3,7 +3,7 @@
 // a new-session draft has no model for the session yet.
 
 import { dirname } from "node:path";
-import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";

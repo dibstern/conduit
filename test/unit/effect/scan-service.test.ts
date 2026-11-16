@@ -5,7 +5,7 @@ import {
 	ScanServiceLive,
 	ScanServiceNotAvailable,
 	ScanServiceTag,
-} from "../../../src/lib/domain/relay/Services/scan-service.js";
+} from "../../../src/lib/domain/project-services/Services/scan-service.js";
 
 describe("standalone ScanServiceLive", () => {
 	it.effect("starts without daemon config and reports unavailable scans", () =>

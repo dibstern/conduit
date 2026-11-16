@@ -22,7 +22,7 @@ const configPathOwners = new Set([
 	"src/lib/domain/daemon/Services/daemon-config-persistence.ts",
 	"src/lib/env.ts",
 	// Lists the configuration directory, not daemon configuration contents.
-	"src/lib/domain/relay/Services/directory-listing-service.ts",
+	"src/lib/domain/project-services/Services/directory-listing-service.ts",
 ]);
 
 function sources(directory: string): string[] {

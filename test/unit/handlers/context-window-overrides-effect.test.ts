@@ -5,11 +5,11 @@ import { expect, vi } from "vitest";
 import {
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	getContextWindow,
 	makeOverridesStateLive,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { switchContextWindowForSession } from "../../../src/lib/handlers/context-window.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";

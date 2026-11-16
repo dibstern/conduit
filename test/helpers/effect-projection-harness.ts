@@ -16,7 +16,7 @@ import type { ProviderRuntimeEvent } from "../../src/lib/contracts/providers/pro
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+} from "../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { EventStoreEffectTag } from "../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../src/lib/persistence/effect/projection-runner-effect.js";

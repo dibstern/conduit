@@ -1,8 +1,8 @@
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { expect, vi } from "vitest";
-import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import type { SessionTitleService } from "../../../src/lib/domain/relay/Services/session-title-service.js";
+import { setModel } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import type { SessionTitleService } from "../../../src/lib/domain/project-services/Services/session-title-service.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { ClaudeEventPersistEffect } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";

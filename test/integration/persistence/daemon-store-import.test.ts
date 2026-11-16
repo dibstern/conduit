@@ -19,7 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
 import { Effect, Result as Either, ManagedRuntime } from "effect";
 import { expect, it } from "vitest";
-import { setRead } from "../../../src/lib/domain/relay/Services/session-attention.js";
+import { setRead } from "../../../src/lib/domain/project-services/Services/session-attention.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";

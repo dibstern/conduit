@@ -15,7 +15,7 @@ import { saveDaemonConfig } from "../../../src/lib/daemon/config-persistence.js"
 import {
 	setDefaultContextWindow,
 	setDefaultVariant,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -29,7 +29,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeCapabilitiesService } from "../../../src/lib/provider/claude/claude-capabilities-service.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
-import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
+import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {

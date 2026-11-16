@@ -15,20 +15,20 @@ import { SessionActivityTag } from "../domain/daemon/Services/session-activity.j
 import { SessionGit } from "../domain/daemon/Services/session-git.js";
 import { WorktreeServiceTag } from "../domain/daemon/Services/worktree-service.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
-import { publishAlert } from "../domain/relay/Services/alerts.js";
+import { publishAlert } from "../domain/project-services/Services/alerts.js";
 import {
 	AgentLivenessTag,
 	ConfigTag,
 	SessionRetriesTag,
-} from "../domain/relay/Services/services.js";
-import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
-import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+} from "../domain/project-services/Services/services.js";
+import { SessionInboxTag } from "../domain/project-services/Services/session-inbox.js";
+import { SessionWorkspaceTag } from "../domain/project-services/Services/session-workspace.js";
 import {
 	containsPath,
 	readSessionWorktreeOwnership,
 	worktreeUsers,
-} from "../domain/relay/Services/session-worktree-deletion.js";
-import { LocalPtyServiceTag } from "../domain/relay/Services/terminal-service.js";
+} from "../domain/project-services/Services/session-worktree-deletion.js";
+import { LocalPtyServiceTag } from "../domain/project-services/Services/terminal-service.js";
 import * as Failure from "../effect/failure-classification.js";
 import {
 	hasNoCommitsBeyondDefault,

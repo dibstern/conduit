@@ -37,7 +37,7 @@ import {
 import {
 	RateLimiterLive,
 	RateLimiterTag,
-} from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
+} from "../../../src/lib/domain/project-services/Layers/rate-limiter-layer.js";
 
 /** Helper: build the layer, run the body, then close the scope. */
 const withMonitor = (

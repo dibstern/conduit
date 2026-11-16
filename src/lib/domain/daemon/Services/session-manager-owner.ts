@@ -1,13 +1,13 @@
 import { Context, Effect, Layer, Ref, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
-import { SessionManagerError } from "../../relay/Services/session-manager-error.js";
+import { SessionManagerError } from "../../project-services/Services/session-manager-error.js";
 import {
 	emptySessionManagerState,
 	forgetSession,
 	makeSessionManagerCoordination,
 	type SessionManagerCoordination,
 	type SessionManagerState,
-} from "../../relay/Services/session-manager-state.js";
+} from "../../project-services/Services/session-manager-state.js";
 import {
 	type OwnerScopeClosedError,
 	type OwnerScopeProjectNotRegisteredError,

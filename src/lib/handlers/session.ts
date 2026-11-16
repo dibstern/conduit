@@ -7,37 +7,37 @@ import type { AccountId } from "../contracts/provider-instance.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../contracts/session-workspace.js";
 import { DeleteNeedsConfirm } from "../contracts/ws-rpc.js";
-import { saveRelaySettings } from "../daemon/relay-settings.js";
+import { saveRelaySettings } from "../daemon/global-settings.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	DaemonEvent,
 	DaemonEventBusTag,
 } from "../domain/daemon/Services/daemon-pubsub.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
-import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
-import { loadModelCatalog } from "../domain/relay/Services/model-catalog.js";
+import { InputDraftsTag } from "../domain/project-services/Services/input-drafts.js";
+import { loadModelCatalog } from "../domain/project-services/Services/model-catalog.js";
 import {
 	ProjectSettingsTag,
 	publishGlobalProjectSetting,
 	refreshGlobalDefaults,
-} from "../domain/relay/Services/project-settings.js";
+} from "../domain/project-services/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	PollerManagerTag,
-} from "../domain/relay/Services/services.js";
-import { forkSession } from "../domain/relay/Services/session-command.js";
-import type { CreateSessionOptions } from "../domain/relay/Services/session-manager-service.js";
+} from "../domain/project-services/Services/services.js";
+import { forkSession } from "../domain/project-services/Services/session-command.js";
+import type { CreateSessionOptions } from "../domain/project-services/Services/session-manager-service.js";
 import {
 	projectSessionManager,
 	SessionManagerServiceTag,
-} from "../domain/relay/Services/session-manager-service.js";
-import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
-import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+} from "../domain/project-services/Services/session-manager-service.js";
+import { clearSession as clearEffectOverrideSession } from "../domain/project-services/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../domain/project-services/Services/session-workspace.js";
 import {
 	cleanupSessionWorktrees,
 	prepareSessionWorktreeDeletion,
-} from "../domain/relay/Services/session-worktree-deletion.js";
+} from "../domain/project-services/Services/session-worktree-deletion.js";
 import * as Failure from "../effect/failure-classification.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";

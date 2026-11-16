@@ -25,7 +25,7 @@ import {
 	preparePersistenceStore,
 	stampProjectProvenance,
 } from "../../domain/persistence/Services/persistence-service.js";
-import type { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
+import type { SessionEventBusTag } from "../../domain/project-services/Services/session-event-bus.js";
 import {
 	type WorkspaceDirectories,
 	WorkspaceDirectoriesLive,

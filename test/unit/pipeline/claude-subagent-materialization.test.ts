@@ -8,7 +8,7 @@ import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it, vi } from "vitest";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
-import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
+import { sessionPickEvents } from "../../../src/lib/domain/project-services/Services/session-pick.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
@@ -51,7 +51,7 @@ import type {
 	SDKPartialAssistantMessage,
 	SessionMessage,
 } from "../../../src/lib/provider/claude/types.js";
-import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
+import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
 import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {
 	createMockQuery,

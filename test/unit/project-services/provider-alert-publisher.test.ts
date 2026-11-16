@@ -1,0 +1,94 @@
+import { Effect, PubSub } from "effect";
+import { SqlClient } from "effect/sql";
+import { expect, it, vi } from "vitest";
+import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	AlertLedgerTag,
+	makeAlertLedger,
+} from "../../../src/lib/domain/project-services/Services/alert-ledger.js";
+import {
+	AlertsLive,
+	AlertsTag,
+} from "../../../src/lib/domain/project-services/Services/alerts.js";
+import { createSilentLogger } from "../../../src/lib/logger.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { publishProviderRelayMessage } from "../../../src/lib/provider/turn-done-publisher.js";
+import { turnEndedAlert } from "../../../src/lib/provider/turn-ended-alert.js";
+
+const idleActivity = {
+	foreground: "idle",
+	background: "none",
+	label: "idle",
+} as const;
+
+it("pushes canonical terminal alerts, preserves replay identity, and suppresses subagent completion", async () => {
+	const sendToAll = vi.fn(async () => ({
+		delivered: ["device"],
+		failed: [],
+		expired: [],
+	}));
+	const alerts = await Effect.runPromise(
+		Effect.gen(function* () {
+			const subscribed = yield* PubSub.subscribe(yield* AlertsTag);
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at) VALUES ('s1', 's1', 'claude', 1, 1)`;
+			yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at, parent_id) VALUES ('child', 'child', 'claude', 1, 1, 's1')`;
+			const ledger = yield* makeAlertLedger;
+			const deps = {
+				isViewed: () => false,
+				pushManager: { sendToAll },
+				log: createSilentLogger(),
+				slug: "project",
+				activityOf: () => idleActivity,
+			};
+			for (const [sessionId, messageId] of [
+				["s1", "m1"],
+				["s1", "m2"],
+				["s1", "m1"],
+				["child", "m3"],
+			] as const) {
+				const alert = turnEndedAlert(
+					canonicalEvent(
+						"turn.completed",
+						sessionId,
+						{ messageId },
+						{ provider: "claude", metadata: { runId: `run-${messageId}` } },
+					),
+				);
+				if (!alert) throw new Error("expected turn-ended alert");
+				yield* publishProviderRelayMessage(alert, deps).pipe(
+					Effect.provideService(AlertLedgerTag, ledger),
+				);
+			}
+			return [
+				...(yield* PubSub.takeUpTo(subscribed, Number.POSITIVE_INFINITY)),
+			];
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(AlertsLive, { local: true }),
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+				local: true,
+			}),
+		),
+	);
+	expect(sendToAll).toHaveBeenCalledTimes(2);
+	expect(sendToAll).toHaveBeenNthCalledWith(
+		1,
+		expect.objectContaining({ alertId: '["s1","m1","done"]' }),
+	);
+	expect(sendToAll).toHaveBeenNthCalledWith(
+		2,
+		expect.objectContaining({ alertId: '["s1","m2","done"]' }),
+	);
+	expect(alerts).toContainEqual(
+		expect.objectContaining<Partial<Alert>>({
+			_tag: "alert",
+			kind: "done",
+			alertId: '["s1","m1","done"]',
+			sessionId: "s1",
+		}),
+	);
+	// Subagent completion is suppressed in-app as well as on push.
+	expect(alerts.map((alert) => alert.sessionId)).not.toContain("child");
+});

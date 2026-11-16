@@ -19,7 +19,7 @@ import {
 	addWithoutRelay,
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { SessionEventBusTag } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { bindEventStoreEffect } from "../../../src/lib/persistence/effect/bind-event-store-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {

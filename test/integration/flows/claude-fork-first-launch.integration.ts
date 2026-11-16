@@ -28,9 +28,9 @@ import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { forkSession } from "../../../src/lib/domain/relay/Services/session-command.js";
-import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { OrchestrationEngineTag } from "../../../src/lib/domain/project-services/Services/services.js";
+import { forkSession } from "../../../src/lib/domain/project-services/Services/session-command.js";
+import { setModel } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { readClaudeGoalStatus } from "../../../src/lib/provider/claude/claude-goal-tracker.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";

@@ -9,12 +9,15 @@ import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../daemon/relay-settings.js";
+} from "../daemon/global-settings.js";
 import { ProjectShellEnvTag } from "../domain/daemon/Layers/project-shell-env-layer.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
-import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
-import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
-import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+import { publishGlobalProjectSetting } from "../domain/project-services/Services/project-settings.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../domain/project-services/Services/services.js";
+import { SessionWorkspaceTag } from "../domain/project-services/Services/session-workspace.js";
 import { ClaudeAccountScopes } from "../provider/claude/claude-account-scopes.js";
 import {
 	type ClaudeSettingsChildRunner,

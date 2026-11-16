@@ -19,8 +19,8 @@ import {
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../src/lib/daemon/relay-settings.js";
-import { syncGlobalSetting } from "../../../src/lib/domain/relay/Services/project-settings.js";
+} from "../../../src/lib/daemon/global-settings.js";
+import { syncGlobalSetting } from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import { discoverCapabilitiesEffect } from "../../../src/lib/provider/claude/claude-runtime-discovery.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";

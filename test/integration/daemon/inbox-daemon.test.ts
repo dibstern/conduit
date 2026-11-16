@@ -8,7 +8,7 @@ import { Effect, ManagedRuntime, Stream } from "effect";
 import { afterEach, expect, it } from "vitest";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
-import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { SessionEventBusTag } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeEventStoreEffect } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceStoreLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";

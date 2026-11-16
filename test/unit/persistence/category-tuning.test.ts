@@ -22,8 +22,8 @@ import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/accoun
 import { CategorySet } from "../../../src/lib/domain/daemon/Services/category-set.js";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/domain/daemon/Services/claude-one-shot.js";
 import { MessageSurfacingSettings } from "../../../src/lib/domain/daemon/Services/message-surfacing-settings.js";
-import { makeCategoryTuning } from "../../../src/lib/domain/relay/Services/category-tuning.js";
-import { readSurfacingFeedback } from "../../../src/lib/domain/relay/Services/surfacing-feedback.js";
+import { makeCategoryTuning } from "../../../src/lib/domain/project-services/Services/category-tuning.js";
+import { readSurfacingFeedback } from "../../../src/lib/domain/project-services/Services/surfacing-feedback.js";
 import {
 	hunkDependencies,
 	withTuningHunks,

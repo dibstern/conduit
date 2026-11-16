@@ -5,30 +5,30 @@ import { Effect, Layer, Ref, Schema, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
+import { AgentServiceTag } from "../../../src/lib/domain/project-services/Services/agent-service.js";
+import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+} from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderTurnServiceTag } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import {
 	makeOverridesStateLive,
 	OverridesStateTag,
 	startProcessingTimeout,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { makeSilenceNotice } from "../../../src/lib/domain/relay/Services/turn-failure.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { makeSilenceNotice } from "../../../src/lib/domain/project-services/Services/turn-failure.js";
 import {
 	handleAskUserResponse,
 	handlePermissionResponse,

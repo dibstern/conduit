@@ -29,7 +29,7 @@ import {
 	makeWsTransportLive,
 	type WsTransport,
 	WsTransportTag,
-} from "../domain/relay/Layers/ws-transport-layer.js";
+} from "../domain/project-services/Layers/ws-transport-layer.js";
 import * as Failure from "../effect/failure-classification.js";
 import { ENV } from "../env.js";
 import { isRecord } from "../utils.js";

@@ -14,7 +14,7 @@ import {
 	SessionActivityTag,
 } from "../../src/lib/domain/daemon/Services/session-activity.js";
 import { PortWatcher } from "../../src/lib/domain/persistence/Services/port-watcher.js";
-import { ConfigTag } from "../../src/lib/domain/relay/Services/services.js";
+import { ConfigTag } from "../../src/lib/domain/project-services/Services/services.js";
 import {
 	PersistenceStore,
 	type PersistenceStoreContext,

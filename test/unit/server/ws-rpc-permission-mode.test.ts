@@ -7,14 +7,14 @@ import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
-import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { restoreSessionSettings } from "../../../src/lib/domain/relay/Services/session-model-settings.js";
+import { loadRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { LoggerTag } from "../../../src/lib/domain/project-services/Services/services.js";
+import { restoreSessionSettings } from "../../../src/lib/domain/project-services/Services/session-model-settings.js";
 import {
 	getDefaultPermissionMode,
 	getPermissionMode,
 	makeOverridesStateLive,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";

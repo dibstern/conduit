@@ -49,8 +49,8 @@ import {
 	type SaveProjectInput,
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
+import { loadRelaySettings } from "../../../daemon/global-settings.js";
 import { readProjectFile } from "../../../daemon/project-file.js";
-import { loadRelaySettings } from "../../../daemon/relay-settings.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { readRepositoryIdentity } from "../../../git/repository-identity.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
@@ -81,13 +81,13 @@ import {
 import type { ProjectGate } from "../../../provider/orchestration-side-effect-reactor.js";
 import { stopRegisteredRunners } from "../../../provider/runner/runner-retirement.js";
 import type { StoredProject } from "../../../types.js";
-import { InputDraftsTag } from "../../relay/Services/input-drafts.js";
-import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { InputDraftsTag } from "../../project-services/Services/input-drafts.js";
+import { SessionEventBusTag } from "../../project-services/Services/session-event-bus.js";
 import {
 	clearProject,
 	OverridesStateTag,
-} from "../../relay/Services/session-overrides-state.js";
-import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+} from "../../project-services/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../project-services/Services/session-workspace.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import { requestConfigSave } from "./config-persistence-service.js";
 import {

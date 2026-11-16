@@ -9,14 +9,14 @@ import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { forkSession } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { OrchestrationEngineTag } from "../../../src/lib/domain/project-services/Services/services.js";
+import { forkSession } from "../../../src/lib/domain/project-services/Services/session-command.js";
 import {
 	getPermissionMode,
 	setDefaultPermissionMode,
 	setModel,
 	setPermissionMode,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import type { Options, Query } from "../../../src/lib/provider/claude/types.js";
 import { ProjectShellEnvResolver } from "../../../src/lib/provider/project-shell-env.js";

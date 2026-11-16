@@ -43,36 +43,36 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { AgentServiceTag } from "../../../src/lib/domain/project-services/Services/agent-service.js";
 import {
 	RelayStatusSnapshotLive,
 	RelayStatusSnapshotTag,
-} from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+} from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 	StatusPollerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { loadPreRenderedHistory } from "../../../src/lib/domain/relay/Services/session-manager-history.js";
-import { listSessions } from "../../../src/lib/domain/relay/Services/session-manager-list.js";
-import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { loadPreRenderedHistory } from "../../../src/lib/domain/project-services/Services/session-manager-history.js";
+import { listSessions } from "../../../src/lib/domain/project-services/Services/session-manager-list.js";
+import { projectSessionManager } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-manager-state.js";
 import {
 	addToParentMap,
 	getSessionParentMap,
 	recordMessageActivity,
-} from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
-import { renameSession } from "../../../src/lib/domain/relay/Services/session-manager-triage.js";
+} from "../../../src/lib/domain/project-services/Services/session-manager-state-operations.js";
+import { renameSession } from "../../../src/lib/domain/project-services/Services/session-manager-triage.js";
 import {
 	makeOverridesStateLive,
 	setDefaultModel,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";

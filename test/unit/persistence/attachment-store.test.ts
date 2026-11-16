@@ -33,7 +33,7 @@ import {
 	AttachmentStoreLive,
 	AttachmentStoreTag,
 } from "../../../src/lib/domain/persistence/Services/attachment-store.js";
-import { releaseInputDraftClaims } from "../../../src/lib/domain/relay/Services/input-drafts.js";
+import { releaseInputDraftClaims } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import { sweepAttachments } from "../../../src/lib/persistence/attachment-store.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {

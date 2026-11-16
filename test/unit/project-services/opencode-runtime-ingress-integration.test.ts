@@ -1,0 +1,267 @@
+// Verifies that SSE events flow through both the Effect relay pipeline and the
+// Effect OpenCode runtime ingress wiring.
+
+import { Cause, Effect, Layer } from "effect";
+import { describe, expect, it, vi } from "vitest";
+import { AlertsLive } from "../../../src/lib/domain/project-services/Services/alerts.js";
+import { PendingInteractionServiceLive } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
+import { ConfigTag } from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import {
+	handleSSEEventEffect,
+	type SSEWiringDeps,
+} from "../../../src/lib/provider/opencode/sse-wiring.js";
+import type { RelayMessage } from "../../../src/lib/types.js";
+import {
+	createMockSSEWiringDeps,
+	makeMockConfig,
+	makeMockSessionManagerService,
+	mockSessionManagers,
+} from "../../helpers/mock-factories.js";
+import { makeSSEEvent } from "../../helpers/sse-factories.js";
+
+type RuntimeIngress = NonNullable<SSEWiringDeps["opencodeRuntimeIngress"]>;
+
+const ingressSuccess = {
+	ok: true,
+	eventsWritten: 1,
+	sessionSeeded: false,
+} as const;
+
+function createRuntimeIngress(
+	onSSEEventEffect: RuntimeIngress["onSSEEventEffect"] = vi.fn(() =>
+		Effect.succeed(ingressSuccess),
+	),
+): RuntimeIngress {
+	return {
+		onSSEEventEffect,
+		onReconnect: vi.fn(),
+	};
+}
+
+function createEffectDeps(
+	overrides: Partial<SSEWiringDeps> = {},
+): SSEWiringDeps {
+	const deps = createMockSSEWiringDeps();
+	return {
+		...deps,
+		...overrides,
+	};
+}
+
+function createServicesLayer() {
+	return Layer.mergeAll(
+		AlertsLive,
+		PendingInteractionServiceLive,
+		makeOverridesStateLive(),
+		Layer.succeed(SessionManagerServiceTag)(
+			mockSessionManagers(makeMockSessionManagerService()),
+		),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
+	);
+}
+
+async function runSSEEvent(
+	deps: SSEWiringDeps,
+	event: Parameters<typeof handleSSEEventEffect>[1],
+) {
+	await Effect.runPromise(
+		handleSSEEventEffect(deps, event).pipe(
+			Effect.provide(createServicesLayer(), { local: true }),
+		),
+	);
+}
+
+describe("OpenCode Runtime Ingress Integration (Effect SSE wiring)", () => {
+	it("calls runtime ingress before relay translation and still routes translated messages", async () => {
+		const order: string[] = [];
+		const runtimeIngress = createRuntimeIngress(
+			vi.fn(() =>
+				Effect.sync(() => {
+					order.push("ingress-effect");
+					return ingressSuccess;
+				}),
+			),
+		);
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "Hello",
+		};
+		const deps = createEffectDeps({
+			opencodeRuntimeIngress: runtimeIngress,
+		});
+		vi.mocked(deps.translator.translate).mockImplementation(() => {
+			order.push("translator");
+			return {
+				ok: true,
+				messages: [translated],
+			};
+		});
+
+		const event = makeSSEEvent("message.created", {
+			sessionID: "s1",
+			messageID: "m1",
+			info: { role: "assistant", parts: [] },
+		});
+
+		await runSSEEvent(deps, event);
+
+		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(
+			event,
+			"s1",
+			"opencode",
+			undefined,
+		);
+		expect(order).toEqual(["ingress-effect", "translator"]);
+	});
+
+	it("calls runtime ingress even when relay translation skips the event", async () => {
+		const runtimeIngress = createRuntimeIngress();
+		const deps = createEffectDeps({
+			opencodeRuntimeIngress: runtimeIngress,
+		});
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: false,
+			reason: "test skip",
+		});
+
+		const event = makeSSEEvent("message.created", {
+			sessionID: "s1",
+			messageID: "m1",
+			info: { role: "assistant", parts: [] },
+		});
+
+		await runSSEEvent(deps, event);
+
+		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(
+			event,
+			"s1",
+			"opencode",
+			undefined,
+		);
+	});
+
+	it("calls runtime ingress on permission.asked before the relay early return", async () => {
+		const runtimeIngress = createRuntimeIngress();
+		const deps = createEffectDeps({
+			opencodeRuntimeIngress: runtimeIngress,
+		});
+
+		const event = makeSSEEvent("permission.asked", {
+			sessionID: "s1",
+			id: "perm_1",
+			permission: "Bash(ls)",
+		});
+
+		await runSSEEvent(deps, event);
+
+		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(
+			event,
+			"s1",
+			"opencode",
+			undefined,
+		);
+		expect(deps.translator.translate).not.toHaveBeenCalled();
+	});
+
+	it("continues relay handling when runtime ingress reports an internal persistence error", async () => {
+		const runtimeIngress = createRuntimeIngress(
+			vi.fn(() =>
+				Effect.succeed({
+					ok: false,
+					reason: "error",
+					error: "ingress failed",
+				} as const),
+			),
+		);
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "Hello",
+		};
+		const deps = createEffectDeps({
+			opencodeRuntimeIngress: runtimeIngress,
+		});
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event = makeSSEEvent("message.created", {
+			sessionID: "s1",
+			messageID: "m1",
+			info: { role: "assistant", parts: [] },
+		});
+
+		await runSSEEvent(deps, event);
+
+		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(
+			event,
+			"s1",
+			"opencode",
+			undefined,
+		);
+	});
+
+	it("surfaces unexpected runtime ingress effect failures to the caller", async () => {
+		const runtimeIngress = createRuntimeIngress(
+			vi.fn(() => Effect.die(new Error("ingress defect"))),
+		);
+		const deps = createEffectDeps({
+			opencodeRuntimeIngress: runtimeIngress,
+			providerInstanceId: "work-oc",
+		});
+
+		const event = makeSSEEvent("message.created", {
+			sessionID: "s1",
+			messageID: "m1",
+			info: { role: "assistant", parts: [] },
+		});
+
+		const exit = await Effect.runPromiseExit(
+			handleSSEEventEffect(deps, event).pipe(
+				Effect.provide(createServicesLayer(), { local: true }),
+			),
+		);
+
+		expect(exit._tag).toBe("Failure");
+		if (exit._tag === "Failure") {
+			const defects = exit.cause.reasons
+				.filter(Cause.isDieReason)
+				.map((reason) => reason.defect);
+			expect(defects).toHaveLength(1);
+			expect(defects[0]).toEqual(expect.any(Error));
+			expect((defects[0] as Error).message).toBe("ingress defect");
+		}
+		expect(runtimeIngress.onSSEEventEffect).toHaveBeenCalledWith(
+			event,
+			"s1",
+			"work-oc",
+			undefined,
+		);
+		expect(deps.translator.translate).not.toHaveBeenCalled();
+	});
+
+	it("continues relay handling when runtime ingress is absent", async () => {
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "Hello",
+		};
+		const deps = createEffectDeps();
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event = makeSSEEvent("message.created", {
+			sessionID: "s1",
+			messageID: "m1",
+			info: { role: "assistant", parts: [] },
+		});
+
+		await runSSEEvent(deps, event);
+	});
+});

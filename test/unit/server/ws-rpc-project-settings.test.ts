@@ -9,8 +9,8 @@ import {
 	type ProjectSettingsEnvelope,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
-import { publishProjectSetting } from "../../../src/lib/domain/relay/Services/project-settings.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
+import { publishProjectSetting } from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,

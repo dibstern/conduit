@@ -4,7 +4,7 @@ import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
-import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
+import { SessionManagerError } from "../../../src/lib/domain/project-services/Services/session-manager-error.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockSessionManagerService,

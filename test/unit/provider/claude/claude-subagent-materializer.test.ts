@@ -9,7 +9,7 @@ import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
-import { sessionPickEvents } from "../../../../src/lib/domain/relay/Services/session-pick.js";
+import { sessionPickEvents } from "../../../../src/lib/domain/project-services/Services/session-pick.js";
 import {
 	ClaudeEventPersistEffectTag,
 	makeClaudeEventPersistEffect,

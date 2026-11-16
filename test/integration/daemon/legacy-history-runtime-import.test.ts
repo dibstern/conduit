@@ -42,7 +42,7 @@ import { saveProject } from "../../../src/lib/domain/daemon/Services/project-reg
 import {
 	InputDraftsTag,
 	makeInputDrafts,
-} from "../../../src/lib/domain/relay/Services/input-drafts.js";
+} from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import {
 	makePersistenceProjectLayer,
 	PersistenceStore,

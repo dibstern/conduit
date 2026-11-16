@@ -9,35 +9,35 @@ import type { OpenCodeConnectionStatus } from "../../contracts/ws-rpc.js";
 import {
 	AlertLedgerTag,
 	type SessionAlert,
-} from "../../domain/relay/Services/alert-ledger.js";
+} from "../../domain/project-services/Services/alert-ledger.js";
 import {
 	type AlertsTag,
 	publishAlert,
-} from "../../domain/relay/Services/alerts.js";
-import type { OpenCodeRuntimeIngressResult } from "../../domain/relay/Services/opencode-runtime-ingress-service.js";
-import type { PendingPermissionRequestInput } from "../../domain/relay/Services/pending-interaction-service.js";
-import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
+} from "../../domain/project-services/Services/alerts.js";
+import type { OpenCodeRuntimeIngressResult } from "../../domain/project-services/Services/opencode-runtime-ingress-service.js";
+import type { PendingPermissionRequestInput } from "../../domain/project-services/Services/pending-interaction-service.js";
+import { PendingInteractionServiceTag } from "../../domain/project-services/Services/pending-interaction-service.js";
 import {
 	type ProjectSettingsTag,
 	publishProjectSetting,
 	refreshModelSettings,
-} from "../../domain/relay/Services/project-settings.js";
+} from "../../domain/project-services/Services/project-settings.js";
 import {
 	type ConfigTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-} from "../../domain/relay/Services/services.js";
+} from "../../domain/project-services/Services/services.js";
 import {
 	projectSessionManager,
 	type SessionManagerServiceTag,
-} from "../../domain/relay/Services/session-manager-service.js";
+} from "../../domain/project-services/Services/session-manager-service.js";
 import {
 	getPermissionMode,
 	type OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
-} from "../../domain/relay/Services/session-overrides-state.js";
-import type { OpenCodeTerminalService } from "../../domain/relay/Services/terminal-service.js";
+} from "../../domain/project-services/Services/session-overrides-state.js";
+import type { OpenCodeTerminalService } from "../../domain/project-services/Services/terminal-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import type { Logger } from "../../logger.js";
 import {

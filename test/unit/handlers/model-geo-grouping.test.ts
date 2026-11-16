@@ -9,14 +9,14 @@ import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 import { layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { ProjectSettingsLive } from "../../../src/lib/domain/relay/Services/project-settings.js";
+import { ProjectSettingsLive } from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import {
 	getModelsResponse,
 	groupGeoRoutingModels,

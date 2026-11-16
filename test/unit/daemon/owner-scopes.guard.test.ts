@@ -163,13 +163,13 @@ const scopeOpeners = new Set([
 	"ManagedRuntime.make",
 ]);
 const ownerModules = [
-	"src/lib/domain/relay/Services/provider-turn-service.ts",
-	"src/lib/domain/relay/Services/provider-turn-dispatch.ts",
-	"src/lib/domain/relay/Services/provider-turn-session.ts",
-	"src/lib/domain/relay/Services/session-manager-service.ts",
-	"src/lib/domain/relay/Services/draft-prewarm.ts",
-	"src/lib/domain/relay/Services/session-setup.ts",
-	"src/lib/domain/relay/Layers/session-workspace-layer.ts",
+	"src/lib/domain/project-services/Services/provider-turn-service.ts",
+	"src/lib/domain/project-services/Services/provider-turn-dispatch.ts",
+	"src/lib/domain/project-services/Services/provider-turn-session.ts",
+	"src/lib/domain/project-services/Services/session-manager-service.ts",
+	"src/lib/domain/project-services/Services/draft-prewarm.ts",
+	"src/lib/domain/project-services/Services/session-setup.ts",
+	"src/lib/domain/project-services/Layers/session-workspace-layer.ts",
 	"src/lib/provider/orchestration-wiring.ts",
 ];
 // Each remaining opener, and why it is not a project or session scope.
@@ -313,7 +313,7 @@ describe("one alert feed and pollers held by tabs (82tn.12)", () => {
 			sources("src/lib").filter((file) => /\bAlertsLive\b/.test(read(file))),
 		).toEqual([
 			`${root}/Layers/daemon-layers.ts`,
-			"src/lib/domain/relay/Services/alerts.ts",
+			"src/lib/domain/project-services/Services/alerts.ts",
 		]);
 	});
 

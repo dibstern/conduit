@@ -22,7 +22,7 @@ vi.mock("../../../../src/lib/env.js", async (importOriginal) => ({
 }));
 
 import { BUILD_ID } from "../../../../src/lib/build-id.js";
-import { ProviderRuntimeIngestionLive } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ProviderRuntimeIngestionLive } from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { makeProcessClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-process-session-runner.js";
 import { ClaudeRunnerSocket } from "../../../../src/lib/provider/claude/claude-runner-protocol.js";

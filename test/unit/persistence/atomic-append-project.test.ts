@@ -16,14 +16,14 @@ import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
-import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { applySessionCommand } from "../../../src/lib/domain/project-services/Services/session-command.js";
+import { SessionEventBusTag } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
+import { projectSessionManager } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {

@@ -41,7 +41,7 @@ import {
 } from "../../src/lib/domain/daemon/Services/project-services.js";
 import { ProviderAdapters } from "../../src/lib/domain/daemon/Services/provider-adapters.js";
 import { EventRetentionTag } from "../../src/lib/domain/persistence/Services/event-retention.js";
-import { SessionManagerServiceTag } from "../../src/lib/domain/relay/Services/session-manager-service.js";
+import { SessionManagerServiceTag } from "../../src/lib/domain/project-services/Services/session-manager-service.js";
 import { ProjectRpcContextsTag } from "../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { verifyReplayParity } from "../../src/lib/persistence/replay-parity.js";
 import { sdkDefaultClaudeConfigDir } from "../../src/lib/provider/claude/claude-sdk-env.js";

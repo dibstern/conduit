@@ -7,23 +7,23 @@ import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { AUTO_TITLE_SOURCE } from "../../../src/lib/contracts/session-title.js";
-import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	applySessionCommand,
 	createOpenCodeSession,
 	forkOpenCodeSession,
 	SessionCommandError,
 	type SessionUpstreamAdapter,
-} from "../../../src/lib/domain/relay/Services/session-command.js";
+} from "../../../src/lib/domain/project-services/Services/session-command.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type {
 	Message,

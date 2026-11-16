@@ -1,7 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { expect, vi } from "vitest";
-import { OpenCodeFileServiceTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { OpenCodeFileServiceTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { getFileListResponse } from "../../../src/lib/handlers/files.js";
 
 describe("file reads with Effect-native file service", () => {

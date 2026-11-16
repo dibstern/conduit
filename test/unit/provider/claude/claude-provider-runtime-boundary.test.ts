@@ -8,7 +8,7 @@ import * as configPersistence from "../../../../src/lib/daemon/config-persistenc
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../../src/lib/daemon/relay-settings.js";
+} from "../../../../src/lib/daemon/global-settings.js";
 import {
 	makeClaudeProviderRuntime,
 	makeClaudeSessionRunner,

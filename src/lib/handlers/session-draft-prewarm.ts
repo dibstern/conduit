@@ -3,18 +3,18 @@ import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import { SCRATCH_PROJECT_SLUG } from "../contracts/scratch-project.js";
 import type { PreWarmDraft } from "../contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
-import { DraftPreWarmTag } from "../domain/relay/Services/draft-prewarm.js";
+import { DraftPreWarmTag } from "../domain/project-services/Services/draft-prewarm.js";
 import {
 	buildSessionLaunchInput,
 	resolveLaunchFolders,
-} from "../domain/relay/Services/provider-turn-dispatch.js";
+} from "../domain/project-services/Services/provider-turn-dispatch.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../domain/relay/Services/services.js";
-import { getDefaultAgent } from "../domain/relay/Services/session-overrides-state.js";
-import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+} from "../domain/project-services/Services/services.js";
+import { getDefaultAgent } from "../domain/project-services/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../domain/project-services/Services/session-workspace.js";
 import {
 	resolveSessionCreation,
 	resolveSessionCreationAccount,

@@ -26,13 +26,13 @@ import type { Approval } from "../../../shared-types.js";
 import {
 	AlertLedgerTag,
 	makeAlertLedger,
-} from "../../relay/Services/alert-ledger.js";
-import { AlertsTag } from "../../relay/Services/alerts.js";
+} from "../../project-services/Services/alert-ledger.js";
+import { AlertsTag } from "../../project-services/Services/alerts.js";
 import {
 	approvalId,
 	subscribeEveryProjectApprovals,
-} from "../../relay/Services/approvals-subscription.js";
-import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+} from "../../project-services/Services/approvals-subscription.js";
+import { SessionEventBusTag } from "../../project-services/Services/session-event-bus.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import {
 	allProjects,

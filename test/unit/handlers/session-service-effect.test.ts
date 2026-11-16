@@ -2,24 +2,24 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
-import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import type { PollerManagerShape } from "../../../src/lib/domain/relay/Services/services.js";
+import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
+import { PendingInteractionServiceLive } from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
+import type { PollerManagerShape } from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	PollerManagerTag,
 	StatusPollerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	type SessionManagerService,
 	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import {
 	makeOverridesStateLive,
 	setDefaultModel,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	handleViewSession,
 	loadMoreHistoryForSession,

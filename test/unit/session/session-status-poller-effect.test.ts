@@ -8,7 +8,7 @@ import {
 	makePollerStateLive,
 	PollerStateTag,
 	poll,
-} from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+} from "../../../src/lib/domain/project-services/Services/session-status-poller.js";
 
 const makeTestLayer = () =>
 	Layer.fresh(makePollerStateLive()).pipe(

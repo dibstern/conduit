@@ -5,12 +5,12 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
-import { HandoffReceiptsLive } from "../../../src/lib/domain/relay/Services/handoff-receipts.js";
+import { HandoffReceiptsLive } from "../../../src/lib/domain/project-services/Services/handoff-receipts.js";
 import {
 	type SessionEventBus,
 	SessionEventBusLive,
 	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeAttachmentStore } from "../../../src/lib/persistence/attachment-store.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";

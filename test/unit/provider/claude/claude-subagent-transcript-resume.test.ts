@@ -9,8 +9,8 @@ import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/provide
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { sessionPickEvents } from "../../../../src/lib/domain/relay/Services/session-pick.js";
+} from "../../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { sessionPickEvents } from "../../../../src/lib/domain/project-services/Services/session-pick.js";
 import { ClaudeEventPersistEffectTag } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";

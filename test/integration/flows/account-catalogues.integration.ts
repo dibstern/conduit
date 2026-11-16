@@ -19,7 +19,7 @@ import {
 } from "../../../src/lib/daemon/config-persistence.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { addInstance } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
-import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { applySessionCommand } from "../../../src/lib/domain/project-services/Services/session-command.js";
 import { getSkillNamesForSession } from "../../../src/lib/handlers/settings.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";

@@ -12,7 +12,7 @@ import { Effect } from "effect";
 import {
 	fetchWithRetry,
 	type RetryFetchOptions,
-} from "../domain/relay/Services/retry-fetch.js";
+} from "../domain/project-services/Services/retry-fetch.js";
 import { ENV } from "../env.js";
 import { OpenCodeApiError } from "../errors.js";
 

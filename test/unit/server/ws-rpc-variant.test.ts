@@ -7,7 +7,7 @@ import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { getVariant } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { getVariant } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";

@@ -16,7 +16,7 @@ import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import type {
 	LocalPtyService,
 	LocalPtySession,
-} from "../../../src/lib/domain/relay/Services/terminal-service.js";
+} from "../../../src/lib/domain/project-services/Services/terminal-service.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { PtyManager } from "../../../src/lib/terminal/pty-manager.js";
 import { makeFakeSocketServer } from "../../helpers/fake-socket-server.js";

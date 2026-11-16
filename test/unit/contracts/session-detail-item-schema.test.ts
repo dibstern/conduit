@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { SessionDetailItemSchema } from "../../../src/lib/contracts/ws-rpc.js";
-import type { SessionDetailItem } from "../../../src/lib/domain/relay/Services/session-detail-subscription.js";
+import type { SessionDetailItem } from "../../../src/lib/domain/project-services/Services/session-detail-subscription.js";
 
 describe("session detail item contract", () => {
 	it("round-trips message and part rows through JSON", async () => {

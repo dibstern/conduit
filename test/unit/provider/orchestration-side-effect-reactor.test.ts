@@ -27,7 +27,7 @@ import {
 	makeProviderRuntimeIngestionLive,
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { makeAttachmentStore } from "../../../src/lib/persistence/attachment-store.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";

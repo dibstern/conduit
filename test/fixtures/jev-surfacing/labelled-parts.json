@@ -284,7 +284,7 @@
 		{
 			"id": "44672f9b0aa0",
 			"provider": "claude",
-			"request": "Continue now that relay-event-sink.ts is back",
+			"request": "Continue now that project-event-sink.ts is back",
 			"message": "Self-FK is correct even under the strict `legacy_alter_table=1` that previously broke it. My probe INSERT just missed a NOT NULL column — completing it:",
 			"label": "finding"
 		},
@@ -502,7 +502,7 @@
 			"id": "0a9f7da46901",
 			"provider": "claude",
 			"request": "Commit your changes to main once this is done",
-			"message": "Pre-commit runs the full suite against the **working tree**, and it's failing in `test/unit/provider/relay-event-sink.test.ts` — another session's actively-changing file. Confirming that's theirs, not mine.",
+			"message": "Pre-commit runs the full suite against the **working tree**, and it's failing in `test/unit/provider/project-event-sink.test.ts` — another session's actively-changing file. Confirming that's theirs, not mine.",
 			"label": "blocked"
 		},
 		{

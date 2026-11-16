@@ -57,8 +57,20 @@ const repo = resolve(import.meta.dirname, "../../../..");
 const units = [
 	"src/lib/provider/orchestration-side-effect-reactor.ts",
 	"src/lib/persistence/effect/input-requeue-effect.ts",
-	"src/lib/domain/relay/Services/provider-turn-service.ts",
+	"src/lib/domain/project-services/Services/provider-turn-service.ts",
 ] as const;
+
+/** A unit's R2 source, with the paths 82tn.86 renamed after R2 pointed at their new names. */
+const sourceAtR2 = (unit: string): string =>
+	execFileSync("git", [
+		"-C",
+		repo,
+		"show",
+		`${r2}:${unit.replace("domain/project-services/", "domain/relay/")}`,
+	])
+		.toString("utf8")
+		.replaceAll("domain/relay/", "domain/project-services/")
+		.replaceAll("./relay-event-sink.js", "./project-event-sink.js");
 
 interface Difference {
 	readonly fact: number;
@@ -245,10 +257,7 @@ beforeAll(async () => {
 		});
 	symlinkSync(join(repo, "node_modules"), join(scratch, "node_modules"));
 	for (const unit of units)
-		writeFileSync(
-			join(scratch, unit),
-			execFileSync("git", ["-C", repo, "show", `${r2}:${unit}`]),
-		);
+		writeFileSync(join(scratch, unit), sourceAtR2(unit));
 	// R2's reactor names a Stop's runs in its control context, which R2's runner read
 	// (6c9ff950 runner-provider-instance.ts 1306); the current runner reads them from runIds alone.
 	const runner = join(
@@ -266,7 +275,7 @@ beforeAll(async () => {
 	// (6c9ff950 provider-turn-service.ts 402); the current dispatch asks the daemon's turns.
 	const dispatch = join(
 		scratch,
-		"src/lib/domain/relay/Services/provider-turn-dispatch.ts",
+		"src/lib/domain/project-services/Services/provider-turn-dispatch.ts",
 	);
 	const daemonFibers = readFileSync(dispatch, "utf8");
 	const ownFibers = daemonFibers.replace(
@@ -302,11 +311,7 @@ describe("Run ledger: main's units beside the ledger build", () => {
 	it("loads each unit from R2's tree, never the current file", () => {
 		for (const unit of units) {
 			const atR2 = readFileSync(join(scratch, unit), "utf8");
-			expect(atR2).toBe(
-				execFileSync("git", ["-C", repo, "show", `${r2}:${unit}`], {
-					encoding: "utf8",
-				}),
-			);
+			expect(atR2).toBe(sourceAtR2(unit));
 			expect(atR2, `${unit} at ${r2}`).not.toBe(
 				readFileSync(join(repo, unit), "utf8"),
 			);

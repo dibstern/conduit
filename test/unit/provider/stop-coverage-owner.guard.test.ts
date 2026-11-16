@@ -28,7 +28,7 @@ describe("Stop coverage has one reader", () => {
 	it("reads committed Stop owners in SQL only in stopCovers and main's stopping recovery", () => {
 		expect(readers(/'\$\.stop\.owners'/)).toEqual([
 			// main's stopping wait restores fences whose owners still run (CONTRACT.md 2095-2096).
-			"src/lib/domain/relay/Services/provider-turn-service.ts",
+			"src/lib/domain/project-services/Services/provider-turn-service.ts",
 			"src/lib/provider/session-run-settlement.ts",
 		]);
 	});
@@ -56,7 +56,7 @@ describe("Stop coverage has one reader", () => {
 		// list; none answers whether a run is covered (CONTRACT.md 2069, 2087).
 		expect(readers(/\bstop\??\.owners\b/)).toEqual([
 			"src/lib/domain/daemon/Services/session-rows.ts",
-			"src/lib/domain/relay/Services/provider-turn-service.ts",
+			"src/lib/domain/project-services/Services/provider-turn-service.ts",
 			"src/lib/persistence/effect/sidebar-projection.ts",
 			"src/lib/provider/orchestration-engine.ts",
 			"src/lib/provider/orchestration-side-effect-reactor.ts",

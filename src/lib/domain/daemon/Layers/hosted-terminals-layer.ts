@@ -1,11 +1,11 @@
 import { Effect, Exit, Layer, PubSub } from "effect";
 import { createLogger } from "../../../logger.js";
 import type { StoredProject } from "../../../types.js";
-import { LoggerTag } from "../../relay/Services/services.js";
+import { LoggerTag } from "../../project-services/Services/services.js";
 import {
 	LocalPtyServiceTag,
 	makeLocalPtyServiceLive,
-} from "../../relay/Services/terminal-service.js";
+} from "../../project-services/Services/terminal-service.js";
 import { DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { type OwnerScope, OwnerScopes } from "../Services/owner-scopes.js";
 import {

@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
+import { projectSessionManager } from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";

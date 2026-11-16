@@ -30,16 +30,16 @@ import type { InputDraftEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	InputDraftsTag,
 	makeInputDrafts,
-} from "../../../src/lib/domain/relay/Services/input-drafts.js";
+} from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
-} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+} from "../../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";

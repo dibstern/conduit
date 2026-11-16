@@ -45,17 +45,17 @@ import type { SessionDirectory } from "../../daemon/Services/session-directory.j
 import type { Usage } from "../../daemon/Services/usage.js";
 import type { UserAvatar } from "../../daemon/Services/user-avatar.js";
 import type { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
-import type { RateLimiterTag } from "../../relay/Layers/rate-limiter-layer.js";
-import type { AlertsTag } from "../../relay/Services/alerts.js";
+import type { RateLimiterTag } from "../../project-services/Layers/rate-limiter-layer.js";
+import type { AlertsTag } from "../../project-services/Services/alerts.js";
 import {
 	DaemonSessionQueryServiceError,
 	DaemonSessionQueryServiceTag,
-} from "../../relay/Services/daemon-session-query-service.js";
-import { DraftPreWarmTag } from "../../relay/Services/draft-prewarm.js";
-import { InstanceManagementServiceLive } from "../../relay/Services/instance-management-service.js";
-import { ProjectManagementServiceLive } from "../../relay/Services/project-management-service.js";
-import { ScanServiceLive } from "../../relay/Services/scan-service.js";
-import type { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
+} from "../../project-services/Services/daemon-session-query-service.js";
+import { DraftPreWarmTag } from "../../project-services/Services/draft-prewarm.js";
+import { InstanceManagementServiceLive } from "../../project-services/Services/instance-management-service.js";
+import { ProjectManagementServiceLive } from "../../project-services/Services/project-management-service.js";
+import { ScanServiceLive } from "../../project-services/Services/scan-service.js";
+import type { SessionManagerServiceTag } from "../../project-services/Services/session-manager-service.js";
 import { HttpServerRefTag } from "../Services/http-server-ref.js";
 import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";
 

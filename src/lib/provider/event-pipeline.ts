@@ -6,7 +6,7 @@ import {
 	clearProcessingTimeout,
 	PROCESSING_TIMEOUT_DURATION,
 	resetProcessingTimeout,
-} from "../domain/relay/Services/session-overrides-state.js";
+} from "../domain/project-services/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
 import type { RelayMessage } from "../shared-types.js";
 

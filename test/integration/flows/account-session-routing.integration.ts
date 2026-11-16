@@ -34,7 +34,7 @@ import {
 	addInstance,
 	removeInstance,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
-import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { applySessionCommand } from "../../../src/lib/domain/project-services/Services/session-command.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {

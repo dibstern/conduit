@@ -5,7 +5,7 @@ import type {
 	CanonicalToolInput,
 	StoredEvent,
 } from "../contracts/stored-event.js";
-import type { SessionWorkspace } from "../domain/relay/Services/session-workspace.js";
+import type { SessionWorkspace } from "../domain/project-services/Services/session-workspace.js";
 import { readWorktrees, realWorkspacePath } from "../git/worktrees.js";
 
 export interface WorkspaceHintCandidate {

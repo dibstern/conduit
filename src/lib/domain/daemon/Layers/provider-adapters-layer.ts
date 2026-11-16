@@ -16,7 +16,7 @@ import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { GoalActionSchema } from "../../../contracts/stored-event.js";
-import { loadRelaySettings } from "../../../daemon/relay-settings.js";
+import { loadRelaySettings } from "../../../daemon/global-settings.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type ClaudeEventPersistEffect,
@@ -53,12 +53,12 @@ import {
 import { discoverRunners } from "../../../provider/runner/runner-registry.js";
 import type { ProjectRelayConfig } from "../../../types.js";
 import { PortWatcher } from "../../persistence/Services/port-watcher.js";
-import { InputDraftsTag } from "../../relay/Services/input-drafts.js";
-import { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
-import { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
-import { OrchestrationEngineTag } from "../../relay/Services/services.js";
-import { makeProcessingTimeoutHooks } from "../../relay/Services/session-overrides-state.js";
-import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+import { InputDraftsTag } from "../../project-services/Services/input-drafts.js";
+import { PendingInteractionServiceTag } from "../../project-services/Services/pending-interaction-service.js";
+import { ProviderRuntimeIngestionTag } from "../../project-services/Services/provider-runtime-ingestion-service.js";
+import { OrchestrationEngineTag } from "../../project-services/Services/services.js";
+import { makeProcessingTimeoutHooks } from "../../project-services/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../project-services/Services/session-workspace.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { hasProviderRecoveryCandidate } from "../Services/daemon-session-reader.js";

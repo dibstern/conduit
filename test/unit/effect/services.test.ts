@@ -4,8 +4,6 @@ import {
 	InstanceMgmtTag,
 	ProjectMgmtTag,
 } from "../../../src/lib/domain/daemon/Services/management-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-
 import {
 	// Per-request Tags
 	ClientIdTag,
@@ -17,7 +15,8 @@ import {
 	PollerManagerTag,
 	PtyManagerTag,
 	StatusPollerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 
 const ALL_TAGS = [
 	OpenCodeAPITag,

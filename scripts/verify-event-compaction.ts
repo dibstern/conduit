@@ -671,7 +671,7 @@ try {
 					"src/lib/persistence/effect/read-query-effect.ts:2097",
 					"src/lib/persistence/session-history-adapter.ts:337",
 					"src/lib/persistence/session-history-adapter.ts:429",
-					"src/lib/domain/relay/Services/session-detail-subscription.ts:270",
+					"src/lib/domain/project-services/Services/session-detail-subscription.ts:270",
 					"src/lib/frontend/utils/history-logic.ts:421",
 				],
 				reason:

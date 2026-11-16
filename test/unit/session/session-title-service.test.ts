@@ -12,23 +12,23 @@ import {
 	type OpenCodeAccount,
 } from "../../../src/lib/contracts/account.js";
 import { isPlaceholderTitle } from "../../../src/lib/contracts/session-title.js";
-import { saveRelaySettings } from "../../../src/lib/daemon/relay-settings.js";
+import { saveRelaySettings } from "../../../src/lib/daemon/global-settings.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ProjectSettingsLive,
 	publishProjectSetting,
-} from "../../../src/lib/domain/relay/Services/project-settings.js";
+} from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	formatTitleFallback,
 	makeSessionTitleServiceLive,
 	SessionTitleServiceTag,
 	sanitizeGeneratedTitle,
-} from "../../../src/lib/domain/relay/Services/session-title-service.js";
+} from "../../../src/lib/domain/project-services/Services/session-title-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";

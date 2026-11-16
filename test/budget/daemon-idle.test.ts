@@ -19,7 +19,7 @@ import { Effect, Fiber, Queue, Result, Schema, Stream } from "effect";
 import { expect, it } from "vitest";
 import { SessionInfoSchema } from "../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfigResult } from "../../src/lib/daemon/config-persistence.js";
-import { sessionPickEvents } from "../../src/lib/domain/relay/Services/session-pick.js";
+import { sessionPickEvents } from "../../src/lib/domain/project-services/Services/session-pick.js";
 import { makeCommitAndSignal } from "../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../src/lib/persistence/events.js";

@@ -18,7 +18,7 @@ import {
 } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
-import type { ProviderRuntimeIngestion } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import type { ProviderRuntimeIngestion } from "../../domain/project-services/Services/provider-runtime-ingestion-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
 import type {

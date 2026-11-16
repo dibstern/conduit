@@ -62,7 +62,7 @@ import {
 	Usage,
 } from "../../src/lib/domain/daemon/Services/usage.js";
 import { PortWatcher } from "../../src/lib/domain/persistence/Services/port-watcher.js";
-import { SessionEventBusLive } from "../../src/lib/domain/relay/Services/session-event-bus.js";
+import { SessionEventBusLive } from "../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { AuthManagerFromConfigLive } from "../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	makePersistenceStoreLayer,

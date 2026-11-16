@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
+import { createRelayEventSink } from "../../../src/lib/provider/project-event-sink.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 const SESSION_ID = "ses-rejoin-1";

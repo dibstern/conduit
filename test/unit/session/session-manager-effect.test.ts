@@ -18,32 +18,31 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
-import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
-import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
+import { InputDraftsLive } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
+import { RelayStatusSnapshotLive } from "../../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionCommandError } from "../../../src/lib/domain/relay/Services/session-command.js";
-import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
-import { listSessions } from "../../../src/lib/domain/relay/Services/session-manager-list.js";
-import { persistSessionPermissionMode } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { SessionCommandError } from "../../../src/lib/domain/project-services/Services/session-command.js";
+import { SessionManagerError } from "../../../src/lib/domain/project-services/Services/session-manager-error.js";
+import { listSessions } from "../../../src/lib/domain/project-services/Services/session-manager-list.js";
+import { persistSessionPermissionMode } from "../../../src/lib/domain/project-services/Services/session-manager-permission-mode.js";
 import {
 	deleteSession,
 	projectSessionManager,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../../src/lib/domain/project-services/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-manager-state.js";
 import {
 	getSessionParentMap,
 	recordMessageActivity,
-} from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
-import { restoreSessionSettings } from "../../../src/lib/domain/relay/Services/session-model-settings.js";
+} from "../../../src/lib/domain/project-services/Services/session-manager-state-operations.js";
+import { restoreSessionSettings } from "../../../src/lib/domain/project-services/Services/session-model-settings.js";
 import {
 	getContextWindow,
 	getModel,
@@ -52,8 +51,9 @@ import {
 	getVariant,
 	makeOverridesStateLive,
 	setDefaultPermissionMode,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { backfillSessionPicks } from "../../../src/lib/domain/relay/Services/session-pick.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { backfillSessionPicks } from "../../../src/lib/domain/project-services/Services/session-pick.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";

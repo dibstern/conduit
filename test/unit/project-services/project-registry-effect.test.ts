@@ -1,0 +1,759 @@
+// test/unit/project-services/project-registry-effect.test.ts
+import { mkdtempSync, rmSync } from "node:fs";
+import { describe, it } from "@effect/vitest";
+import {
+	Context,
+	Deferred,
+	Effect,
+	Fiber,
+	Layer,
+	Option,
+	PubSub,
+	Ref,
+} from "effect";
+import { afterAll, expect, vi } from "vitest";
+import {
+	accountsStateFromConfig,
+	materializeDefault,
+} from "../../../src/lib/account-directory.js";
+import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
+import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
+import {
+	DaemonEventBusLive,
+	DaemonEventBusTag,
+} from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+import {
+	addWithoutRelay,
+	allProjects,
+	findByDirectory,
+	getEntry,
+	getProject,
+	has,
+	isReady,
+	makeProjectRegistryLive,
+	markError,
+	markReady,
+	readyEntries,
+	remove,
+	removeAll,
+	size,
+	slugs,
+	startRelay,
+	touchLastUsed,
+	updateProject,
+} from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	type ProjectParts,
+	ProjectServices,
+} from "../../../src/lib/domain/daemon/Services/project-services.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import type { StoredProject } from "../../../src/lib/types.js";
+
+const configDir = mkdtempSync("/tmp/project-registry-");
+const TestDaemonStateLive = makeDaemonStateLive({ configDir });
+afterAll(() => rmSync(configDir, { recursive: true, force: true }));
+
+function makeProject(slug: string, dir?: string): StoredProject {
+	return {
+		slug,
+		folders: [dir ?? `/test/${slug}`],
+		title: slug,
+		lastUsed: Date.now(),
+	};
+}
+
+/** ProjectServices whose projects open at once and close quietly, unless overridden. */
+const stubProjectServices = (
+	overrides: Partial<ProjectServices["Service"]> = {},
+) =>
+	Layer.succeed(ProjectServices)({
+		forProject: () => Effect.die("unused"),
+		generation: () => Effect.die("unused"),
+		open: () =>
+			Effect.succeed(Context.empty() as Context.Context<ProjectParts>),
+		opened: () => Effect.succeedNone,
+		close: (_slug: string) => Effect.void,
+		...overrides,
+	});
+
+/** No-op ProjectServices for tests that don't exercise the project lifecycle. */
+const NoOpProjectServicesLive = stubProjectServices();
+
+/** ProjectServices whose start dies, for testing error paths. */
+const FailingProjectServicesLive = stubProjectServices({
+	open: () => Effect.die(new Error("relay-boom")),
+});
+
+/** Standard test layer providing all deps with fresh state. */
+const TestLayer = Layer.fresh(
+	Layer.mergeAll(
+		makeProjectRegistryLive(),
+		DaemonEventBusLive,
+		TestDaemonStateLive,
+		NoOpProjectServicesLive,
+		ConfigPersistenceNoopLive,
+	),
+);
+
+/** Test layer with a failing project start. */
+const FailingRelayTestLayer = Layer.fresh(
+	Layer.mergeAll(
+		makeProjectRegistryLive(),
+		DaemonEventBusLive,
+		TestDaemonStateLive,
+		FailingProjectServicesLive,
+		ConfigPersistenceNoopLive,
+	),
+);
+
+describe("ProjectRegistry Effect - addWithoutRelay", () => {
+	it.effect("registers a project in Registering state", () =>
+		Effect.gen(function* () {
+			const project = makeProject("alpha");
+			yield* addWithoutRelay(project);
+
+			const entry = yield* getEntry("alpha");
+			expect(Option.isSome(entry)).toBe(true);
+			expect(Option.getOrThrow(entry)._tag).toBe("Registering");
+			expect(Option.getOrThrow(entry).project.slug).toBe("alpha");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("publishes InstanceAdded event", () =>
+		Effect.gen(function* () {
+			const bus = yield* DaemonEventBusTag;
+			const sub = yield* PubSub.subscribe(bus);
+
+			yield* addWithoutRelay(makeProject("alpha"));
+
+			const msg = yield* PubSub.take(sub);
+			expect(msg._tag).toBe("InstanceAdded");
+			if (msg._tag === "InstanceAdded") {
+				expect(msg.instanceId).toBe("alpha");
+			}
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("does not publish event when silent", () =>
+		Effect.gen(function* () {
+			const bus = yield* DaemonEventBusTag;
+			const sub = yield* PubSub.subscribe(bus);
+
+			yield* addWithoutRelay(makeProject("alpha"), { silent: true });
+
+			const isEmpty = (yield* PubSub.takeUpTo(sub, 1)).length === 0;
+			expect(isEmpty).toBe(true);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("fails with ProjectAlreadyExists for duplicate slug", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+
+			const result = yield* addWithoutRelay(makeProject("alpha")).pipe(
+				Effect.catchTag("ProjectAlreadyExists", (e) =>
+					Effect.succeed(`caught: ${e.slug}`),
+				),
+			);
+			expect(result).toBe("caught: alpha");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+});
+
+describe("ProjectRegistry Effect - markReady", () => {
+	it.effect("transitions to Ready state", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* markReady("alpha");
+
+			const entry = yield* getEntry("alpha");
+			expect(Option.getOrThrow(entry)._tag).toBe("Ready");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("publishes once across five calls without requesting a save", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+
+			const bus = yield* DaemonEventBusTag;
+			const sub = yield* PubSub.subscribe(bus);
+
+			const requestSave = vi.fn(() => {});
+			yield* Effect.gen(function* () {
+				for (let index = 0; index < 5; index++) {
+					yield* markReady("alpha");
+				}
+			}).pipe(
+				Effect.provideService(ConfigPersistenceTag, {
+					requestSave: Effect.sync(requestSave),
+					flush: Effect.void,
+				}),
+			);
+
+			const events = yield* PubSub.takeUpTo(sub, Number.POSITIVE_INFINITY);
+			expect(Array.from(events)).toEqual([
+				{ _tag: "InstanceStatusChanged", instanceId: "alpha" },
+			]);
+			expect(requestSave).not.toHaveBeenCalled();
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("publishes again when an Error project becomes Ready", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* markReady("alpha");
+			yield* markError("alpha", "relay failed");
+
+			const bus = yield* DaemonEventBusTag;
+			const sub = yield* PubSub.subscribe(bus);
+			yield* markReady("alpha");
+
+			expect(Option.getOrThrow(yield* getEntry("alpha"))).toEqual({
+				_tag: "Ready",
+				project: yield* getProject("alpha"),
+			});
+			expect(
+				Array.from(yield* PubSub.takeUpTo(sub, Number.POSITIVE_INFINITY)),
+			).toEqual([{ _tag: "InstanceStatusChanged", instanceId: "alpha" }]);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("fails with ProjectNotFound if slug not registered", () =>
+		Effect.gen(function* () {
+			const result = yield* markReady("ghost").pipe(
+				Effect.catchTag("ProjectNotFound", (e) =>
+					Effect.succeed(`not-found: ${e.slug}`),
+				),
+			);
+			expect(result).toBe("not-found: ghost");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+});
+
+describe("ProjectRegistry Effect - markError", () => {
+	it.effect("transitions to Error state with error message", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* markError("alpha", "connection refused");
+
+			const entry = yield* getEntry("alpha");
+			const val = Option.getOrThrow(entry);
+			expect(val._tag).toBe("Error");
+			if (val._tag === "Error") {
+				expect(val.error).toBe("connection refused");
+			}
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("publishes InstanceStatusChanged", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+
+			const bus = yield* DaemonEventBusTag;
+			const sub = yield* PubSub.subscribe(bus);
+
+			yield* markError("alpha", "boom");
+
+			const msg = yield* PubSub.take(sub);
+			expect(msg._tag).toBe("InstanceStatusChanged");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+});
+
+describe("ProjectRegistry Effect - remove", () => {
+	it.effect("removes a registered project", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* remove("alpha");
+
+			const exists = yield* has("alpha");
+			expect(exists).toBe(false);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("publishes InstanceRemoved event", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+
+			const bus = yield* DaemonEventBusTag;
+			const sub = yield* PubSub.subscribe(bus);
+
+			yield* remove("alpha");
+
+			const msg = yield* PubSub.take(sub);
+			expect(msg._tag).toBe("InstanceRemoved");
+			if (msg._tag === "InstanceRemoved") {
+				expect(msg.instanceId).toBe("alpha");
+			}
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("is a no-op for non-existent slug", () =>
+		Effect.gen(function* () {
+			// Should not throw
+			yield* remove("ghost");
+
+			const currentSize = yield* size;
+			expect(currentSize).toBe(0);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("closes the project via ProjectServices", () => {
+		let closedSlug: string | null = null;
+		const tracking = stubProjectServices({
+			close: (slug: string) =>
+				Effect.sync(() => {
+					closedSlug = slug;
+				}),
+		});
+
+		const customLayer = Layer.fresh(
+			Layer.mergeAll(
+				makeProjectRegistryLive(),
+				DaemonEventBusLive,
+				TestDaemonStateLive,
+				tracking,
+				ConfigPersistenceNoopLive,
+			),
+		);
+
+		return Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* remove("alpha");
+
+			expect(closedSlug).toBe("alpha");
+		}).pipe(Effect.provide(customLayer));
+	});
+});
+
+describe("ProjectRegistry Effect - updateProject", () => {
+	it.effect("updates project title", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* updateProject("alpha", { title: "Alpha v2" });
+
+			const project = yield* getProject("alpha");
+			expect(project.title).toBe("Alpha v2");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("publishes InstanceStatusChanged", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+
+			const bus = yield* DaemonEventBusTag;
+			const sub = yield* PubSub.subscribe(bus);
+
+			yield* updateProject("alpha", { title: "New" });
+
+			const msg = yield* PubSub.take(sub);
+			expect(msg._tag).toBe("InstanceStatusChanged");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("fails with ProjectNotFound for missing slug", () =>
+		Effect.gen(function* () {
+			const result = yield* updateProject("ghost", { title: "nope" }).pipe(
+				Effect.catchTag("ProjectNotFound", (e) =>
+					Effect.succeed(`not-found: ${e.slug}`),
+				),
+			);
+			expect(result).toBe("not-found: ghost");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("preserves entry state (_tag) when updating project fields", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* markReady("alpha");
+			yield* updateProject("alpha", { title: "Updated" });
+
+			const entry = yield* getEntry("alpha");
+			const val = Option.getOrThrow(entry);
+			expect(val._tag).toBe("Ready");
+			expect(val.project.title).toBe("Updated");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+});
+
+describe("materializeDefault for OpenCode", () => {
+	it("returns the first OpenCode instance after skipping Claude accounts", () => {
+		const instances = [
+			{ id: "claude", driver: "claude" },
+			{ id: "first", driver: "opencode" },
+			{ id: "second", driver: "opencode" },
+		] as const;
+		expect(materializeDefault(instances, "opencode", undefined, [])).toEqual(
+			Option.some("first"),
+		);
+		const legacy = accountsStateFromConfig(
+			{
+				...defaultDaemonConfig(),
+				instances: [
+					{ id: "legacy", name: "Legacy", port: 1234, managed: false },
+				],
+			},
+			sdkDefaultClaudeConfigDir("/isolated-home/.claude"),
+		);
+		expect(
+			materializeDefault(legacy.accounts, "opencode", undefined, []),
+		).toEqual(Option.some("legacy"));
+		expect(
+			materializeDefault(
+				[{ id: "claude", driver: "claude" }],
+				"opencode",
+				undefined,
+				[],
+			),
+		).toEqual(Option.none());
+		expect(materializeDefault([], "opencode", undefined, [])).toEqual(
+			Option.none(),
+		);
+	});
+});
+
+describe("ProjectRegistry Effect - touchLastUsed", () => {
+	it.effect("bumps lastUsed timestamp", () =>
+		Effect.gen(function* () {
+			const oldTimestamp = 1000;
+			const project = { ...makeProject("alpha"), lastUsed: oldTimestamp };
+			yield* addWithoutRelay(project);
+
+			yield* touchLastUsed("alpha");
+
+			const updated = yield* getProject("alpha");
+			// touchLastUsed uses Date.now() which is always > 1000
+			expect(updated.lastUsed).toBeGreaterThan(oldTimestamp);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("publishes InstanceStatusChanged", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+
+			const bus = yield* DaemonEventBusTag;
+			const sub = yield* PubSub.subscribe(bus);
+
+			yield* touchLastUsed("alpha");
+
+			const msg = yield* PubSub.take(sub);
+			expect(msg._tag).toBe("InstanceStatusChanged");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("is a no-op for non-existent slug", () =>
+		Effect.gen(function* () {
+			// Should not throw
+			yield* touchLastUsed("ghost");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+});
+
+describe("ProjectRegistry Effect - Queries", () => {
+	it.effect("has() returns true for registered, false for unregistered", () =>
+		Effect.gen(function* () {
+			expect(yield* has("alpha")).toBe(false);
+			yield* addWithoutRelay(makeProject("alpha"));
+			expect(yield* has("alpha")).toBe(true);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("isReady() reflects current state", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			expect(yield* isReady("alpha")).toBe(false);
+
+			yield* markReady("alpha");
+			expect(yield* isReady("alpha")).toBe(true);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("getProject fails with ProjectNotFound for missing slug", () =>
+		Effect.gen(function* () {
+			const result = yield* getProject("ghost").pipe(
+				Effect.catchTag("ProjectNotFound", (e) =>
+					Effect.succeed(`not-found: ${e.slug}`),
+				),
+			);
+			expect(result).toBe("not-found: ghost");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("allProjects() returns all projects sorted by lastUsed desc", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay({ ...makeProject("alpha"), lastUsed: 100 });
+			yield* addWithoutRelay({ ...makeProject("beta"), lastUsed: 300 });
+			yield* addWithoutRelay({ ...makeProject("gamma"), lastUsed: 200 });
+
+			const all = yield* allProjects;
+			expect(all.map((p) => p.slug)).toEqual(["beta", "gamma", "alpha"]);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("readyEntries() returns only Ready entries", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutRelay(makeProject("beta"));
+			yield* markReady("alpha");
+
+			const ready = yield* readyEntries;
+			expect(ready).toHaveLength(1);
+			expect(ready[0]?.[0]).toBe("alpha");
+			expect(ready[0]?.[1]._tag).toBe("Ready");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("slugs() returns all registered slugs", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutRelay(makeProject("beta"));
+			yield* addWithoutRelay(makeProject("gamma"));
+
+			const allSlugs = yield* slugs;
+			expect(allSlugs.sort()).toEqual(["alpha", "beta", "gamma"]);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("size() is accurate", () =>
+		Effect.gen(function* () {
+			expect(yield* size).toBe(0);
+			yield* addWithoutRelay(makeProject("alpha"));
+			expect(yield* size).toBe(1);
+			yield* addWithoutRelay(makeProject("beta"));
+			expect(yield* size).toBe(2);
+			yield* remove("alpha");
+			expect(yield* size).toBe(1);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("findByDirectory() finds entry by path", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha", "/custom/path"));
+
+			const found = yield* findByDirectory("/custom/path");
+			expect(Option.isSome(found)).toBe(true);
+			expect(Option.getOrThrow(found).project.slug).toBe("alpha");
+
+			const notFound = yield* findByDirectory("/nonexistent");
+			expect(Option.isNone(notFound)).toBe(true);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+});
+
+describe("ProjectRegistry Effect - startRelay", () => {
+	it.effect(
+		"transitions Registering -> Ready on successful relay creation",
+		() =>
+			Effect.gen(function* () {
+				yield* addWithoutRelay(makeProject("alpha"));
+				yield* startRelay("alpha");
+
+				const entry = yield* getEntry("alpha");
+				expect(Option.getOrThrow(entry)._tag).toBe("Ready");
+			}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("transitions Error -> Registering -> Ready on retry", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* markError("alpha", "first-fail");
+
+			// Use TestLayer which has NoOpProjectServicesLive (succeeds)
+			yield* startRelay("alpha");
+
+			const entry = yield* getEntry("alpha");
+			expect(Option.getOrThrow(entry)._tag).toBe("Ready");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("transitions to Error state when relay creation fails", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* startRelay("alpha");
+
+			const entry = yield* getEntry("alpha");
+			const val = Option.getOrThrow(entry);
+			expect(val._tag).toBe("Error");
+			if (val._tag === "Error") {
+				expect(val.error).toBe("relay-boom");
+			}
+		}).pipe(Effect.provide(FailingRelayTestLayer)),
+	);
+
+	it.effect("fails with ProjectNotFound for missing slug", () =>
+		Effect.gen(function* () {
+			const result = yield* startRelay("ghost").pipe(
+				Effect.catchTag("ProjectNotFound", (e) =>
+					Effect.succeed(`not-found: ${e.slug}`),
+				),
+			);
+			expect(result).toBe("not-found: ghost");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("fails with ProjectAlreadyReady for ready slug", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* markReady("alpha");
+
+			const result = yield* startRelay("alpha").pipe(
+				Effect.catchTag("ProjectAlreadyReady", (e) =>
+					Effect.succeed(`already-ready: ${e.slug}`),
+				),
+			);
+			expect(result).toBe("already-ready: alpha");
+		}).pipe(Effect.provide(TestLayer)),
+	);
+});
+
+describe("ProjectRegistry Effect - removeAll", () => {
+	it.effect("removes all projects, empties state", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutRelay(makeProject("beta"));
+			yield* addWithoutRelay(makeProject("gamma"));
+
+			yield* removeAll;
+
+			expect(yield* size).toBe(0);
+			expect(yield* has("alpha")).toBe(false);
+			expect(yield* has("beta")).toBe(false);
+			expect(yield* has("gamma")).toBe(false);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("publishes InstanceRemoved for each project", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutRelay(makeProject("beta"));
+
+			const bus = yield* DaemonEventBusTag;
+			const sub = yield* PubSub.subscribe(bus);
+
+			yield* removeAll;
+
+			const msg1 = yield* PubSub.take(sub);
+			const msg2 = yield* PubSub.take(sub);
+			const tags = [msg1._tag, msg2._tag];
+			expect(tags).toEqual(["InstanceRemoved", "InstanceRemoved"]);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("is a no-op when registry is empty", () =>
+		Effect.gen(function* () {
+			yield* removeAll;
+			expect(yield* size).toBe(0);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("caps project close concurrency without dropping projects", () =>
+		Effect.gen(function* () {
+			const projectCount = 7;
+			const maxAllowedConcurrency = 4;
+			const current = yield* Ref.make(0);
+			const maxObserved = yield* Ref.make(0);
+			const invalidated = yield* Ref.make<ReadonlyArray<string>>([]);
+			const firstInvalidationStarted = yield* Deferred.make<void>();
+			const releaseInvalidations = yield* Deferred.make<void>();
+			const TrackingProjectServicesLive = stubProjectServices({
+				close: (slug: string) =>
+					Effect.gen(function* () {
+						const inFlight = yield* Ref.updateAndGet(current, (n) => n + 1);
+						yield* Ref.update(maxObserved, (n) => Math.max(n, inFlight));
+						yield* Deferred.succeed(firstInvalidationStarted, void 0).pipe(
+							Effect.ignore,
+						);
+						yield* Deferred.await(releaseInvalidations);
+						yield* Ref.update(invalidated, (slugs) => [...slugs, slug]);
+						yield* Ref.update(current, (n) => n - 1);
+					}),
+			});
+			const TrackingLayer = Layer.fresh(
+				Layer.mergeAll(
+					makeProjectRegistryLive(),
+					DaemonEventBusLive,
+					TestDaemonStateLive,
+					TrackingProjectServicesLive,
+					ConfigPersistenceNoopLive,
+				),
+			);
+
+			yield* Effect.gen(function* () {
+				for (let index = 0; index < projectCount; index++) {
+					yield* addWithoutRelay(makeProject(`project-${index}`));
+				}
+
+				const fiber = yield* Effect.forkChild(removeAll);
+				yield* Deferred.await(firstInvalidationStarted);
+				for (let index = 0; index < maxAllowedConcurrency; index++) {
+					yield* Effect.yieldNow;
+				}
+				expect(yield* Ref.get(maxObserved)).toBe(maxAllowedConcurrency);
+				yield* Deferred.succeed(releaseInvalidations, void 0);
+				yield* Fiber.join(fiber);
+
+				expect(yield* Ref.get(maxObserved)).toBeLessThanOrEqual(
+					maxAllowedConcurrency,
+				);
+				expect(new Set(yield* Ref.get(invalidated)).size).toBe(projectCount);
+				expect(yield* size).toBe(0);
+			}).pipe(Effect.provide(TrackingLayer));
+		}),
+	);
+});
+
+describe("ProjectRegistry Effect - Multi-step lifecycle", () => {
+	it.effect(
+		"full lifecycle: add -> markReady -> update -> touchLastUsed -> remove",
+		() =>
+			Effect.gen(function* () {
+				const project = makeProject("alpha");
+				yield* addWithoutRelay(project);
+				expect(yield* has("alpha")).toBe(true);
+				expect(yield* isReady("alpha")).toBe(false);
+
+				yield* markReady("alpha");
+				expect(yield* isReady("alpha")).toBe(true);
+
+				yield* updateProject("alpha", { title: "New Title" });
+				const updated = yield* getProject("alpha");
+				expect(updated.title).toBe("New Title");
+
+				yield* touchLastUsed("alpha");
+				const touched = yield* getProject("alpha");
+				expect(touched.lastUsed).toBeDefined();
+
+				yield* remove("alpha");
+				expect(yield* has("alpha")).toBe(false);
+				expect(yield* size).toBe(0);
+			}).pipe(Effect.provide(TestLayer)),
+	);
+
+	it.effect("multiple projects with different states", () =>
+		Effect.gen(function* () {
+			yield* addWithoutRelay(makeProject("alpha"));
+			yield* addWithoutRelay(makeProject("beta"));
+			yield* addWithoutRelay(makeProject("gamma"));
+
+			yield* markReady("alpha");
+			yield* markError("beta", "fail");
+			// gamma stays Registering
+
+			const entryAlpha = yield* getEntry("alpha");
+			const entryBeta = yield* getEntry("beta");
+			const entryGamma = yield* getEntry("gamma");
+
+			expect(Option.getOrThrow(entryAlpha)._tag).toBe("Ready");
+			expect(Option.getOrThrow(entryBeta)._tag).toBe("Error");
+			expect(Option.getOrThrow(entryGamma)._tag).toBe("Registering");
+
+			const ready = yield* readyEntries;
+			expect(ready).toHaveLength(1);
+
+			const all = yield* allProjects;
+			expect(all).toHaveLength(3);
+		}).pipe(Effect.provide(TestLayer)),
+	);
+});

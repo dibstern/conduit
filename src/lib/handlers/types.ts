@@ -4,7 +4,7 @@ import type { AddAccountInput } from "../contracts/account.js";
 import type {
 	PollerManagerShape,
 	SessionManagerShape,
-} from "../domain/relay/Services/services.js";
+} from "../domain/project-services/Services/services.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";

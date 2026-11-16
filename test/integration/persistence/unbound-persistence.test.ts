@@ -12,7 +12,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import {
 	SessionEventBusLive,
 	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import {
 	ClaudeEventPersistEffectTag,
 	makeClaudeEventPersistEffect,

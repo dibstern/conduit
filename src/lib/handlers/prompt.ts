@@ -12,11 +12,14 @@ import type {
 import type { InputDraftKey } from "../contracts/ws-rpc.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { AttachmentStoreTag } from "../domain/persistence/Services/attachment-store.js";
-import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
-import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
-import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
-import { projectSessionManager } from "../domain/relay/Services/session-manager-service.js";
+import { AgentServiceTag } from "../domain/project-services/Services/agent-service.js";
+import { ProviderTurnServiceTag } from "../domain/project-services/Services/provider-turn-service.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../domain/project-services/Services/services.js";
+import { SessionInboxTag } from "../domain/project-services/Services/session-inbox.js";
+import { projectSessionManager } from "../domain/project-services/Services/session-manager-service.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { assertSessionRunnerAvailable } from "../provider/runner/runner-provider-instance.js";
@@ -226,6 +229,6 @@ export const cancelSessionById = (
 export {
 	rewindSessionToMessage,
 	undoSessionRewind,
-} from "../domain/relay/Services/session-rewind.js";
+} from "../domain/project-services/Services/session-rewind.js";
 
 export { syncInputDraft } from "./input-drafts.js";

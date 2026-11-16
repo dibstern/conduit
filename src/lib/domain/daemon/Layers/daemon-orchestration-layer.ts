@@ -40,15 +40,15 @@ import { AttachmentStoreTag } from "../../persistence/Services/attachment-store.
 import {
 	DraftPreWarmLive,
 	DraftPreWarmTag,
-} from "../../relay/Services/draft-prewarm.js";
+} from "../../project-services/Services/draft-prewarm.js";
 import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
-} from "../../relay/Services/provider-runtime-ingestion-service.js";
-import { makeEventSinkFactory } from "../../relay/Services/provider-turn-dispatch.js";
-import { LoggerTag } from "../../relay/Services/services.js";
-import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
-import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+} from "../../project-services/Services/provider-runtime-ingestion-service.js";
+import { makeEventSinkFactory } from "../../project-services/Services/provider-turn-dispatch.js";
+import { LoggerTag } from "../../project-services/Services/services.js";
+import { SessionEventBusTag } from "../../project-services/Services/session-event-bus.js";
+import { SessionWorkspaceTag } from "../../project-services/Services/session-workspace.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonOrchestration } from "../Services/daemon-orchestration.js";

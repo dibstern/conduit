@@ -1,6 +1,6 @@
 import { Clock, Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
-import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
+import { SessionInboxTag } from "../domain/project-services/Services/session-inbox.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import { loadLedger } from "../persistence/effect/run-ledger-arm.js";

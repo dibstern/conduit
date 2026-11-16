@@ -33,7 +33,7 @@ import {
 	ProjectServicesError,
 } from "../../../src/lib/domain/daemon/Services/project-services.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
+import { makeWsTransportLive } from "../../../src/lib/domain/project-services/Layers/ws-transport-layer.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	ProjectRpcContextsTag,

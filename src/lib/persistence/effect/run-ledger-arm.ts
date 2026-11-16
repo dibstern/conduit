@@ -769,7 +769,7 @@ const commandFor = (
 					};
 				// 2.1 row 205, 3.10 (CONTRACT.md 216, 999-1006): an OpenCode interaction belongs to the
 				// label its session's process reported last (gap, reported); Claude's to its runner's,
-				// the prompt's providerProcessId (relay-event-sink.ts 257).
+				// the prompt's providerProcessId (project-event-sink.ts 257).
 				const runnerId = opencode ? null : (providerProcessId ?? null);
 				if (!opencode && runnerId === null) return undefined;
 				const [started] = yield* sql<{ label: string }>`

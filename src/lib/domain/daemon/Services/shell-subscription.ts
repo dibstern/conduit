@@ -28,8 +28,8 @@ import {
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
-import { stream } from "../../relay/Services/read-model-subscription.js";
-import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { stream } from "../../project-services/Services/read-model-subscription.js";
+import { SessionEventBusTag } from "../../project-services/Services/session-event-bus.js";
 import type { AccountDirectory } from "./account-directory.js";
 import type { SessionActivityTag } from "./session-activity.js";
 import { makeSessionRows, type SessionRowsScope } from "./session-rows.js";

@@ -10,8 +10,8 @@ import {
 	SessionDirectory,
 	SessionDirectoryReadError,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
-import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
-import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
+import type { Envelope } from "../../../src/lib/domain/project-services/Services/read-model-subscription.js";
+import { ConfigTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import { EventDelivery } from "../../../src/lib/server/event-audiences.js";
 import {
 	CurrentEventDelivery,

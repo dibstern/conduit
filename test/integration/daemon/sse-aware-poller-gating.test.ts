@@ -29,7 +29,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	getCurrentStatuses,
 	PollerPubSubTag,
-} from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+} from "../../../src/lib/domain/project-services/Services/session-status-poller.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {

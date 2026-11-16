@@ -8,13 +8,13 @@ import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { EventRetentionSchedulerTag } from "../../../src/lib/domain/persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
-import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { OrchestrationEngineTag } from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	applySessionCommand,
 	forkSession,
-} from "../../../src/lib/domain/relay/Services/session-command.js";
-import { readSessionWorktreeOwnership } from "../../../src/lib/domain/relay/Services/session-worktree-deletion.js";
+} from "../../../src/lib/domain/project-services/Services/session-command.js";
+import { readSessionWorktreeOwnership } from "../../../src/lib/domain/project-services/Services/session-worktree-deletion.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";

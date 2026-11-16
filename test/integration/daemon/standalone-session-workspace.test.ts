@@ -15,8 +15,8 @@ import {
 	type WorktreeService,
 	WorktreeServiceTag,
 } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
-import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
-import { readSessionWorktreeOwnership } from "../../../src/lib/domain/relay/Services/session-worktree-deletion.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
+import { readSessionWorktreeOwnership } from "../../../src/lib/domain/project-services/Services/session-worktree-deletion.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { createDaemonProject } from "../../helpers/in-process-daemon.js";

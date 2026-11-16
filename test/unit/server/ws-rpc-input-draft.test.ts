@@ -11,7 +11,7 @@ import {
 	SessionDirectory,
 	SessionDirectoryReadError,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
-import { InputDraftsTag } from "../../../src/lib/domain/relay/Services/input-drafts.js";
+import { InputDraftsTag } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import { inputDraftClaimMarker } from "../../../src/lib/persistence/input-drafts.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";

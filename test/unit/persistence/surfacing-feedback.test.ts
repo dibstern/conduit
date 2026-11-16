@@ -21,8 +21,8 @@ import {
 	SetSurfacingMark,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
-import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { makeSurfacingFeedback } from "../../../src/lib/domain/relay/Services/surfacing-feedback.js";
+import { SessionEventBusTag } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
+import { makeSurfacingFeedback } from "../../../src/lib/domain/project-services/Services/surfacing-feedback.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";

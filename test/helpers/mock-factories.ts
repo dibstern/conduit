@@ -8,7 +8,7 @@
  * ## Effect Layer helpers
  *
  * Effect-based test helpers live at the bottom of this file. They compose
- * the service Tags from `src/lib/domain/relay/Services/services.ts` into reusable Layers
+ * the service Tags from `src/lib/domain/project-services/Services/services.ts` into reusable Layers
  * that can be used with `@effect/vitest`'s `it.effect` / `it.scoped`.
  *
  * Existing imperative helpers are preserved — many tests still depend on them.
@@ -60,40 +60,39 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../src/lib/domain/daemon/Services/session-activity.js";
-import { OpenCodeAPITag } from "../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { RateLimiterLive } from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
-import { SessionWorkspaceLive } from "../../src/lib/domain/relay/Layers/session-workspace-layer.js";
+import { RateLimiterLive } from "../../src/lib/domain/project-services/Layers/rate-limiter-layer.js";
+import { SessionWorkspaceLive } from "../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
 import {
 	type AgentList,
 	type AgentService,
 	AgentServiceLive,
-} from "../../src/lib/domain/relay/Services/agent-service.js";
-import { AlertsLive } from "../../src/lib/domain/relay/Services/alerts.js";
-import { DaemonSessionQueryServiceLive } from "../../src/lib/domain/relay/Services/daemon-session-query-service.js";
-import { DirectoryListingServiceLive } from "../../src/lib/domain/relay/Services/directory-listing-service.js";
-import { InputDraftsLive } from "../../src/lib/domain/relay/Services/input-drafts.js";
+} from "../../src/lib/domain/project-services/Services/agent-service.js";
+import { AlertsLive } from "../../src/lib/domain/project-services/Services/alerts.js";
+import { DaemonSessionQueryServiceLive } from "../../src/lib/domain/project-services/Services/daemon-session-query-service.js";
+import { DirectoryListingServiceLive } from "../../src/lib/domain/project-services/Services/directory-listing-service.js";
+import { InputDraftsLive } from "../../src/lib/domain/project-services/Services/input-drafts.js";
 import {
 	type InstanceManagementService,
 	InstanceManagementServiceError,
 	InstanceManagementServiceTag,
-} from "../../src/lib/domain/relay/Services/instance-management-service.js";
-import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
+} from "../../src/lib/domain/project-services/Services/instance-management-service.js";
+import { PendingInteractionServiceLive } from "../../src/lib/domain/project-services/Services/pending-interaction-service.js";
 import {
 	type ProjectManagementService,
 	ProjectManagementServiceLive,
 	ProjectManagementServiceTag,
-} from "../../src/lib/domain/relay/Services/project-management-service.js";
-import { ProjectSettingsLive } from "../../src/lib/domain/relay/Services/project-settings.js";
+} from "../../src/lib/domain/project-services/Services/project-management-service.js";
+import { ProjectSettingsLive } from "../../src/lib/domain/project-services/Services/project-settings.js";
+import { RelayStatusSnapshotLive } from "../../src/lib/domain/project-services/Services/project-status-snapshot.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+} from "../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnServiceLive,
 	ProviderTurnServiceTag,
-} from "../../src/lib/domain/relay/Services/provider-turn-service.js";
-import { RelayStatusSnapshotLive } from "../../src/lib/domain/relay/Services/relay-status-snapshot.js";
-import { ScanServiceLive } from "../../src/lib/domain/relay/Services/scan-service.js";
+} from "../../src/lib/domain/project-services/Services/provider-turn-service.js";
+import { ScanServiceLive } from "../../src/lib/domain/project-services/Services/scan-service.js";
 import {
 	ConfigTag,
 	type ConnectPtyUpstreamShape,
@@ -112,37 +111,38 @@ import {
 	type SessionManagerShape,
 	type StatusPollerShape,
 	StatusPollerTag,
-} from "../../src/lib/domain/relay/Services/services.js";
-import { SessionInboxTag } from "../../src/lib/domain/relay/Services/session-inbox.js";
-import { SessionManagerError } from "../../src/lib/domain/relay/Services/session-manager-error.js";
+} from "../../src/lib/domain/project-services/Services/services.js";
+import { SessionInboxTag } from "../../src/lib/domain/project-services/Services/session-inbox.js";
+import { SessionManagerError } from "../../src/lib/domain/project-services/Services/session-manager-error.js";
 import {
 	ownSessionManagersLive,
 	type SessionManagerService,
 	SessionManagerServiceTag,
 	type SessionManagers,
-} from "../../src/lib/domain/relay/Services/session-manager-service.js";
+} from "../../src/lib/domain/project-services/Services/session-manager-service.js";
 import {
 	makeSessionManagerCoordination,
 	makeSessionManagerStateLive,
 	SessionManagerCoordinationTag,
 	type SessionManagerState,
-} from "../../src/lib/domain/relay/Services/session-manager-state.js";
+} from "../../src/lib/domain/project-services/Services/session-manager-state.js";
 import {
 	makeOverridesStateLive,
 	OverridesStateTag,
-} from "../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { makePollerStateLive } from "../../src/lib/domain/relay/Services/session-status-poller.js";
+} from "../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { makePollerStateLive } from "../../src/lib/domain/project-services/Services/session-status-poller.js";
 import {
 	type SessionTitleService,
 	SessionTitleServiceTag,
-} from "../../src/lib/domain/relay/Services/session-title-service.js";
+} from "../../src/lib/domain/project-services/Services/session-title-service.js";
 import {
 	type LocalPtyService,
 	LocalPtyServiceTag,
 	type LocalPtySession,
 	OpenCodeTerminalServiceLive,
-} from "../../src/lib/domain/relay/Services/terminal-service.js";
-import { ToolContentServiceNoop } from "../../src/lib/domain/relay/Services/tool-content-service.js";
+} from "../../src/lib/domain/project-services/Services/terminal-service.js";
+import { ToolContentServiceNoop } from "../../src/lib/domain/project-services/Services/tool-content-service.js";
+import { OpenCodeAPITag } from "../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type {
 	HandlerDeps,
 	InstanceManagementDeps,
@@ -295,7 +295,7 @@ export function createMockSSEWiringDeps(
 // Effect Layer Test Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// These helpers compose the Effect service Tags from src/lib/domain/relay/Services/services.ts
+// These helpers compose the Effect service Tags from src/lib/domain/project-services/Services/services.ts
 // into reusable Layers for @effect/vitest tests. They complement (not replace)
 // the imperative factories above.
 //

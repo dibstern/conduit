@@ -33,8 +33,8 @@ import {
 	type SecretAnswers,
 } from "../domain/daemon/Services/secret-answers.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
-import type { DraftChange } from "../domain/relay/Services/input-drafts.js";
-import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
+import type { DraftChange } from "../domain/project-services/Services/input-drafts.js";
+import type { ProviderRuntimeIngestion } from "../domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
 import type { AttachmentStore } from "../persistence/attachment-store.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";

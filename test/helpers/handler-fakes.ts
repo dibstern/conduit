@@ -1,7 +1,7 @@
 import { Layer } from "effect";
 import { vi } from "vitest";
 import { AccountDirectory } from "../../src/lib/domain/daemon/Services/account-directory.js";
-import { SessionManagerServiceTag } from "../../src/lib/domain/relay/Services/session-manager-service.js";
+import { SessionManagerServiceTag } from "../../src/lib/domain/project-services/Services/session-manager-service.js";
 import type { OpenCodeAPI } from "../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";

@@ -20,25 +20,25 @@ import { SqlError } from "effect/sql/SqlError";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
 import {
 	ConfigTag,
 	LoggerTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
 import {
 	SessionEventBusLive,
 	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
 import {
 	dismissWorkspaceHint,
 	SessionWorkspaceHintReactorLive,
-} from "../../../src/lib/domain/relay/Services/session-workspace-hint.js";
+} from "../../../src/lib/domain/project-services/Services/session-workspace-hint.js";
 import {
 	SessionWorkspaceHintStateLive,
 	type SessionWorkspaceHintStateTag,
-} from "../../../src/lib/domain/relay/Services/session-workspace-hint-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-workspace-hint-state.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	makeUnboundEventStoreEffect,

@@ -17,23 +17,23 @@ import { daemonStorePath } from "../../../persistence/project-storage.js";
 import type { PollerGatingConfig } from "../../../provider/opencode/monitoring-types.js";
 import type { RpcSubscriptionScopeTag } from "../../../server/ws-rpc.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
-import type { AgentServiceTag } from "../../relay/Services/agent-service.js";
-import type { AlertLedgerTag } from "../../relay/Services/alert-ledger.js";
-import type { ContinuationTag } from "../../relay/Services/continuation.js";
-import type { DirectoryListingServiceTag } from "../../relay/Services/directory-listing-service.js";
-import type { GoalSummaryServiceTag } from "../../relay/Services/goal-summary-service.js";
+import type { AgentServiceTag } from "../../project-services/Services/agent-service.js";
+import type { AlertLedgerTag } from "../../project-services/Services/alert-ledger.js";
+import type { ContinuationTag } from "../../project-services/Services/continuation.js";
+import type { DirectoryListingServiceTag } from "../../project-services/Services/directory-listing-service.js";
+import type { GoalSummaryServiceTag } from "../../project-services/Services/goal-summary-service.js";
 import type {
 	OpenCodeHistoryReconcileTag,
 	OpenCodeProcessLinkTag,
 	OpenCodeRuntimeIngressTag,
 	OpenCodeSessionCreationGateTag,
-} from "../../relay/Services/opencode-runtime-ingress-service.js";
-import type { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
-import type { ProjectSettingsTag } from "../../relay/Services/project-settings.js";
-import type { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
-import type { ProviderTurnServiceTag } from "../../relay/Services/provider-turn-service.js";
-import type { RecapServiceTag } from "../../relay/Services/recap-service.js";
-import type { RelayStatusSnapshotTag } from "../../relay/Services/relay-status-snapshot.js";
+} from "../../project-services/Services/opencode-runtime-ingress-service.js";
+import type { PendingInteractionServiceTag } from "../../project-services/Services/pending-interaction-service.js";
+import type { ProjectSettingsTag } from "../../project-services/Services/project-settings.js";
+import type { RelayStatusSnapshotTag } from "../../project-services/Services/project-status-snapshot.js";
+import type { ProviderRuntimeIngestionTag } from "../../project-services/Services/provider-runtime-ingestion-service.js";
+import type { ProviderTurnServiceTag } from "../../project-services/Services/provider-turn-service.js";
+import type { RecapServiceTag } from "../../project-services/Services/recap-service.js";
 import type {
 	AgentLivenessTag,
 	ConfigTag,
@@ -45,22 +45,22 @@ import type {
 	PtyManagerTag,
 	StatusPollerTag,
 	TranslatorTag,
-} from "../../relay/Services/services.js";
-import type { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
-import type { SessionInboxTag } from "../../relay/Services/session-inbox.js";
+} from "../../project-services/Services/services.js";
+import type { SessionEventBusTag } from "../../project-services/Services/session-event-bus.js";
+import type { SessionInboxTag } from "../../project-services/Services/session-inbox.js";
 import type {
 	ProjectSessionManagerParts,
 	SessionManagerServiceTag,
-} from "../../relay/Services/session-manager-service.js";
+} from "../../project-services/Services/session-manager-service.js";
 import type {
 	PollerPubSubTag,
 	PollerStateTag,
-} from "../../relay/Services/session-status-poller.js";
-import type { SessionTitleServiceTag } from "../../relay/Services/session-title-service.js";
-import type { SessionWorkspaceHintStateTag } from "../../relay/Services/session-workspace-hint-state.js";
-import type { SSEStreamTag } from "../../relay/Services/sse-stream-service.js";
-import type { OpenCodeTerminalServiceTag } from "../../relay/Services/terminal-service.js";
-import type { ToolContentServiceTag } from "../../relay/Services/tool-content-service.js";
+} from "../../project-services/Services/session-status-poller.js";
+import type { SessionTitleServiceTag } from "../../project-services/Services/session-title-service.js";
+import type { SessionWorkspaceHintStateTag } from "../../project-services/Services/session-workspace-hint-state.js";
+import type { SSEStreamTag } from "../../project-services/Services/sse-stream-service.js";
+import type { OpenCodeTerminalServiceTag } from "../../project-services/Services/terminal-service.js";
+import type { ToolContentServiceTag } from "../../project-services/Services/tool-content-service.js";
 import type { ProjectShellEnvTag } from "../Layers/project-shell-env-layer.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonEvent, type DaemonEventBusTag } from "./daemon-pubsub.js";

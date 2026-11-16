@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
-import { ProjectManagementServiceTag } from "../../domain/relay/Services/project-management-service.js";
+import { ProjectManagementServiceTag } from "../../domain/project-services/Services/project-management-service.js";
 import { normalizeProjectTitle } from "../../handlers/settings.js";
 import type { WsRpcHandlerMap } from "./shared.js";
 

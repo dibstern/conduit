@@ -17,8 +17,8 @@ import {
 } from "../contracts/ws-rpc.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
-import type { Envelope } from "../domain/relay/Services/read-model-subscription.js";
-import { ConfigTag } from "../domain/relay/Services/services.js";
+import type { Envelope } from "../domain/project-services/Services/read-model-subscription.js";
+import { ConfigTag } from "../domain/project-services/Services/services.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	type Audience,

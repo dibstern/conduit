@@ -26,8 +26,8 @@ import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/sessio
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+} from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
+import { makeSessionManagerStateLive } from "../../../src/lib/domain/project-services/Services/session-manager-state.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {
 	ReadQueryEffectError,

@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
 import { Effect } from "effect";
-import type { SessionUpstreamAdapter } from "../../domain/relay/Services/session-command.js";
+import type { SessionUpstreamAdapter } from "../../domain/project-services/Services/session-command.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import {
 	discoverRunners,

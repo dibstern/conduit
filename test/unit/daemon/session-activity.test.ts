@@ -11,7 +11,7 @@ import {
 	SessionActivityDaemonLive,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { EventDelivery } from "../../../src/lib/server/event-audiences.js";
 import { publishLedgerTasks } from "../../helpers/ledger-tasks.js";

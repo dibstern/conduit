@@ -1,0 +1,989 @@
+import { Effect, Exit, Ref, Scope } from "effect";
+import { assert, describe, expect, it, vi } from "vitest";
+import {
+	OverridesStateTag,
+	startProcessingTimeout,
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { createSilentLogger } from "../../../src/lib/logger.js";
+import {
+	extractSessionId,
+	handleSSEEventEffect,
+	type SSEWiringDeps,
+	wireSSEConsumerEffect,
+} from "../../../src/lib/provider/opencode/sse-wiring.js";
+import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
+import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
+import { partialFake } from "../../helpers/partial-fake.js";
+import {
+	makeSSETestServices,
+	runSSEEvent,
+	wireSSEConsumerForTest,
+} from "../../helpers/sse-effect-harness.js";
+
+describe("extractSessionId", () => {
+	it("returns top-level sessionID", async () => {
+		const event: OpenCodeEvent = {
+			type: "message.part.delta",
+			properties: { sessionID: "s1" },
+		};
+		expect(extractSessionId(event)).toBe("s1");
+	});
+
+	it("returns sessionID nested in part", async () => {
+		const event: OpenCodeEvent = {
+			type: "message.part.updated",
+			properties: { part: { sessionID: "s2" } },
+		};
+		expect(extractSessionId(event)).toBe("s2");
+	});
+
+	it("returns sessionID nested in info", async () => {
+		const event: OpenCodeEvent = {
+			type: "message.updated",
+			properties: { info: { sessionID: "s3" } },
+		};
+		expect(extractSessionId(event)).toBe("s3");
+	});
+
+	it("returns id from info for session.updated", async () => {
+		const event: OpenCodeEvent = {
+			type: "session.updated",
+			properties: { info: { id: "s4" } },
+		};
+		expect(extractSessionId(event)).toBe("s4");
+	});
+
+	it("returns undefined when no sessionID found", async () => {
+		const event: OpenCodeEvent = {
+			type: "unknown",
+			properties: {},
+		};
+		expect(extractSessionId(event)).toBeUndefined();
+	});
+
+	it("prefers top-level sessionID over nested", async () => {
+		const event: OpenCodeEvent = {
+			type: "message.part.delta",
+			properties: {
+				sessionID: "top-level",
+				part: { sessionID: "nested" },
+			},
+		};
+		expect(extractSessionId(event)).toBe("top-level");
+	});
+});
+
+describe("handleSSEEventEffect", () => {
+	it("translates events with the upstream session ID", async () => {
+		const deps = createMockSSEWiringDeps();
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "message.part.delta",
+			properties: { sessionID: "active-session" },
+		};
+		await runSSEEvent(deps, event);
+
+		expect(deps.translator.translate).toHaveBeenCalledWith(event, {
+			sessionId: "active-session",
+		});
+	});
+
+	it.each([
+		[
+			"clears processing timeout when done event arrives for a session",
+			"done",
+			"active-session",
+			"clear",
+		],
+		[
+			"clears processing timeout for done on any session (not just active)",
+			"done",
+			"other-session",
+			"clear",
+		],
+		[
+			"resets processing timeout on non-done events (inactivity timer)",
+			"delta",
+			"active-session",
+			"reset",
+		],
+		[
+			"resets processing timeout on non-done events for any session (per-session timer)",
+			"delta",
+			"other-session",
+			"reset",
+		],
+		[
+			"resets processing timeout on retry events for active session",
+			"retry",
+			"active-session",
+			"reset",
+		],
+		[
+			"does not reset processing timeout when no sessionID is present",
+			"delta",
+			undefined,
+			"same",
+		],
+	] as const)("%s", async (_name, kind, sessionId, expected) => {
+		const deps = createMockSSEWiringDeps();
+		const services = makeSSETestServices();
+		// A retry translates to nothing: it rides the shell row.
+		vi.mocked(deps.translator.translate).mockReturnValue(
+			kind === "retry"
+				? { ok: false, reason: "retry rides the shell row" }
+				: {
+						ok: true,
+						messages: [
+							kind === "done"
+								? { type: "done", sessionId: "s1", code: 0, alertId: "done-1" }
+								: { type: "delta", sessionId: "s1", text: "hello" },
+						],
+					},
+		);
+		const event: OpenCodeEvent = {
+			type: kind === "delta" ? "message.part.delta" : "session.status",
+			properties: {
+				...(sessionId ? { sessionID: sessionId } : {}),
+				...(kind === "retry" ? { status: { type: "retry" } } : {}),
+			},
+		};
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const timeoutSessionId = sessionId ?? "active-session";
+				yield* startProcessingTimeout(
+					timeoutSessionId,
+					"1 minute",
+					() => Effect.void,
+				);
+				const ref = yield* OverridesStateTag;
+				const before = (yield* Ref.get(ref)).processingTimeouts.get(
+					timeoutSessionId,
+				)?.token;
+				yield* handleSSEEventEffect(deps, event);
+				const after = (yield* Ref.get(ref)).processingTimeouts.get(
+					timeoutSessionId,
+				)?.token;
+				expect(before).toBeDefined();
+				if (expected === "clear") expect(after).toBeUndefined();
+				else if (expected === "reset") expect(after).not.toBe(before);
+				else expect(after).toBe(before);
+			}).pipe(Effect.provide(services.layer, { local: true })),
+		);
+	});
+
+	it("records permission.asked events through pending permission state", async () => {
+		const deps = createMockSSEWiringDeps();
+		const services = makeSSETestServices();
+		vi.spyOn(services.pendingInteractions, "recordPermissionRequest");
+
+		const event: OpenCodeEvent = {
+			type: "permission.asked",
+			properties: {
+				id: "perm-1",
+				permission: "Bash",
+				sessionID: "session-1",
+				patterns: ["git *"],
+				metadata: { command: "git status" },
+				always: ["git *"],
+			},
+		};
+		await runSSEEvent(deps, event, services);
+
+		expect(
+			services.pendingInteractions.recordPermissionRequest,
+		).toHaveBeenCalledWith({
+			requestId: "perm-1",
+			sessionId: "session-1",
+			toolName: "Bash",
+			toolInput: {
+				patterns: ["git *"],
+				metadata: { command: "git status" },
+			},
+			always: ["git *"],
+		});
+	});
+
+	it("routes permission.replied events to pending permission state", async () => {
+		const deps = createMockSSEWiringDeps();
+		const services = makeSSETestServices();
+		vi.spyOn(services.pendingInteractions, "markPermissionReplied");
+
+		const event: OpenCodeEvent = {
+			type: "permission.replied",
+			properties: {
+				sessionID: "s1",
+				requestID: "perm-1",
+				reply: "once",
+			},
+		};
+		await runSSEEvent(deps, event, services);
+
+		expect(
+			services.pendingInteractions.markPermissionReplied,
+		).toHaveBeenCalledWith("perm-1");
+	});
+
+	it("does not send push for anonymous done status hints", async () => {
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
+		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
+		const translated: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: { sessionID: "active-session" },
+		};
+		await runSSEEvent(deps, event);
+		expect(mockPush?.sendToAll).not.toHaveBeenCalled();
+	});
+
+	it("sends push notification for error events", async () => {
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
+		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
+		const translated: RelayMessage = {
+			type: "done",
+			alertId: "error-1",
+			sessionId: "s1",
+			code: 1,
+			error: "Something broke",
+		};
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.error",
+			properties: {
+				sessionID: "active-session",
+				error: { name: "err", data: { message: "Something broke" } },
+			},
+		};
+		await runSSEEvent(deps, event);
+
+		assert.exists(mockPush, "expected push service");
+		expect(mockPush.sendToAll).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "error",
+				title: "Error",
+				body: "Something broke",
+			}),
+		);
+	});
+
+	it("sends push notification for done/error on ANY session (not just active)", async () => {
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
+		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
+		const translated: RelayMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "done-1",
+		};
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: { sessionID: "other-session" },
+		};
+		await runSSEEvent(deps, event);
+
+		assert.exists(mockPush, "expected push service");
+		const calls = vi.mocked(mockPush.sendToAll).mock.calls;
+		const doneCalls = calls.filter(
+			(c) => (c[0] as { type: string }).type === "done",
+		);
+		expect(doneCalls).toHaveLength(1);
+	});
+
+	it("calls notifySSEIdle on status poller when session.status:idle arrives", async () => {
+		const mockStatusPoller = { notifySSEIdle: vi.fn(() => Effect.void) };
+		const deps = createMockSSEWiringDeps({ statusPoller: mockStatusPoller });
+		// Translator returns ok: false for idle (no relay messages produced)
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: false,
+			reason: "session status: unhandled status type",
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: {
+				sessionID: "sess-123",
+				status: { type: "idle" },
+			},
+		};
+		await runSSEEvent(deps, event);
+
+		expect(mockStatusPoller.notifySSEIdle).toHaveBeenCalledWith("sess-123");
+	});
+
+	it("does not call notifySSEIdle for session.status:busy", async () => {
+		const mockStatusPoller = { notifySSEIdle: vi.fn(() => Effect.void) };
+		const deps = createMockSSEWiringDeps({ statusPoller: mockStatusPoller });
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: false,
+			reason: "session status: unhandled status type",
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: {
+				sessionID: "sess-123",
+				status: { type: "busy" },
+			},
+		};
+		await runSSEEvent(deps, event);
+
+		expect(mockStatusPoller.notifySSEIdle).not.toHaveBeenCalled();
+	});
+
+	it("does not call notifySSEIdle when no statusPoller is configured", async () => {
+		const deps = createMockSSEWiringDeps();
+		// No statusPoller in deps
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: false,
+			reason: "session status: unhandled status type",
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: {
+				sessionID: "sess-123",
+				status: { type: "idle" },
+			},
+		};
+		// Should not throw even without statusPoller
+		await expect(runSSEEvent(deps, event)).resolves.toEqual([]);
+	});
+});
+
+describe("wireSSEConsumerEffect", () => {
+	it("invalidates PTY discovery on every SSE connection", async () => {
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = partialFake<Parameters<typeof wireSSEConsumerEffect>[1]>({
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		});
+		const onPtysChanged = vi.fn();
+		const deps = createMockSSEWiringDeps({ onPtysChanged });
+		await wireSSEConsumerForTest(deps, consumer);
+		const connected = listeners.get("connected");
+		assert.exists(connected);
+		// A PTY created before the first connection sends no event either.
+		connected();
+		expect(onPtysChanged).toHaveBeenCalledExactlyOnceWith(
+			deps.providerInstanceId,
+		);
+		connected();
+		expect(onPtysChanged).toHaveBeenCalledTimes(2);
+	});
+
+	it("invalidates delayed stop settlement when the instance starts again", async () => {
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = {
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+		let stopIsCurrent: (() => boolean) | undefined;
+		let stoppedProcess: string | undefined;
+		const deps = createMockSSEWiringDeps({
+			opencodeRuntimeIngress: {
+				onReconnect: () => Effect.void,
+				onSSEEventEffect: () =>
+					Effect.succeed({ ok: false, reason: "not-translatable" }),
+				onInstanceStopped: (
+					_instanceId: string,
+					isCurrent?: () => boolean,
+					stoppedProcessId?: string,
+				) => {
+					stopIsCurrent = isCurrent;
+					stoppedProcess = stoppedProcessId;
+					return Effect.void;
+				},
+			},
+		});
+		await wireSSEConsumerForTest(deps, consumer);
+		const status = listeners.get("status");
+		assert.exists(status);
+		status("stopped", true, "opencode:stopped");
+		expect(stopIsCurrent?.()).toBe(true);
+		// CONTRACT.md 9: the stop's process id reaches the settlement for its process_lost.
+		expect(stoppedProcess).toBe("opencode:stopped");
+		status("starting");
+		expect(stopIsCurrent?.()).toBe(false);
+	});
+
+	it("registers event listeners on consumer", async () => {
+		const deps = createMockSSEWiringDeps();
+		const consumer = {
+			on: vi.fn(),
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+
+		await wireSSEConsumerForTest(deps, consumer);
+
+		const registeredEvents = vi.mocked(consumer.on).mock.calls.map((c) => c[0]);
+		expect(registeredEvents).toContain("connected");
+		expect(registeredEvents).toContain("status");
+		expect(registeredEvents).toContain("error");
+		expect(registeredEvents).toContain("event");
+	});
+
+	it("event listener delegates to handleSSEEventEffect", async () => {
+		const deps = createMockSSEWiringDeps();
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = {
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+
+		await wireSSEConsumerForTest(deps, consumer);
+
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hi",
+		};
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "message.part.delta",
+			properties: { sessionID: "active-session" },
+		};
+		const eventListener = listeners.get("event");
+		assert.exists(eventListener, "expected event listener");
+		eventListener(event);
+
+		expect(deps.translator.translate).toHaveBeenCalledWith(event, {
+			sessionId: "active-session",
+		});
+	});
+
+	it("forwards a schema-valid event without a decode warning (conduit-test-8g7)", async () => {
+		const warnSpy = vi.fn();
+		const log = { ...createSilentLogger(), warn: warnSpy };
+		const deps = createMockSSEWiringDeps({ log });
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = {
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+		await wireSSEConsumerForTest(deps, consumer);
+
+		const event = {
+			type: "message.part.delta",
+			properties: {
+				sessionID: "s1",
+				partID: "p1",
+				field: "text",
+				delta: "hi",
+			},
+		};
+		const eventListener = listeners.get("event");
+		assert.exists(eventListener, "expected event listener");
+		eventListener(event);
+
+		expect(deps.translator.translate).toHaveBeenCalled();
+		expect(warnSpy).not.toHaveBeenCalledWith(
+			expect.stringContaining("failed OpenCodeEventSchema decode"),
+		);
+	});
+
+	it("warns but still forwards an event that fails schema decode — never drops (conduit-test-8g7)", async () => {
+		const warnSpy = vi.fn();
+		const log = { ...createSilentLogger(), warn: warnSpy };
+		const deps = createMockSSEWiringDeps({ log });
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = {
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+		await wireSSEConsumerForTest(deps, consumer);
+
+		// Well-formed envelope, but an event type not in the modeled union.
+		const unknownEvent = {
+			type: "server.brand.new.v99",
+			properties: { sessionID: "s1" },
+		};
+		const eventListener = listeners.get("event");
+		assert.exists(eventListener, "expected event listener");
+		eventListener(unknownEvent);
+
+		// Forwarded raw despite decode failure (never dropped)…
+		expect(deps.translator.translate).toHaveBeenCalledWith(
+			unknownEvent,
+			expect.anything(),
+		);
+		// …and the drift is surfaced as a warning.
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("failed OpenCodeEventSchema decode"),
+		);
+	});
+
+	it("logs SSE lifecycle events", async () => {
+		const infoSpy = vi.fn();
+		const warnSpy = vi.fn();
+		const log = { ...createSilentLogger(), info: infoSpy, warn: warnSpy };
+		const deps = createMockSSEWiringDeps({ log });
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = {
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+
+		await wireSSEConsumerForTest(deps, consumer);
+
+		const connectedListener = listeners.get("connected");
+		assert.exists(connectedListener, "expected connected listener");
+		connectedListener();
+		expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("Connected"));
+
+		const statusListener = listeners.get("status");
+		assert.exists(statusListener, "expected status listener");
+		statusListener("reconnecting");
+		expect(infoSpy).toHaveBeenCalledWith(
+			expect.stringContaining("reconnecting"),
+		);
+
+		const errorListener = listeners.get("error");
+		assert.exists(errorListener, "expected error listener");
+		errorListener(new Error("boom"));
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("boom"));
+	});
+
+	it("publishes the OpenCode upstream state as a live project fact", async () => {
+		const deps = createMockSSEWiringDeps();
+		const services = makeSSETestServices();
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = {
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
+		const latest = () =>
+			Effect.runSync(Ref.get(services.projectSettings.live))[
+				"opencodeConnection:opencode"
+			];
+
+		await wireSSEConsumerForTest(deps, consumer, services);
+
+		for (const status of ["reconnecting", "failed", "connected"] as const) {
+			listeners.get("status")?.(status);
+			expect(latest()).toEqual({
+				_tag: "opencodeConnection",
+				instanceId: "opencode",
+				status,
+			});
+		}
+	});
+
+	// 82tn.61: a session idle that overtook its turn's last parts ended the Run before the reply.
+	it("hands one session's events over in arrival order, without holding back other sessions", async () => {
+		const handled: string[] = [];
+		let handledAll = () => {};
+		const allHandled = new Promise<void>((resolve) => {
+			handledAll = resolve;
+		});
+		const deps = createMockSSEWiringDeps({
+			opencodeRuntimeIngress: {
+				onReconnect: () => Effect.void,
+				onInstanceStopped: () => Effect.void,
+				onSSEEventEffect: (event: OpenCodeEvent) => {
+					const step = (event.properties as { step?: string }).step ?? "";
+					return Effect.gen(function* () {
+						if (step === "s1-text") yield* Effect.sleep("30 millis");
+						if (step === "s3-dies") return yield* Effect.die("boom");
+						handled.push(step);
+						if (handled.length === 4) handledAll();
+						return { ok: false, reason: "not-translatable" } as const;
+					});
+				},
+			},
+		});
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = partialFake<Parameters<typeof wireSSEConsumerEffect>[1]>({
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		});
+		await wireSSEConsumerForTest(deps, consumer);
+		const emit = listeners.get("event");
+		assert.exists(emit);
+		for (const [sessionID, step] of [
+			["s1", "s1-text"],
+			["s1", "s1-idle"],
+			["s2", "s2-text"],
+			["s3", "s3-dies"],
+			["s3", "s3-after"],
+		])
+			emit({ type: "message.part.delta", properties: { sessionID, step } });
+		await allHandled;
+		expect(handled).toEqual(["s2-text", "s3-after", "s1-text", "s1-idle"]);
+	});
+});
+
+// When the pipeline drops a notification-worthy event (done, error) because no
+// clients are viewing that session, the server should publish an alert
+// (SubscribeAlerts) so clients on other sessions can fire sound/browser alerts.
+
+// Notification routing through resolveNotifications (F2 wiring)
+// Verifies that handleSSEEventEffect gates push and alert publication through
+// resolveNotifications() — not inline logic. These tests exercise the REAL
+// wiring path, not the policy function in isolation.
+
+describe("notification routing: push gating via resolveNotifications", () => {
+	it("does NOT call push for non-notification-worthy events (delta)", async () => {
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
+		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [
+				{ type: "delta", sessionId: "s1", text: "hello" } as RelayMessage,
+			],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "message.part.delta",
+			properties: { sessionID: "s1" },
+		};
+		await runSSEEvent(deps, event);
+
+		expect(mockPush.sendToAll).not.toHaveBeenCalled();
+	});
+
+	it("calls push for done event from root session (no parent)", async () => {
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
+		const deps = createMockSSEWiringDeps({
+			pushManager: mockPush,
+		});
+		const services = makeSSETestServices();
+		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
+			Effect.succeed(new Map()),
+		);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [
+				{
+					type: "done",
+					sessionId: "s1",
+					code: 0,
+					alertId: "done-1",
+				} as RelayMessage,
+			],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: { sessionID: "root-session" },
+		};
+		await runSSEEvent(deps, event, services);
+
+		expect(mockPush.sendToAll).toHaveBeenCalled();
+	});
+
+	it("does NOT call push for done event from subagent session", async () => {
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
+		const deps = createMockSSEWiringDeps({
+			pushManager: mockPush,
+		});
+		const services = makeSSETestServices();
+		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
+			Effect.succeed(new Map([["child-session", "parent-session"]])),
+		);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [
+				{
+					type: "done",
+					sessionId: "s1",
+					code: 0,
+					alertId: "done-1",
+				} as RelayMessage,
+			],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: { sessionID: "child-session" },
+		};
+		await runSSEEvent(deps, event, services);
+
+		expect(mockPush.sendToAll).not.toHaveBeenCalled();
+	});
+
+	it("does NOT publish a completion alert for a subagent", async () => {
+		const deps = createMockSSEWiringDeps({});
+		const services = makeSSETestServices();
+		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
+			Effect.succeed(new Map([["child-session", "parent-session"]])),
+		);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [
+				{
+					type: "done",
+					sessionId: "s1",
+					code: 0,
+					alertId: "done-1",
+				} as RelayMessage,
+			],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: { sessionID: "child-session" },
+		};
+		expect(await runSSEEvent(deps, event, services)).toEqual([]);
+	});
+
+	it("DOES call push for subagent error (errors always notify)", async () => {
+		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
+			sendToAll: vi
+				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
+				.mockResolvedValue({
+					delivered: ["device-1"],
+					expired: [],
+					failed: [],
+				}),
+		});
+		const deps = createMockSSEWiringDeps({
+			pushManager: mockPush,
+		});
+		const services = makeSSETestServices();
+		vi.mocked(services.sessionService.getSessionParentMap).mockReturnValue(
+			Effect.succeed(new Map([["child-session", "parent-session"]])),
+		);
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [
+				{
+					type: "done",
+					alertId: "error-1",
+					sessionId: "s1",
+					code: 1,
+					error: "crashed",
+				} as RelayMessage,
+			],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.error",
+			properties: { sessionID: "child-session" },
+		};
+		await runSSEEvent(deps, event, services);
+
+		expect(mockPush.sendToAll).toHaveBeenCalled();
+	});
+});
+
+describe("alert published for dropped notification-worthy events", () => {
+	it("publishes an alert when done is dropped (no viewers)", async () => {
+		const deps = createMockSSEWiringDeps();
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
+		const translated: RelayMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "done-1",
+		};
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: { sessionID: "other-session" },
+		};
+		const alerts = await runSSEEvent(deps, event);
+
+		expect(alerts).toEqual([
+			{
+				_tag: "alert",
+				kind: "done",
+				alertId: "done-1",
+				sessionId: "other-session",
+			},
+		]);
+	});
+
+	it("publishes an alert with message when error is dropped", async () => {
+		const deps = createMockSSEWiringDeps();
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
+		const translated: RelayMessage = {
+			type: "done",
+			alertId: "error-1",
+			sessionId: "s1",
+			code: 1,
+			error: "Something broke",
+		};
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: { sessionID: "other-session" },
+		};
+		const alerts = await runSSEEvent(deps, event);
+
+		expect(alerts).toEqual([
+			{
+				_tag: "alert",
+				kind: "error",
+				alertId: "error-1",
+				message: "Something broke",
+				sessionId: "other-session",
+			},
+		]);
+	});
+
+	it("does NOT publish an alert when the session has viewers", async () => {
+		const deps = createMockSSEWiringDeps();
+		// An RPC viewer suppresses the completion alert.
+		vi.mocked(deps.hasViewers).mockReturnValue(true);
+		const translated: RelayMessage = {
+			type: "done",
+			sessionId: "s1",
+			code: 0,
+			alertId: "done-1",
+		};
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "session.status",
+			properties: { sessionID: "my-session" },
+		};
+		expect(await runSSEEvent(deps, event)).toEqual([]);
+	});
+
+	it("does NOT publish an alert for non-notification types (delta)", async () => {
+		const deps = createMockSSEWiringDeps();
+		vi.mocked(deps.hasViewers).mockReturnValue(false);
+		const translated: RelayMessage = {
+			type: "delta",
+			sessionId: "s1",
+			text: "hello",
+		};
+		vi.mocked(deps.translator.translate).mockReturnValue({
+			ok: true,
+			messages: [translated],
+		});
+
+		const event: OpenCodeEvent = {
+			type: "message.part.delta",
+			properties: { sessionID: "other-session" },
+		};
+		expect(await runSSEEvent(deps, event)).toEqual([]);
+	});
+});
+
+// Lane 16o row 110: a closed relay's SSE consumer listeners would handle the next
+// stream's events a second time.
+describe("wireSSEConsumerEffect scope", () => {
+	it("drops every listener it adds when the relay's scope closes", async () => {
+		const listeners = new Set<string>();
+		const consumer = partialFake<Parameters<typeof wireSSEConsumerEffect>[1]>({
+			on: (name: string) => void listeners.add(name),
+			off: (name: string) => void listeners.delete(name),
+		});
+		const scope = Effect.runSync(Scope.make());
+		await Effect.runPromise(
+			wireSSEConsumerEffect(createMockSSEWiringDeps(), consumer).pipe(
+				Effect.provide(makeSSETestServices().layer, { local: true }),
+				Scope.provide(scope),
+			),
+		);
+		expect([...listeners].sort()).toEqual([
+			"connected",
+			"error",
+			"event",
+			"status",
+		]);
+
+		await Effect.runPromise(Scope.close(scope, Exit.void));
+
+		expect([...listeners]).toEqual([]);
+	});
+});

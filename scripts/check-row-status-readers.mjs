@@ -16,16 +16,17 @@ const allowed = {
 	"src/lib/persistence/effect/projectors-effect.ts": "projector",
 	// Provider-event readers: the status a provider reported, before any row exists.
 	"src/lib/provider/opencode/opencode-runtime-event-translator.ts": "event",
-	"src/lib/provider/relay-event-sink.ts": "event",
+	"src/lib/provider/project-event-sink.ts": "event",
 	"src/lib/provider/provider-runtime-event-to-domain.ts": "event",
-	"src/lib/domain/relay/Services/provider-runtime-ingestion-service.ts":
+	"src/lib/domain/project-services/Services/provider-runtime-ingestion-service.ts":
 		"event",
 	"src/lib/session/session-retries.ts": "event",
 	"src/lib/provider/opencode/sse-wiring.ts": "event",
 	"src/lib/persistence/effect/inherit-fork-history.ts": "event",
 	"src/lib/domain/daemon/Layers/opencode-instances-reconcile.ts": "event",
 	// A busy status from the stream marks a synced session's history for a reread (82tn.12).
-	"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts": "event",
+	"src/lib/domain/project-services/Services/opencode-runtime-ingress-service.ts":
+		"event",
 	// View readers: the status poller publishes each session's status from SessionActivity (busy
 	// while the ledger holds its active Run), so these read the view's status, not a row's.
 	"src/lib/session-busy.ts": "view",
@@ -33,7 +34,7 @@ const allowed = {
 	"src/lib/session/session-info-list.ts": "view",
 	// Row writers (32.13) read the row only to correct it. The poller's stale-busy pass does so only
 	// when the ledger says nothing may act (8.3).
-	"src/lib/domain/relay/Services/session-status-poller.ts": "writer",
+	"src/lib/domain/project-services/Services/session-status-poller.ts": "writer",
 	// A dead runner's busy children with no run of their own are settled idle (82tn.32.40).
 	"src/lib/provider/session-run-settlement.ts": "writer",
 };
@@ -84,9 +85,9 @@ for (const file of Object.keys(allowed))
 // fences, the processing timeouts or the stop covers (32.13 deletes them), and each must still
 // call the admission.
 const admissionPaths = {
-	"src/lib/domain/relay/Services/session-rewind.ts": "head move",
-	"src/lib/domain/relay/Services/continuation.ts": "provider switch",
-	"src/lib/domain/relay/Services/session-command.ts": "fork",
+	"src/lib/domain/project-services/Services/session-rewind.ts": "head move",
+	"src/lib/domain/project-services/Services/continuation.ts": "provider switch",
+	"src/lib/domain/project-services/Services/session-command.ts": "fork",
 };
 const otherBusy =
 	/provider_command_outbox|hasActiveProcessingTimeout|turnFences|fenceLifts|stopCovers|session-busy(?:\.js)?["']/;

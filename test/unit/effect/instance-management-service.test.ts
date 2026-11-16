@@ -4,7 +4,7 @@ import { expect } from "vitest";
 import {
 	InstanceManagementServiceLive,
 	InstanceManagementServiceTag,
-} from "../../../src/lib/domain/relay/Services/instance-management-service.js";
+} from "../../../src/lib/domain/project-services/Services/instance-management-service.js";
 
 describe("standalone InstanceManagementServiceLive", () => {
 	it.effect(

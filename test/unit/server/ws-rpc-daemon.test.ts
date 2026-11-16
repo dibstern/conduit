@@ -13,7 +13,7 @@ import {
 import {
 	type ProjectSettings,
 	ProjectSettingsTag,
-} from "../../../src/lib/domain/relay/Services/project-settings.js";
+} from "../../../src/lib/domain/project-services/Services/project-settings.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 

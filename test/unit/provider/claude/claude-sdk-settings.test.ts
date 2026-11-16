@@ -6,7 +6,7 @@ import { CLAUDE_TRUST_TIERED_SETTINGS_KEYS } from "../../../../src/lib/contracts
 import {
 	loadRelaySettings,
 	saveRelaySettings,
-} from "../../../../src/lib/daemon/relay-settings.js";
+} from "../../../../src/lib/daemon/global-settings.js";
 import { buildClaudeFlagSettings } from "../../../../src/lib/provider/claude/claude-sdk-settings.js";
 
 describe("buildClaudeFlagSettings", () => {

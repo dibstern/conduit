@@ -12,7 +12,7 @@ import Database from "better-sqlite3";
 import { Effect, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionDetailItemSchema } from "../../../src/lib/contracts/ws-rpc.js";
-import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
+import { SessionInboxTag } from "../../../src/lib/domain/project-services/Services/session-inbox.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";

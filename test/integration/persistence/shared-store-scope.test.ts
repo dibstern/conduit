@@ -42,45 +42,45 @@ import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { readColdWorktreeCleanupCandidates } from "../../../src/lib/domain/daemon/Services/worktree-cleanup-reader.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
+import { AgentServiceTag } from "../../../src/lib/domain/project-services/Services/agent-service.js";
 import {
 	AlertsLive,
 	AlertsTag,
-} from "../../../src/lib/domain/relay/Services/alerts.js";
-import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
+} from "../../../src/lib/domain/project-services/Services/alerts.js";
+import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/project-services/Services/opencode-runtime-ingress-service.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
-} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
-import { resolveOrphanedClaudePermissions } from "../../../src/lib/domain/relay/Services/resolve-orphaned-claude-permissions.js";
+} from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
+import { ProviderTurnServiceTag } from "../../../src/lib/domain/project-services/Services/provider-turn-service.js";
+import { resolveOrphanedClaudePermissions } from "../../../src/lib/domain/project-services/Services/resolve-orphaned-claude-permissions.js";
 import {
 	AgentLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { announceBackgroundWork } from "../../../src/lib/domain/relay/Services/session-attention.js";
-import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
-import { restoreSessionSettings } from "../../../src/lib/domain/relay/Services/session-model-settings.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { announceBackgroundWork } from "../../../src/lib/domain/project-services/Services/session-attention.js";
+import { SessionInboxTag } from "../../../src/lib/domain/project-services/Services/session-inbox.js";
+import { restoreSessionSettings } from "../../../src/lib/domain/project-services/Services/session-model-settings.js";
 import {
 	makeOverridesStateLive,
 	OverridesStateTag,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { backfillSessionPicks } from "../../../src/lib/domain/relay/Services/session-pick.js";
+} from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { backfillSessionPicks } from "../../../src/lib/domain/project-services/Services/session-pick.js";
 import {
 	SessionSetupLive,
 	SessionSetupTag,
-} from "../../../src/lib/domain/relay/Services/session-setup.js";
-import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
-import { worktreeUsers } from "../../../src/lib/domain/relay/Services/session-worktree-deletion.js";
+} from "../../../src/lib/domain/project-services/Services/session-setup.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/project-services/Services/session-workspace.js";
+import { worktreeUsers } from "../../../src/lib/domain/project-services/Services/session-worktree-deletion.js";
 import {
 	SSEStreamLive,
 	SSEStreamTag,
-} from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
-import { LocalPtyServiceTag } from "../../../src/lib/domain/relay/Services/terminal-service.js";
+} from "../../../src/lib/domain/project-services/Services/sse-stream-service.js";
+import { LocalPtyServiceTag } from "../../../src/lib/domain/project-services/Services/terminal-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,

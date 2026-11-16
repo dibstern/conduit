@@ -19,12 +19,12 @@ import {
 import { SqlClient } from "effect/sql";
 import { RunnerWriteOrigin } from "../../contracts/stored-event.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
-import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
+import { InputDraftsTag } from "../../domain/project-services/Services/input-drafts.js";
+import { PendingInteractionServiceTag } from "../../domain/project-services/Services/pending-interaction-service.js";
 import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
-} from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+} from "../../domain/project-services/Services/provider-runtime-ingestion-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
 import { makeClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";

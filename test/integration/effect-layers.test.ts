@@ -28,23 +28,23 @@ import {
 import {
 	RateLimiterLive,
 	RateLimiterTag,
-} from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
+} from "../../src/lib/domain/project-services/Layers/rate-limiter-layer.js";
 
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
-} from "../../src/lib/domain/relay/Services/session-manager-state.js";
+} from "../../src/lib/domain/project-services/Services/session-manager-state.js";
 import {
 	clearSession,
 	getModel,
 	makeOverridesStateLive,
 	OverridesStateTag,
 	setModel,
-} from "../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../src/lib/domain/project-services/Services/session-overrides-state.js";
 import {
 	makePollerStateLive,
 	PollerStateTag,
-} from "../../src/lib/domain/relay/Services/session-status-poller.js";
+} from "../../src/lib/domain/project-services/Services/session-status-poller.js";
 import { makeDaemonRpcTestLayer } from "../helpers/daemon-rpc.js";
 
 /** All Effect-native state layers + mock Tags for imperative services. */

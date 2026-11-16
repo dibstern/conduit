@@ -2,7 +2,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Option, Result } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
-import { makeInputDrafts } from "../../../src/lib/domain/relay/Services/input-drafts.js";
+import { makeInputDrafts } from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import { makeClaudeEventPersistEffect } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";

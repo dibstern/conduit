@@ -1,8 +1,8 @@
 import { Effect, Option } from "effect";
 import type { InputDraftKey } from "../contracts/ws-rpc.js";
-import { DraftPreWarmTag } from "../domain/relay/Services/draft-prewarm.js";
-import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
-import { ConfigTag } from "../domain/relay/Services/services.js";
+import { DraftPreWarmTag } from "../domain/project-services/Services/draft-prewarm.js";
+import { InputDraftsTag } from "../domain/project-services/Services/input-drafts.js";
+import { ConfigTag } from "../domain/project-services/Services/services.js";
 
 export const syncInputDraft = ({
 	key,

@@ -18,15 +18,15 @@ import { SqlClient, Statement } from "effect/sql";
 import { expect, it } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/project-services/Layers/session-workspace-layer.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
-import { forkSession } from "../../../src/lib/domain/relay/Services/session-command.js";
-import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+} from "../../../src/lib/domain/project-services/Services/services.js";
+import { forkSession } from "../../../src/lib/domain/project-services/Services/session-command.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/project-services/Services/session-overrides-state.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { claudeSdk } from "../../helpers/fake-claude-process-sdk.js";
 import {
@@ -55,7 +55,8 @@ it.skipIf(!snapshot || !baselineRef)(
 			join(resolve("test-results"), "fork-baseline-"),
 		);
 		try {
-			const commandPath = "src/lib/domain/relay/Services/session-command.ts";
+			const commandPath =
+				"src/lib/domain/project-services/Services/session-command.ts";
 			const historyPath = "src/lib/persistence/fork-history.ts";
 			for (const [original, target] of [
 				[historyPath, "fork-history.ts"],
