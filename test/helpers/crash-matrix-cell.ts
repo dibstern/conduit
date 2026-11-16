@@ -16,12 +16,6 @@ const read = (storePath: string, sessionId: string) => {
 			runs: all<{ id: string; status: string }>(
 				"SELECT id, status FROM provider_runs WHERE session_id = ?",
 			),
-			// 3.9, 4.8: a joined steer's main run is a Run Input of the Run it steered; it ends no Run.
-			// A steer that outlives its Run is a Run of its own once its host starts it, and ends
-			// once (CONTRACT.md 978-984).
-			steerRuns: all<{ runId: string }>(
-				"SELECT json_extract(r.data, '$.runId') AS runId FROM events r JOIN events s ON s.session_id = r.session_id AND s.type = 'input.sent' AND json_extract(s.data, '$.steer') = 1 AND json_extract(s.data, '$.inputId') = json_extract(r.data, '$.inputId') WHERE r.session_id = ? AND r.type = 'run.requested' AND NOT EXISTS (SELECT 1 FROM events started WHERE started.session_id = r.session_id AND started.type = 'run.started' AND json_extract(started.data, '$.requestedRunId') = json_extract(r.data, '$.runId'))",
-			).map(({ runId }) => runId),
 			ends: all<{ runId: string; outcome: string }>(
 				"SELECT json_extract(entry_json, '$.runId') AS runId, json_extract(entry_json, '$.outcome') AS outcome FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end'",
 			),
@@ -89,13 +83,10 @@ export const crashMatrixInvariants = (
 				const ends = store.ends.filter(({ runId }) => runId === run.id);
 				// The ledger owns the outcome, which may differ from main's row (CONTRACT 5774-5776,
 				// 857-859): a Stop asked ends interrupted though main's row reads error.
-				// AMENDMENT-2026-11-16 J1, J2: an unstarted steer is its own pending Run. A join folds it
-				// into the Run it steered with no end; a loss or retirement that covers it first ends it
-				// once (failure mode 87).
-				if (run.status === "joined") return ends.length === 0;
-				return store.steerRuns.includes(run.id)
-					? ends.length <= 1
-					: ends.length === 1;
+				// AMENDMENT-2026-11-16 J1, J2, J5: a join folds a steer into the Run it steered with no
+				// end; an unjoined steer is its own Run, which its terminal, loss or retirement ends
+				// exactly once by the time every Run has ended (failure mode 87).
+				return ends.length === (run.status === "joined" ? 0 : 1);
 			}),
 		everyRunningEffectHasOneOwner: store.unowned.length === 0,
 		inputAtMostOnce:
