@@ -2337,6 +2337,108 @@ export const scenarios: readonly OracleScenario[] = [
 		},
 	},
 	{
+		id: "VK-S1-later",
+		title:
+			"[E4] OpenCode: a send issued after the outstanding native_session probe is owed its own probe once that probe answers",
+		provider: "opencode",
+		run(d) {
+			const a = running(d);
+			main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			const first = d.latest("probe");
+			step(d, {
+				verb: "settle",
+				settlement: { kind: "process_lost", runnerId: "r1", retiredAt: d.now },
+			});
+			const b = running(d, "B");
+			const ended = main(d, {
+				kind: "run_terminal",
+				runId: b.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			expect(ended.issued).toEqual([]);
+			// A's idle was read before B was sent, so it cannot cover B; B is owed a probe of its own.
+			const idle = observe(d, tokenOf(first), {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().anythingMayAct).toBe(true);
+			expect(idle.issued.map(({ effect }) => effect)).toMatchObject([
+				{ kind: "probe", target: { tag: "native_session" } },
+			]);
+			observe(d, tokenOf(d.latest("probe")), {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().anythingMayAct).toBe(false);
+		},
+	},
+	{
+		id: "VK-S1-late-acceptance",
+		title:
+			"[E3, E4] OpenCode: a start accepted only after its sole idle read is owed a probe issued after its acceptance",
+		provider: "opencode",
+		run(d) {
+			const a = begin(d);
+			main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			observe(d, tokenOf(d.latest("probe")), {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().anythingMayAct).toBe(true);
+			const accepted = observe(d, a.token, {
+				kind: "input_accepted",
+				nativeMessageId: "native-A",
+			});
+			expect(accepted.issued.map(({ effect }) => effect)).toMatchObject([
+				{ kind: "probe", target: { tag: "native_session" } },
+			]);
+			observe(d, tokenOf(d.latest("probe")), {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().anythingMayAct).toBe(false);
+			expect(
+				d.issued.filter(({ effect }) => effect.kind === "start"),
+			).toHaveLength(1);
+		},
+	},
+	{
+		id: "VK-S1-exhausted",
+		title:
+			"[E4] OpenCode: a probe that reached its cap owes no follow-up; the fence holds to query_ended",
+		provider: "opencode",
+		run(d) {
+			const a = running(d);
+			main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "error",
+				code: "TurnError",
+			});
+			observe(d, tokenOf(d.latest("probe")), {
+				kind: "probe_result",
+				finding: { tag: "native_busy" },
+			});
+			for (const _ of [1, 2, 3, 4]) fire(d);
+			const capped = fire(d);
+			expect(capped.issued).toEqual([]);
+			expect(d.view().anythingMayAct).toBe(true);
+			const late = observe(d, a.token, { kind: "activity" });
+			expect(late.issued).toEqual([]);
+		},
+	},
+	{
 		id: "VK-101",
 		title:
 			"[E2] a runner host's terminal ends start and steer work at once, as before",

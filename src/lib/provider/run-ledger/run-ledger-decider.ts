@@ -125,6 +125,8 @@ interface Probe {
 	readonly subject?: { readonly send: number; readonly tx: number } | undefined;
 	deadline?: { readonly at: number; readonly opened: number } | undefined;
 	done: boolean;
+	/** 3.7: it ended at its cap with no finding. */
+	exhausted?: boolean | undefined;
 }
 
 /**
@@ -1259,6 +1261,7 @@ function reprobe(
 	const n = send.txs.filter((tx) => !tx.notSent).length + 1;
 	if (n > 5) {
 		pending.done = true;
+		pending.exhausted = true;
 		pending.deadline = undefined;
 		return;
 	}
@@ -1290,6 +1293,42 @@ const nativeSessionProbing = (book: Book): boolean =>
 	book.sends.some(
 		(send) => send.probe?.target.tag === "native_session" && !send.probe.done,
 	);
+
+/**
+ * AMENDMENT-2026-11-16 E4: a native_session probe can cover only a member sent before it, once its
+ * delivery is confirmed. A covered-by-none member, sent after the probe that was running or confirmed
+ * after its idle, is owed a probe of its own when none is running; one that exhausted its cap after
+ * the member was sent ends the owing.
+ */
+function oweNativeSessionProbe(book: Book, fact: Fact, step: Step): void {
+	if (
+		nativePolicies[book.provider].capabilities.runnerHost ||
+		nativeSessionProbing(book)
+	)
+		return;
+	const policy = rules(book);
+	const owed = book.sends.find(
+		(send) =>
+			delivers(send) &&
+			send.txs.some(
+				(tx) =>
+					tx.mainEnded &&
+					tx.ended === undefined &&
+					policy.idleCovers(
+						send.effect,
+						tx.resulted || consumptionRank[tx.consumption.tag] >= 2,
+					) &&
+					!book.sends.some(
+						(other) =>
+							other.probe?.target.tag === "native_session" &&
+							other.probe.exhausted &&
+							other.txs.some((sent) => sent.seq > tx.seq),
+					),
+			),
+	);
+	if (owed !== undefined)
+		probe(book, fact, step, owed.runId, { tag: "native_session" });
+}
 
 /**
  * 9: OpenCode's query end ends its label's starts and steers, never an abort or cancel_request, which
@@ -3137,26 +3176,26 @@ function apply(book: Book, entry: Entry, step: Step): Outcome {
 		case "fact": {
 			book.entry++;
 			const command = entry.command;
-			switch (command.verb) {
-				case "admit": {
-					const prior = book.inputs.get(command.inputId);
-					if (
-						prior?.runId !== undefined &&
-						findRun(book, prior.runId)?.phase !== "Ended"
-					)
-						return rejected("input already admitted to an active Run");
-					// D58, 3.4: main's handoff; main's run.requested reserves the Run.
-					// J1 (AMENDMENT-2026-11-16): admission never joins.
-					book.inputs.set(command.inputId, { delivery: command.delivery });
-					return changed;
-				}
-				case "observe":
-					return observe(book, entry, step, command.observation);
-				case "control":
-					return control(book, entry, step, command.control);
-				case "settle":
-					return settle(book, entry, step, command.settlement);
+			if (command.verb === "admit") {
+				const prior = book.inputs.get(command.inputId);
+				if (
+					prior?.runId !== undefined &&
+					findRun(book, prior.runId)?.phase !== "Ended"
+				)
+					return rejected("input already admitted to an active Run");
+				// D58, 3.4: main's handoff; main's run.requested reserves the Run.
+				// J1 (AMENDMENT-2026-11-16): admission never joins.
+				book.inputs.set(command.inputId, { delivery: command.delivery });
+				return changed;
 			}
+			const outcome =
+				command.verb === "observe"
+					? observe(book, entry, step, command.observation)
+					: command.verb === "control"
+						? control(book, entry, step, command.control)
+						: settle(book, entry, step, command.settlement);
+			if (outcome.tag === "Changed") oweNativeSessionProbe(book, entry, step);
+			return outcome;
 		}
 	}
 }

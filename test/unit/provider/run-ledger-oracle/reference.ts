@@ -105,6 +105,8 @@ interface Probe {
 	answered: boolean;
 	busy: boolean;
 	done: boolean;
+	/** 3.7: it ended at its cap with no finding. */
+	exhausted?: boolean | undefined;
 }
 
 interface Send {
@@ -1035,6 +1037,7 @@ function reprobe(world: World, step: Step, send: Send, probe: Probe): void {
 	if (n > 5) {
 		// 3.7: past the cap the probe ends with no finding.
 		probe.done = true;
+		probe.exhausted = true;
 		probe.deadline = undefined;
 		return;
 	}
@@ -1498,6 +1501,34 @@ const nativeSessionProbing = (world: World): boolean =>
 	world.sends.some(
 		(send) => send.probe?.target.tag === "native_session" && !send.probe.done,
 	);
+
+/**
+ * AMENDMENT-2026-11-16 E4: an idle read covers only a confirmed start or steer issued before it. Once
+ * no native_session probe is outstanding, a confirmed mainEnded one no probe after it can still cover
+ * (it was sent after the last probe, or confirmed after that probe's idle) is owed a fresh probe. A
+ * probe that reached its cap after it owes none; query_ended probes again (E3).
+ */
+function oweNativeSessionProbe(world: World, step: Step): void {
+	if (world.provider !== "opencode" || nativeSessionProbing(world)) return;
+	const owed = world.sends.find(
+		(send) =>
+			(send.effect.kind === "start" || send.effect.kind === "steer") &&
+			send.txs.some(
+				(tx) =>
+					tx.mainEnded &&
+					tx.ended === undefined &&
+					(tx.resulted || consumptionRank[tx.consumption.tag] >= 2) &&
+					!world.sends.some(
+						(other) =>
+							other.probe?.target.tag === "native_session" &&
+							other.probe.exhausted &&
+							other.txs.some((sent) => sent.seq > tx.seq),
+					),
+			),
+	);
+	if (owed !== undefined)
+		probe(world, step, owed.runId, { tag: "native_session" });
+}
 
 /**
  * OpenCode's query end ends its label's starts and steers (9). An abort or cancel_request acts on
@@ -2991,7 +3022,10 @@ function run(
 		ended: [],
 	};
 	const outcome = apply(world, entry.command, step);
-	if (outcome.tag === "Changed") reconcile(world, step);
+	if (outcome.tag === "Changed") {
+		oweNativeSessionProbe(world, step);
+		reconcile(world, step);
+	}
 	return { outcome, step };
 }
 
