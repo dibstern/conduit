@@ -287,13 +287,14 @@ export class CursorTurnEvents {
 		data: ProviderRuntimeEventPayloadMap[K],
 		refs?: ProviderRuntimeProviderRefs,
 		sink = this.sink,
+		runId = this.runId,
 	) {
 		return sink.push({
 			eventId: createEventId(),
 			type,
 			providerId: "cursor",
 			sessionId: this.sessionId,
-			...(this.runId ? { runId: this.runId } : {}),
+			...(runId ? { runId } : {}),
 			providerRefs: {
 				...this.refs,
 				providerMessageId: this.messageId,

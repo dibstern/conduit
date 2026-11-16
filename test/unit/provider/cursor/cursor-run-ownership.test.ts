@@ -58,6 +58,7 @@ describe("Cursor accepted run ownership", () => {
 							"complete_delivered" | "revert_to_followup"
 						>();
 						const finish = yield* Deferred.make<void>();
+						const ended = yield* Deferred.make<void>();
 						let sends = 0;
 						let delta: ((value: unknown) => void) | undefined;
 						const steer = vi.fn(() =>
@@ -144,7 +145,14 @@ describe("Cursor accepted run ownership", () => {
 								return Effect.sync(() => {
 									if (output.type === "event") events.push(output.event);
 									return {};
-								});
+								}).pipe(
+									Effect.tap(() =>
+										output.type === "event" &&
+										output.event.type === "turn.completed"
+											? Deferred.succeed(ended, undefined)
+											: Effect.void,
+									),
+								);
 							},
 							(inFlight) => {
 								lifecycle.push(inFlight ? "busy" : "idle");
@@ -333,9 +341,12 @@ describe("Cursor accepted run ownership", () => {
 						}
 						if (evidence === "late-delivered" || evidence === "late-reverted") {
 							// 105: the turn ends with the answer outstanding; the steer
-							// stays pending, and its later answer settles it.
+							// stays pending, and its later answer settles it. A late
+							// complete_delivered starts the steer's own Run and settles it
+							// with the turn's native outcome: nothing else would end it.
 							yield* Deferred.succeed(finish, undefined);
 							expect((yield* Fiber.join(first)).status).toBe("accepted");
+							yield* Deferred.await(ended);
 							expect(second.pollUnsafe()).toBeUndefined();
 							yield* Deferred.succeed(
 								delivered,
@@ -356,8 +367,43 @@ describe("Cursor accepted run ownership", () => {
 								...(evidence === "late-delivered"
 									? [
 											{
-												runId: "run-a",
+												runId: "run-b",
 												data: { inputId: "input-b", requestedRunId: "run-b" },
+											},
+										]
+									: []),
+							]);
+							expect(
+								events.flatMap(({ type, runId, data }) =>
+									type === "turn.completed" ||
+									type === "turn.interrupted" ||
+									type === "turn.error"
+										? [
+												{
+													type,
+													runId,
+													userMessageId:
+														typeof data === "object" &&
+														data !== null &&
+														"userMessageId" in data
+															? data.userMessageId
+															: undefined,
+												},
+											]
+										: [],
+								),
+							).toEqual([
+								{
+									type: "turn.completed",
+									runId: "run-a",
+									userMessageId: undefined,
+								},
+								...(evidence === "late-delivered"
+									? [
+											{
+												type: "turn.completed",
+												runId: "run-b",
+												userMessageId: "input-b",
 											},
 										]
 									: []),

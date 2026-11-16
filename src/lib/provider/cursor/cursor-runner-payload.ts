@@ -385,6 +385,65 @@ export class CursorRunnerPayload implements RunnerPayload {
 					yield* Deferred.succeed(intake, this.result(session, "accepted", 0));
 				});
 			let acceptingSteers = true;
+			// The turn's native end, set as main's terminal for it goes out.
+			let ended: TurnResult | undefined;
+			// Main's terminal for the turn's run, or for a steer's own Run (J4).
+			const pushTerminal = (
+				result: TurnResult,
+				durationMs: number,
+				own?: { inputId: string; runId: string; sink: EventSink },
+			) =>
+				result.status === "completed"
+					? events.push(
+							"turn.completed",
+							own
+								? { messageId: events.messageId, userMessageId: own.inputId }
+								: {
+										messageId: events.messageId,
+										...(session.agentId
+											? { providerSessionId: session.agentId }
+											: {}),
+										duration: durationMs,
+										// Cursor reports occupancy but no capacity, so the window stays omitted.
+										tokens: result.tokens,
+										...(events.contextTokens !== undefined
+											? { contextTokens: events.contextTokens }
+											: {}),
+										...(cost !== undefined ? { cost } : {}),
+										providerStateUpdates: result.providerStateUpdates.map(
+											({ key, value }) => ({ key, value: String(value) }),
+										),
+									},
+							undefined,
+							own?.sink,
+							own?.runId,
+						)
+					: result.status === "interrupted"
+						? events.push(
+								"turn.interrupted",
+								{
+									messageId: events.messageId,
+									// CONTRACT.md 3113-3117: the interrupt-timeout abandonment is not a native
+									// result (the native run may still act), so the wire marks it.
+									...(abandoned ? { code: "abandoned" } : {}),
+								},
+								undefined,
+								own?.sink,
+								own?.runId,
+							)
+						: events.push(
+								"turn.error",
+								{
+									messageId: events.messageId,
+									error: result.error?.message ?? "Cursor turn failed",
+									code: result.error?.code ?? "provider_error",
+									retryable: result.error?.retryable ?? false,
+									retryHandled: result.error?.retryHandled ?? false,
+								},
+								undefined,
+								own?.sink,
+								own?.runId,
+							);
 			// J7 (AMENDMENT-2026-11-16): the steer settlement. The steer call's own
 			// answer is the only thing that settles a sent steer: complete_delivered
 			// joins the open Run (J3), revert_to_followup declines, and a failed call
@@ -431,14 +490,25 @@ export class CursorRunnerPayload implements RunnerPayload {
 						if (pending.input.runId) runIds.add(pending.input.runId);
 						events.currentUserMessageId = inputId;
 						// The steer's own sink outlives the initial send's, so a join
-						// read after the turn ends still reaches main.
+						// read after the turn ends still reaches main. Read after the turn's
+						// terminal, it is no join: the steer is its own Run (J4), which it
+						// starts, and which the turn's native end settles, since the native
+						// run that took it has nothing more to send.
+						const own = ended && pending.input.runId;
 						if (events.runId && pending.input.runId)
 							yield* events.push(
 								"run.started",
 								{ inputId, requestedRunId: pending.input.runId },
 								undefined,
 								pending.sink,
+								own || events.runId,
 							);
+						if (ended && own)
+							yield* pushTerminal(ended, 0, {
+								inputId,
+								runId: own,
+								sink: pending.sink,
+							});
 						return this.result(session, "accepted", 0);
 					}).pipe(
 						Effect.mapError(
@@ -1104,38 +1174,8 @@ export class CursorRunnerPayload implements RunnerPayload {
 						yield* events.endThinking();
 						// A terminal can settle an unaccepted reservation without claiming intake.
 						events.runId ??= input.runId;
-						if (result.status === "completed")
-							yield* events.push("turn.completed", {
-								messageId: events.messageId,
-								...(session.agentId
-									? { providerSessionId: session.agentId }
-									: {}),
-								duration: durationMs,
-								// Cursor reports occupancy but no capacity, so the window stays omitted.
-								tokens: result.tokens,
-								...(events.contextTokens !== undefined
-									? { contextTokens: events.contextTokens }
-									: {}),
-								...(cost !== undefined ? { cost } : {}),
-								providerStateUpdates: result.providerStateUpdates.map(
-									({ key, value }) => ({ key, value: String(value) }),
-								),
-							});
-						else if (result.status === "interrupted")
-							yield* events.push("turn.interrupted", {
-								messageId: events.messageId,
-								// CONTRACT.md 3113-3117: the interrupt-timeout abandonment is not a native result
-								// (the native run may still act), so the wire marks it.
-								...(abandoned ? { code: "abandoned" } : {}),
-							});
-						else
-							yield* events.push("turn.error", {
-								messageId: events.messageId,
-								error: result.error?.message ?? "Cursor turn failed",
-								code: result.error?.code ?? "provider_error",
-								retryable: result.error?.retryable ?? false,
-								retryHandled: result.error?.retryHandled ?? false,
-							});
+						ended = result;
+						yield* pushTerminal(result, durationMs);
 						yield* events.push("session.status", {
 							sessionId: input.sessionId,
 							status: "idle",
