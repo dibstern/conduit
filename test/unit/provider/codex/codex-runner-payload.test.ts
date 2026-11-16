@@ -4,12 +4,13 @@
 // app-server exit inside the successor window fails a turn that completed; a
 // successor that arrived after its window is lost when its loop reads it.
 // A steer (J2, J3 AMENDMENT-2026-11-16): it joins the open run at its
-// turn/steer reply rather than at Codex's echo; an echo without clientId never
-// joins; an accepted steer Codex never echoes before turn/completed joins the
-// closed run (90); a reply read after the turn settled joins or writes to the
-// closed run (91); one echo without clientId, read as both item/started and
-// item/completed, joins two pending steers of the same turn; the turn's own
-// input echo, read after a steer's reply, joins that steer.
+// turn/steer reply rather than at Codex's echo; an accepted steer Codex never
+// echoes before turn/completed joins the closed run (90); a reply read after
+// the turn settled joins or writes to the closed run (91); an echo without
+// clientId joins a steer, on the turn its reply named or beside a tagged echo
+// (108); a tagged echo read as both item/started and item/completed joins
+// twice (110); the turn's own input echo, read after a steer's reply, joins
+// that steer.
 import {
 	existsSync,
 	mkdtempSync,
@@ -660,8 +661,8 @@ describe("Codex runner preparation", () => {
 	);
 
 	// J2, J3 (AMENDMENT-2026-11-16): Codex's userMessage echo is a steer's join; the turn/steer
-	// reply only places it. An echo joins by identity only, never by text: its clientId, or without
-	// one its reply's turnId, on the turn still executing. Nothing joins or reaches the closed run
+	// reply only places it. An echo joins by identity only, its clientId, never by text or by the
+	// turn its reply named, and only on the turn still executing. Nothing joins or reaches the closed run
 	// after its turn settled (90, 91). A steer its turn ended without echoing is its own Run (J4):
 	// the later turn Codex runs it in starts that Run, under its own run id, and ends it (90); an
 	// echo naming the ended turn consumes nothing. `starts` names the run its run.started names;
@@ -669,9 +670,8 @@ describe("Codex runner preparation", () => {
 	for (const variant of [
 		{ name: "joins at the echo", readsReply: true, starts: "run" },
 		{
-			name: "joins an echo without clientId on its reply's turn",
+			name: "joins no echo without clientId on its reply's turn",
 			readsReply: true,
-			starts: "run",
 		},
 		{
 			name: "joins no echo of its turn's own input read after its reply",
@@ -747,7 +747,7 @@ describe("Codex runner preparation", () => {
 					variant.name === "joins at the echo"
 						? rows
 						: variant.name ===
-								"joins an echo without clientId on its reply's turn"
+								"joins no echo without clientId on its reply's turn"
 							? rows.map((row) => {
 									if (!echoed(row) || !row.message?.params?.item) return row;
 									const { clientId: _clientId, ...item } =
@@ -956,148 +956,155 @@ describe("Codex runner preparation", () => {
 			}),
 		);
 
-	// J3: the item/started echo is the join. Codex sends each userMessage as item/started and
-	// item/completed; an echo without clientId must join one pending steer, not one per frame.
-	it.live("one echo without clientId joins one of two steers on its turn", () =>
-		Effect.gen(function* () {
-			const root = yield* Effect.acquireRelease(
-				Effect.sync(() => mkdtempSync(join(tmpdir(), "codex-runner-echo-"))),
-				(path) =>
-					Effect.sync(() => rmSync(path, { recursive: true, force: true })),
-			);
-			const rows: {
-				at: number;
-				message?: {
-					id?: number;
-					method?: string;
-					params?: Record<string, unknown> & {
-						item?: Record<string, unknown>;
+	// J3: the item/started echo is the join, by its clientId alone. Codex sends each userMessage as
+	// item/started and item/completed; the tagged echo joins its steer once (110), and an untagged
+	// copy on the same turn joins neither steer (108), though both replies named that turn.
+	it.live(
+		"one tagged echo joins its steer once and an untagged one joins none",
+		() =>
+			Effect.gen(function* () {
+				const root = yield* Effect.acquireRelease(
+					Effect.sync(() => mkdtempSync(join(tmpdir(), "codex-runner-echo-"))),
+					(path) =>
+						Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+				);
+				const rows: {
+					at: number;
+					message?: {
+						id?: number;
+						method?: string;
+						params?: Record<string, unknown> & {
+							item?: Record<string, unknown>;
+						};
 					};
-				};
-			}[] = readFileSync(
-				fileURLToPath(
-					new URL(
-						"../../../fixtures/codex-app-server-traces/steer.jsonl",
-						import.meta.url,
+				}[] = readFileSync(
+					fileURLToPath(
+						new URL(
+							"../../../fixtures/codex-app-server-traces/steer.jsonl",
+							import.meta.url,
+						),
 					),
-				),
-				"utf8",
-			)
-				.trim()
-				.split("\n")
-				.map((line) => JSON.parse(line));
-			const request = rows.findIndex(
-				({ message }) => message?.method === "turn/steer",
-			);
-			const reply = rows.findIndex(
-				({ message }) => message?.id === 4 && message.method === undefined,
-			);
-			const second = [
-				{
-					...rows[request],
-					message: {
-						...rows[request]?.message,
-						id: 5,
-						params: {
-							...rows[request]?.message?.params,
-							clientUserMessageId: "fixture-steer-2",
-						},
-					},
-				},
-				{ ...rows[reply], message: { ...rows[reply]?.message, id: 5 } },
-			];
-			const kept = rows.flatMap((row, index) => {
-				if (index === reply) return [row, ...second];
-				const item = row.message?.params?.item;
-				if (item?.["clientId"] !== "fixture-steer" || !row.message?.params)
-					return [row];
-				const { clientId: _clientId, ...rest } = item;
-				return [
+					"utf8",
+				)
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line));
+				const request = rows.findIndex(
+					({ message }) => message?.method === "turn/steer",
+				);
+				const reply = rows.findIndex(
+					({ message }) => message?.id === 4 && message.method === undefined,
+				);
+				const second = [
 					{
-						...row,
+						...rows[request],
 						message: {
-							...row.message,
-							params: { ...row.message.params, item: rest },
+							...rows[request]?.message,
+							id: 5,
+							params: {
+								...rows[request]?.message?.params,
+								clientUserMessageId: "fixture-steer-2",
+							},
 						},
 					},
+					{ ...rows[reply], message: { ...rows[reply]?.message, id: 5 } },
 				];
-			});
-			const trace = join(root, "steer.jsonl");
-			writeFileSync(
-				trace,
-				`${kept.map((row) => JSON.stringify(row)).join("\n")}\n`,
-			);
-			const events: ProviderRuntimeEvent[] = [];
-			const started = yield* Deferred.make<void>();
-			const ended = yield* Deferred.make<void>();
-			const runner = yield* makeCodexSessionRunner(
-				{
-					workspaceRoot: root,
-					daemonConfigDir: root,
-					environment: () => ({
-						CODEX_HOME: root,
-						NODE_ENV: "test",
-						CONDUIT_CODEX_APP_SERVER_TRACE: trace,
-					}),
-				},
-				(output) =>
-					Effect.gen(function* () {
-						if (output.type !== "event") return {};
-						events.push(output.event);
-						if (output.event.type === "run.started")
-							yield* Deferred.succeed(started, undefined);
-						if (output.event.type === "turn.completed")
-							yield* Deferred.succeed(ended, undefined);
-						return {};
-					}),
-			);
-			const admission = yield* makeRunnerAdmission(runner, "codex");
-			const send = (inputId: string, runId: string, prompt: string) =>
-				admitRunnerCommand(admission, runner, {
-					type: "send-turn",
-					sinkId: inputId,
-					aborted: false,
-					input: {
-						sessionId: "session",
-						inputId,
-						runId,
-						prompt,
-						history: [],
-						providerState: {},
-						workspaceRoot: root,
-						extraFolders: [],
-						configDir: configuredClaudeConfigDir(root),
-						folderSource: "account",
-						model: { providerId: "codex", modelId: "gpt-5.4" },
-						facts: {
-							_tag: "Codex",
-							skill: { _tag: "None" },
-							truncate: { _tag: "None" },
+				const kept = rows.flatMap((row, index) => {
+					if (index === reply) return [row, ...second];
+					const item = row.message?.params?.item;
+					if (item?.["clientId"] !== "fixture-steer" || !row.message?.params)
+						return [row];
+					const { clientId: _clientId, ...rest } = item;
+					return [
+						row,
+						{
+							...row,
+							message: {
+								...row.message,
+								params: {
+									...row.message.params,
+									item: { ...rest, id: `${String(rest["id"])}-untagged` },
+								},
+							},
 						},
-					},
+					];
 				});
-			const turn = yield* send("input", "run", "Say hello").pipe(
-				Effect.forkScoped,
-			);
-			yield* Deferred.await(started);
-			expect(
-				yield* send("steer", "run-steer", "Use the steered instruction"),
-			).toMatchObject({ status: "accepted" });
-			expect(
-				yield* send("steer-2", "run-steer-2", "Use the steered instruction"),
-			).toMatchObject({ status: "accepted" });
-			yield* Fiber.join(turn);
-			yield* Deferred.await(ended);
-			expect(
-				events.flatMap(({ type, runId, data }) =>
-					type === "run.started" &&
-					typeof data === "object" &&
-					data !== null &&
-					"requestedRunId" in data
-						? [`${runId} ${String(data.requestedRunId)}`]
-						: [],
-				),
-			).toEqual(["run run", "run run-steer"]);
-		}),
+				const trace = join(root, "steer.jsonl");
+				writeFileSync(
+					trace,
+					`${kept.map((row) => JSON.stringify(row)).join("\n")}\n`,
+				);
+				const events: ProviderRuntimeEvent[] = [];
+				const started = yield* Deferred.make<void>();
+				const ended = yield* Deferred.make<void>();
+				const runner = yield* makeCodexSessionRunner(
+					{
+						workspaceRoot: root,
+						daemonConfigDir: root,
+						environment: () => ({
+							CODEX_HOME: root,
+							NODE_ENV: "test",
+							CONDUIT_CODEX_APP_SERVER_TRACE: trace,
+						}),
+					},
+					(output) =>
+						Effect.gen(function* () {
+							if (output.type !== "event") return {};
+							events.push(output.event);
+							if (output.event.type === "run.started")
+								yield* Deferred.succeed(started, undefined);
+							if (output.event.type === "turn.completed")
+								yield* Deferred.succeed(ended, undefined);
+							return {};
+						}),
+				);
+				const admission = yield* makeRunnerAdmission(runner, "codex");
+				const send = (inputId: string, runId: string, prompt: string) =>
+					admitRunnerCommand(admission, runner, {
+						type: "send-turn",
+						sinkId: inputId,
+						aborted: false,
+						input: {
+							sessionId: "session",
+							inputId,
+							runId,
+							prompt,
+							history: [],
+							providerState: {},
+							workspaceRoot: root,
+							extraFolders: [],
+							configDir: configuredClaudeConfigDir(root),
+							folderSource: "account",
+							model: { providerId: "codex", modelId: "gpt-5.4" },
+							facts: {
+								_tag: "Codex",
+								skill: { _tag: "None" },
+								truncate: { _tag: "None" },
+							},
+						},
+					});
+				const turn = yield* send("input", "run", "Say hello").pipe(
+					Effect.forkScoped,
+				);
+				yield* Deferred.await(started);
+				expect(
+					yield* send("steer", "run-steer", "Use the steered instruction"),
+				).toMatchObject({ status: "accepted" });
+				expect(
+					yield* send("steer-2", "run-steer-2", "Use the steered instruction"),
+				).toMatchObject({ status: "accepted" });
+				yield* Fiber.join(turn);
+				yield* Deferred.await(ended);
+				expect(
+					events.flatMap(({ type, runId, data }) =>
+						type === "run.started" &&
+						typeof data === "object" &&
+						data !== null &&
+						"requestedRunId" in data
+							? [`${runId} ${String(data.requestedRunId)}`]
+							: [],
+					),
+				).toEqual(["run run", "run run-steer"]);
+			}),
 	);
 });
