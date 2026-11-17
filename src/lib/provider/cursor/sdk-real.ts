@@ -26,6 +26,9 @@ import type {
 
 export type { ToolType as CursorToolKind } from "@cursor/sdk";
 
+let sdk: Promise<typeof import("@cursor/sdk")> | undefined;
+export const loadCursorSdk = () => (sdk ??= import("@cursor/sdk"));
+
 export function cursorSdkVersion(): string {
 	let directory = dirname(
 		createRequire(import.meta.url).resolve("@cursor/sdk"),
@@ -54,12 +57,11 @@ export function cursorSdkVersion(): string {
 	}
 }
 
-/** Runs once at startup, before any account can log in or out. */
-export async function adoptLegacyCursorCredential(
+/** Reserve the legacy login's owner even when Cursor is not loaded yet. */
+export function claimLegacyCursorCredential(
 	storePath: string,
 	markerPath: string,
-	legacyStorePath?: string,
-): Promise<string> {
+): string {
 	const completed = `${markerPath}.complete`;
 	if (existsSync(completed)) return readFileSync(markerPath, "utf8");
 	mkdirSync(dirname(markerPath), { recursive: true, mode: 0o700 });
@@ -79,8 +81,22 @@ export async function adoptLegacyCursorCredential(
 	} finally {
 		rmSync(claim, { force: true });
 	}
-	const selectedStorePath = readFileSync(markerPath, "utf8");
-	const { FileCredentialStore } = await import("@cursor/sdk");
+	return readFileSync(markerPath, "utf8");
+}
+
+export async function adoptLegacyCursorCredential(
+	storePath: string,
+	markerPath: string,
+	legacyStorePath?: string,
+): Promise<string> {
+	const selectedStorePath = claimLegacyCursorCredential(storePath, markerPath);
+	const completed = `${markerPath}.complete`;
+	if (existsSync(completed)) return selectedStorePath;
+	// Leave adoption retryable when the optional SDK cannot load. The real port's
+	// runtime probe still owns reporting Cursor unavailable.
+	const loaded = await loadCursorSdk().catch(() => undefined);
+	if (!loaded) return selectedStorePath;
+	const { FileCredentialStore } = loaded;
 	const legacy = new FileCredentialStore(legacyStorePath);
 	const scoped = new FileCredentialStore(selectedStorePath);
 	if (!(await scoped.load()) && (await legacy.load())) {
@@ -106,9 +122,8 @@ export async function adoptLegacyCursorCredential(
 export function createRealCursorSdkPort(
 	credentialStorePath?: string,
 ): CursorSdkPort {
-	let sdk: Promise<typeof import("@cursor/sdk")> | undefined;
 	let pendingLogin: Promise<void> | undefined;
-	const load = () => (sdk ??= import("@cursor/sdk"));
+	const load = loadCursorSdk;
 	let credentials: import("@cursor/sdk").FileCredentialStore | undefined;
 	const credentialStore = async () =>
 		(credentials ??= new (await load()).FileCredentialStore(

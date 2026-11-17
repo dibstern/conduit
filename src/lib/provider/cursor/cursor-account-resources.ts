@@ -21,7 +21,11 @@ import {
 	cursorCredentialStorePath,
 } from "./cursor-sdk.js";
 import type { CursorSdkPort } from "./sdk-port.js";
-import { adoptLegacyCursorCredential } from "./sdk-real.js";
+import {
+	adoptLegacyCursorCredential,
+	claimLegacyCursorCredential,
+	loadCursorSdk,
+} from "./sdk-real.js";
 
 export interface CursorAccountResource {
 	readonly owner: CursorCredentialOwner;
@@ -56,21 +60,35 @@ export const CursorAccountResourcesLive = (
 				process.env["CURSOR_BACKEND_URL"] ?? DEFAULT_CURSOR_BACKEND_URL,
 			);
 			const loginSlot = { _tag: "LoginSlot" } as const;
-			const compatibilityStorePath = yield* Effect.tryPromise({
+			const markerPath = join(configDir, "cursor", "legacy-auth-adopted");
+			const compatibilityStorePath = yield* Effect.try({
 				try: () =>
-					adoptLegacyCursorCredential(
+					claimLegacyCursorCredential(
 						cursorCredentialStorePath(
 							Option.isSome(legacyDefault) ? legacyDefault.value.id : loginSlot,
 							configDir,
 						),
-						join(configDir, "cursor", "legacy-auth-adopted"),
-						legacyStorePath,
+						markerPath,
 					),
 				catch: () =>
 					new WsRpcError({
 						message: "Could not adopt the existing Cursor login",
 					}),
 			});
+			const adoptCredential = yield* Effect.cached(
+				Effect.tryPromise({
+					try: () =>
+						adoptLegacyCursorCredential(
+							compatibilityStorePath,
+							markerPath,
+							legacyStorePath,
+						),
+					catch: () =>
+						new WsRpcError({
+							message: "Could not adopt the existing Cursor login",
+						}),
+				}),
+			);
 			const resources = yield* scopes.make((id) =>
 				Effect.gen(function* () {
 					const account = (yield* directory.snapshot).accounts.find(
@@ -82,6 +100,11 @@ export const CursorAccountResourcesLive = (
 								message: `Cursor account "${id}" is unavailable`,
 							}),
 						);
+					const sdk = createCursorSdkPort({
+						id: account?.id ?? loginSlot,
+						configDir,
+					});
+					if (!sdk.replay) yield* adoptCredential;
 					const owner: CursorCredentialOwner =
 						account?.driver === "cursor"
 							? {
@@ -92,10 +115,6 @@ export const CursorAccountResourcesLive = (
 										compatibilityStorePath,
 								}
 							: loginSlot;
-					const sdk = createCursorSdkPort({
-						id: owner._tag === "Account" ? owner.account.id : owner,
-						configDir,
-					});
 					const credential = Effect.tryPromise({
 						try: async () => {
 							const launchEnv =
@@ -142,6 +161,17 @@ export const CursorAccountResourcesLive = (
 					return { owner, sdk, auth, credential };
 				}),
 			);
+			// This layer already precedes listen. Open the configured Cursor port
+			// here so its first browser RPC never pays for module evaluation.
+			const cursor = (yield* directory.snapshot).accounts.find(
+				(account) => account.driver === "cursor",
+			);
+			if (cursor)
+				yield* resources.use(cursor.id, ({ sdk }) =>
+					sdk.replay
+						? Effect.void
+						: Effect.tryPromise(loadCursorSdk).pipe(Effect.ignore),
+				);
 			return {
 				backendUrl,
 				use: (id, work) =>
