@@ -20,6 +20,7 @@ import { accountsStateFromInstances } from "../../../src/lib/account-directory.j
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { makeProductionProcessTable } from "../../../src/lib/provider/runner/process-table.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
 	runnerSinkId,
@@ -30,7 +31,6 @@ import {
 	discoverRunners,
 	registerRunner,
 	runnerDirectory,
-	runnerProcessTable,
 } from "../../../src/lib/provider/runner/runner-registry.js";
 import type { SessionCommand } from "../../../src/lib/provider/runner/session-runner.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
@@ -44,6 +44,8 @@ import {
 	ProcessHarness,
 	responseChunks,
 } from "../../helpers/process-harness.js";
+
+const processTable = makeProductionProcessTable();
 
 function snapshot(harness: ProcessHarness, sessionId: string) {
 	const db = new Database(harness.daemonStorePath(), {
@@ -333,13 +335,21 @@ describe("Claude runner admission socket probes", () => {
 						yield* sql`INSERT INTO session_providers (id, session_id, provider, activated_at)
 							VALUES (${sessionId}, ${sessionId}, 'claude', 1)`;
 						const receipts = yield* makeRunnerReceiptStore(sql);
+						const observed = processTable.identify([pid]).get(pid);
 						expect(
 							yield* receipts.register(
 								runnerId,
 								{
 									sessionId,
 									pid,
-									startTime: runnerProcessTable.inspect(pid).startTime,
+									...(observed?.state === "running"
+										? {
+												startTime: observed.startTime,
+												...(observed.startKey
+													? { startKey: observed.startKey }
+													: {}),
+											}
+										: {}),
 								},
 								"serving",
 							),

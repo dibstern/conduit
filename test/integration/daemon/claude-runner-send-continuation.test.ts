@@ -15,12 +15,16 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
-import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
+import {
+	makeProductionProcessTable,
+	sameProcess,
+} from "../../../src/lib/provider/runner/process-table.js";
 import {
 	ProcessHarness,
 	responseChunks,
 } from "../../helpers/process-harness.js";
 
+const processTable = makeProductionProcessTable();
 const evidenceDirectory =
 	process.env["CONDUIT_RUNNER_EVIDENCE_DIR"] ??
 	mkdtempSync(join(tmpdir(), "send-continuation-evidence-"));
@@ -241,15 +245,15 @@ function ownRunner(harness: ProcessHarness, sessionId: string) {
 		(item) => item.kind === "runner-started" && item.sessionId === sessionId,
 	);
 	assert(mark?.kind === "runner-started");
-	const observed = runnerProcessTable.inspect(mark.pid);
-	assert(observed.state === "running" && observed.startTime);
+	const observed = processTable.identify([mark.pid]).get(mark.pid);
+	assert(observed?.state === "running");
 	return { ...mark, startTime: observed.startTime };
 }
 
 function signalRunner(runner: ReturnType<typeof ownRunner>, signal: "SIGKILL") {
-	const current = runnerProcessTable.inspect(runner.pid);
+	const current = processTable.identify([runner.pid]).get(runner.pid);
 	assert(
-		current.state === "running" && current.startTime === runner.startTime,
+		sameProcess(runner, current) === "same",
 		"Only the fixture-owned original process may be signalled",
 	);
 	process.kill(runner.pid, signal);
@@ -464,7 +468,9 @@ describe("send continuation through real daemon and runner processes", () => {
 					assert(run);
 					for (let count = 0; count < 3; count++) {
 						await harness.kill();
-						expect(runnerProcessTable.inspect(runner.pid)).toMatchObject({
+						expect(
+							processTable.identify([runner.pid]).get(runner.pid),
+						).toMatchObject({
 							state: "running",
 							startTime: runner.startTime,
 						});
@@ -545,7 +551,9 @@ describe("send continuation through real daemon and runner processes", () => {
 						if (mode === 40) signalRunner(runner, "SIGKILL");
 						else {
 							await harness.kill();
-							expect(runnerProcessTable.inspect(runner.pid)).toMatchObject({
+							expect(
+								processTable.identify([runner.pid]).get(runner.pid),
+							).toMatchObject({
 								state: "running",
 								startTime: runner.startTime,
 							});
@@ -565,7 +573,9 @@ describe("send continuation through real daemon and runner processes", () => {
 						expect(command.status).toBe("running");
 						await harness.kill();
 						rmSync(pauseGate, { force: true });
-						expect(runnerProcessTable.inspect(runner.pid)).toMatchObject({
+						expect(
+							processTable.identify([runner.pid]).get(runner.pid),
+						).toMatchObject({
 							state: "running",
 							startTime: runner.startTime,
 						});

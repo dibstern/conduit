@@ -42,7 +42,7 @@ let proof: Record<string, unknown> | undefined;
 const proofs: Record<string, unknown>[] = [];
 
 afterEach(async () => {
-	// Restore inspect first: cleanup refuses to signal an unverifiable runner.
+	// Restore registration matching before fixture cleanup.
 	vi.restoreAllMocks();
 	if (harness) {
 		await harness.dispose();
@@ -447,40 +447,27 @@ it.each([
 			return [registration.pid, registration.startTime ?? birth];
 		}),
 	);
-	vi.spyOn(runnerRegistry.runnerProcessTable, "inspect").mockImplementation(
-		(pid) => {
-			if (!runnerRegistry.runnerPidAlive(pid)) return { state: "gone" };
-			const startTime = identities.get(pid);
-			return unverifiable || startTime === undefined
-				? { state: "unknown" }
-				: { state: "running", startTime };
-		},
-	);
-	// Retirement observes through the batch form; it must see the same evidence.
-	vi.spyOn(runnerRegistry.runnerProcessTable, "inspectMany").mockImplementation(
-		(pids) =>
-			new Map(
-				pids.map((pid) => [
-					pid,
-					runnerRegistry.runnerProcessTable.inspect(pid),
-				]),
-			),
-	);
 	const processTable = makeProductionProcessTable();
 	const identify = processTable.identify;
 	vi.spyOn(processTable, "identify").mockImplementation((pids) => {
 		const observed = identify(pids);
 		return new Map(
 			pids.map((pid) => {
-				const process = observed.get(pid);
-				if (!unverifiable && !identities.has(pid))
-					return [pid, process ?? { state: "unknown" }];
+				const seen = observed.get(pid);
+				const startTime = identities.get(pid);
+				if (!unverifiable && startTime === undefined)
+					return [pid, seen ?? { state: "unknown" }];
+				if (!runnerRegistry.runnerPidAlive(pid))
+					return [pid, { state: "gone" }];
+				if (unverifiable || startTime === undefined)
+					return [pid, { state: "unknown" }];
 				return [
 					pid,
 					testProcess({
-						...runnerRegistry.runnerProcessTable.inspect(pid),
-						...(process?.state === "running" && process.pgid !== undefined
-							? { pgid: process.pgid }
+						state: "running",
+						startTime,
+						...(seen?.state === "running" && seen.pgid !== undefined
+							? { pgid: seen.pgid }
 							: {}),
 					}),
 				];

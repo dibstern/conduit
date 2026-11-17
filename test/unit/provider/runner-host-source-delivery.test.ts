@@ -13,6 +13,7 @@ import {
 	configuredClaudeConfigDir,
 } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { SendToken } from "../../../src/lib/provider/run-ledger/run-ledger-model.js";
+import * as ProcessTables from "../../../src/lib/provider/runner/process-table.js";
 import {
 	type RunnerLaunch,
 	type RunnerLaunchCallbacks,
@@ -24,7 +25,6 @@ import {
 	runnerBuildId,
 	sendToken,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
-import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
 import { readRunnerSendJournal } from "../../../src/lib/provider/runner/runner-send-journal.js";
 import { RunnerSpool } from "../../../src/lib/provider/runner/runner-spool.js";
 import type {
@@ -37,6 +37,7 @@ import type {
 	SessionFailure,
 } from "../../../src/lib/provider/runner/session-runner.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
+import { makeTestProcessTable } from "../../helpers/runner-process-table.js";
 
 // The payload supplies output and a no-op Stop; the real host owns all wire state.
 function makePayload(emit: Parameters<RunnerLaunch["makeRunner"]>[1]) {
@@ -192,9 +193,22 @@ for (const { name, mode } of [
 		};
 		const argvDescriptor = Object.getOwnPropertyDescriptor(process, "argv");
 		const sendDescriptor = Object.getOwnPropertyDescriptor(process, "send");
-		const inspect = vi
-			.spyOn(runnerProcessTable, "inspect")
-			.mockReturnValue({ state: "running", startTime: "host-fixture" });
+		const table = vi
+			.spyOn(ProcessTables, "makeProductionProcessTable")
+			.mockReturnValue(
+				makeTestProcessTable({
+					processes: new Map([
+						[
+							process.pid,
+							{
+								state: "running",
+								startTime: "host-fixture",
+								pgid: process.pid,
+							},
+						],
+					]),
+				}),
+			);
 		const exit = vi.spyOn(process, "exit").mockImplementation(() => {
 			throw new Error("Host fixture must never exit the test process");
 		});
@@ -1075,7 +1089,7 @@ for (const { name, mode } of [
 			vi.unstubAllEnvs();
 			exit.mockRestore();
 			kill.mockRestore();
-			inspect.mockRestore();
+			table.mockRestore();
 			rmSync(directory, { recursive: true, force: true });
 		}
 	});

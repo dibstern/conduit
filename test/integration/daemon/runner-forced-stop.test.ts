@@ -15,15 +15,15 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
 	makeProductionProcessTable,
+	makePsProcessAdapter,
 	ProcessStart,
 	sameProcess,
 } from "../../../src/lib/provider/runner/process-table.js";
 import type { RunnerMember } from "../../../src/lib/provider/runner/runner-receipts.js";
-import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import {
 	ProcessHarness,
@@ -472,15 +472,17 @@ async function cleanupOwned(
 	}
 	for (const pid of harness.runnerPids()) {
 		const saved = all.find((member) => member.pid === pid);
-		const group = runnerProcessTable.members?.(pid);
-		const current = runnerProcessTable.inspect(pid);
+		const observation = await Effect.runPromise(
+			processTable.observe({ pgid: pid, pids: [pid] }),
+		);
+		const current = observation.processes.get(pid);
 		if (
 			saved &&
-			current.state === "running" &&
-			current.startTime === saved.startTime &&
+			sameProcess(saved, current) === "same" &&
+			current?.state === "running" &&
 			current.pgid === pid
 		)
-			all.push(...(group ?? []));
+			all.push(...(observation.group ?? []));
 	}
 	try {
 		for (const member of all) signalOwned(member, "SIGKILL");
@@ -518,7 +520,9 @@ async function selectedRunner(
 			typeof reaper["startTime"] === "string",
 	);
 	const reaperIdentity = identity(reaper["pid"]);
-	expect(runnerProcessTable.inspect(reaperIdentity.pid)).toMatchObject({
+	expect(
+		processTable.identify([reaperIdentity.pid]).get(reaperIdentity.pid),
+	).toMatchObject({
 		state: "running",
 		startTime: reaperIdentity.startTime,
 		pgid: leader.pid,
@@ -550,12 +554,16 @@ async function selectedRunner(
 		join(harness.root, "d1-selected-pid"),
 		JSON.stringify({ ...selection, descendantPid: descendant.pid }),
 	);
-	const members = runnerProcessTable.members?.(runner.pid);
+	const { group: members } = await Effect.runPromise(
+		processTable.observe({ pgid: runner.pid, pids: [runner.pid] }),
+	);
 	assert(members);
 	expect(members).toEqual(
 		expect.arrayContaining(
 			[leader, reaperIdentity, descendant].map((member) =>
-				Schema.decodeUnknownSync(PreviousMember)(member),
+				expect.objectContaining(
+					Schema.decodeUnknownSync(PreviousMember)(member),
+				),
 			),
 		),
 	);
@@ -602,13 +610,16 @@ async function expectGroupGone(
 	members: readonly RunnerMember[],
 ) {
 	await vi.waitFor(
-		() => {
+		async () => {
 			expect(membersGone(members)).toBe(true);
+			// Once the pins exit, observe skips listing. Use an independent oracle
+			// so an unrecorded surviving child still fails this assertion.
+			const groupProcesses = await Effect.runPromise(
+				makePsProcessAdapter().group(group),
+			);
+			assert(groupProcesses);
 			expect(
-				(runnerProcessTable.members?.(group) ?? []).filter(
-					(member) =>
-						runnerProcessTable.inspect(member.pid).state === "running",
-				),
+				[...groupProcesses.values()].filter((seen) => seen.state === "running"),
 			).toEqual([]);
 		},
 		{ timeout: harness.remainingTimeMs(20_000) },
@@ -942,7 +953,11 @@ describe("runner forced stop with real processes", () => {
 			const fixture = await selectedRunner(harness, leaderExits, { forking });
 			members = [...fixture.members];
 			evidence["acceptedRun"] = fixture.acceptedRun;
-			expect(runnerProcessTable.inspect(fixture.descendant.pid)).toMatchObject({
+			expect(
+				processTable
+					.identify([fixture.descendant.pid])
+					.get(fixture.descendant.pid),
+			).toMatchObject({
 				state: "running",
 				pgid: fixture.leader.pid,
 			});
@@ -1000,7 +1015,7 @@ describe("runner forced stop with real processes", () => {
 				const committed = Schema.decodeUnknownSync(
 					Schema.fromJsonString(
 						Schema.Array(
-							Schema.Struct({ pid: Schema.Number, startTime: Schema.String }),
+							Schema.Struct({ pid: Schema.Number, ...ProcessStart.fields }),
 						),
 					),
 				)(shutdown["retirement"]["member_snapshot"]);
@@ -1017,7 +1032,7 @@ describe("runner forced stop with real processes", () => {
 						grandchildren.some(
 							(child) =>
 								child.pid === member.pid &&
-								child.startTime === member.startTime,
+								sameProcess(child, { state: "running", ...member }) === "same",
 						),
 					),
 				).toBe(true);
@@ -1267,7 +1282,7 @@ describe("runner forced stop with real processes", () => {
 			await expectGroupGone(harness, fixture.leader.pid, members);
 			evidence["groupGoneWhileDaemonPaused"] = members.map((member) => ({
 				...member,
-				observation: runnerProcessTable.inspect(member.pid),
+				observation: processTable.identify([member.pid]).get(member.pid),
 			}));
 			signalOwned(daemon, "SIGCONT");
 			daemon = undefined;
@@ -1397,11 +1412,13 @@ describe("runner forced stop with real processes", () => {
 			evidence["durableBeforeRestart"] = retired;
 			evidence["observationsBeforeRestart"] = members.map((member) => ({
 				...member,
-				observation: runnerProcessTable.inspect(member.pid),
+				observation: processTable.identify([member.pid]).get(member.pid),
 			}));
 			if (crash !== "after-kill") {
 				expect(
-					runnerProcessTable.inspect(fixture.descendant.pid),
+					processTable
+						.identify([fixture.descendant.pid])
+						.get(fixture.descendant.pid),
 				).toMatchObject({
 					state: "running",
 					startTime: fixture.descendant.startTime,
@@ -1416,7 +1433,9 @@ describe("runner forced stop with real processes", () => {
 					proof(harness).filter((entry) => entry["kind"] === "signal"),
 				).toEqual([]);
 				for (const member of members)
-					expect(runnerProcessTable.inspect(member.pid)).toMatchObject({
+					expect(
+						processTable.identify([member.pid]).get(member.pid),
+					).toMatchObject({
 						state: "running",
 						startTime: member.startTime,
 					});

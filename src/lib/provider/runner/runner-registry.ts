@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
 	closeSync,
@@ -24,7 +23,6 @@ import {
 	type ProcessTable,
 	sameProcess,
 } from "./process-table.js";
-import type { RunnerMember } from "./runner-receipts.js";
 
 class RunnerRegistryError extends Data.TaggedError("RunnerRegistryError")<{
 	readonly message: string;
@@ -41,104 +39,6 @@ export interface RunnerRegistration
 	readonly registeredAt?: number;
 	readonly signalled?: boolean;
 }
-
-export interface RunnerProcessTable {
-	readonly inspect: (pid: number) => {
-		readonly state: "running" | "zombie" | "gone" | "unknown";
-		readonly startTime?: string;
-		readonly pgid?: number;
-	};
-	readonly members?: (pgid: number) => readonly RunnerMember[] | undefined;
-	readonly inspectMany?: (
-		pids: readonly number[],
-	) => ReadonlyMap<number, ReturnType<RunnerProcessTable["inspect"]>>;
-}
-
-export const runnerProcessTable: RunnerProcessTable = {
-	inspectMany: (pids) => {
-		const observed = new Map<
-			number,
-			ReturnType<RunnerProcessTable["inspect"]>
-		>();
-		// A gone pid is a gone member (6.6) without a ps.
-		for (const pid of pids)
-			if (!runnerPidAlive(pid)) observed.set(pid, { state: "gone" });
-		const live = pids.filter((pid) => !observed.has(pid));
-		if (live.length === 0) return observed;
-		try {
-			const output = execFileSync(
-				"ps",
-				["-o", "pid=,pgid=,lstart=,stat=", "-p", live.join(",")],
-				{
-					encoding: "utf8",
-					env: { ...process.env, LC_ALL: "C" },
-					stdio: ["ignore", "pipe", "ignore"],
-					timeout: 1000,
-				},
-			);
-			for (const line of output.split("\n")) {
-				const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s+(\S+)\s*$/.exec(line);
-				if (match?.[1] && match[2] && match[3] && match[4])
-					observed.set(Number(match[1]), {
-						state: match[4].startsWith("Z") ? "zombie" : "running",
-						startTime: match[3],
-						pgid: Number(match[2]),
-					});
-			}
-		} catch {
-			// A failed inspection is not proof that a process has exited.
-		}
-		for (const pid of pids)
-			if (!observed.has(pid))
-				observed.set(pid, { state: runnerPidAlive(pid) ? "unknown" : "gone" });
-		return observed;
-	},
-	inspect: (pid) => {
-		if (!runnerPidAlive(pid)) return { state: "gone" };
-		try {
-			const output = execFileSync(
-				"ps",
-				["-o", "pgid=,lstart=,stat=", "-p", String(pid)],
-				{
-					encoding: "utf8",
-					// lstart is persisted and compared across daemon environments.
-					env: { ...process.env, LC_ALL: "C" },
-					stdio: ["ignore", "pipe", "ignore"],
-					timeout: 1000,
-				},
-			).trim();
-			const match = /^(\d+)\s+(.*?)\s+(\S+)$/.exec(output);
-			if (!match?.[1] || !match[2] || !match[3]) return { state: "unknown" };
-			return {
-				state: match[3].startsWith("Z") ? "zombie" : "running",
-				startTime: match[2],
-				pgid: Number(match[1]),
-			};
-		} catch {
-			return { state: runnerPidAlive(pid) ? "unknown" : "gone" };
-		}
-	},
-	members: (pgid) => {
-		// A group with no member has none to list (6.6).
-		if (!runnerPidAlive(-pgid)) return [];
-		try {
-			const output = execFileSync("ps", ["-axo", "pid=,pgid=,lstart="], {
-				encoding: "utf8",
-				env: { ...process.env, LC_ALL: "C" },
-				stdio: ["ignore", "pipe", "ignore"],
-				timeout: 1000,
-			});
-			return output.split("\n").flatMap((line) => {
-				const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line);
-				return match?.[1] && match[2] && match[3] && Number(match[2]) === pgid
-					? [{ pid: Number(match[1]), startTime: match[3] }]
-					: [];
-			});
-		} catch {
-			return undefined;
-		}
-	},
-};
 
 function runnerTargetDirectory(
 	workspaceRoot: string,

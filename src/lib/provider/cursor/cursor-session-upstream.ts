@@ -1,10 +1,8 @@
 import { rm } from "node:fs/promises";
 import { Effect } from "effect";
 import type { SessionUpstreamAdapter } from "../../domain/project-services/Services/session-command.js";
-import {
-	discoverRunners,
-	runnerProcessTable,
-} from "../runner/runner-registry.js";
+import type { ProcessTable } from "../runner/process-table.js";
+import { discoverRunners } from "../runner/runner-registry.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
 import {
 	cursorSessionStorePath,
@@ -14,7 +12,11 @@ import { CursorSdkFailure } from "./sdk-error.js";
 
 export const cursorUpstreamAdapter = (
 	configuration:
-		| { readonly workspaceRoot: string; readonly configDir: string }
+		| {
+				readonly workspaceRoot: string;
+				readonly configDir: string;
+				readonly processTable: ProcessTable;
+		  }
 		| undefined,
 ): SessionUpstreamAdapter => ({
 	provider: "cursor",
@@ -28,19 +30,21 @@ export const cursorUpstreamAdapter = (
 								"Cursor cleanup requires the project and config directories",
 						});
 					}
-					const { workspaceRoot, configDir } = configuration;
+					const { workspaceRoot, configDir, processTable } = configuration;
 					const { sessionId } = command.data;
 					const identity = readCursorSessionIdentity(configDir, sessionId);
 					// An end-session failure must not let a live controller write into
 					// the store while its persisted agent is being removed.
 					if (
-						discoverRunners(workspaceRoot, configDir).some(
+						discoverRunners(workspaceRoot, configDir, processTable).some(
 							(runner) => runner.sessionId === sessionId,
 						) ||
 						// A zombie cannot write; Stop counts it as gone (6.6).
 						(identity &&
 							!["gone", "zombie"].includes(
-								runnerProcessTable.inspect(identity.controllerPid).state,
+								processTable
+									.identify([identity.controllerPid])
+									.get(identity.controllerPid)?.state ?? "unknown",
 							))
 					) {
 						throw new CursorSdkFailure({

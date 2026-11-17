@@ -10,11 +10,8 @@ import { RUNNER_PROTOCOL_VERSION } from "../../src/lib/provider/runner/runner-pr
 import {
 	prepareRunnerDirectory,
 	type RunnerRegistration,
-	runnerProcessTable,
 } from "../../src/lib/provider/runner/runner-registry.js";
 import { isRecord } from "../../src/lib/utils.js";
-
-const cleanupProcesses = makeProductionProcessTable();
 
 export function testRunnerAlive(pid: number): boolean {
 	try {
@@ -170,6 +167,7 @@ export async function cleanupTestClaudeRunners(
 	projectDir = join(root, "project"),
 	knownStartTimes?: ReadonlyMap<number, string>,
 ) {
+	const cleanupProcesses = makeProductionProcessTable();
 	const entries = registrations(projectDir, configDir);
 	const identities = new Map(knownStartTimes);
 	for (const entry of entries)
@@ -186,11 +184,10 @@ export async function cleanupTestClaudeRunners(
 	};
 	const signal = (pid: number, value: NodeJS.Signals) => {
 		const startTime = identities.get(pid);
-		const current = runnerProcessTable.inspect(pid);
+		const current = cleanupProcesses.identify([pid]).get(pid);
 		if (
 			startTime === undefined ||
-			current.state !== "running" ||
-			current.startTime !== startTime
+			sameProcess({ pid, startTime }, current) !== "same"
 		)
 			return;
 		process.kill(pid, value);

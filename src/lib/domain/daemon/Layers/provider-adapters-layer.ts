@@ -671,6 +671,7 @@ export const makeProviderAdaptersLive = (
 			);
 			return {
 				registry,
+				processTable,
 				...(testSdk?.fork && { claudeSessionForkSdk: testSdk.fork }),
 				shutdown,
 				projectContext: (projectId) =>

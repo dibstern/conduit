@@ -235,7 +235,7 @@ const processStartRow = {
 		time: start?.startTime ?? null,
 		key: start?.startTime === undefined ? null : (start.startKey ?? null),
 	}),
-	decode: (time: string | null, key: string | null) =>
+	decode: (time: StartTime | null, key: string | null) =>
 		time === null
 			? undefined
 			: { startTime: time, ...(key === null ? {} : { startKey: key }) },
@@ -316,9 +316,15 @@ const decodeRetirement = (raw: { readonly runner_id: string }) =>
 		),
 	);
 
-export const mergeRunnerMembers = (
+export function mergeRunnerMembers(
+	...snapshots: readonly (readonly ProcessMember[])[]
+): ProcessMember[];
+export function mergeRunnerMembers(
 	...snapshots: readonly (readonly RunnerMember[])[]
-) => {
+): RunnerMember[];
+export function mergeRunnerMembers(
+	...snapshots: readonly (readonly RunnerMember[])[]
+) {
 	const members: RunnerMember[] = [];
 	for (const snapshot of snapshots)
 		for (const member of snapshot) {
@@ -339,7 +345,7 @@ export const mergeRunnerMembers = (
 				members[index] = member;
 		}
 	return members;
-};
+}
 
 export interface RunnerCursorIdentity
 	extends Partial<{

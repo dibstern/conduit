@@ -38,7 +38,10 @@ import type { SendToken } from "../../../src/lib/provider/run-ledger/run-ledger-
 import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import * as ProcessTables from "../../../src/lib/provider/runner/process-table.js";
-import { makeProcessTable } from "../../../src/lib/provider/runner/process-table.js";
+import {
+	makeMemoryProcessAdapter,
+	makeProcessTable,
+} from "../../../src/lib/provider/runner/process-table.js";
 import * as RunnerConnection from "../../../src/lib/provider/runner/runner-connection.js";
 import {
 	type RunnerCommandFailure,
@@ -52,10 +55,8 @@ import * as RunnerRecovery from "../../../src/lib/provider/runner/runner-recover
 import * as RunnerRegistry from "../../../src/lib/provider/runner/runner-registry.js";
 import {
 	prepareRunnerDirectory,
-	type RunnerProcessTable,
 	type RunnerRegistration,
 	registerRunner,
-	runnerProcessTable,
 } from "../../../src/lib/provider/runner/runner-registry.js";
 import { stopRegisteredRunners } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { RunnerSendJournal } from "../../../src/lib/provider/runner/runner-send-journal.js";
@@ -115,24 +116,18 @@ const setup = Effect.gen(function* () {
 		number,
 		readonly { readonly pid: number; readonly startTime: string }[]
 	>();
-	const members = vi.fn<NonNullable<RunnerProcessTable["members"]>>(
+	const listGroup = vi.fn<
+		(
+			pgid: number,
+		) =>
+			| readonly { readonly pid: number; readonly startTime: string }[]
+			| undefined
+	>(
 		(pgid: number) =>
 			groups.get(pgid) ??
 			(processes.get(pgid)?.startTime
 				? [{ pid: pgid, startTime: processes.get(pgid)?.startTime ?? "" }]
 				: []),
-	);
-	const inspect = vi.fn(
-		(pid: number) => processes.get(pid) ?? { state: "gone" as const },
-	);
-	const inspectMany = vi.fn(
-		(pids: readonly number[]) =>
-			new Map(
-				pids.map((pid) => [
-					pid,
-					processes.get(pid) ?? { state: "gone" as const },
-				]),
-			),
 	);
 	const signal = vi.fn((pid: number, signal: NodeJS.Signals) => {
 		signals.push({ pid, signal });
@@ -224,14 +219,15 @@ const setup = Effect.gen(function* () {
 			}
 			return entry;
 		});
-	const processTable = makeProcessTable({
-		read: (pids) =>
-			new Map(
-				[...inspectMany(pids)].map(([pid, seen]) => [pid, testProcess(seen)]),
-			),
+	const adapter = makeMemoryProcessAdapter({
+		get processes() {
+			return new Map(
+				[...processes].map(([pid, seen]) => [pid, testProcess(seen)]),
+			);
+		},
 		group: (pgid) =>
 			Effect.sync(() => {
-				const group = members(pgid);
+				const group = listGroup(pgid);
 				return group === undefined
 					? undefined
 					: new Map(
@@ -247,8 +243,9 @@ const setup = Effect.gen(function* () {
 						);
 			}),
 		signal,
-		argv: () => undefined,
 	});
+	const readProcesses = vi.spyOn(adapter, "read");
+	const processTable = makeProcessTable(adapter);
 	const makeManager = (
 		options: Pick<
 			Parameters<typeof makeProcessSessionRunner>[0],
@@ -300,10 +297,9 @@ const setup = Effect.gen(function* () {
 		signal,
 		signals,
 		processes,
-		inspect,
-		inspectMany,
+		readProcesses,
 		groups,
-		members,
+		listGroup,
 		children,
 		notices,
 		output,
@@ -1133,7 +1129,7 @@ it.effect("keeps descendant grace and escalates after the runner exits", () =>
 			child.emit("exit", 0, null);
 			yield* TestClock.adjust("500 millis");
 			expect(stopping.pollUnsafe()).toBeUndefined();
-			expect(f.inspectMany.mock.calls.at(-1)?.[0]).toEqual(
+			expect(f.readProcesses.mock.calls.at(-1)?.[0]).toEqual(
 				members.map((member) => member.pid),
 			);
 			// Observe the four-second Stop bound independently of jittered polling.
@@ -1179,7 +1175,7 @@ for (const pin of ["leader", "reaper"] as const)
 						{ pid: leader.pid, startTime: "unrelated-leader" },
 						{ pid: 100_092, startTime: "unrelated-child" },
 					];
-					f.members.mockImplementation(() => {
+					f.listGroup.mockImplementation(() => {
 						if (pin === "reaper")
 							f.processes.set(reaper.pid, { state: "gone" });
 						for (const member of unrelated)
@@ -1264,15 +1260,6 @@ it.effect(
 								return undefined;
 							}),
 						),
-						vi
-							.spyOn(runnerProcessTable, "inspect")
-							.mockImplementation(f.inspect),
-						vi
-							.spyOn(runnerProcessTable, "inspectMany")
-							.mockImplementation(f.inspectMany),
-						vi
-							.spyOn(runnerProcessTable, "members")
-							.mockImplementation(f.members),
 					]),
 					(values) =>
 						Effect.sync(() => {
@@ -1310,21 +1297,20 @@ it.effect("shared fixture cleanup never signals a reused runner PID", () =>
 			const nativeKill = process.kill;
 			yield* Effect.acquireRelease(
 				Effect.sync(() => [
-					vi.spyOn(runnerProcessTable, "inspect").mockReturnValue({
-						state: "running",
-						startTime: "unrelated-process",
-					}),
-					vi.spyOn(runnerProcessTable, "inspectMany").mockImplementation(
-						(pids) =>
-							new Map(
-								pids.map((target) => [
-									target,
-									{
-										state: "running" as const,
-										startTime: "unrelated-process",
-									},
+					vi.spyOn(ProcessTables, "makeProductionProcessTable").mockReturnValue(
+						makeProcessTable(
+							makeMemoryProcessAdapter({
+								processes: new Map([
+									[
+										pid,
+										testProcess({
+											state: "running",
+											startTime: "unrelated-process",
+										}),
+									],
 								]),
-							),
+							}),
+						),
 					),
 					vi.spyOn(process, "kill").mockImplementation((target, signal) => {
 						if (target !== pid) return nativeKill.call(process, target, signal);
@@ -1392,7 +1378,7 @@ for (const pin of ["leader", "reaper", "both"] as const)
 						startTime: descendant.startTime,
 						pgid: leader.pid,
 					});
-					f.members.mockReturnValue(undefined);
+					f.listGroup.mockReturnValue(undefined);
 					f.signal.mockImplementation((pid, signal) => {
 						f.signals.push({ pid, signal });
 						if (pid === -leader.pid)
@@ -1504,7 +1490,7 @@ it.effect(
 				const members = [{ pid: leader.pid, startTime: "original" }];
 				let reads = 0;
 				let readsAtSignal = 0;
-				f.members.mockImplementation(() => {
+				f.listGroup.mockImplementation(() => {
 					// Bound the faulty implementation's recursion so red fails promptly.
 					if (!f.signals.length && reads < 12) {
 						reads++;
@@ -1563,7 +1549,7 @@ for (const losePin of [false, true])
 					yield* f.recover;
 					let reads = 0;
 					let listed = false;
-					f.members.mockImplementation(() => {
+					f.listGroup.mockImplementation(() => {
 						reads++;
 						listed = true;
 						f.processes.set(child.pid, {
@@ -1574,13 +1560,13 @@ for (const losePin of [false, true])
 						return [original, child];
 					});
 					let checks = 0;
-					f.inspectMany.mockImplementation((pids) => {
+					f.readProcesses.mockImplementation((pids) => {
 						if (listed && ++checks === 2 && losePin)
 							f.processes.set(leader.pid, { state: "gone" });
 						return new Map(
 							pids.map((pid) => [
 								pid,
-								f.processes.get(pid) ?? { state: "gone" as const },
+								testProcess(f.processes.get(pid) ?? { state: "gone" as const }),
 							]),
 						);
 					});
@@ -2854,11 +2840,11 @@ it.effect(
 				yield* f.recover;
 				yield* f.manager.recoverEffect;
 				yield* TestClock.adjust("58 seconds");
-				const checks = f.members.mock.calls.length;
+				const checks = f.listGroup.mock.calls.length;
 				yield* TestClock.adjust("59 seconds");
-				expect(f.members.mock.calls).toHaveLength(checks);
+				expect(f.listGroup.mock.calls).toHaveLength(checks);
 				yield* TestClock.adjust("1 second");
-				expect(f.members.mock.calls.length).toBeGreaterThan(checks);
+				expect(f.listGroup.mock.calls.length).toBeGreaterThan(checks);
 				expect(yield* f.notices).toHaveLength(1);
 			}),
 		),
@@ -2986,23 +2972,23 @@ it.effect(
 				const f = yield* setup;
 				const entry = yield* f.register("abababab8585", 100_085);
 				yield* f.recover;
-				const reads = f.inspectMany.mock.calls.length;
-				const listings = f.members.mock.calls.length;
+				const reads = f.readProcesses.mock.calls.length;
+				const listings = f.listGroup.mock.calls.length;
 				yield* TestClock.adjust("7 seconds");
-				expect(f.inspectMany.mock.calls).toHaveLength(reads);
-				expect(f.members.mock.calls).toHaveLength(listings);
+				expect(f.readProcesses.mock.calls).toHaveLength(reads);
+				expect(f.listGroup.mock.calls).toHaveLength(listings);
 				expect(f.alive).toHaveBeenCalledWith(entry.pid);
 				expect(f.signals).toEqual([]);
 				yield* TestClock.adjust("1 second");
 				expect(f.signals).toEqual([{ pid: -entry.pid, signal: "SIGKILL" }]);
-				const readsAfterKill = f.inspectMany.mock.calls.length;
+				const readsAfterKill = f.readProcesses.mock.calls.length;
 				f.processes.set(entry.pid, {
 					state: "zombie",
 					startTime: "original",
 					pgid: entry.pid,
 				});
 				yield* TestClock.adjust("7 seconds");
-				expect(f.inspectMany.mock.calls).toHaveLength(readsAfterKill);
+				expect(f.readProcesses.mock.calls).toHaveLength(readsAfterKill);
 				expect(f.signals).toHaveLength(1);
 				// signal 0 cannot distinguish an unreaped zombie; the next full pass can.
 				yield* TestClock.adjust("13 seconds");
@@ -3270,7 +3256,11 @@ it.effect(
 					startTime: undefined,
 					signalled: false,
 				});
-				f.processes.set(entry.pid, runnerProcessTable.inspect(entry.pid));
+				f.processes.set(entry.pid, {
+					state: "running",
+					startTime: "current-process",
+					pgid: process.pid,
+				});
 				yield* f.recover;
 				yield* TestClock.adjust("60 seconds");
 				expect(f.signals).toEqual([]);
@@ -4118,7 +4108,7 @@ for (const state of ["running", "unknown"] as const)
 					yield* f.sql`UPDATE claude_runner_cursors SET reaper_pid = ${reaper.pid}, reaper_start_time = ${reaper.startTime}, member_snapshot = ${JSON.stringify([reaper])} WHERE runner_id = ${leader.runnerId}`;
 					f.processes.set(leader.pid, { state });
 					f.processes.set(reaper.pid, { state: "gone" });
-					f.members.mockReturnValue(undefined);
+					f.listGroup.mockReturnValue(undefined);
 					yield* f.recover;
 					yield* TestClock.adjust("60 seconds");
 					expect(

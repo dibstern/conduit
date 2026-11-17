@@ -52,7 +52,6 @@ import {
 	runnerIdleFailure,
 	sendToken,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
-import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
 import type { SessionCommand } from "../../../src/lib/provider/runner/session-runner.js";
 import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
@@ -72,16 +71,6 @@ it("observes a replacement's lower revisions without losing its launch snapshot"
 	const root = mkdtempSync(join(tmpdir(), "run-generation-revision-"));
 	roots.push(root);
 	const children = [new TestChild(), new TestChild(99_999_998)];
-	const inspect = vi
-		.spyOn(runnerProcessTable, "inspect")
-		.mockImplementation((pid) => ({
-			state: children.some(
-				(child) => child.pid === pid && child.exitCode === null,
-			)
-				? "running"
-				: "gone",
-			startTime: "revision-fixture",
-		}));
 	let spawned = 0;
 	transport.alive.mockImplementation((pid: number) =>
 		children.some((child) => child.pid === pid && child.exitCode === null),
@@ -261,7 +250,6 @@ it("observes a replacement's lower revisions without losing its launch snapshot"
 		expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
 	} finally {
 		kill.mockRestore();
-		inspect.mockRestore();
 	}
 });
 

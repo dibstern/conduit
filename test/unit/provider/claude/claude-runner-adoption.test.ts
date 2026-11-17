@@ -11,7 +11,13 @@ import { join } from "node:path";
 import { Deferred, Effect, Result as Either, Fiber, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { makeProductionProcessTable } from "../../../../src/lib/provider/runner/process-table.js";
+import {
+	makeMemoryProcessAdapter,
+	makeProcessTable,
+	makeProductionProcessTable,
+	type ProcessStart,
+	sameProcess,
+} from "../../../../src/lib/provider/runner/process-table.js";
 
 const config = vi.hoisted(() => ({
 	root: `/tmp/adopt-${process.pid}-${Date.now().toString(36)}`,
@@ -36,7 +42,6 @@ import {
 	registerRunner,
 	runnerDirectory,
 	runnerPidAlive,
-	runnerProcessTable,
 } from "../../../../src/lib/provider/runner/runner-registry.js";
 import type { SessionOutput } from "../../../../src/lib/provider/runner/session-runner.js";
 import { ProviderRuntimeIngestionLive } from "../../../helpers/daemon-turns.js";
@@ -45,19 +50,19 @@ import { makeRunnerAdmission } from "../../../helpers/runner-provider-admission.
 const observations: Record<string, unknown>[] = [];
 const servers: Server[] = [];
 const sockets = new Set<Socket>();
-const children = new Map<ChildProcess, string | undefined>();
+const children = new Map<ChildProcess, ProcessStart | undefined>();
+const processTable = makeProductionProcessTable();
 let cases = 0;
 
 function spawnRunnerChild() {
 	const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], {
 		stdio: "ignore",
 	});
-	children.set(
-		child,
+	const seen =
 		child.pid === undefined
 			? undefined
-			: runnerProcessTable.inspect(child.pid).startTime,
-	);
+			: processTable.identify([child.pid]).get(child.pid);
+	children.set(child, seen?.state === "running" ? seen : undefined);
 	return child;
 }
 
@@ -79,14 +84,17 @@ afterEach(async () => {
 					new Promise<void>((resolve) => server.close(() => resolve())),
 			),
 	);
-	for (const [child, startTime] of children) {
+	for (const [child, start] of children) {
 		if (child.exitCode !== null || child.signalCode !== null) continue;
 		await new Promise<void>((resolve) => {
 			child.once("exit", () => resolve());
 			if (
 				child.pid !== undefined &&
-				startTime !== undefined &&
-				runnerProcessTable.inspect(child.pid).startTime === startTime
+				start !== undefined &&
+				sameProcess(
+					{ pid: child.pid, ...start },
+					processTable.identify([child.pid]).get(child.pid),
+				) === "same"
 			)
 				child.kill("SIGKILL");
 		});
@@ -120,17 +128,16 @@ async function runnerSocket(options: {
 	mkdirSync(directory, { recursive: true });
 	const socketPath = join(directory, runnerId);
 	const pid = options.child?.pid ?? process.pid;
-	const native = makeProductionProcessTable();
-	const processTable = {
-		...native,
-		identify: (pids: readonly number[]) =>
-			new Map(
-				[...native.identify(pids)].map(([target, seen]) => [
-					target,
-					target === process.pid ? { state: "unknown" as const } : seen,
-				]),
-			),
-	};
+	const native = processTable;
+	const fixtureProcesses = makeProcessTable(
+		makeMemoryProcessAdapter({
+			get processes() {
+				const facts = new Map(native.identify([pid]));
+				facts.set(process.pid, { state: "unknown" });
+				return facts;
+			},
+		}),
+	);
 	const persistence = makePersistenceEffectLayer(
 		":memory:",
 		"adoption-project",
@@ -151,7 +158,7 @@ async function runnerSocket(options: {
 				driverKind: "claude",
 				pid,
 				startTime: (() => {
-					const seen = processTable.identify([pid]).get(pid);
+					const seen = fixtureProcesses.identify([pid]).get(pid);
 					return seen && "startTime" in seen ? seen.startTime : undefined;
 				})(),
 			},
@@ -240,7 +247,7 @@ async function runnerSocket(options: {
 		deps: {
 			projectRootForSession: () => Effect.succeed(workspaceRoot),
 			daemonConfigDir: config.root,
-			processTable,
+			processTable: fixtureProcesses,
 		},
 		registerServing,
 		services,
@@ -474,8 +481,10 @@ describe("Claude runner adoption", () => {
 				if (
 					child.pid !== undefined &&
 					children.get(child) !== undefined &&
-					runnerProcessTable.inspect(child.pid).startTime ===
-						children.get(child)
+					sameProcess(
+						{ pid: child.pid, ...children.get(child) },
+						processTable.identify([child.pid]).get(child.pid),
+					) === "same"
 				)
 					child.kill("SIGTERM");
 			},

@@ -23,10 +23,11 @@ import {
 	type LedgerEvent,
 	viewLedger,
 } from "../../../src/lib/provider/run-ledger/run-ledger-decider.js";
-import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
+import { makeProductionProcessTable } from "../../../src/lib/provider/runner/process-table.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const EVIDENCE = "test-results/lane-3226-claude-goals.json";
+const processTable = makeProductionProcessTable();
 
 const read = (harness: ProcessHarness, sessionId: string) => {
 	const db = new Database(harness.daemonStorePath(), { readonly: true });
@@ -392,8 +393,8 @@ describe("Claude goals as native commands", () => {
 			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
 		);
 		if (runner?.kind !== "runner-started") throw new Error("no runner mark");
-		const owned = runnerProcessTable.inspect(runner.pid);
-		if (owned.state !== "running") throw new Error("runner not running");
+		const owned = processTable.identify([runner.pid]).get(runner.pid);
+		if (owned?.state !== "running") throw new Error("runner not running");
 		process.kill(runner.pid, "SIGKILL");
 		await turn;
 		// test-waits-allow polling: the process death and the resend reach the store with no browser frame.

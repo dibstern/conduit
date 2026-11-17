@@ -21,6 +21,7 @@ import type {
 	SDKMessage,
 } from "../../../src/lib/provider/claude/types.js";
 import { ClaudeBoundaryError } from "../../../src/lib/provider/event-sink-errors.js";
+import * as ProcessTables from "../../../src/lib/provider/runner/process-table.js";
 import {
 	type RunnerLaunch,
 	type RunnerLaunchCallbacks,
@@ -32,7 +33,6 @@ import {
 	RunnerSocket,
 	runnerBuildId,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
-import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
 import { RunnerSinkBindings } from "../../../src/lib/provider/runner/runner-sink-bindings.js";
 import { RunnerSpool } from "../../../src/lib/provider/runner/runner-spool.js";
 import {
@@ -43,12 +43,12 @@ import {
 	type SessionOutput,
 	type SessionOutputReply,
 } from "../../../src/lib/provider/runner/session-runner.js";
-
 import {
 	createMockQuery,
 	makeErrorResult,
 	makeSuccessResult,
 } from "../../helpers/mock-sdk.js";
+import { makeTestProcessTable } from "../../helpers/runner-process-table.js";
 import {
 	admitRunnerCommand,
 	makeRunnerAdmission,
@@ -169,9 +169,22 @@ const withHost = (
 		const socketPath = join(directory, "r.sock");
 		const argv = Object.getOwnPropertyDescriptor(process, "argv");
 		const send = Object.getOwnPropertyDescriptor(process, "send");
-		const inspect = vi
-			.spyOn(runnerProcessTable, "inspect")
-			.mockReturnValue({ state: "running", startTime: "host-fixture" });
+		const table = vi
+			.spyOn(ProcessTables, "makeProductionProcessTable")
+			.mockReturnValue(
+				makeTestProcessTable({
+					processes: new Map([
+						[
+							process.pid,
+							{
+								state: "running",
+								startTime: "host-fixture",
+								pgid: process.pid,
+							},
+						],
+					]),
+				}),
+			);
 		const exit = vi.spyOn(process, "exit").mockImplementation(() => {
 			throw new Error("Host fixture must never exit the test process");
 		});
@@ -186,7 +199,7 @@ const withHost = (
 				vi.unstubAllEnvs();
 				exit.mockRestore();
 				kill.mockRestore();
-				inspect.mockRestore();
+				table.mockRestore();
 				rmSync(directory, { recursive: true, force: true });
 			}),
 		);

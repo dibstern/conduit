@@ -77,6 +77,7 @@ import { assertNever } from "../../../utils.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeSessionIds } from "../../daemon/Services/opencode-session-ids.js";
+import { ProviderAdapters } from "../../daemon/Services/provider-adapters.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { DraftChange } from "./input-drafts.js";
 import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
@@ -487,13 +488,17 @@ export const sessionUpstreamAdapter = (
 			case "cursor":
 			case "codex": {
 				const config = yield* Effect.serviceOption(ConfigTag);
+				const adapters = yield* Effect.serviceOption(ProviderAdapters);
 				const adapter =
 					provider === "codex" ? codexUpstreamAdapter : cursorUpstreamAdapter;
 				return adapter(
-					config._tag === "Some" && config.value.configDir !== undefined
+					config._tag === "Some" &&
+						config.value.configDir !== undefined &&
+						adapters._tag === "Some"
 						? {
 								workspaceRoot: config.value.projectDir,
 								configDir: config.value.configDir,
+								processTable: adapters.value.processTable,
 							}
 						: undefined,
 				);

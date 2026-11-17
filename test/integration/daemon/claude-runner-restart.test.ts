@@ -32,7 +32,6 @@ import {
 	type RunnerMessage,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { RunnerMember } from "../../../src/lib/provider/runner/runner-receipts.js";
-import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
 import type { SessionTurn } from "../../../src/lib/provider/runner/session-runner.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
@@ -1639,7 +1638,7 @@ if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
 			const sample = (stage: string) => {
 				const current = members.map((member) => ({
 					...member,
-					observation: runnerProcessTable.inspect(member.pid),
+					observation: cleanupProcesses.identify([member.pid]).get(member.pid),
 				}));
 				observations.push({ stage, at: Date.now(), current });
 				for (const member of current)
@@ -1742,11 +1741,10 @@ if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
 			evidence["proof"] = readProof();
 			try {
 				for (const member of members) {
-					const current = runnerProcessTable.inspect(member.pid);
-					if (
-						current.state === "running" &&
-						current.startTime === member.startTime
-					) {
+					const current = cleanupProcesses
+						.identify([member.pid])
+						.get(member.pid);
+					if (sameProcess(member, current) === "same") {
 						try {
 							process.kill(member.pid, "SIGKILL");
 						} catch (cause) {

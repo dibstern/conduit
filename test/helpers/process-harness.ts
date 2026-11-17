@@ -67,7 +67,6 @@ import {
 	makeProductionProcessTable,
 	sameProcess,
 } from "../../src/lib/provider/runner/process-table.js";
-import { runnerProcessTable } from "../../src/lib/provider/runner/runner-registry.js";
 import type {
 	ModelInfo,
 	ProviderAgentInfo,
@@ -1550,8 +1549,8 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 						) &&
 						!this.runnerStartTimes.has(pid)
 					) {
-						const current = runnerProcessTable.inspect(pid);
-						if (current.state === "running" && current.startTime !== undefined)
+						const current = cleanupProcesses.identify([pid]).get(pid);
+						if (current?.state === "running" && current.startTime !== undefined)
 							this.runnerStartTimes.set(pid, current.startTime);
 					}
 					this.marks.push(value as unknown as ProcessMark);
@@ -2331,11 +2330,10 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 
 	signalOwnedRunner(pid: number, signal: NodeJS.Signals): boolean {
 		const startTime = this.runnerStartTimes.get(pid);
-		const current = runnerProcessTable.inspect(pid);
+		const current = cleanupProcesses.identify([pid]).get(pid);
 		if (
 			startTime === undefined ||
-			current.state !== "running" ||
-			current.startTime !== startTime
+			sameProcess({ pid, startTime }, current) !== "same"
 		)
 			return false;
 		try {
@@ -2498,11 +2496,10 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 		for (const pid of this.remainingRunnerPids()) {
 			try {
 				const startTime = this.runnerStartTimes.get(pid);
-				const current = runnerProcessTable.inspect(pid);
+				const current = cleanupProcesses.identify([pid]).get(pid);
 				if (
 					startTime === undefined ||
-					current.state !== "running" ||
-					current.startTime !== startTime
+					sameProcess({ pid, startTime }, current) !== "same"
 				)
 					continue;
 				process.kill(pid, "SIGKILL");

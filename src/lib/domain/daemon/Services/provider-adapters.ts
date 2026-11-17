@@ -8,6 +8,7 @@ import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-
 import type { ClaudeSessionForkSdk } from "../../../provider/claude/claude-session-fork.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import type { ProviderRegistry } from "../../../provider/provider-registry.js";
+import type { ProcessTable } from "../../../provider/runner/process-table.js";
 import type { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import type { InputDraftsTag } from "../../project-services/Services/input-drafts.js";
 import type { PendingInteractionServiceTag } from "../../project-services/Services/pending-interaction-service.js";
@@ -41,6 +42,7 @@ export class ProviderAdapters extends Context.Service<
 	ProviderAdapters,
 	{
 		readonly registry: ProviderRegistry;
+		readonly processTable: ProcessTable;
 		/** A test seam's Claude fork SDK; launches use the real SDK without one. */
 		readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
 		/** Shared by early terminal drain and the owner's acquisition finalizer. */
