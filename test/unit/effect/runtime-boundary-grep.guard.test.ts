@@ -113,6 +113,13 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		snippetPattern: /getOrCreateSessionMessages: empty sessionId/,
 		reason: "frontend session-store invariant",
 	},
+	{
+		path: "src/lib/provider/runner/process-table.ts",
+		snippetPattern:
+			/throw new Error\(\s*(?:["`](?:sysctl |unexpected kinfo_proc|localtime_r failed|native start-time self-check failed)|process\.execArgv\.includes\("--no-experimental-ffi"\))/,
+		reason:
+			"native process-table failures never leave the module: reads become unknown, setup falls back to ps with one warning",
+	},
 ];
 
 function tsFiles(dir: string): string[] {

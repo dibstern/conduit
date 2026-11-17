@@ -31,6 +31,8 @@ const remainingOneShotCallers = new Set(
 		"src/bin/cli-service.ts",
 		"src/lib/daemon/keep-awake.ts",
 		"src/lib/provider/runner/runner-registry.ts",
+		// Expand/contract replacement of runner-registry's ps reader (g43i.28).
+		"src/lib/provider/runner/process-table.ts",
 	].map((path) => resolve(path)),
 );
 // Shared spawn configuration for long-lived processes may reference types only.

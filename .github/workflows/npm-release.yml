@@ -105,6 +105,11 @@ jobs:
       - run: bash scripts/test-all.sh vitest
         env:
           CONDUIT_INTEGRATION_WORKERS: 4
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: process-table-contract-linux
+          path: test-results/process-table-contract.*.json
 
   # ── Job 3: E2E Playwright tests ────────────────────────────────────────────
   # Needs dist/frontend/ from build. Daemon tests need OpenCode.
@@ -193,6 +198,13 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
+      - name: Native process-table contract
+        run: pnpm exec vitest run --project unit test/fixture/process-table-contract.test.ts
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: process-table-contract-darwin
+          path: test-results/process-table-contract.*.json
       - run: pnpm exec playwright install --with-deps chromium
         timeout-minutes: 5
       - run: pnpm storybook:build
