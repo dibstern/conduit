@@ -202,6 +202,8 @@ export const backgroundTasksHandlers: StepHandler[] = [
 				.locator('[data-sheet-edge="top"]')
 				.filter({ has: panel });
 			await expect(panel).toBeVisible();
+			// It grows out of its pill; measure only once it has come to rest.
+			await expect(sheet).toHaveCSS("transform", "none");
 			await expect
 				.poll(async () => {
 					const header = await world.page.locator("#session-bar").boundingBox();

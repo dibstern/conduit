@@ -47,7 +47,14 @@ describe("a top sheet's entrance and exit", () => {
 		sheetGlide(sheet, { edge: "top", trigger: () => trigger })({ direction });
 	const more = () => document.getElementById("more") as HTMLElement;
 
-	it("grows out of its trigger in a Duo pose, then settles at rest", () => {
+	const offDesktop = ["phone", "duo-folded-portrait"];
+	const pose = (name: string) =>
+		more().closest("#layout")?.setAttribute("data-pose", name);
+
+	it.each(
+		offDesktop,
+	)("grows out of its trigger on %s, then settles at rest", (name) => {
+		pose(name);
 		expect(glide("in").duration).toBe(220);
 		expect(sheet.style.transformOrigin).toBe("360px -40px");
 		expect(sheet.style.transform).toBe("scale(0.1)");
@@ -58,7 +65,8 @@ describe("a top sheet's entrance and exit", () => {
 		);
 	});
 
-	it("shrinks back into its trigger in a Duo pose", () => {
+	it.each(offDesktop)("shrinks back into its trigger on %s", (name) => {
+		pose(name);
 		expect(glide("out").duration).toBe(220);
 		expect(sheet.style.transformOrigin).toBe("360px -40px");
 		expect(sheet.style.transform).toBe("scale(0.1)");
@@ -87,14 +95,7 @@ describe("a top sheet's entrance and exit", () => {
 	});
 
 	it.each([
-		[
-			"on a phone",
-			() => more().closest("#layout")?.setAttribute("data-pose", "phone"),
-		],
-		[
-			"on a desktop",
-			() => more().closest("#layout")?.setAttribute("data-pose", "desktop"),
-		],
+		["on a desktop", () => pose("desktop")],
 		[
 			"without a trigger",
 			() => {

@@ -155,9 +155,16 @@ Examples:
   | folded portrait   |
   | unfolded portrait |
 
-Scenario: Off the Duo the three-dot menu still glides down from behind the header
+# conduit-test-qym0h. Every phone, not only the Duo, grows a header drop-down
+# out of its control. The desktop keeps the glide.
+Scenario Outline: On a phone the <surface> drop-down grows out of its control and shrinks back into it
   Given the viewport is a phone
-  When I open the sessions drop-down
-  Then the drop-down glided down from behind the header
-  When I press Escape in the sessions drop-down
-  Then the drop-down glided back up behind the header
+  When I open the <surface> drop-down
+  Then the <surface> drop-down grew out of its control
+  When I press Escape in the <surface> drop-down
+  Then the <surface> drop-down shrank back into its control
+
+Examples:
+  | surface  |
+  | sessions |
+  | tasks    |

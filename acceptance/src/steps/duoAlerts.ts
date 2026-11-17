@@ -120,7 +120,6 @@ const centre = (box: Box) => ({
 const gap = (from: Box, to: Box) =>
 	Math.hypot(centre(from).x - centre(to).x, centre(from).y - centre(to).y);
 const width = (box: Box) => box.right - box.left;
-const height = (box: Box) => box.bottom - box.top;
 
 /** The small end of the motion sits toward the control, scaled about a point inside it. */
 async function expectGrowthFromControl(
@@ -141,13 +140,6 @@ async function expectGrowthFromControl(
 	expect(pivot.y).toBeLessThanOrEqual(control.bottom);
 	expect(width(small)).toBeLessThan(width(rest));
 	expect(gap(small, control)).toBeLessThan(gap(rest, control));
-}
-
-/** The far end of the motion is the resting box moved up by its own height. */
-function expectGlideBehindHeader(away: Box, rest: Box): void {
-	expect(away.left).toBeCloseTo(rest.left, 0);
-	expect(away.right).toBeCloseTo(rest.right, 0);
-	expect(away.top).toBeCloseTo(rest.top - height(rest), 0);
 }
 
 export const duoAlertsHandlers: StepHandler[] = [
@@ -247,15 +239,6 @@ export const duoAlertsHandlers: StepHandler[] = [
 				rest: exit.first,
 				origin: exit.origin,
 			});
-		},
-	},
-	{
-		name: "assert the drop-down entered by gliding down from behind the header",
-		match: /^the drop-down glided down from behind the header$/,
-		run: async ({ world }) => {
-			const [entrance] = await loggedMotion(world.page);
-			if (!entrance) throw new Error("No entrance was logged");
-			expectGlideBehindHeader(entrance.first, entrance.last);
 		},
 	},
 	{

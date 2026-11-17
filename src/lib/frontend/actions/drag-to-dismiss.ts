@@ -145,9 +145,9 @@ function openerOf(
 }
 
 /**
- * In a Duo pose a resting sheet is put away into the control that opened it,
- * wherever that sits: scaled about the control's centre down to its size.
- * Off the Duo, with no control on screen, or once a finger has moved it, there
+ * On a phone or Duo a resting sheet is put away into the control that opened
+ * it, wherever that sits: scaled about the control's centre down to its size.
+ * On a desktop, with no control on screen, or once a finger has moved it, there
  * is no such transform and the sheet glides behind the header.
  */
 function intoTrigger(
@@ -155,7 +155,7 @@ function intoTrigger(
 	trigger: HTMLElement | null,
 ): string | undefined {
 	const box =
-		trigger?.closest("#layout[data-pose^='duo-']") &&
+		trigger?.closest("#layout:not([data-pose='desktop'])") &&
 		trigger.getClientRects()[0];
 	if (!trigger || !box || node.style.transform !== "") return undefined;
 	// Only the visible part: the phone task row scrolls a button wider than itself.
@@ -174,7 +174,7 @@ function intoTrigger(
 
 /**
  * Hold the DOM through the same CSS glide used when a finger releases it, or
- * in a Duo pose grow out of and shrink back into `trigger`, measured each time.
+ * off the desktop grow out of and shrink back into `trigger`, measured each time.
  */
 export function sheetGlide(
 	node: HTMLElement,

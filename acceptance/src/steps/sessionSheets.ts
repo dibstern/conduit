@@ -258,6 +258,12 @@ export const sessionSheetsHandlers: StepHandler[] = [
 			const sheet = world.page.locator(sheetSelector);
 			const cards = sheet.locator("[data-view-card]");
 			await expect(cards).toHaveCount(4);
+			// It grows out of its trigger; measure only once it has come to rest.
+			await expect(
+				world.page
+					.locator("[data-sheet-edge]")
+					.filter({ has: world.page.locator("[data-view-card]") }),
+			).toHaveCSS("transform", "none");
 			const boxes = await cards.evaluateAll((nodes) =>
 				nodes.map((node) => {
 					const { top, width, height } = node.getBoundingClientRect();
