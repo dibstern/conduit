@@ -106,8 +106,9 @@ function comparable(
 		return ids.get(id) ?? id;
 	};
 	return JSON.parse(
-		// A restart's reattach reports its runner's start (CONTRACT 6.1), which this
-		// parity leaves to test/integration/daemon/claude-run-ledger.test.ts. A
+		// A restart's reattach reports its runner's start (CONTRACT 6.1), and
+		// retirement reports its loss; this parity leaves both to
+		// test/integration/daemon/claude-run-ledger.test.ts. A
 		// run's file capture lands after its turn completes, and a restart only
 		// finishes one in a git folder (f02e9.8, f02e9.20); that is
 		// test/integration/daemon/session-diff-turn-capture.test.ts's to pin.
@@ -115,6 +116,7 @@ function comparable(
 			events.filter(
 				({ type }) =>
 					type !== "evidence.process_started" &&
+					type !== "evidence.process_lost" &&
 					type !== "run.changes_captured",
 			),
 			(key, value: unknown) => {
@@ -461,6 +463,9 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 					{ timeout: TIMEOUT },
 				);
 				const original = runner(fixture, id);
+				const originalRunnerId = persisted(fixture, id).events.find(
+					({ type }) => type === "evidence.process_started",
+				)?.data["runnerId"];
 				if (mode !== "control") {
 					await fixture.kill();
 					expect(() => process.kill(original.pid, 0)).not.toThrow();
@@ -509,6 +514,21 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 						{ timeout: TIMEOUT },
 					);
 				if (mode === "rebuild") {
+					const events = persisted(fixture, id).events;
+					const idleIndex = events
+						.map(
+							({ type, data }) =>
+								type === "session.status" && data["status"] === "idle",
+						)
+						.lastIndexOf(true);
+					expect(idleIndex).toBeGreaterThanOrEqual(0);
+					expect(
+						events.findIndex(
+							({ type, data }) =>
+								type === "evidence.process_lost" &&
+								data["runnerId"] === originalRunnerId,
+						),
+					).toBeGreaterThan(idleIndex);
 					const identity = readCursorSessionIdentity(fixture.configDir, id);
 					const reopened = await fixture.connect(id);
 					const followup = await reopened.send(id, "Say hi again.", TIMEOUT);
