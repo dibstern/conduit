@@ -641,8 +641,9 @@ export const makeProcessSessionRunner = (
 			): Effect.Effect<boolean> {
 				if (!sql) return Effect.succeed(false);
 				return Effect.gen(function* () {
+					// Migration 0097: no feeder owns an older build's unstarted claim; recovery settles it.
 					const [modern] =
-						yield* sql`SELECT 1 FROM provider_runs run JOIN provider_command_outbox command ON command.run_id = run.id AND command.session_id = run.session_id WHERE run.id = ${runId} AND run.session_id = ${sessionId} AND run.joined_into IS NULL AND run.status IN ('pending', 'running') AND command.effect_type = 'send_turn' AND command.status = 'running'`;
+						yield* sql`SELECT 1 FROM provider_runs run JOIN provider_command_outbox command ON command.run_id = run.id AND command.session_id = run.session_id WHERE run.id = ${runId} AND run.session_id = ${sessionId} AND run.joined_into IS NULL AND run.legacy_claim = 0 AND run.status IN ('pending', 'running') AND command.effect_type = 'send_turn' AND command.status = 'running'`;
 					if (modern) return true;
 					return yield* sql<{
 						held: number;

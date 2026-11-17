@@ -988,7 +988,9 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 					JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
 					JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id
 					WHERE command.request_sequence = ${row.request_sequence} AND command.project_key = ${row.project_key}
-						AND run.runner_id IS NULL AND owner.status IN ('pending','running')`;
+						AND run.runner_id IS NULL AND run.legacy_claim = 0 AND owner.status IN ('pending','running')`;
+					// Migration 0097: an older build's unstarted claim may have executed, so it is
+					// never fed again; orphan recovery settles it.
 					if (!unheld) continue;
 					const [rejected] = yield* sql<{
 						instance_id: string;

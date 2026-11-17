@@ -8,7 +8,9 @@ the reaper-less kill path and the stored-send rebuild, now `runner-stored-send.t
 `journals_before_execution` is no longer written, and a recorded 0 stays untrusted. Applied migration
 SQL is unchanged. The registry-ranking backfill now reads an empty ranking, which is what a missing
 or malformed registry already meant, so sequence order decides. Pre-ledger (main) stores are
-unsupported: their cursors with an empty session id are no longer backfilled, so such a store fails
-with "Runner session changed". The two-build tests now upgrade from the ledger build 4b2fe6ee to the
+unsupported: their cursors with an empty session id are no longer backfilled, so a store whose main
+runner still lives fails with "Runner session changed". Where that runner is gone, a run migration
+0097 marked `legacy_claim` may already have executed, so the feeder never sends it and nothing claims
+it as fed: orphan recovery ends its turn `runner_stopped`, never re-sent. The two-build tests now upgrade from the ledger build 4b2fe6ee to the
 current build. Crash-matrix F49 (holderless dispatched run) and F53 (`runner_idle_exit`) are not
 applicable, since only main-built hosts produced them.

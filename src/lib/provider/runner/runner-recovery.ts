@@ -233,11 +233,18 @@ export const settleUnclaimedRunnerCommands = <E>(
 			};
 			const [requested] = yield* sql<{
 				joined_into: string | null;
-			}>`SELECT run.joined_into
+				legacy_claim: number;
+			}>`SELECT run.joined_into, run.legacy_claim
 				FROM provider_command_outbox command JOIN provider_runs run
 					ON run.id = command.run_id AND run.session_id = command.session_id
 				WHERE command.request_sequence = ${row.request_sequence} AND command.project_key = ${row.project_key}`;
-			if (row.run_id && requested?.joined_into === null) {
+			// Migration 0097: an older build's unstarted claim may have executed. It ends
+			// its turn below as runner_stopped, never requeued.
+			if (
+				row.run_id &&
+				requested?.joined_into === null &&
+				requested.legacy_claim === 0
+			) {
 				const projector = yield* Effect.serviceOption(
 					ProjectionRunnerEffectTag,
 				);

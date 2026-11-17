@@ -1227,6 +1227,74 @@ describe("Cursor on the Run Ledger", () => {
 		);
 	}, 300_000);
 
+	// 32.47, migration 0097: main's runner took the send, but main's daemon died before it
+	// recorded the turn's start, and the runner died too. No live runner refuses the restart,
+	// so the claim reaches recovery: it settles once, never re-sent.
+	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
+	it("settles a Cursor turn main's runner took before its start was recorded, its runner gone before the restart", async (context) => {
+		const historical = await historicalRunnerBundle(
+			"020678548921ff6419796274482a1a9ecc5dfc69",
+		);
+		if (!historical.available) return context.skip(historical.reason);
+		// The send gate holds main's runner inside the SDK's send, after its capture.
+		const sendGate = held();
+		const gate = held();
+		const { fixture, browser, sessionId, restart } = await start(
+			"two-build-gone",
+			"basic",
+			{
+				CONDUIT_TEST_CURSOR_SEND_GATE: sendGate,
+				CONDUIT_TEST_CURSOR_STREAM_GATE: gate,
+			},
+			undefined,
+			historical.dist,
+		);
+		await submit(browser, sessionId, "Replay the captured basic turn.");
+		// test-waits-allow polling: the SDK's take of the send reaches only its capture file.
+		await vi.waitFor(() => expect(captured("send.options")).toHaveLength(1), {
+			timeout: TIMEOUT,
+		});
+		await fixture.kill();
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			expect(
+				db
+					.prepare(
+						"SELECT type FROM events WHERE session_id = ? AND type IN ('run.started', 'run.dispatched')",
+					)
+					.all(sessionId),
+			).toEqual([]);
+		} finally {
+			db.close();
+		}
+		const [mainRunner] = fixture.remainingRunnerPids();
+		if (mainRunner === undefined) throw new Error("main's runner is gone");
+		expect(fixture.signalOwnedRunner(mainRunner, "SIGKILL")).toBe(true);
+		// test-waits-allow polling: the killed runner's exit reaches only the process table.
+		await vi.waitFor(() => expect(fixture.remainingRunnerPids()).toEqual([]), {
+			timeout: TIMEOUT,
+		});
+		const from = fixture.marks.length;
+		await restart(undefined, process.env["CONDUIT_TEST_DIST"] ?? "dist");
+		// Nothing holds the provider back now: a turn sent again would complete.
+		rmSync(sendGate);
+		rmSync(gate);
+		await fixture.connect(sessionId);
+		await turns(fixture, sessionId, ["error"]);
+		expect(cellRuns(fixture, sessionId)).toEqual([
+			{ status: "error", ends: ["error"] },
+		]);
+		expect(captured("send.options")).toHaveLength(1);
+		expect(
+			fixture.marks
+				.slice(from)
+				.filter(
+					(mark) =>
+						mark.kind === "runner-started" && mark.sessionId === sessionId,
+				),
+		).toEqual([]);
+	}, 300_000);
+
 	// test-waits-allow timeout-override: a daemon restart and the steered turn each take seconds.
 	it("delivers a steer once when the daemon dies with the steer handed to the SDK, unacknowledged", async () => {
 		const gate = held();
