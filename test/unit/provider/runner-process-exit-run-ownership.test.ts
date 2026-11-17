@@ -7,6 +7,7 @@ import { it as effectIt } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, it, vi } from "vitest";
+import { makeTestProcessTable } from "../../helpers/runner-process-table.js";
 import {
 	admitRunnerCommand,
 	makeRunnerAdmission,
@@ -98,7 +99,8 @@ it("observes a replacement's lower revisions without losing its launch snapshot"
 		);
 		return child;
 	});
-	const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+	const kill = vi.spyOn(process, "kill").mockImplementation((_pid, signal) => {
+		if (signal === 0) return true;
 		throw new Error("Revision fixture must never signal a PID");
 	});
 	try {
@@ -198,10 +200,17 @@ it("observes a replacement's lower revisions without losing its launch snapshot"
 						{
 							projectRootForSession: () => Effect.succeed(root),
 							daemonConfigDir: root,
-							processTable: {
-								inspect: runnerProcessTable.inspect,
-								signal: runnerProcessTable.signal,
-							},
+							processTable: makeTestProcessTable({
+								processes: () =>
+									new Map(
+										children
+											.filter((child) => child.exitCode === null)
+											.map((child) => [
+												child.pid,
+												{ state: "running", startTime: "revision-fixture" },
+											]),
+									),
+							}),
 						},
 						() => Effect.succeed({}),
 						driver,
@@ -251,7 +260,7 @@ it("observes a replacement's lower revisions without losing its launch snapshot"
 				}),
 			),
 		);
-		expect(kill).not.toHaveBeenCalled();
+		expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
 	} finally {
 		kill.mockRestore();
 		inspect.mockRestore();
@@ -389,19 +398,23 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 				{
 					projectRootForSession: () => Effect.succeed(root),
 					daemonConfigDir: root,
-					processTable: {
-						inspect: (pid) => ({
-							state: children.some(
-								(child) => child.pid === pid && child.exitCode === null,
-							)
-								? "running"
-								: "gone",
-							startTime: "idle-retry-fixture",
-						}),
+					processTable: makeTestProcessTable({
+						processes: () =>
+							new Map(
+								children
+									.filter(
+										(child) =>
+											child.pid !== undefined && child.exitCode === null,
+									)
+									.map((child) => [
+										child.pid ?? 0,
+										{ state: "running", startTime: "idle-retry-fixture" },
+									]),
+							),
 						signal: () => {
 							throw runnerFailure("test signal", "Unexpected runner signal");
 						},
-					},
+					}),
 				},
 				(output) =>
 					output.type === "event"
@@ -717,21 +730,28 @@ for (const [
 						{
 							projectRootForSession: () => Effect.succeed(root),
 							daemonConfigDir: root,
-							processTable: {
-								inspect: (pid) => ({
-									state:
-										pid === child.pid && child.exitCode === null
-											? "running"
-											: "gone",
-									startTime: "exit-ownership-fixture",
-								}),
+							processTable: makeTestProcessTable({
+								processes: () =>
+									new Map(
+										child.pid !== undefined && child.exitCode === null
+											? [
+													[
+														child.pid,
+														{
+															state: "running",
+															startTime: "exit-ownership-fixture",
+														},
+													],
+												]
+											: [],
+									),
 								signal: () => {
 									throw runnerFailure(
 										"test signal",
 										"Unexpected runner signal",
 									);
 								},
-							},
+							}),
 						},
 						(output) =>
 							Effect.gen(function* () {
@@ -1111,18 +1131,25 @@ effectIt.effect(
 					{
 						projectRootForSession: () => Effect.succeed(root),
 						daemonConfigDir: root,
-						processTable: {
-							inspect: (pid) => ({
-								state:
-									pid === child.pid && child.exitCode === null
-										? "running"
-										: "gone",
-								startTime: "hello-replay-fixture",
-							}),
+						processTable: makeTestProcessTable({
+							processes: () =>
+								new Map(
+									child.pid !== undefined && child.exitCode === null
+										? [
+												[
+													child.pid,
+													{
+														state: "running",
+														startTime: "hello-replay-fixture",
+													},
+												],
+											]
+										: [],
+								),
 							signal: () => {
 								throw runnerFailure("test signal", "Unexpected runner signal");
 							},
-						},
+						}),
 					},
 					(output) =>
 						output.type === "event"

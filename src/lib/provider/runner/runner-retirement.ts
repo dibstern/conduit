@@ -47,6 +47,13 @@ import type {
 	RunRelease,
 } from "./process-runner-types.js";
 import {
+	makeProductionProcessTable,
+	type Observed,
+	type ProcessTable,
+	StartTime,
+	sameProcess,
+} from "./process-table.js";
+import {
 	type Grant,
 	makeRunnerAuthority,
 	type RunnerIdentity,
@@ -82,10 +89,10 @@ import {
 } from "./runner-receipts.js";
 import {
 	discoverRunners,
-	type RunnerProcessTable,
 	readRunnerEvidence,
 	removeRunnerDiscovery,
 	runnerDirectory,
+	runnerPidAlive,
 	runnerPidMatchesRegistration,
 	runnerProcessTable,
 } from "./runner-registry.js";
@@ -671,7 +678,7 @@ export const makeRunnerStopReconciler = (options: {
 	readonly receipts:
 		| Effect.Success<ReturnType<typeof makeRunnerReceiptStore>>
 		| undefined;
-	readonly processTable: RunnerProcessTable;
+	readonly processTable: ProcessTable;
 	readonly holdRun?: (
 		sessionId: string,
 		runId: string,
@@ -772,10 +779,7 @@ export const makeRunnerStopReconciler = (options: {
 				return recovered;
 			});
 		const observe = (record: RunnerRetirement) =>
-			decideRunnerKill(
-				record,
-				observeRunnerRetirement(record, options.processTable),
-			).record;
+			decideRunnerKill(record, observeLegacyRunnerRetirement(record)).record;
 		/** The durable commit; without a store the routing rows are the store. */
 		const commitStop = (
 			target: StopTarget,
@@ -937,13 +941,8 @@ export const makeRunnerStopReconciler = (options: {
 				const settlement = options.settlement;
 				const { identity } = target;
 				if (!settlement?.sql || identity.tag !== "Verified") return absent;
-				const observed = options.processTable.inspect(identity.pid);
-				if (
-					observed.state !== "gone" &&
-					observed.state !== "zombie" &&
-					(observed.startTime === undefined ||
-						observed.startTime === identity.startTime)
-				)
+				const observed = options.processTable.identify([identity.pid]);
+				if (sameProcess(identity, observed.get(identity.pid)) !== "gone")
 					return absent;
 				const entry = settlement.entry(target.runnerId);
 				for (const command of yield* heldCommands(settlement.sql, target)) {
@@ -1150,61 +1149,32 @@ export const makeRunnerStopReconciler = (options: {
 				}
 				if (!("record" in state)) return;
 				yield* options.committed(state.record);
-				let unsent = false;
 				for (let step = 0; step < 5; step++) {
 					if (!("record" in state) || state._tag === "Settled") return;
-					// Only a signal needs identity (6.6): runRunnerKill reads it after
-					// its commit, and a step after a kill that sent nothing reads it so
-					// a reused pid is seen gone. The window otherwise reads liveness,
-					// where a live pid is unknown, never gone.
-					const alive = options.processTable.alive;
-					const liveness: RunnerRetirementObservation | undefined =
-						alive &&
-						!unsent &&
-						(state._tag === "Requested" || state._tag === "Escalating")
-							? {
-									group: undefined,
-									processes: new Map(
-										knownPids(state.record).map((pid) => [
-											pid,
-											{ state: alive(pid) ? "unknown" : "gone" },
-										]),
-									),
-								}
-							: undefined;
-					const now = clock.currentTimeMillisUnsafe();
-					// Liveness names no signal target, so an Escalated it decides is
-					// re-read with identity: the window never ends on it without KILL.
-					const processes: RunnerRetirementObservation =
-						liveness &&
-						decideRunnerStop(
-							{
-								...state,
-								record: decideRunnerKill(state.record, liveness).record,
-							},
-							{
-								_tag: "Observe",
-								now,
-								processes: liveness,
-								retry: retryPending,
-								notice: noticePending,
-							},
-						).state._tag !== "Escalated"
-							? liveness
-							: observeRunnerRetirement(state.record, options.processTable);
+					const processes = yield* observeRunnerRetirement(
+						state.record,
+						options.processTable,
+					);
 					const observed: RunnerRetirement = decideRunnerKill(
 						state.record,
 						processes,
 					).record;
+					const row = rows.get(runnerId);
+					// Phase-2 Stops can have signals but no retired_at yet. Normalize
+					// that legacy intent so progress and pruning can update its row.
 					if (
 						options.receipts &&
-						observed.members.length > state.record.members.length
-					)
+						(observed.members.length > state.record.members.length ||
+							row?.retiredAt === null)
+					) {
 						yield* options.receipts.commitRetirement(observed);
+						if (row?.retiredAt === null)
+							rows.set(runnerId, { ...row, retiredAt: observed.retiredAt });
+					}
 					state = { ...state, record: observed };
 					const decision = decideRunnerStop(state, {
 						_tag: "Observe",
-						now: processes === liveness ? now : clock.currentTimeMillisUnsafe(),
+						now: clock.currentTimeMillisUnsafe(),
 						processes,
 						retry: retryPending,
 						notice: noticePending,
@@ -1231,7 +1201,6 @@ export const makeRunnerStopReconciler = (options: {
 										processes,
 									);
 								record = killed.record;
-								unsent = killed.signals.length === 0;
 								retryPending = false;
 								break;
 							}
@@ -1301,6 +1270,59 @@ export const makeRunnerStopReconciler = (options: {
 					const startedAt = clock.currentTimeMillisUnsafe();
 					let tickedAt = startedAt;
 					let healthy = yield* safeTick(runnerId);
+					let observeExit = true;
+					let leaderObserved = false;
+					const waitUntil = (until: number) =>
+						Effect.gen(function* () {
+							while (
+								clock.currentTimeMillisUnsafe() < until &&
+								get(runnerId)._tag !== "Settled"
+							) {
+								const current = get(runnerId);
+								const leaderExit =
+									observeExit && !leaderObserved && "record" in current
+										? options.waitForExit?.(current.record)
+										: undefined;
+								// Cheap liveness only wakes a full pass. Identity and zombie
+								// checks stay there, so the ps fallback never spawns while waiting.
+								const exited = observeExit
+									? Effect.gen(function* () {
+											do {
+												yield* Effect.sleep("250 millis");
+												const state = get(runnerId);
+												if (
+													!("record" in state) ||
+													knownPids(state.record).every(
+														(pid) => !runnerPidAlive(pid),
+													)
+												)
+													return;
+											} while (true);
+										}).pipe(Effect.as("absent" as const))
+									: Effect.never;
+								const changed = leaderExit
+									? Effect.raceFirst(
+											leaderExit.pipe(Effect.as("leader" as const)),
+											exited,
+										)
+									: exited;
+								const delay = Math.max(
+									0,
+									until - clock.currentTimeMillisUnsafe(),
+								);
+								const wake = yield* healthy
+									? Effect.raceFirst(
+											changed,
+											Effect.sleep(delay).pipe(Effect.as("deadline" as const)),
+										)
+									: Effect.sleep(delay).pipe(Effect.as("deadline" as const));
+								if (wake === "deadline") return;
+								if (wake === "leader") leaderObserved = true;
+								// An inconclusive full pass retries at its scheduled deadline.
+								if (wake === "absent") observeExit = false;
+								healthy = yield* safeTick(runnerId);
+							}
+						});
 					while (
 						get(runnerId)._tag === "Escalating" ||
 						get(runnerId)._tag === "Requested"
@@ -1339,35 +1361,22 @@ export const makeRunnerStopReconciler = (options: {
 									250,
 									startedAt + 4_000 - clock.currentTimeMillisUnsafe(),
 								);
-						// With no exit event, poll the known pids as main did, so Gone
-						// follows the last exit (the reaper's, 6.6) by one interval.
-						const alive = options.processTable.alive;
-						const pids = "record" in current ? knownPids(current.record) : [];
-						const exited =
-							leaderExit ??
-							(alive &&
-								Effect.gen(function* () {
-									do yield* Effect.sleep("25 millis");
-									while (pids.some(alive));
-								}));
-						yield* exited && healthy
-							? Effect.raceFirst(exited, Effect.sleep(delay))
-							: Effect.sleep(delay);
+						yield* waitUntil(clock.currentTimeMillisUnsafe() + delay);
+						if (get(runnerId)._tag === "Settled") return;
 						tickedAt = clock.currentTimeMillisUnsafe();
 						healthy = yield* safeTick(runnerId);
 					}
 					for (const offset of [10_000, 30_000, 60_000]) {
 						if (get(runnerId)._tag === "Settled") return;
-						yield* Effect.sleep(
-							Math.max(0, startedAt + offset - clock.currentTimeMillisUnsafe()),
-						);
-						yield* safeTick(runnerId, true);
+						yield* waitUntil(startedAt + offset);
+						if (get(runnerId)._tag === "Settled") return;
+						healthy = yield* safeTick(runnerId, true);
 					}
 					let noticed = false;
 					while (get(runnerId)._tag !== "Settled") {
 						if (yield* safeTick(runnerId, false, !noticed)) noticed = true;
 						if (get(runnerId)._tag === "Settled") return;
-						yield* Effect.sleep("60 seconds");
+						yield* waitUntil(clock.currentTimeMillisUnsafe() + 60_000);
 					}
 				}).pipe(Effect.ensuring(Effect.sync(() => watching.delete(runnerId)))),
 			);
@@ -1662,6 +1671,11 @@ export const makeRunnerStopReconciler = (options: {
 					}
 					// Startup registers these intents and does not wait on their
 					// commits; a busy store must not hold up reattachment.
+					const observed = options.processTable.identify(
+						recovered.rows.flatMap((row) =>
+							row.identity.pid === undefined ? [] : [row.identity.pid],
+						),
+					);
 					for (const row of recovered.rows) {
 						if (recoverable && !(yield* recoverable(row))) continue;
 						if (row.retiredAt !== null || get(row.runnerId)._tag !== "Running")
@@ -1672,13 +1686,11 @@ export const makeRunnerStopReconciler = (options: {
 								{ _tag: "CandidateAbandoned" },
 							);
 						else if (row.identity.pid !== undefined) {
-							const observed = options.processTable.inspect(row.identity.pid);
 							if (
-								observed.state === "gone" ||
-								observed.state === "zombie" ||
-								(row.identity.tag === "Verified" &&
-									observed.startTime !== undefined &&
-									observed.startTime !== row.identity.startTime)
+								sameProcess(
+									{ ...row.identity, pid: row.identity.pid },
+									observed.get(row.identity.pid),
+								) === "gone"
 							)
 								registerStop({ ...row, members: [] }, { _tag: "Exited" });
 						}
@@ -1987,14 +1999,12 @@ export const makeRunnerRetirement = (
 				return undefined;
 			},
 			pidAlive: (pid: number, startTime?: string) => {
-				const current = options.processTable.inspect(pid);
+				const current = options.processTable.identify([pid]).get(pid);
 				return (
-					!["gone", "zombie"].includes(current.state) &&
-					!(
-						startTime !== undefined &&
-						current.startTime !== undefined &&
-						current.startTime !== startTime
-					)
+					sameProcess(
+						{ pid, ...(startTime === undefined ? {} : { startTime }) },
+						current,
+					) !== "gone"
 				);
 			},
 			processTable: options.processTable,
@@ -2371,19 +2381,32 @@ export const makeRunnerRetirement = (
 		};
 	});
 
-type ProcessObservation = ReturnType<RunnerProcessTable["inspect"]>;
 export interface RunnerRetirementObservation {
-	readonly processes: ReadonlyMap<number, ProcessObservation>;
+	readonly processes: ReadonlyMap<number, Observed>;
 	readonly group: readonly RunnerMember[] | undefined;
 }
 
 export const observeRunnerRetirement = (
 	record: RunnerRetirement,
-	table: RunnerProcessTable,
-	refreshGroup = true,
+	table: ProcessTable,
+): Effect.Effect<RunnerRetirementObservation> =>
+	table.observe({
+		pgid: record.identity.pid ?? 0,
+		pids: [
+			...(record.identity.pid === undefined ? [] : [record.identity.pid]),
+			...(record.reaper ? [record.reaper.pid] : []),
+			...record.members.map((member) => member.pid),
+		],
+	});
+
+// The in-write Stop hook stays synchronous until the intent-only commit lands.
+// Calling ProcessTable.observe here would trip PreventSchedulerYield.
+const observeLegacyRunnerRetirement = (
+	record: RunnerRetirement,
 ): RunnerRetirementObservation => {
+	const table = runnerProcessTable;
 	const group =
-		!refreshGroup || record.identity.pid === undefined
+		record.identity.pid === undefined
 			? undefined
 			: table.members?.(record.identity.pid);
 	const pids = [
@@ -2394,36 +2417,38 @@ export const observeRunnerRetirement = (
 			...(group ?? []).map((member) => member.pid),
 		]),
 	];
-	const processes = new Map(
-		table.inspectMany?.(pids) ?? pids.map((pid) => [pid, table.inspect(pid)]),
+	const current = table.inspectMany?.(pids);
+	const processes = new Map<number, Observed>(
+		pids.map((pid) => {
+			const seen = current?.get(pid) ?? table.inspect(pid);
+			return [
+				pid,
+				seen.state === "gone" || seen.state === "unknown"
+					? { state: seen.state }
+					: seen.startTime === undefined
+						? { state: "unknown" }
+						: {
+								...seen,
+								state: seen.state,
+								startTime: StartTime.make(seen.startTime),
+							},
+			];
+		}),
 	);
 	// Verify the pins after enumeration: the group may have been reused while
 	// ps was reading it. Only this later observation can authorize membership.
 	// A successful group listing is also an observation of each member's pgid.
 	for (const member of group ?? []) {
-		const prior = processes.get(member.pid) ?? table.inspect(member.pid);
+		const prior = processes.get(member.pid);
 		if (
 			record.identity.pid !== undefined &&
-			prior.state === "running" &&
-			prior.startTime === member.startTime &&
+			prior?.state === "running" &&
+			sameProcess(member, prior) === "same" &&
 			prior.pgid === undefined
 		)
 			processes.set(member.pid, { ...prior, pgid: record.identity.pid });
-		else if (!processes.has(member.pid)) processes.set(member.pid, prior);
 	}
 	return { processes, group };
-};
-
-const memberGone = (
-	member: RunnerMember,
-	observation: RunnerRetirementObservation,
-) => {
-	const current = observation.processes.get(member.pid);
-	return (
-		current?.state === "gone" ||
-		current?.state === "zombie" ||
-		(current?.startTime !== undefined && current.startTime !== member.startTime)
-	);
 };
 
 /** Membership only grows while a verified identity pins the original group. */
@@ -2439,11 +2464,12 @@ export const decideRunnerKill = (
 		const current = observation.processes.get(member.pid);
 		return (
 			current?.state === "running" &&
-			current.startTime === member.startTime &&
+			sameProcess(member, current) === "same" &&
 			current.pgid === record.identity.pid
 		);
 	};
-	const pinned = pins(leader) || pins(record.reaper);
+	const pinned =
+		pins(leader) || pins(record.reaper) || record.members.some(pins);
 	const members = mergeRunnerMembers(
 		record.members,
 		leader ? [{ pid: leader.pid, startTime: leader.startTime }] : [],
@@ -2454,7 +2480,10 @@ export const decideRunnerKill = (
 		(member) => member.pid === record.identity.pid,
 	);
 	const gone =
-		members.every((member) => memberGone(member, observation)) &&
+		members.every(
+			(member) =>
+				sameProcess(member, observation.processes.get(member.pid)) === "gone",
+		) &&
 		(leaderTracked ||
 			(record.identity.pid === undefined && members.length === 0) ||
 			(record.identity.pid !== undefined &&
@@ -2479,14 +2508,11 @@ export const decideRunnerKill = (
 				const current = observation.processes.get(member.pid);
 				if (
 					record.reaper?.pid === member.pid &&
-					record.reaper.startTime === member.startTime &&
+					sameProcess(record.reaper, current) === "same" &&
 					!pins(record.reaper)
 				)
 					continue;
-				if (
-					current?.state === "running" &&
-					current.startTime === member.startTime
-				)
+				if (sameProcess(member, current) === "same")
 					signals.push({ signal, target: member.pid, members: [member] });
 			}
 	}
@@ -2496,7 +2522,7 @@ export const decideRunnerKill = (
 /** The durable snapshot is committed before delivery; delivery never owns membership. */
 const runRunnerKill = (
 	record: RunnerRetirement,
-	table: RunnerProcessTable,
+	table: ProcessTable,
 	receipts:
 		| Effect.Success<ReturnType<typeof makeRunnerReceiptStore>>
 		| undefined,
@@ -2508,47 +2534,30 @@ const runRunnerKill = (
 > =>
 	Effect.gen(function* () {
 		const clock = yield* Clock.Clock;
-		let decision = decideRunnerKill(
+		const decision = decideRunnerKill(
 			record,
-			observation ?? observeRunnerRetirement(record, table),
+			observation ?? (yield* observeRunnerRetirement(record, table)),
 			signal,
 		);
-		if (receipts) yield* receipts.commitRetirement(decision.record);
-		if (signal) {
-			const committed = decision.record;
-			decision = decideRunnerKill(
-				committed,
-				observeRunnerRetirement(committed, table),
-				signal,
-			);
-			if (
-				receipts &&
-				decision.record.members.length > committed.members.length
-			) {
-				yield* receipts.commitRetirement(decision.record);
-				// COMMIT may outlive either pin. Revalidate identities without another
-				// membership refresh: a live pin authorizes -P, otherwise only the
-				// committed members qualify. A fork after this check is the inherited
-				// race in amendment failure mode 10; do not wait for forks to stop.
-				decision = decideRunnerKill(
-					decision.record,
-					observeRunnerRetirement(decision.record, table, false),
-					signal,
-				);
-			}
-		}
+		if (receipts && decision.record.members.length > record.members.length)
+			yield* receipts.commitRetirement(decision.record);
 		const attempts: RunnerSignalAttempt[] = [];
 		for (const action of decision.signals) {
-			let outcome: RunnerSignalAttempt["outcome"] = "delivered";
 			const at = clock.currentTimeMillisUnsafe();
-			try {
-				table.signal(action.target, action.signal);
-			} catch (cause) {
-				outcome =
-					isRecord(cause) &&
-					(cause["code"] === "EPERM" || cause["code"] === "EACCES")
-						? "refused"
-						: "failed";
+			const member = action.members[0];
+			const target =
+				action.target < 0
+					? { group: -action.target, pins: decision.record.members }
+					: member
+						? { process: member }
+						: undefined;
+			if (!target) continue;
+			const outcome = table.signal(target, action.signal);
+			if (outcome === "stale") {
+				log.warn(
+					`Runner signal target stale: runnerId=${record.runnerId} target=${action.target} signal=${action.signal}`,
+				);
+				continue;
 			}
 			attempts.push({
 				...action,
@@ -2638,9 +2647,12 @@ export const stopRegisteredRunners = (
 				),
 			);
 			const connections = new Map<string, RunnerSocket>();
+			const processTable = makeProductionProcessTable((message) =>
+				log.warn(message),
+			);
 			const stops = yield* makeRunnerStopReconciler({
 				receipts,
-				processTable: runnerProcessTable,
+				processTable,
 				committed: () => Effect.void,
 				// This connection never acknowledges output, so a runner flushing
 				// output on shutdown waits for it to close, even past SIGTERM.
@@ -2665,7 +2677,7 @@ export const stopRegisteredRunners = (
 				notice: () => Effect.succeed(true),
 			});
 			const registrations = yield* Effect.try({
-				try: () => discoverRunners(workspaceRoot, configDir),
+				try: () => discoverRunners(workspaceRoot, configDir, processTable),
 				catch: (cause) => new RunnerProcessError({ message: String(cause) }),
 			});
 			const runFork = yield* FiberSet.makeRuntime<never, void, never>();
@@ -2694,12 +2706,15 @@ export const stopRegisteredRunners = (
 						);
 						const verified =
 							connection._tag === "Success" ||
-							runnerPidMatchesRegistration(registration);
+							runnerPidMatchesRegistration(registration, processTable);
 						if (connection._tag === "Success")
 							connections.set(registration.runnerId, connection.success);
+						const seen = processTable
+							.identify([registration.pid])
+							.get(registration.pid);
 						const startTime = verified
 							? (registration.startTime ??
-								runnerProcessTable.inspect(registration.pid).startTime)
+								(seen && "startTime" in seen ? seen.startTime : undefined))
 							: undefined;
 						yield* stops.requestStop(
 							{
@@ -2724,7 +2739,7 @@ export const stopRegisteredRunners = (
 							"record" in state &&
 							decideRunnerKill(
 								state.record,
-								observeRunnerRetirement(state.record, runnerProcessTable),
+								yield* observeRunnerRetirement(state.record, processTable),
 							).gone
 						)
 							removeRunnerDiscovery(registration.socketPath);

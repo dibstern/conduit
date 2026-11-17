@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import {
+	makeDarwinProcessAdapter,
 	makeMemoryProcessAdapter,
 	makeProcessTable,
 	makeProductionProcessTable,
@@ -16,6 +17,9 @@ import {
 const warnings: string[] = [];
 const table = makeProductionProcessTable((message) => warnings.push(message));
 let worstIdentifyMs = 0;
+let worstGroupMs = 0;
+let worstObserveMs = 0;
+const signalCases: unknown[] = [];
 let identifyCalls = 0;
 const identify = table.identify.bind(table);
 table.identify = (pids) => {
@@ -98,6 +102,8 @@ const unreadable = makeProcessTable({
 	argv: () => {
 		throw new Error("EPERM");
 	},
+	group: () => Effect.succeed(undefined),
+	signal: () => {},
 });
 assert.deepEqual(
 	[...unreadable.identify([1]).values()],
@@ -124,6 +130,38 @@ try {
 	const [output] = await once(group.stdout, "data");
 	pids = JSON.parse(String(output));
 	const targets = Object.values(pids);
+	const pgid = pids["leader"];
+	const child = pids["ignoresTerm"];
+	assert.ok(pgid && child);
+	const begin = performance.now();
+	const observed = await Effect.runPromise(
+		table.observe({ pgid, pids: targets }),
+	);
+	worstObserveMs = performance.now() - begin;
+	const groupAdapter = native
+		? makeDarwinProcessAdapter()
+		: makePsProcessAdapter();
+	// Warm Effect's execution boundary before timing the native group query.
+	await Effect.runPromise(groupAdapter.group(pgid));
+	for (let i = 0; i < 100; i++) {
+		const started = performance.now();
+		if (native) Effect.runSync(groupAdapter.group(pgid));
+		else await Effect.runPromise(groupAdapter.group(pgid));
+		worstGroupMs = Math.max(worstGroupMs, performance.now() - started);
+	}
+	if (native) assert.ok(worstGroupMs < 1, `group worst ${worstGroupMs}ms`);
+	const wrongStart = Schema.decodeUnknownSync(ProcessStart)({
+		startTime: "Mon Jan  1 00:00:00 1900",
+	});
+	for (const target of [
+		{ process: { pid: child, ...wrongStart } },
+		{ group: pgid, pins: [{ pid: pgid, ...wrongStart }] },
+	]) {
+		const outcome = table.signal(target, "SIGKILL");
+		assert.equal(outcome, "stale");
+		assert.equal(table.identify([child]).get(child)?.state, "running");
+		signalCases.push({ target, outcome });
+	}
 	// Read ps independently of the adapter, including zombie state.
 	const oracle = () =>
 		execFileSync("ps", ["-axo", "pid=,pgid=,stat=,lstart="], {
@@ -146,6 +184,14 @@ try {
 					: [];
 			});
 	const expected = oracle();
+	assert.deepEqual(
+		observed.group?.map((member) => member.pid).sort((a, b) => a - b),
+		expected
+			.filter((row) => row.pgid === pgid)
+			.map((row) => row.pid)
+			.sort((a, b) => a - b),
+	);
+	assert.equal(observed.processes.get(pids["zombie"] ?? 0)?.state, "zombie");
 	assert.equal(expected.length, 4);
 	assert.equal(
 		expected.find((row) => row.pid === pids["zombie"])?.state,
@@ -210,9 +256,12 @@ try {
 			]);
 		assert.equal(ps.argv(pid)?.join(" "), command);
 	}
-	const child = pids["ignoresTerm"];
-	assert.ok(child);
-	process.kill(child, "SIGTERM");
+	const childStart = initial.get(child);
+	assert.ok(childStart && "startTime" in childStart);
+	assert.equal(
+		table.signal({ process: { pid: child, ...childStart } }, "SIGTERM"),
+		"delivered",
+	);
 	assert.equal(table.identify([child]).get(child)?.state, "running");
 	const exited = once(group, "exit");
 	group.stdin.end("exit\n");
@@ -228,6 +277,28 @@ try {
 	for (let i = 0; i < 100; i++) {
 		table.identify([child]);
 	}
+	const killOutcome = table.signal(
+		{ process: { pid: child, ...childStart } },
+		"SIGKILL",
+	);
+	assert.equal(killOutcome, "delivered");
+	signalCases.push({ target: child, outcome: killOutcome });
+	const escapee = pids["escapee"];
+	const escapeStart = initial.get(escapee ?? 0);
+	assert.ok(escapee && escapeStart && "startTime" in escapeStart);
+	const closed = once(group.stdout, "end");
+	assert.equal(
+		table.signal({ process: { pid: escapee, ...escapeStart } }, "SIGKILL"),
+		"delivered",
+	);
+	await closed;
+	assert.equal(
+		sameProcess(
+			{ pid: child, ...childStart },
+			table.identify([child]).get(child),
+		),
+		"gone",
+	);
 	assert.equal(table.argv(2147483647), undefined);
 	assert.equal(table.identify([2147483647]).get(2147483647)?.state, "gone");
 	assert.deepEqual(
@@ -269,6 +340,9 @@ console.log(
 		node: process.version,
 		warnings,
 		worstIdentifyMs,
+		worstGroupMs,
+		worstObserveMs,
+		signalCases,
 		identifyCalls,
 		pids,
 		samples,

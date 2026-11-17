@@ -19,7 +19,6 @@ import {
 	Layer,
 	Option,
 	Random,
-	Schema,
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -50,11 +49,6 @@ import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js
 import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import {
-	makeMemoryProcessAdapter,
-	makeProcessTable,
-	ProcessStart,
-} from "../../../src/lib/provider/runner/process-table.js";
-import {
 	type RunnerHello,
 	type RunnerSocket,
 	type RunnerWriteGate,
@@ -82,6 +76,7 @@ import {
 	createMockEventSink,
 	makeBaseSendTurnInput,
 } from "../../helpers/mock-sdk.js";
+import { makeTestProcessTable } from "../../helpers/runner-process-table.js";
 import { gatedWrite } from "../../helpers/runner-write-gate.js";
 
 const spawned = vi.hoisted(() => ({ spawn: vi.fn() }));
@@ -248,22 +243,7 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 			[{ id: "account", driver: driverKind, name: "Account" }],
 			configuredClaudeConfigDir(root),
 		);
-		const processTable: runnerRegistry.RunnerProcessTable = {
-			inspect: (processId) => processes.get(processId) ?? { state: "gone" },
-			signal: () => {},
-		};
-		const processIdentity = makeProcessTable(
-			makeMemoryProcessAdapter({
-				get processes() {
-					return new Map(
-						[...processes].map(([pid, seen]) => [
-							pid,
-							{ ...seen, ...Schema.decodeUnknownSync(ProcessStart)(seen) },
-						]),
-					);
-				},
-			}),
-		);
+		const processTable = makeTestProcessTable({ processes });
 		let recovery: RunnerRecoveryDependencies | undefined;
 		let emit: Parameters<typeof makeProcessSessionRunner>[1] = () =>
 			Effect.succeed({});
@@ -273,7 +253,6 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 				accounts: Effect.succeed(accounts),
 				projectRootForSession: () => Effect.succeed(root),
 				processTable,
-				processIdentity,
 				recoveryForSession: () => Effect.succeed(recovery),
 			},
 			(...args) => emit(...args),
@@ -333,7 +312,7 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 		const discover = runnerRegistry.discoverAllRunners;
 		const discovery = vi
 			.spyOn(runnerRegistry, "discoverAllRunners")
-			.mockImplementation((config) => discover(config, processIdentity));
+			.mockImplementation((config) => discover(config, processTable));
 		yield* Effect.addFinalizer(() =>
 			Effect.sync(() => discovery.mockRestore()),
 		);
@@ -1689,6 +1668,7 @@ for (const outcome of ["delivered", "terminal", "covered"] as const)
 					vi.spyOn(f.processTable, "signal").mockImplementation(
 						(_pid, signal) => {
 							signals.push({ signal, at: clock.currentTimeMillisUnsafe() });
+							return "delivered";
 						},
 					);
 					const gates = yield* countGates(f.sql, ["run:park-head"]);

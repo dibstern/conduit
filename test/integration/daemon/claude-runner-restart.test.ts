@@ -17,6 +17,13 @@ import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
+import {
+	makeProductionProcessTable,
+	sameProcess,
+} from "../../../src/lib/provider/runner/process-table.js";
+
+const cleanupProcesses = makeProductionProcessTable();
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
 import {
@@ -25,10 +32,7 @@ import {
 	type RunnerMessage,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { RunnerMember } from "../../../src/lib/provider/runner/runner-receipts.js";
-import {
-	runnerMembersGone,
-	runnerProcessTable,
-} from "../../../src/lib/provider/runner/runner-registry.js";
+import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
 import type { SessionTurn } from "../../../src/lib/provider/runner/session-runner.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
@@ -1752,8 +1756,17 @@ if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
 					}
 				}
 				await vi.waitFor(
-					() =>
-						expect(runnerMembersGone(runnerProcessTable, members)).toBe(true),
+					() => {
+						const seen = cleanupProcesses.identify(
+							members.map((member) => member.pid),
+						);
+						expect(
+							members.every(
+								(member) =>
+									sameProcess(member, seen.get(member.pid)) === "gone",
+							),
+						).toBe(true);
+					},
 					{ timeout: 5000 },
 				);
 				await harness.dispose();

@@ -9,21 +9,45 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
+import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { RunnerMember } from "../../../src/lib/provider/runner/runner-receipts.js";
 import {
-	runnerMembersGone,
-	runnerProcessTable,
-} from "../../../src/lib/provider/runner/runner-registry.js";
+	makeProductionProcessTable,
+	ProcessStart,
+	sameProcess,
+} from "../../../src/lib/provider/runner/process-table.js";
+import type { RunnerMember } from "../../../src/lib/provider/runner/runner-receipts.js";
+import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import {
 	ProcessHarness,
 	responseChunks,
 } from "../../helpers/process-harness.js";
+
+const dist = process.env["CONDUIT_TEST_DIST"] ?? "dist";
+const processTable = makeProductionProcessTable();
+// Copy the old release's schema so expanding today's outcome union cannot hide a downgrade failure.
+const PreviousSignalLog = Schema.fromJsonString(
+	Schema.Array(
+		Schema.Struct({
+			signal: Schema.Literals(["SIGTERM", "SIGKILL"]),
+			at: Schema.optionalKey(Schema.Number),
+			target: Schema.Number.check(Schema.isInt()),
+			members: Schema.Array(
+				Schema.Struct({
+					pid: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
+					startTime: Schema.NonEmptyString,
+				}),
+			),
+			outcome: Schema.Literals(["delivered", "refused", "failed"]),
+		}),
+	),
+);
 
 function installForcedStopFixture(harness: ProcessHarness): void {
 	// Hold only the selected runner's control transport. Its sends and SDK
@@ -32,11 +56,57 @@ function installForcedStopFixture(harness: ProcessHarness): void {
 		join(harness.root, "runner-identity-fixture.mjs"),
 		`
 import { appendFileSync as d1Append } from "node:fs";
-import { RunnerSocket as D1Socket } from ${JSON.stringify(pathToFileURL(resolve("dist/src/lib/provider/runner/runner-protocol.js")).href)};
-import { runnerProcessTable as D1Processes } from ${JSON.stringify(pathToFileURL(resolve("dist/src/lib/provider/runner/runner-registry.js")).href)};
+const { Effect: D1Effect } = await import(${JSON.stringify(pathToFileURL(createRequire(import.meta.url).resolve("effect")).href)});
+const { readRunnerStopSnapshot: d1Snapshot } = await import(${JSON.stringify(new URL("../../fixtures/runner-stop-proof.ts", import.meta.url).href)});
 const d1Selection = join(root, "d1-selected-pid");
 const d1Record = (kind, fields = {}) => d1Append(join(root, "d1-stop-proof.jsonl"), JSON.stringify({ kind, at: Date.now(), pid: process.pid, ...fields }) + "\\n");
 const d1Selected = pid => existsSync(d1Selection) && [JSON.parse(readFileSync(d1Selection, "utf8")).pid, JSON.parse(readFileSync(d1Selection, "utf8")).descendantPid].includes(Math.abs(pid));
+const d1Cursor = () => {
+  const selected = JSON.parse(readFileSync(d1Selection, "utf8"));
+  return d1Snapshot(${JSON.stringify(harness.daemonStorePath())}, selected.runnerId, selected.pid);
+};
+let d1Observations = 0;
+let d1UnreadableReaper;
+globalThis[Symbol.for("d1-wrap-process-table")] = table => {
+  if (!table.observe) return table;
+  const identify = table.identify.bind(table);
+  table.identify = pids => {
+    const seen = identify(pids);
+    return d1UnreadableReaper !== undefined && pids.includes(d1UnreadableReaper)
+      ? new Map(seen).set(d1UnreadableReaper, { state: "unknown" })
+      : seen;
+  };
+  const observe = table.observe.bind(table);
+  const signal = table.signal.bind(table);
+  table.observe = query => D1Effect.suspend(() => {
+    if (!d1Selected(query.pgid)) return observe(query);
+    const observation = ++d1Observations;
+    d1Record("process-observe-start", { observation, pgid: query.pgid });
+    return observe(query).pipe(D1Effect.tap(result => D1Effect.sync(() => {
+      d1Record("process-observed", { observation, pgid: query.pgid, group: result.group, processes: [...result.processes], retirement: d1Cursor() });
+    })));
+  });
+  table.signal = (target, signalName) => {
+    const selected = d1Selected("group" in target ? target.group : target.process.pid);
+    if (selected) d1Record("process-signal-snapshot", { observation: d1Observations, target, signal: signalName, retirement: d1Cursor() });
+    const outcome = signal(target, signalName);
+    if (selected) d1Record("process-signalled", { observation: d1Observations, target, signal: signalName, outcome });
+    return outcome;
+  };
+  return table;
+};
+registerHooks({
+  load(url, context, nextLoad) {
+    const loaded = nextLoad(url, context);
+    if (/\\/process-table\\.(js|ts)$/.test(url)) return {
+      ...loaded,
+      source: Buffer.from(loaded.source).toString().replaceAll("makeProductionProcessTable", "d1MakeProductionProcessTable") +
+        '\\nexport function makeProductionProcessTable(...args) { return globalThis[Symbol.for("d1-wrap-process-table")](d1MakeProductionProcessTable(...args)); }',
+    };
+    return loaded;
+  },
+});
+const { RunnerSocket: D1Socket } = await import(${JSON.stringify(pathToFileURL(resolve(dist ? join(dist, "src/lib/provider/runner/runner-protocol.js") : "src/lib/provider/runner/runner-protocol.ts")).href)});
 const d1Write = D1Socket.prototype.write;
 D1Socket.prototype.write = function(message) {
   if (message.type === "hello") d1Record("hello", { hello: message, startTime: childProcess.execFileSync("ps", ["-o", "lstart=", "-p", String(process.pid)], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } }).trim() });
@@ -59,10 +129,7 @@ if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
         try { d1Record("reaper-spawned", { childPid: child.pid, startTime: childProcess.execFileSync("ps", ["-o", "lstart=", "-p", String(child.pid)], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } }).trim() }); }
         catch { d1Record("reaper-exited-before-identity", { childPid: child.pid }); }
       });
-      if (reaperFailure === "identity-failure") {
-        const inspect = D1Processes.inspect;
-        D1Processes.inspect = pid => pid === child.pid ? { state: "unknown" } : inspect(pid);
-      }
+      if (reaperFailure === "identity-failure") d1UnreadableReaper = child.pid;
     }
     return child;
   };
@@ -259,14 +326,21 @@ function artifact(name: string): string {
 }
 
 function identity(pid: number): RunnerMember {
-	const observation = runnerProcessTable.inspect(pid);
-	assert(observation.state === "running" && observation.startTime);
+	const observation = processTable.identify([pid]).get(pid);
+	assert(observation?.state === "running");
 	return { pid, startTime: observation.startTime };
 }
 
+function membersGone(members: readonly RunnerMember[]): boolean {
+	const observed = processTable.identify(members.map((member) => member.pid));
+	return members.every(
+		(member) => sameProcess(member, observed.get(member.pid)) === "gone",
+	);
+}
+
 function signalOwned(member: RunnerMember, signal: NodeJS.Signals): void {
-	const current = runnerProcessTable.inspect(member.pid);
-	if (current.state === "running" && current.startTime === member.startTime) {
+	const current = processTable.identify([member.pid]).get(member.pid);
+	if (sameProcess(member, current) === "same") {
 		try {
 			process.kill(member.pid, signal);
 		} catch (cause) {
@@ -324,10 +398,9 @@ async function cleanupOwned(
 	}
 	try {
 		for (const member of all) signalOwned(member, "SIGKILL");
-		await vi.waitFor(
-			() => expect(runnerMembersGone(runnerProcessTable, all)).toBe(true),
-			{ timeout: 5000 },
-		);
+		await vi.waitFor(() => expect(membersGone(all)).toBe(true), {
+			timeout: 5000,
+		});
 	} finally {
 		await harness.dispose();
 	}
@@ -346,7 +419,7 @@ async function selectedRunner(
 	const runner = harness.marks.find(
 		(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
 	);
-	assert(runner?.kind === "runner-started");
+	assert(runner?.kind === "runner-started", harness.logTail);
 	const leader = identity(runner.pid);
 	const hello = proof(harness).find(
 		(mark) => mark["kind"] === "hello" && mark["pid"] === runner.pid,
@@ -363,7 +436,13 @@ async function selectedRunner(
 		startTime: reaperIdentity.startTime,
 		pgid: leader.pid,
 	});
-	const selection = { pid: runner.pid, sessionId, leaderExits, ...extra };
+	const selection = {
+		pid: runner.pid,
+		runnerId: basename(runner.socketPath),
+		sessionId,
+		leaderExits,
+		...extra,
+	};
 	writeFileSync(
 		join(harness.root, "d1-selected-pid"),
 		JSON.stringify(selection),
@@ -433,7 +512,7 @@ async function expectGroupGone(
 ) {
 	await vi.waitFor(
 		() => {
-			expect(runnerMembersGone(runnerProcessTable, members)).toBe(true);
+			expect(membersGone(members)).toBe(true);
 			expect(
 				(runnerProcessTable.members?.(group) ?? []).filter(
 					(member) =>
@@ -457,7 +536,7 @@ describe("runner forced stop with real processes", () => {
 			failureMode: failure,
 		};
 		const harness = ProcessHarness.create({
-			dist: "dist",
+			dist,
 			deadline: performance.now() + 40_000,
 		});
 		try {
@@ -522,7 +601,7 @@ describe("runner forced stop with real processes", () => {
 			killReaper,
 		};
 		const harness = ProcessHarness.create({
-			dist: "dist",
+			dist,
 			deadline: performance.now() + 75_000,
 		});
 		let members: RunnerMember[] = [];
@@ -545,9 +624,7 @@ describe("runner forced stop with real processes", () => {
 			if (killReaper) {
 				signalOwned(fixture.reaper, "SIGKILL");
 				await vi.waitFor(() =>
-					expect(runnerMembersGone(runnerProcessTable, [fixture.reaper])).toBe(
-						true,
-					),
+					expect(membersGone([fixture.reaper])).toBe(true),
 				);
 			}
 			await harness.requestRpc({
@@ -563,9 +640,103 @@ describe("runner forced stop with real processes", () => {
 				fixture.acceptedRun.id,
 			);
 			evidence["proof"] = proof(harness);
-			evidence["retirement"] = cursor(
-				harness,
-				basename(fixture.runner.socketPath),
+			evidence["retirementAfterSettlement"] =
+				cursor(harness, basename(fixture.runner.socketPath)) ?? null;
+			const processProof = proof(harness).filter((mark) =>
+				[
+					"process-observe-start",
+					"process-observed",
+					"process-signal-snapshot",
+					"process-signalled",
+				].includes(String(mark["kind"])),
+			);
+			evidence["processTable"] = processProof;
+			expect(processProof).toContainEqual(
+				expect.objectContaining({
+					kind: "process-observed",
+					pgid: fixture.leader.pid,
+				}),
+			);
+			const observations = new Set<number>();
+			const deliveries: Array<Record<string, unknown>> = [];
+			const snapshots: Array<Record<string, unknown>> = [];
+			const previousReleaseLog: Array<(typeof PreviousSignalLog.Type)[number]> =
+				[];
+			for (const mark of processProof) {
+				if (mark["kind"] === "process-observed")
+					observations.add(Number(mark["observation"]));
+				const retirement = mark["retirement"];
+				if (isRecord(retirement)) {
+					expect(retirement["runner_id"]).toBe(
+						basename(fixture.runner.socketPath),
+					);
+					previousReleaseLog.push(
+						...Schema.decodeUnknownSync(PreviousSignalLog)(
+							retirement["signal_log"],
+						),
+					);
+				}
+				if (mark["kind"] === "process-signal-snapshot") {
+					assert(isRecord(retirement));
+					expect(retirement["retired_at"]).toEqual(expect.any(Number));
+					const members = Schema.decodeUnknownSync(
+						Schema.fromJsonString(
+							Schema.Array(
+								Schema.Struct({
+									pid: Schema.Number,
+									startTime: Schema.NonEmptyString,
+									startKey: Schema.optionalKey(Schema.String),
+								}),
+							),
+						),
+					)(retirement["member_snapshot"]);
+					expect(members).toEqual(
+						expect.arrayContaining([
+							expect.objectContaining(fixture.leader),
+							expect.objectContaining(fixture.reaper),
+							expect.objectContaining(fixture.descendant),
+						]),
+					);
+					const observed = processProof.find(
+						(candidate) =>
+							candidate["kind"] === "process-observed" &&
+							candidate["observation"] === mark["observation"],
+					);
+					assert(observed);
+					if (Array.isArray(observed["group"]))
+						for (const member of observed["group"]) {
+							assert(isRecord(member));
+							// The legacy Stop commit may have stored only lstart.
+							const start = Schema.decodeUnknownSync(ProcessStart)(member);
+							expect(
+								members.some(
+									(saved) =>
+										saved.pid === member["pid"] &&
+										sameProcess(saved, { state: "running", ...start }) ===
+											"same",
+								),
+							).toBe(true);
+						}
+					snapshots.push(mark);
+				}
+				if (mark["kind"] === "process-signalled") {
+					expect(observations.has(Number(mark["observation"]))).toBe(true);
+					expect(snapshots).toContainEqual(
+						expect.objectContaining({
+							observation: mark["observation"],
+							signal: mark["signal"],
+							target: mark["target"],
+						}),
+					);
+					deliveries.push(mark);
+				}
+			}
+			expect(previousReleaseLog).toContainEqual(
+				expect.objectContaining({ signal: "SIGTERM", outcome: "delivered" }),
+			);
+			evidence["previousReleaseSignalLog"] = previousReleaseLog;
+			expect(deliveries).toContainEqual(
+				expect.objectContaining({ signal: "SIGTERM", outcome: "delivered" }),
 			);
 			expect(proof(harness)).toContainEqual(
 				expect.objectContaining({
@@ -574,10 +745,8 @@ describe("runner forced stop with real processes", () => {
 					signal: "SIGTERM",
 				}),
 			);
-			// A pinned group gets -leader. With the leader exited and its reaper
-			// killed, escalation must target the descendant directly. A live
-			// reaper's own group KILL can beat the daemon's, so there the
-			// daemon's KILL is optional.
+			// The recorded descendant still pins the group after both leader and
+			// reaper exit. A live reaper's own group KILL can beat the daemon's.
 			const signals = proof(harness).filter(
 				(mark) =>
 					mark["kind"] === "signal" &&
@@ -601,7 +770,7 @@ describe("runner forced stop with real processes", () => {
 						mark["pid"] === fixture.leader.pid,
 				);
 				expect(Number(kill?.["at"])).toBeGreaterThan(Number(exited?.["at"]));
-				expect(kill?.["childPid"]).toBe(fixture.descendant.pid);
+				expect(kill?.["childPid"]).toBe(-fixture.leader.pid);
 			} else if (!leaderExits) {
 				expect(proof(harness)).toContainEqual(
 					expect.objectContaining({
@@ -678,7 +847,7 @@ describe("runner forced stop with real processes", () => {
 		const artifactPath = artifact("leader-crash-without-stop");
 		const evidence: Record<string, unknown> = { passed: false };
 		const harness = ProcessHarness.create({
-			dist: "dist",
+			dist,
 			deadline: performance.now() + 75_000,
 		});
 		let members: RunnerMember[] = [];
@@ -750,7 +919,7 @@ describe("runner forced stop with real processes", () => {
 		const artifactPath = artifact(`crash-${crash}`);
 		const evidence: Record<string, unknown> = { passed: false, crash };
 		const harness = ProcessHarness.create({
-			dist: "dist",
+			dist,
 			restartProof: true,
 			deadline: performance.now() + 100_000,
 		});
@@ -913,10 +1082,34 @@ describe("runner forced stop with real processes", () => {
 		const evidence: Record<string, unknown> = { passed: false };
 		const owned: RunnerMember[] = [];
 		const harness = ProcessHarness.create({
-			dist: "dist",
+			dist,
 			restartProof: true,
 			deadline: performance.now() + 100_000,
 		});
+		let diagnosticRunnerId: string | undefined;
+		const phases: Array<Record<string, unknown>> = [];
+		evidence["phases"] = phases;
+		const capture = (phase: string) => {
+			const observed = processTable.identify(owned.map((member) => member.pid));
+			const snapshot: Record<string, unknown> = {
+				phase,
+				at: Date.now(),
+				proof: proof(harness),
+				members: owned.map((member) => ({
+					...member,
+					observed: observed.get(member.pid),
+				})),
+			};
+			try {
+				if (diagnosticRunnerId && existsSync(harness.daemonStorePath())) {
+					snapshot["cursor"] = cursor(harness, diagnosticRunnerId) ?? null;
+					snapshot["runs"] = runnerRuns(harness, diagnosticRunnerId);
+				}
+			} catch (cause) {
+				snapshot["captureFailure"] = String(cause);
+			}
+			phases.push(snapshot);
+		};
 		try {
 			installForcedStopFixture(harness);
 			await harness.restart();
@@ -930,6 +1123,7 @@ describe("runner forced stop with real processes", () => {
 			assert(first?.kind === "runner-started");
 			owned.push(identity(first.pid));
 			const runnerId = basename(first.socketPath);
+			diagnosticRunnerId = runnerId;
 			const originalQuery = harness.marks.find(
 				(mark) => mark.kind === "query" && mark.pid === first.pid,
 			);
@@ -938,7 +1132,12 @@ describe("runner forced stop with real processes", () => {
 			evidence["nativeSessionId"] = originalQuery.sessionId;
 			writeFileSync(
 				join(harness.root, "d1-selected-pid"),
-				JSON.stringify({ pid: first.pid, sessionId, surviveSigkill: true }),
+				JSON.stringify({
+					pid: first.pid,
+					runnerId,
+					sessionId,
+					surviveSigkill: true,
+				}),
 			);
 			const pending = browser.send(sessionId, "upgrade-long-turn", 90_000);
 			void pending.catch(() => undefined);
@@ -994,7 +1193,7 @@ describe("runner forced stop with real processes", () => {
 					),
 				{ timeout: harness.remainingTimeMs(20_000) },
 			);
-			evidence["signals"] = proof(harness);
+			evidence["signalsBeforeRestart"] = proof(harness);
 			await harness.kill();
 			await pending.catch(() => undefined);
 			evidence["daemonKilledAt"] = Date.now();
@@ -1014,6 +1213,7 @@ describe("runner forced stop with real processes", () => {
 			);
 			await harness.restart();
 			evidence["daemonRestartedAt"] = Date.now();
+			capture("after-restart");
 			browser = await harness.connect(sessionId);
 			expect(() => process.kill(first.pid, 0)).not.toThrow();
 			// Only the reconciler's Stop progress may move across the restart, and
@@ -1049,11 +1249,12 @@ describe("runner forced stop with real processes", () => {
 				harness.remainingTimeMs(15_000),
 				held.command_id,
 			);
+			capture("before-member-kill");
 			for (const member of members) signalOwned(member, "SIGKILL");
-			await vi.waitFor(
-				() => expect(runnerMembersGone(runnerProcessTable, members)).toBe(true),
-				{ timeout: harness.remainingTimeMs(5000) },
-			);
+			await vi.waitFor(() => expect(membersGone(members)).toBe(true), {
+				timeout: harness.remainingTimeMs(5000),
+			});
+			capture("members-gone-before-settlement");
 			await vi.waitFor(
 				() => {
 					const settled = runnerRuns(harness, runnerId).find(
@@ -1070,6 +1271,7 @@ describe("runner forced stop with real processes", () => {
 				},
 				{ timeout: harness.remainingTimeMs(15_000) },
 			);
+			capture("settled-after-gone");
 			const settledDb = new Database(harness.daemonStorePath(), {
 				readonly: true,
 			});
@@ -1134,7 +1336,13 @@ describe("runner forced stop with real processes", () => {
 			evidence["resumedNativeSessionId"] = resumedQuery.sessionId;
 			evidence["cursorAfterRestart"] = cursor(harness, runnerId);
 			evidence["passed"] = true;
+		} catch (cause) {
+			evidence["failure"] = String(cause);
+			capture("failure");
+			throw cause;
 		} finally {
+			capture("before-cleanup");
+			evidence["signals"] = proof(harness);
 			try {
 				await cleanupOwned(harness, owned);
 				evidence["cleanup"] = harness.proof();

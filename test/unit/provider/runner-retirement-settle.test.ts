@@ -5,7 +5,7 @@ import { it } from "@effect/vitest";
 import { Effect, Exit, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-services/Services/provider-runtime-ingestion-service.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -22,6 +22,7 @@ import {
 	makeRunnerReceiptStore,
 	type StopReason,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
+import * as RunnerRegistry from "../../../src/lib/provider/runner/runner-registry.js";
 import {
 	prepareRunnerDirectory,
 	registerRunner,
@@ -35,6 +36,7 @@ import type { SendEvidence } from "../../../src/lib/provider/runner/send-settlem
 import { settleSend } from "../../../src/lib/provider/runner/send-settlement-outbox.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
 import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
+import { makeTestProcessTable } from "../../helpers/runner-process-table.js";
 
 // Settle at the reconciler's interface over a real store: a gone runner's held
 // send with no journal is released only when the runner journals before it
@@ -50,6 +52,7 @@ const settle = (
 	reason: StopReason = { _tag: "Explicit" },
 	answer?: TurnResult,
 	steer = false,
+	recovery?: "before-first-recovery-tick" | "after-recovery-kill",
 ) =>
 	Effect.gen(function* () {
 		const configDir = mkdtempSync(join(tmpdir(), "settle-config-"));
@@ -105,12 +108,37 @@ const settle = (
 			);
 		const released: RunRelease[] = [];
 		const committed: SendEvidence[] = [];
+		let alive = recovery === "after-recovery-kill";
+		const signals: string[] = [];
+		if (recovery) {
+			const liveness = vi
+				.spyOn(RunnerRegistry, "runnerPidAlive")
+				.mockImplementation(() => alive);
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(() => liveness.mockRestore()),
+			);
+		}
 		const reconciler = yield* makeRunnerStopReconciler({
 			receipts,
-			processTable: {
-				inspect: () => ({ state: "gone" }),
-				signal: () => undefined,
-			},
+			processTable: makeTestProcessTable({
+				processes: () =>
+					new Map(
+						alive
+							? [
+									[
+										123,
+										{
+											state: "running",
+											startTime: "started",
+											startKey: "d:1.1",
+											pgid: 123,
+										},
+									],
+								]
+							: [],
+					),
+				signal: (_, signal) => signals.push(signal),
+			}),
 			holdRun: (sessionId, runId, commandId) =>
 				lifecycle.holdRun({ sessionId, runId, commandId }),
 			release: (input) =>
@@ -141,7 +169,8 @@ const settle = (
 				wake: () => Effect.void,
 			},
 			evict: () => Effect.void,
-			prune: () => Effect.void,
+			prune: (record) =>
+				recovery ? receipts.pruneRetired(record.runnerId) : Effect.void,
 			notice: () => Effect.succeed(true),
 		});
 		yield* reconciler.register(
@@ -187,22 +216,57 @@ const settle = (
 				}),
 			).toMatchObject({ _tag: "Held", runner: runnerId, transmission: 1 });
 		}
-		const stopped = yield* Effect.exit(
-			reconciler.requestStop(
-				{
-					runnerId,
-					sessionId: "session",
-					driverKind: "claude",
-					identity: { tag: "Verified", pid: 123, startTime: "started" },
-					reaper: undefined,
-					members: [],
-				},
-				reason,
-			),
-		);
+		const members = [
+			{ pid: 123, startTime: "started" },
+			{ pid: 123, startTime: "started", startKey: "d:1.1" },
+		];
+		if (recovery) {
+			const log = [
+				{ signal: "SIGKILL", target: -123, members, outcome: "refused" },
+			];
+			yield* sql`UPDATE provider_runs SET status = 'running' WHERE id = 'run'`;
+			yield* sql`UPDATE claude_runner_cursors SET retired_at = 0,
+				stop_started_at = 0, stop_state = 'Escalated', stop_reason = ${JSON.stringify(reason)},
+				retirement_state = 'Watching', signal_state = 'TermSent',
+				member_snapshot = ${JSON.stringify(members)}, signal_log = ${JSON.stringify(log)}
+				WHERE runner_id = ${runnerId}`;
+			yield* TestClock.adjust("10 seconds");
+			expect(
+				(yield* receipts.retirements([runnerId])).rows[0]?.members,
+			).toEqual([members[1]]);
+			yield* reconciler.recover();
+			if (alive) {
+				yield* TestClock.adjust("10 seconds");
+				expect(signals).toEqual(["SIGKILL"]);
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE id = 'run'`,
+				).toEqual([{ status: "running" }]);
+				alive = false;
+			}
+			yield* TestClock.adjust("250 millis");
+			expect(reconciler.state(runnerId)._tag).toBe("Settled");
+			expect(
+				yield* sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${runnerId}`,
+			).toEqual([]);
+		}
+		const stopped = recovery
+			? Exit.succeed("Requested")
+			: yield* Effect.exit(
+					reconciler.requestStop(
+						{
+							runnerId,
+							sessionId: "session",
+							driverKind: "claude",
+							identity: { tag: "Verified", pid: 123, startTime: "started" },
+							reaper: undefined,
+							members: [],
+						},
+						reason,
+					),
+				);
 		const stop = Exit.isSuccess(stopped) ? stopped.value : "Failed";
 		if (stop === "Requested") {
-			yield* TestClock.adjust("10 seconds");
+			if (!recovery) yield* TestClock.adjust("10 seconds");
 			expect(reconciler.state(runnerId)._tag).toBe("Settled");
 			// A fresh serving runner holds the send again only if the stop left
 			// its run open.
@@ -321,6 +385,44 @@ const ownerEnd = (reason: StopReason) =>
 				type: "turn.error",
 				code: reason._tag === "Exited" ? "provider_error" : "runner_stopped",
 			};
+
+for (const phase of [
+	"before-first-recovery-tick",
+	"after-recovery-kill",
+] as const)
+	it.effect(
+		`settles and prunes an accepted recovered send ${phase} with duplicate pins`,
+		() =>
+			Effect.gen(function* () {
+				const settled = yield* settle(
+					true,
+					runnerBuildId(),
+					{ _tag: "EndSession" },
+					{
+						status: "accepted",
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						providerStateUpdates: [],
+					},
+					false,
+					phase,
+				);
+				expect(settled.committed).toEqual([
+					{ _tag: "process_lost", runId: "run" },
+				]);
+				expect(settled.ended).toEqual([
+					{ type: "turn.interrupted", code: null },
+				]);
+				expect(settled.owner).toEqual([
+					{ type: "turn.interrupted", code: null },
+				]);
+				expect(settled.send).toEqual([
+					{ status: "failed", error_code: "interrupted" },
+				]);
+				expect(settled.again).toEqual({ _tag: "Ended" });
+			}),
+	);
 
 // A hold binds only the serving runner. The swap refuses a target that holds
 // a run, and an abandoned candidate that serves is Ignored (6.3), so neither

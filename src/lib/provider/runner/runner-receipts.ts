@@ -50,6 +50,7 @@ export class RunnerSlotError extends Data.TaggedError("RunnerSlotError")<{
 const Member = Schema.Struct({
 	pid: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
 	startTime: Schema.NonEmptyString,
+	startKey: Schema.optionalKey(Schema.String),
 });
 export type RunnerMember = typeof Member.Type;
 const SignalAttempt = Schema.Struct({
@@ -283,13 +284,20 @@ const decodeRetirement = (raw: { readonly runner_id: string }) =>
 
 export const mergeRunnerMembers = (
 	...snapshots: readonly (readonly RunnerMember[])[]
-) => [
-	...new Map(
-		snapshots
-			.flat()
-			.map((member) => [`${member.pid}:${member.startTime}`, member]),
-	).values(),
-];
+) => {
+	const members = new Map<string, RunnerMember>();
+	for (const snapshot of snapshots)
+		for (const member of snapshot) {
+			const key = `${member.pid}:${member.startTime}`;
+			// A legacy leader/reaper must not erase a member's precise identity.
+			if (
+				member.startKey !== undefined ||
+				members.get(key)?.startKey === undefined
+			)
+				members.set(key, member);
+		}
+	return [...members.values()];
+};
 
 export interface RunnerCursorIdentity {
 	readonly sessionId: string;

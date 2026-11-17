@@ -101,7 +101,7 @@ export const makeProviderAdaptersLive = (
 			const activity = yield* SessionActivityTag;
 			const watcher = yield* PortWatcher;
 			const registry = new ProviderRegistry();
-			const processIdentity = makeProductionProcessTable((message) =>
+			const processTable = makeProductionProcessTable((message) =>
 				createLogger("provider-adapters").warn(message),
 			);
 			const shutdown = yield* Effect.cached(
@@ -461,7 +461,7 @@ export const makeProviderAdaptersLive = (
 						Effect.map((config) => config.autoSettleAfterDays),
 					),
 					daemonConfigDir: configDir,
-					processIdentity,
+					processTable,
 					projectRootForSession,
 					recoveryForSession,
 					persistUserMessage,
@@ -555,7 +555,7 @@ export const makeProviderAdaptersLive = (
 				yield* makeCursorProviderRuntime(
 					{
 						daemonConfigDir: configDir,
-						processIdentity,
+						processTable,
 						accounts: accounts.snapshot,
 						autoSettleAfterDays: Ref.get(configRef).pipe(
 							Effect.map((config) => config.autoSettleAfterDays),
@@ -571,7 +571,7 @@ export const makeProviderAdaptersLive = (
 				yield* makeCodexProviderRuntime(
 					{
 						daemonConfigDir: configDir,
-						processIdentity,
+						processTable,
 						accounts: accounts.snapshot,
 						autoSettleAfterDays: Ref.get(configRef).pipe(
 							Effect.map((config) => config.autoSettleAfterDays),
@@ -618,11 +618,7 @@ export const makeProviderAdaptersLive = (
 					continue;
 				const needsRecovery = yield* Effect.gen(function* () {
 					const runners = yield* Effect.try(() =>
-						discoverRunners(
-							entry.project.folders[0],
-							configDir,
-							processIdentity,
-						),
+						discoverRunners(entry.project.folders[0], configDir, processTable),
 					);
 					// Controls can outlive both their runner and session projection.
 					// Lend their registered project's services before the first drain.

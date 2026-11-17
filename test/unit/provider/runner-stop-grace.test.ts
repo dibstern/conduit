@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest";
-import { Clock, Data, Effect, Exit, Fiber, Scope } from "effect";
+import { Clock, Data, Effect, Exit, Fiber, Schema, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
@@ -8,13 +8,187 @@ import {
 	makeRunnerReceiptStore,
 	type RunnerRetirement,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
-import { makeRunnerStopReconciler } from "../../../src/lib/provider/runner/runner-retirement.js";
+import {
+	decideRunnerKill,
+	makeRunnerStopReconciler,
+} from "../../../src/lib/provider/runner/runner-retirement.js";
+import { makeTestProcessTable } from "../../helpers/runner-process-table.js";
 
 // Failure cases: shutdown consumes part of the grace; the Stop waiter blocks
 // beyond its bound; restart discards the remaining grace; old logs stop decoding.
 class RefusedSignal extends Data.TaggedError("RefusedSignal")<{
 	readonly code: "EPERM";
 }> {}
+
+it.effect(
+	"keeps a recorded precise start when the group listing is unreadable",
+	() =>
+		Effect.sync(() => {
+			const member = {
+				pid: 123,
+				startTime: "same-second-start",
+				startKey: "d:1.1",
+			};
+			const processes = new Map([
+				[
+					123,
+					{
+						state: "running" as const,
+						startTime: member.startTime,
+						startKey: member.startKey,
+						pgid: 123,
+					},
+				],
+			]);
+			const table = makeTestProcessTable({ processes });
+			const decision = decideRunnerKill(
+				{
+					runnerId: "runner",
+					sessionId: "session",
+					driverKind: "claude",
+					identity: {
+						tag: "Verified",
+						pid: member.pid,
+						startTime: member.startTime,
+					},
+					reaper: undefined,
+					members: [member],
+					signal: { tag: "None" },
+					signalLog: [],
+					retiredAt: 0,
+					retirement: { tag: "Watching" },
+				},
+				{ processes: table.identify([123]), group: undefined },
+				"SIGKILL",
+			);
+			processes.set(123, {
+				state: "running",
+				startTime: member.startTime,
+				startKey: "d:1.2",
+				pgid: 123,
+			});
+			expect(
+				table.signal({ group: 123, pins: decision.record.members }, "SIGKILL"),
+			).toBe("stale");
+			expect(table.calls.signals).toEqual([]);
+		}),
+);
+
+it.effect(
+	"observes once per kill pass and never persists a stale delivery",
+	() =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const receipts = yield* makeRunnerReceiptStore(sql);
+				const processes = new Map([
+					[123, { state: "running" as const, startTime: "started", pgid: 123 }],
+					[
+						124,
+						{ state: "running" as const, startTime: "child-start", pgid: 123 },
+					],
+				]);
+				const memory = makeTestProcessTable({ processes });
+				let observations = 0;
+				let committedObservation = 0;
+				let committedMembers: readonly { readonly pid: number }[] = [];
+				const attempts: number[] = [];
+				const processTable = {
+					...memory,
+					observe: (query: Parameters<typeof memory.observe>[0]) =>
+						Effect.sync(() => {
+							observations++;
+							processes.set(200 + observations, {
+								state: "running",
+								startTime: `fork-${observations}`,
+								pgid: 123,
+							});
+						}).pipe(Effect.andThen(memory.observe(query))),
+					signal: (
+						target: Parameters<typeof memory.signal>[0],
+						signal: "SIGTERM" | "SIGKILL",
+					) => {
+						expect(committedMembers.map((member) => member.pid)).toEqual([
+							...processes.keys(),
+						]);
+						expect(observations).toBe(committedObservation);
+						attempts.push(observations);
+						if (signal === "SIGKILL") {
+							// Reuse after the snapshot commit, before delivery, cannot be
+							// produced reliably with real process IDs.
+							for (const pid of processes.keys())
+								processes.set(pid, {
+									state: "running",
+									startTime: `reused-${pid}`,
+									pgid: 123,
+								});
+						}
+						return memory.signal(target, signal);
+					},
+				};
+				const reconciler = yield* makeRunnerStopReconciler({
+					receipts: {
+						...receipts,
+						commitRetirement: (record) =>
+							receipts.commitRetirement(record).pipe(
+								Effect.tap(() =>
+									Effect.sync(() => {
+										committedMembers = record.members;
+										committedObservation = observations;
+									}),
+								),
+							),
+					},
+					processTable,
+					committed: () => Effect.void,
+					shutdown: () => Effect.void,
+					evict: () => Effect.void,
+					prune: () => Effect.void,
+					notice: () => Effect.succeed(false),
+				});
+				yield* reconciler.requestStop({
+					runnerId: "runner",
+					sessionId: "session",
+					driverKind: "claude",
+					identity: { tag: "Verified", pid: 123, startTime: "started" },
+					reaper: undefined,
+					members: [],
+				});
+				yield* TestClock.adjust("4 seconds");
+				expect(attempts).toHaveLength(2);
+				expect(new Set(attempts).size).toBe(2);
+				expect(memory.calls.signals).toEqual([
+					{ target: -123, signal: "SIGTERM" },
+				]);
+				const [row] = yield* sql<{
+					signal_log: string;
+				}>`SELECT signal_log FROM claude_runner_cursors WHERE runner_id = 'runner'`;
+				expect(row).toBeDefined();
+				// Copied from the prior release, independent of the current decoder.
+				const previousSignalLog = Schema.fromJsonString(
+					Schema.Array(
+						Schema.Struct({
+							signal: Schema.Literals(["SIGTERM", "SIGKILL"]),
+							at: Schema.optionalKey(Schema.Number),
+							target: Schema.Number.check(Schema.isInt()),
+							members: Schema.Array(
+								Schema.Struct({
+									pid: Schema.Number,
+									startTime: Schema.NonEmptyString,
+								}),
+							),
+							outcome: Schema.Literals(["delivered", "refused", "failed"]),
+						}),
+					),
+				);
+				expect(
+					Schema.decodeUnknownSync(previousSignalLog)(row?.signal_log),
+				).toMatchObject([
+					{ signal: "SIGTERM", target: -123, outcome: "delivered" },
+				]);
+			}),
+		).pipe(Effect.provide(makePersistenceEffectLayer(":memory:", "project"))),
+);
 
 for (const restart of [false, true])
 	for (const refused of [false, true])
@@ -41,12 +215,10 @@ for (const restart of [false, true])
 						};
 						const options = {
 							receipts,
-							processTable: {
-								inspect: () => ({
-									state: "running",
-									startTime: "started",
-									pgid: 123,
-								}),
+							processTable: makeTestProcessTable({
+								processes: new Map([
+									[123, { state: "running", startTime: "started", pgid: 123 }],
+								]),
 								signal: (_pid: number, signal: NodeJS.Signals | 0) => {
 									signals.push({
 										signal: String(signal),
@@ -55,7 +227,7 @@ for (const restart of [false, true])
 									if (refused && signal === "SIGTERM")
 										throw new RefusedSignal({ code: "EPERM" });
 								},
-							},
+							}),
 							committed: () => Effect.void,
 							shutdown: () => Effect.never,
 							evict: () => Effect.void,
@@ -147,19 +319,17 @@ for (const previousUntimedTerm of [false, true])
 					yield* TestClock.adjust("10 seconds");
 					const reconciler = yield* makeRunnerStopReconciler({
 						receipts,
-						processTable: {
-							inspect: () => ({
-								state: "running",
-								startTime: "started",
-								pgid: 123,
-							}),
+						processTable: makeTestProcessTable({
+							processes: new Map([
+								[123, { state: "running", startTime: "started", pgid: 123 }],
+							]),
 							signal: (_pid, signal) => {
 								signals.push({
 									signal: String(signal),
 									at: clock.currentTimeMillisUnsafe(),
 								});
 							},
-						},
+						}),
 						committed: () => Effect.void,
 						shutdown: () => Effect.void,
 						evict: () => Effect.void,
@@ -191,19 +361,17 @@ it.effect(
 				const signals: Array<{ signal: string; at: number }> = [];
 				const reconciler = yield* makeRunnerStopReconciler({
 					receipts,
-					processTable: {
-						inspect: () => ({
-							state: "running",
-							startTime: "started",
-							pgid: 123,
-						}),
+					processTable: makeTestProcessTable({
+						processes: new Map([
+							[123, { state: "running", startTime: "started", pgid: 123 }],
+						]),
 						signal: (_pid, signal) => {
 							signals.push({
 								signal: String(signal),
 								at: clock.currentTimeMillisUnsafe(),
 							});
 						},
-					},
+					}),
 					committed: () => Effect.void,
 					shutdown: () => Effect.void,
 					evict: () => Effect.void,
@@ -247,13 +415,17 @@ it.effect(
 				let gone = false;
 				const reconciler = yield* makeRunnerStopReconciler({
 					receipts,
-					processTable: {
-						inspect: () =>
-							gone
-								? { state: "gone" }
-								: { state: "running", startTime: "started", pgid: 123 },
-						signal: () => undefined,
-					},
+					processTable: makeTestProcessTable({
+						processes: () =>
+							new Map([
+								[
+									123,
+									gone
+										? { state: "gone" }
+										: { state: "running", startTime: "started", pgid: 123 },
+								],
+							]),
+					}),
 					committed: () => Effect.void,
 					shutdown: () => Effect.void,
 					// No session row is left, so Settle has nothing to end.

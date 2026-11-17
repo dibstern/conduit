@@ -21,7 +21,6 @@ import {
 	Logger,
 	Option,
 	Scheduler,
-	Schema,
 	Scope,
 	Stream,
 } from "effect";
@@ -78,11 +77,6 @@ import { makeInProcessSessionRunner } from "../../../src/lib/provider/runner/in-
 import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import {
-	makeMemoryProcessAdapter,
-	makeProcessTable,
-	ProcessStart,
-} from "../../../src/lib/provider/runner/process-table.js";
-import {
 	isLegacyRunner,
 	legacyRunnerRunQuery,
 } from "../../../src/lib/provider/runner/runner-legacy-classification.js";
@@ -130,6 +124,7 @@ import {
 	createMockEventSink,
 	makeBaseSendTurnInput,
 } from "../../helpers/mock-sdk.js";
+import { makeTestProcessTable } from "../../helpers/runner-process-table.js";
 import {
 	admitRunnerCommand,
 	makeRunnerAdmission,
@@ -370,23 +365,7 @@ const retirementFixture = (
 					return {};
 				}),
 		);
-		const processTable: runnerRegistry.RunnerProcessTable = {
-			inspect: (pid: number) =>
-				processes.get(pid) ?? { state: "gone" as const },
-			signal: () => {},
-		};
-		const processIdentity = makeProcessTable(
-			makeMemoryProcessAdapter({
-				get processes() {
-					return new Map(
-						[...processes].map(([pid, seen]) => [
-							pid,
-							{ ...seen, ...Schema.decodeUnknownSync(ProcessStart)(seen) },
-						]),
-					);
-				},
-			}),
-		);
+		const processTable = makeTestProcessTable({ processes });
 		// A held gate parks every accounts read until the test opens it.
 		const accountsGate: { hold?: Deferred.Deferred<void> } = {};
 		const manager = yield* makeProcessSessionRunner(
@@ -404,7 +383,6 @@ const retirementFixture = (
 				),
 				projectRootForSession: () => Effect.succeed(root),
 				processTable,
-				processIdentity,
 				...(recoveryForSession ? { recoveryForSession } : {}),
 			},
 			output,
@@ -453,7 +431,6 @@ const retirementFixture = (
 			socketPath,
 			driver,
 			processTable,
-			processIdentity,
 			processes,
 			childProcesses,
 			manager,
@@ -1052,7 +1029,7 @@ const s7Fixture = (
 		const discover = runnerRegistry.discoverAllRunners;
 		const discovery = vi
 			.spyOn(runnerRegistry, "discoverAllRunners")
-			.mockImplementation((config) => discover(config, f.processIdentity));
+			.mockImplementation((config) => discover(config, f.processTable));
 		yield* Effect.addFinalizer(() =>
 			Effect.sync(() => discovery.mockRestore()),
 		);
@@ -1418,6 +1395,7 @@ it.effect(
 				yield* f.sql`CREATE TEMP TRIGGER s10_attach_settled AFTER UPDATE ON provider_command_outbox WHEN NEW.command_id='attach-retry' AND NEW.status='completed' BEGIN INSERT INTO s10_attach_settled VALUES (NEW.command_id); END`;
 				vi.spyOn(f.processTable, "signal").mockImplementation(() => {
 					f.processes.delete(100_088);
+					return "delivered";
 				});
 				const result = {
 					status: "completed",
@@ -1517,6 +1495,7 @@ it.effect(
 				yield* f.seed("main-race");
 				vi.spyOn(f.processTable, "signal").mockImplementation(() => {
 					f.processes.delete(100_088);
+					return "delivered";
 				});
 				const result = {
 					status: "completed",
@@ -3191,6 +3170,7 @@ it.effect(
 				yield* f.sql`UPDATE provider_runs SET runner_id = '131313131313' WHERE id = 'run:unreceived'`;
 				vi.spyOn(f.processTable, "signal").mockImplementation(() => {
 					f.processes.delete(100_088);
+					return "delivered";
 				});
 				yield* f.sql`CREATE TEMP TRIGGER reject_s7_requeue BEFORE UPDATE ON provider_command_outbox
 			WHEN NEW.status = 'retryable_failed' BEGIN SELECT RAISE(ABORT, 'persistent S7 settlement failure'); END`;
@@ -7567,10 +7547,11 @@ it.effect(
 					{
 						daemonConfigDir: root,
 						projectRootForSession: () => Effect.succeed(root),
-						processTable: {
-							inspect: () => ({ state: "running", startTime: "original" }),
-							signal: () => {},
-						},
+						processTable: makeTestProcessTable({
+							processes: new Map([
+								[pid, { state: "running", startTime: "original" }],
+							]),
+						}),
 					},
 					(output) =>
 						Effect.gen(function* () {
@@ -9303,11 +9284,26 @@ it.effect(
 		runRetirement(
 			Effect.gen(function* () {
 				const f = yield* sendScopeFixture();
+				const discover = runnerRegistry.discoverAllRunners;
+				const discovery = vi
+					.spyOn(runnerRegistry, "discoverAllRunners")
+					.mockImplementation((config, processTable) => {
+						expect(processTable).toBe(f.processTable);
+						return discover(config, processTable);
+					});
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => discovery.mockRestore()),
+				);
 				const signals: Array<{ pid: number; signal: string }> = [];
-				vi.spyOn(f.processTable, "signal").mockImplementation((pid, signal) => {
-					signals.push({ pid, signal });
-					f.processes.delete(pid);
-				});
+				vi.spyOn(f.processTable, "signal").mockImplementation(
+					(target, signal) => {
+						const pid =
+							"process" in target ? target.process.pid : -target.group;
+						signals.push({ pid, signal });
+						f.processes.delete(Math.abs(pid));
+						return "delivered";
+					},
+				);
 				const before = yield* f.sql`SELECT type FROM events ORDER BY sequence`;
 				// This public entry bypasses only the fixture's cursor auto-registration.
 				if (

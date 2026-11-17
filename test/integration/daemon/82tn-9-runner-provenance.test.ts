@@ -25,6 +25,7 @@ import {
 } from "../../../src/lib/persistence/effect/live.js";
 import { makeRetireReplacedProcessPrompts } from "../../../src/lib/persistence/effect/retire-pending-prompts.js";
 import { makeClaudeProviderRuntime } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { makeProductionProcessTable } from "../../../src/lib/provider/runner/process-table.js";
 import { settleUnclaimedRunnerCommands } from "../../../src/lib/provider/runner/runner-recovery.js";
 import * as runnerRegistry from "../../../src/lib/provider/runner/runner-registry.js";
 import { discoverRunners } from "../../../src/lib/provider/runner/runner-registry.js";
@@ -34,6 +35,7 @@ import {
 } from "../../helpers/daemon-turns.js";
 import { makeMockConfig } from "../../helpers/mock-factories.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
+import { testProcess } from "../../helpers/runner-process-table.js";
 
 let harness: ProcessHarness | undefined;
 let proof: Record<string, unknown> | undefined;
@@ -464,7 +466,17 @@ it.each([
 				]),
 			),
 	);
-	const signals = vi.spyOn(runnerRegistry.runnerProcessTable, "signal");
+	const processTable = makeProductionProcessTable();
+	vi.spyOn(processTable, "identify").mockImplementation(
+		(pids) =>
+			new Map(
+				pids.map((pid) => [
+					pid,
+					testProcess(runnerRegistry.runnerProcessTable.inspect(pid)),
+				]),
+			),
+	);
+	const signals = vi.spyOn(processTable, "signal");
 	const store = makePersistenceStoreLayer(fixture.daemonStorePath());
 	const persistence = makePersistenceProjectLayer("project-b").pipe(
 		Layer.provideMerge(store),
@@ -481,6 +493,7 @@ it.each([
 			VALUES ('legacy-question', ${sessionId}, 'question', 'pending', 1),
 				('legacy-permission', ${sessionId}, 'permission', 'pending', 1)`;
 				const runner = yield* makeClaudeProviderRuntime({
+					processTable,
 					projectRootForSession: (id) =>
 						Effect.succeed(id === sessionId ? fixture.projectDir : undefined),
 					daemonConfigDir: fixture.configDir,

@@ -20,7 +20,6 @@ import {
 	Layer,
 	Logger,
 	Random,
-	Schema,
 	Scope,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -38,11 +37,8 @@ import { sendPreparedClaudeTurn } from "../../../src/lib/provider/claude/prepare
 import type { SendToken } from "../../../src/lib/provider/run-ledger/run-ledger-model.js";
 import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
-import {
-	makeMemoryProcessAdapter,
-	makeProcessTable,
-	ProcessStart,
-} from "../../../src/lib/provider/runner/process-table.js";
+import * as ProcessTables from "../../../src/lib/provider/runner/process-table.js";
+import { makeProcessTable } from "../../../src/lib/provider/runner/process-table.js";
 import * as RunnerConnection from "../../../src/lib/provider/runner/runner-connection.js";
 import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-legacy-classification.js";
 import {
@@ -71,6 +67,7 @@ import type {
 } from "../../../src/lib/provider/runner/session-runner.js";
 import { cleanupTestClaudeRunners } from "../../helpers/claude-runner-cleanup.js";
 import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
+import { testProcess } from "../../helpers/runner-process-table.js";
 import {
 	admitRunnerCommand,
 	makeRunnerAdmission,
@@ -102,6 +99,16 @@ const setup = Effect.gen(function* () {
 			readonly pgid?: number;
 		}
 	>();
+	const nativeAlive = RunnerRegistry.runnerPidAlive;
+	const alive = yield* Effect.acquireRelease(
+		Effect.sync(() =>
+			vi.spyOn(RunnerRegistry, "runnerPidAlive").mockImplementation((pid) => {
+				const current = processes.get(pid);
+				return current ? current.state !== "gone" : nativeAlive(pid);
+			}),
+		),
+		(spy) => Effect.sync(() => spy.mockRestore()),
+	);
 	const signals: Array<{
 		readonly pid: number;
 		readonly signal: NodeJS.Signals;
@@ -146,6 +153,7 @@ const setup = Effect.gen(function* () {
 		processes.set(child.pid, {
 			state: "running",
 			startTime: `spawned-${child.pid}`,
+			pgid: child.pid,
 		});
 		queueMicrotask(() =>
 			child.emit("message", {
@@ -204,6 +212,7 @@ const setup = Effect.gen(function* () {
 			writeFileSync(`${entry.socketPath}.json`, JSON.stringify(entry));
 			processes.set(pid, {
 				state: "running",
+				pgid: pid,
 				...(entry.startTime ? { startTime: entry.startTime } : {}),
 			});
 			if (options.retired !== false)
@@ -217,6 +226,31 @@ const setup = Effect.gen(function* () {
 			}
 			return entry;
 		});
+	const processTable = makeProcessTable({
+		read: (pids) =>
+			new Map(
+				[...inspectMany(pids)].map(([pid, seen]) => [pid, testProcess(seen)]),
+			),
+		group: (pgid) =>
+			Effect.sync(() => {
+				const group = members(pgid);
+				return group === undefined
+					? undefined
+					: new Map(
+							group.map((member) => [
+								member.pid,
+								testProcess({
+									...processes.get(member.pid),
+									state: processes.get(member.pid)?.state ?? "running",
+									...member,
+									pgid,
+								}),
+							]),
+						);
+			}),
+		signal,
+		argv: () => undefined,
+	});
 	const makeManager = (
 		options: Pick<
 			Parameters<typeof makeProcessSessionRunner>[0],
@@ -229,12 +263,7 @@ const setup = Effect.gen(function* () {
 					...options,
 					daemonConfigDir: root,
 					projectRootForSession: () => Effect.succeed(root),
-					processTable: {
-						inspect,
-						inspectMany,
-						members,
-						signal,
-					},
+					processTable,
 				},
 				output,
 				driver,
@@ -260,6 +289,8 @@ const setup = Effect.gen(function* () {
 	}>`SELECT data FROM events WHERE type = 'turn.notice' ORDER BY sequence`;
 	return {
 		manager,
+		processTable,
+		alive,
 		admission,
 		managerScope,
 		makeManager,
@@ -1014,7 +1045,8 @@ it.effect(
 				expect(
 					yield* f.sql`SELECT * FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
 				).toEqual(before);
-				expect(warnings).toHaveLength(1);
+				// Both the exit observation and the scheduled retry reject the row.
+				expect(warnings).toHaveLength(2);
 				yield* f.sql`UPDATE claude_runner_cursors SET signal_members = '[]' WHERE runner_id = ${entry.runnerId}`;
 				yield* TestClock.adjust("20 seconds");
 				expect(
@@ -1033,107 +1065,96 @@ it.effect(
 	},
 );
 
-it.effect(
-	"waits for child exit and batches descendant checks before escalation",
-	() =>
-		run(
-			Effect.gen(function* () {
-				const f = yield* setup;
-				f.connect.mockImplementation((options) =>
-					Effect.gen(function* () {
-						const connection = {
-							closed: false,
-							commandEffect: () => Effect.void,
-							destroy: () => {},
-							write: () => {},
-						} as unknown as RunnerSocket;
-						yield* options.onHello(
-							{
-								type: "hello",
-								protocolVersion: 1,
-								buildId: runnerBuildId(),
-								stampsRunIds: true,
-								runnerId: options.runnerId,
-								sessionId: "s",
-								pid: options.pid ?? 0,
-								bindings: [],
-								sendJournalAnswers: true,
-								sendAnswers: [],
-							},
-							connection,
-						);
-						return connection;
-					}),
-				);
-				yield* f.manager.executeEffect({
-					type: "pre-warm",
-					sessionId: "s",
-					input: {
-						sessionId: "s",
-						workspaceRoot: f.root,
-						extraFolders: [],
-						providerState: {},
-						configDir: configuredClaudeConfigDir(f.root),
-					},
-				});
-				const [pid, child] = [...f.children][0] ?? [];
-				if (pid === undefined || !child)
-					return yield* Effect.fail(
-						runnerFailure("test child", "Missing child"),
+it.effect("keeps descendant grace and escalates after the runner exits", () =>
+	run(
+		Effect.gen(function* () {
+			const f = yield* setup;
+			f.connect.mockImplementation((options) =>
+				Effect.gen(function* () {
+					const connection = {
+						closed: false,
+						commandEffect: () => Effect.void,
+						destroy: () => {},
+						write: () => {},
+					} as unknown as RunnerSocket;
+					yield* options.onHello(
+						{
+							type: "hello",
+							protocolVersion: 1,
+							buildId: runnerBuildId(),
+							stampsRunIds: true,
+							runnerId: options.runnerId,
+							sessionId: "s",
+							pid: options.pid ?? 0,
+							bindings: [],
+							sendJournalAnswers: true,
+							sendAnswers: [],
+						},
+						connection,
 					);
-				const members = [
-					{ pid, startTime: `spawned-${pid}` },
-					{ pid: 100_061, startTime: "descendant" },
-					{ pid: 100_062, startTime: "reused" },
-				];
-				f.groups.set(pid, members);
-				for (const member of members)
-					f.processes.set(member.pid, {
-						state: "running",
-						startTime: member.startTime,
-					});
-				f.signal.mockImplementation((target, signal) => {
-					f.signals.push({ pid: target, signal });
-					if (signal === "SIGKILL") f.processes.set(target, { state: "gone" });
-				});
-				const stopping = yield* f.manager
-					.executeEffect({ type: "end-session", sessionId: "s" })
-					.pipe(Effect.forkChild);
-				yield* TestClock.adjust(0);
-				const inspections = f.inspect.mock.calls.length;
-				const batches = f.inspectMany.mock.calls.length;
-				yield* TestClock.adjust("2 seconds");
-				expect(f.inspect.mock.calls.length).toBe(inspections);
-				expect(f.inspectMany.mock.calls.length).toBe(batches);
-				f.processes.set(pid, { state: "gone" });
-				f.processes.set(100_062, {
-					state: "running",
-					startTime: "new-process",
-				});
-				child.emit("exit", 0, null);
-				yield* TestClock.adjust("500 millis");
-				expect(stopping.pollUnsafe()).toBeUndefined();
-				expect(f.inspect.mock.calls.length).toBe(inspections);
-				expect(f.inspectMany.mock.calls.length - batches).toBeLessThanOrEqual(
-					3,
-				);
-				expect(f.inspectMany.mock.calls.at(-1)?.[0]).toEqual(
-					members.map((member) => member.pid),
-				);
-				// Observe the four-second Stop bound independently of jittered polling.
-				yield* TestClock.adjust("1500 millis");
-				expect(stopping.pollUnsafe()).toBeDefined();
-				yield* Fiber.join(stopping);
-				expect(
-					f.signals.filter((signal) => signal.signal === "SIGKILL"),
-				).toEqual([{ pid: 100_061, signal: "SIGKILL" }]);
-			}).pipe(
-				Effect.provideService(Random.Random, {
-					nextIntUnsafe: () => 0,
-					nextDoubleUnsafe: () => 0.999,
+					return connection;
 				}),
-			),
+			);
+			yield* f.manager.executeEffect({
+				type: "pre-warm",
+				sessionId: "s",
+				input: {
+					sessionId: "s",
+					workspaceRoot: f.root,
+					extraFolders: [],
+					providerState: {},
+					configDir: configuredClaudeConfigDir(f.root),
+				},
+			});
+			const [pid, child] = [...f.children][0] ?? [];
+			if (pid === undefined || !child)
+				return yield* Effect.fail(runnerFailure("test child", "Missing child"));
+			const members = [
+				{ pid, startTime: `spawned-${pid}` },
+				{ pid: 100_061, startTime: "descendant" },
+				{ pid: 100_062, startTime: "reused" },
+			];
+			f.groups.set(pid, members);
+			for (const member of members)
+				f.processes.set(member.pid, {
+					state: "running",
+					startTime: member.startTime,
+					...(member.pid === pid ? { pgid: pid } : {}),
+				});
+			f.signal.mockImplementation((target, signal) => {
+				f.signals.push({ pid: target, signal });
+				if (signal === "SIGKILL") f.processes.set(target, { state: "gone" });
+			});
+			const stopping = yield* f.manager
+				.executeEffect({ type: "end-session", sessionId: "s" })
+				.pipe(Effect.forkChild);
+			yield* TestClock.adjust(0);
+			yield* TestClock.adjust("2 seconds");
+			f.processes.set(pid, { state: "gone" });
+			f.processes.set(100_062, {
+				state: "running",
+				startTime: "new-process",
+			});
+			child.emit("exit", 0, null);
+			yield* TestClock.adjust("500 millis");
+			expect(stopping.pollUnsafe()).toBeUndefined();
+			expect(f.inspectMany.mock.calls.at(-1)?.[0]).toEqual(
+				members.map((member) => member.pid),
+			);
+			// Observe the four-second Stop bound independently of jittered polling.
+			yield* TestClock.adjust("1500 millis");
+			expect(stopping.pollUnsafe()).toBeDefined();
+			yield* Fiber.join(stopping);
+			expect(f.signals.filter((signal) => signal.signal === "SIGKILL")).toEqual(
+				[{ pid: 100_061, signal: "SIGKILL" }],
+			);
+		}).pipe(
+			Effect.provideService(Random.Random, {
+				nextIntUnsafe: () => 0,
+				nextDoubleUnsafe: () => 0.999,
+			}),
 		),
+	),
 );
 
 for (const pin of ["leader", "reaper"] as const)
@@ -1223,26 +1244,22 @@ it.effect(
 				);
 				const discover = RunnerRegistry.discoverRunners;
 				// Discovery reads the process table; give it this fixture's processes.
-				const identity = makeProcessTable(
-					makeMemoryProcessAdapter({
-						processes: new Map(
-							[...f.processes].map(([pid, seen]) => [
-								pid,
-								{
-									state: "running" as const,
-									...Schema.decodeUnknownSync(ProcessStart)(seen),
-								},
-							]),
-						),
-					}),
-				);
 				yield* Effect.acquireRelease(
 					Effect.sync(() => [
 						vi
 							.spyOn(RunnerRegistry, "discoverRunners")
-							.mockImplementation((root, config) =>
-								discover(root, config, identity),
-							),
+							.mockImplementation((root, config, processTable) => {
+								expect(processTable).toBe(f.processTable);
+								return discover(root, config, processTable);
+							}),
+						vi
+							.spyOn(ProcessTables, "makeProductionProcessTable")
+							.mockReturnValue(f.processTable),
+						vi.spyOn(f, "signal").mockImplementation((pid, signal) => {
+							f.signals.push({ pid, signal });
+							if (signal === "SIGKILL")
+								throw runnerFailure("test signal", "KILL refused");
+						}),
 						vi
 							.spyOn(RunnerConnection, "connectRunner")
 							.mockReturnValue(Effect.succeed(connection)),
@@ -1261,16 +1278,6 @@ it.effect(
 						vi
 							.spyOn(runnerProcessTable, "members")
 							.mockImplementation(f.members),
-						vi
-							.spyOn(runnerProcessTable, "alive")
-							.mockImplementation((pid) => f.inspect(pid).state !== "gone"),
-						vi
-							.spyOn(runnerProcessTable, "signal")
-							.mockImplementation((pid, signal) => {
-								f.signals.push({ pid, signal });
-								if (signal === "SIGKILL")
-									throw runnerFailure("test signal", "KILL refused");
-							}),
 					]),
 					(values) =>
 						Effect.sync(() => {
@@ -1285,7 +1292,7 @@ it.effect(
 				// STOP-INTENT S4: a committed waiter cannot fail after escalation.
 				expect(result._tag).toBe("Success");
 				expect(f.signals).toContainEqual({
-					pid: descendant.pid,
+					pid: -leader.pid,
 					signal: "SIGKILL",
 				});
 				expect(f.processes.get(descendant.pid)?.state).toBe("running");
@@ -1523,7 +1530,7 @@ it.effect(
 				});
 				yield* TestClock.adjust("8 seconds");
 				expect(f.signals).toEqual([{ pid: -leader.pid, signal: "SIGKILL" }]);
-				expect(readsAtSignal).toBe(2);
+				expect(readsAtSignal).toBe(1);
 				const [row] = yield* f.sql<{
 					member_snapshot: string;
 					signal_log: string;
@@ -1541,18 +1548,18 @@ it.effect(
 		),
 );
 
-// A post-COMMIT fork must survive a failed signal-log append in the durable
-// snapshot. Losing the pin during its second commit must fall back to that set.
+// An observed fork survives a failed signal-log append in the durable snapshot.
+// Its recorded identity can still pin the group if the leader exits before delivery.
 for (const losePin of [false, true])
 	it.effect(
-		`commits rechecked descendants before delivery even if the signal log fails, losePin=${losePin}`,
+		`commits observed descendants before delivery even if the signal log fails, loseLeader=${losePin}`,
 		() =>
 			run(
 				Effect.gen(function* () {
 					const f = yield* setup;
 					const leader = yield* f.register("cdcdcdcdcdcd", 100_110);
 					const original = { pid: leader.pid, startTime: "original" };
-					const child = { pid: 100_111, startTime: "post-commit-child" };
+					const child = { pid: 100_111, startTime: "observed-child" };
 					f.processes.set(leader.pid, {
 						state: "running",
 						startTime: original.startTime,
@@ -1560,20 +1567,20 @@ for (const losePin of [false, true])
 					});
 					yield* f.recover;
 					let reads = 0;
+					let listed = false;
 					f.members.mockImplementation(() => {
 						reads++;
-						if (reads === 1) return [original];
-						if (reads === 2)
-							f.processes.set(child.pid, {
-								state: "running",
-								startTime: child.startTime,
-								pgid: leader.pid,
-							});
+						listed = true;
+						f.processes.set(child.pid, {
+							state: "running",
+							startTime: child.startTime,
+							pgid: leader.pid,
+						});
 						return [original, child];
 					});
 					let checks = 0;
 					f.inspectMany.mockImplementation((pids) => {
-						if (++checks === 3 && losePin)
+						if (listed && ++checks === 2 && losePin)
 							f.processes.set(leader.pid, { state: "gone" });
 						return new Map(
 							pids.map((pid) => [
@@ -1589,9 +1596,7 @@ for (const losePin of [false, true])
 						f.processes.set(leader.pid, { state: "gone" });
 					});
 					yield* TestClock.adjust("8 seconds");
-					expect(f.signals).toEqual([
-						{ pid: losePin ? child.pid : -leader.pid, signal: "SIGKILL" },
-					]);
+					expect(f.signals).toEqual([{ pid: -leader.pid, signal: "SIGKILL" }]);
 					const [row] = yield* f.sql<{
 						member_snapshot: string;
 						signal_log: string;
@@ -1601,16 +1606,17 @@ for (const losePin of [false, true])
 						child,
 					]);
 					expect(JSON.parse(row?.signal_log ?? "[]")).toEqual([]);
-					expect(reads).toBe(2);
+					expect(reads).toBe(1);
 					expect(f.processes.get(child.pid)?.state).toBe("running");
 					yield* f.sql`DROP TRIGGER fail_signal_log`;
 					f.signal.mockImplementation((pid, signal) => {
 						f.signals.push({ pid, signal });
-						f.processes.set(pid, { state: "gone" });
+						for (const member of [original, child])
+							f.processes.set(member.pid, { state: "gone" });
 					});
 					yield* TestClock.adjust("20 seconds");
 					expect(f.signals).toContainEqual({
-						pid: child.pid,
+						pid: -leader.pid,
 						signal: "SIGKILL",
 					});
 					expect(f.processes.get(child.pid)?.state).toBe("gone");
@@ -2845,7 +2851,7 @@ it.effect(
 );
 
 it.effect(
-	"checks a noticed survivor once per minute without stacking watchers",
+	"lists a noticed survivor group once per minute without stacking watchers",
 	() =>
 		run(
 			Effect.gen(function* () {
@@ -2854,11 +2860,11 @@ it.effect(
 				yield* f.recover;
 				yield* f.manager.recoverEffect;
 				yield* TestClock.adjust("58 seconds");
-				const checks = f.inspectMany.mock.calls.length;
+				const checks = f.members.mock.calls.length;
 				yield* TestClock.adjust("59 seconds");
-				expect(f.inspectMany.mock.calls).toHaveLength(checks);
+				expect(f.members.mock.calls).toHaveLength(checks);
 				yield* TestClock.adjust("1 second");
-				expect(f.inspectMany.mock.calls.length).toBeGreaterThan(checks);
+				expect(f.members.mock.calls.length).toBeGreaterThan(checks);
 				expect(yield* f.notices).toHaveLength(1);
 			}),
 		),
@@ -2977,6 +2983,153 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 		),
 	);
 };
+
+it.effect(
+	"survivor liveness wakes do not read identity between scheduled passes",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* setup;
+				const entry = yield* f.register("abababab8585", 100_085);
+				yield* f.recover;
+				const reads = f.inspectMany.mock.calls.length;
+				const listings = f.members.mock.calls.length;
+				yield* TestClock.adjust("7 seconds");
+				expect(f.inspectMany.mock.calls).toHaveLength(reads);
+				expect(f.members.mock.calls).toHaveLength(listings);
+				expect(f.alive).toHaveBeenCalledWith(entry.pid);
+				expect(f.signals).toEqual([]);
+				yield* TestClock.adjust("1 second");
+				expect(f.signals).toEqual([{ pid: -entry.pid, signal: "SIGKILL" }]);
+				const readsAfterKill = f.inspectMany.mock.calls.length;
+				f.processes.set(entry.pid, {
+					state: "zombie",
+					startTime: "original",
+					pgid: entry.pid,
+				});
+				yield* TestClock.adjust("7 seconds");
+				expect(f.inspectMany.mock.calls).toHaveLength(readsAfterKill);
+				expect(f.signals).toHaveLength(1);
+				// signal 0 cannot distinguish an unreaped zombie; the next full pass can.
+				yield* TestClock.adjust("13 seconds");
+				expect(
+					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
+				).toEqual([]);
+				expect(f.signals).toHaveLength(1);
+			}),
+		),
+);
+
+for (const delivered of [false, true])
+	for (const state of ["gone", "zombie"] as const)
+		it.effect(
+			`settles external ${state} after the recovery retry window, delivered=${delivered}`,
+			() =>
+				run(
+					Effect.gen(function* () {
+						const f = yield* setup;
+						const entry = yield* f.register("abababab8484", 100_084);
+						const members = [{ pid: entry.pid, startTime: "original" }];
+						yield* f.sql`UPDATE claude_runner_cursors SET stop_state = 'Escalated',
+							stop_reason = '{"_tag":"EndSession"}', signal_state = 'TermSent',
+							member_snapshot = ${JSON.stringify(members)} WHERE runner_id = ${entry.runnerId}`;
+						yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, runner_id)
+							VALUES ('external-exit-run', 's', 'running', 1, ${entry.runnerId})`;
+						f.signal.mockImplementation((pid, signal) => {
+							f.signals.push({ pid, signal });
+							if (!delivered)
+								throw Object.assign(runnerFailure("signal", "Refused"), {
+									code: "EPERM",
+								});
+						});
+						yield* f.recover;
+						// Recovery's first retry is at ten seconds. Exit after both that
+						// tick and the old delivery-only observation window have passed.
+						yield* TestClock.adjust("13 seconds");
+						expect(f.signals).toEqual([{ pid: -entry.pid, signal: "SIGKILL" }]);
+						expect(
+							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'external-exit-run'`,
+						).toEqual([{ status: "running" }]);
+						f.processes.set(entry.pid, {
+							state,
+							startTime: "original",
+							pgid: entry.pid,
+						});
+						// Zombies still answer signal 0, so only the scheduled full pass
+						// at thirty seconds proves Gone without spawning ps between ticks.
+						yield* TestClock.adjust(
+							state === "gone" ? "250 millis" : "15 seconds",
+						);
+						expect(
+							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'external-exit-run'`,
+						).toEqual([{ status: "interrupted" }]);
+						expect(
+							yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
+						).toEqual([]);
+						expect(f.signals).toHaveLength(1);
+					}),
+				),
+		);
+
+for (const state of ["gone", "zombie"] as const)
+	it.effect(
+		`settles a recovered refused KILL when its member becomes ${state} after delivery`,
+		() =>
+			run(
+				Effect.gen(function* () {
+					const f = yield* setup;
+					const entry = yield* f.register("abababab8383", 100_083);
+					const members = [{ pid: entry.pid, startTime: "original" }];
+					const signalLog = [
+						{
+							signal: "SIGTERM",
+							at: 0,
+							target: -entry.pid,
+							members,
+							outcome: "delivered",
+						},
+						{
+							signal: "SIGKILL",
+							target: -entry.pid,
+							members,
+							outcome: "refused",
+						},
+					];
+					yield* f.sql`UPDATE claude_runner_cursors SET stop_state = 'Escalated',
+						stop_reason = '{"_tag":"EndSession"}', signal_state = 'TermSent',
+						member_snapshot = ${JSON.stringify(members)}, signal_log = ${JSON.stringify(signalLog)}
+						WHERE runner_id = ${entry.runnerId}`;
+					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, runner_id)
+						VALUES ('accepted-run', 's', 'running', 1, ${entry.runnerId})`;
+					// Delivery is asynchronous: the first observation after KILL still
+					// sees the member running, exactly as the native recovery trace did.
+					f.signal.mockImplementation((pid, signal) => {
+						f.signals.push({ pid, signal });
+					});
+					yield* f.recover;
+					yield* TestClock.adjust("8 seconds");
+					expect(f.signals).toEqual([{ pid: -entry.pid, signal: "SIGKILL" }]);
+					expect(
+						yield* f.sql`SELECT status FROM provider_runs WHERE id = 'accepted-run'`,
+					).toEqual([{ status: "running" }]);
+					f.processes.set(entry.pid, {
+						state,
+						startTime: "original",
+						pgid: entry.pid,
+					});
+					yield* TestClock.adjust(
+						state === "gone" ? "250 millis" : "20 seconds",
+					);
+					expect(
+						yield* f.sql`SELECT status FROM provider_runs WHERE id = 'accepted-run'`,
+					).toEqual([{ status: "interrupted" }]);
+					expect(
+						yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
+					).toEqual([]);
+					expect(f.signals).toHaveLength(1);
+				}),
+			),
+	);
 
 it.effect(
 	"retries retired runners independently at 10, 30 and 60 seconds and notices once",

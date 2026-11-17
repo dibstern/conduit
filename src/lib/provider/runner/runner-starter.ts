@@ -126,7 +126,6 @@ export const CANCELLED_TURN: TurnResult = {
 };
 
 interface RunnerStarterOptions {
-	readonly processIdentity: import("./process-table.js").ProcessTable;
 	readonly deps: ProcessRunnerDeps;
 	readonly driver: ProcessRunnerDriver;
 	readonly runFork: Effect.Success<
@@ -260,7 +259,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 	Effect.gen(function* () {
 		const {
 			deps,
-			processIdentity,
 			driver,
 			runFork,
 			configDir,
@@ -1359,7 +1357,12 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								hello,
 								connection,
 								attachmentId: (yield* currentRunnerOutput)?.attachmentId,
-								startTime: (pid) => stops.processTable.inspect(pid).startTime,
+								startTime: (pid) => {
+									const seen = stops.processTable.identify([pid]).get(pid);
+									return seen && "startTime" in seen
+										? seen.startTime
+										: undefined;
+								},
 								owns: ownsEntry,
 							});
 							const ensureAttached = () =>
@@ -1961,7 +1964,12 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							Entry.bindProcess(entry, {
 								child,
 								pid: child.pid,
-								startTime: (pid) => stops.processTable.inspect(pid).startTime,
+								startTime: (pid) => {
+									const seen = stops.processTable.identify([pid]).get(pid);
+									return seen && "startTime" in seen
+										? seen.startTime
+										: undefined;
+								},
 							});
 							return child;
 						} finally {
@@ -2420,7 +2428,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 						);
 						const discovered = discoverAllRunners(
 							configDir,
-							processIdentity,
+							stops.processTable,
 						).filter(
 							(registration) =>
 								(registration.driverKind ?? "claude") === driver.driverKind &&
@@ -2779,7 +2787,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								if (
 									connected._tag === "Failure" &&
 									connected.failure.code === "runner_incompatible" &&
-									runnerPidMatchesRegistration(registration, processIdentity)
+									runnerPidMatchesRegistration(registration, stops.processTable)
 								) {
 									const failure = connected.failure;
 									log.warn(failure.message);

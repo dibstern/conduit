@@ -20,6 +20,7 @@ import {
 	makeRunnerRunLifecycle,
 	makeRunnerStopReconciler,
 } from "../../../src/lib/provider/runner/runner-retirement.js";
+import { makeTestProcessTable } from "../../helpers/runner-process-table.js";
 
 // Failure modes 55-59, 70, 76, 81 and 82 at the Stop and release interfaces:
 // a real SQLite store whose Stop fence read fails while `fault.down` is set.
@@ -118,15 +119,18 @@ const harness = Effect.gen(function* () {
 			});
 	const options: Parameters<typeof makeRunnerStopReconciler>[0] = {
 		receipts,
-		processTable: {
-			inspect: (pid) =>
-				live.has(pid)
-					? { state: "running", startTime: "started", pgid: pid }
-					: { state: "gone" },
+		processTable: makeTestProcessTable({
+			processes: () =>
+				new Map(
+					[...live].map((pid) => [
+						pid,
+						{ state: "running", startTime: "started", pgid: pid },
+					]),
+				),
 			signal: (pid, signal) => {
 				actions.push(`signal ${pid} ${signal}`);
 			},
-		},
+		}),
 		holdRun: (sessionId, runId, commandId) =>
 			lifecycle.holdRun({ sessionId, runId, commandId }),
 		release: (input) =>

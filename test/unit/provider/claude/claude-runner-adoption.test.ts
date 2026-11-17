@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { Deferred, Effect, Result as Either, Fiber, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeProductionProcessTable } from "../../../../src/lib/provider/runner/process-table.js";
 
 const config = vi.hoisted(() => ({
 	root: `/tmp/adopt-${process.pid}-${Date.now().toString(36)}`,
@@ -28,12 +29,10 @@ import { ClaudeRunnerSocket } from "../../../../src/lib/provider/claude/claude-r
 import {
 	RUNNER_PROTOCOL_VERSION,
 	type RunnerMessage,
-	runnerFailure,
 } from "../../../../src/lib/provider/runner/runner-protocol.js";
 import { makeRunnerReceiptStore } from "../../../../src/lib/provider/runner/runner-receipts.js";
 import {
 	discoverRunners,
-	type RunnerProcessTable,
 	registerRunner,
 	runnerDirectory,
 	runnerPidAlive,
@@ -121,26 +120,16 @@ async function runnerSocket(options: {
 	mkdirSync(directory, { recursive: true });
 	const socketPath = join(directory, runnerId);
 	const pid = options.child?.pid ?? process.pid;
-	const inspect: RunnerProcessTable["inspect"] = (target) =>
-		target === process.pid
-			? { state: "unknown" }
-			: runnerProcessTable.inspect(target);
-	const processTable: RunnerProcessTable = {
-		...runnerProcessTable,
-		inspect,
-		inspectMany: (pids) =>
-			new Map(pids.map((target) => [target, inspect(target)])),
-		signal: (target, signal) => {
-			if (
-				options.child?.pid !== Math.abs(target) ||
-				children.get(options.child) === undefined ||
-				runnerProcessTable.inspect(Math.abs(target)).startTime !==
-					children.get(options.child) ||
-				(target < 0 && runnerProcessTable.inspect(-target).pgid !== -target)
-			)
-				throw runnerFailure("fixture signal", "Runner identity changed");
-			runnerProcessTable.signal(target, signal);
-		},
+	const native = makeProductionProcessTable();
+	const processTable = {
+		...native,
+		identify: (pids: readonly number[]) =>
+			new Map(
+				[...native.identify(pids)].map(([target, seen]) => [
+					target,
+					target === process.pid ? { state: "unknown" as const } : seen,
+				]),
+			),
 	};
 	const persistence = makePersistenceEffectLayer(
 		":memory:",
@@ -161,7 +150,10 @@ async function runnerSocket(options: {
 				sessionId,
 				driverKind: "claude",
 				pid,
-				startTime: processTable.inspect(pid).startTime,
+				startTime: (() => {
+					const seen = processTable.identify([pid]).get(pid);
+					return seen && "startTime" in seen ? seen.startTime : undefined;
+				})(),
 			},
 			"serving",
 		);

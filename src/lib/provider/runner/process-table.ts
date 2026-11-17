@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { Brand, Schema } from "effect";
+import { execFile, execFileSync } from "node:child_process";
+import { Brand, Effect, Scheduler, Schema } from "effect";
 
 export const StartTime = Schema.NonEmptyString.pipe(Schema.brand("StartTime"));
 export type StartTime = typeof StartTime.Type;
@@ -16,14 +16,36 @@ export type Observed =
 			readonly pgid?: number;
 	  } & ProcessStart)
 	| { readonly state: "gone" | "unknown" };
+export type ProcessMember = { readonly pid: number } & ProcessStart;
+export interface Observation {
+	readonly processes: ReadonlyMap<number, Observed>;
+	readonly group: readonly ProcessMember[] | undefined;
+}
+type RecordedMember = {
+	readonly pid: number;
+	readonly startTime: string;
+	readonly startKey?: string;
+};
+export type SignalTarget =
+	| { readonly process: RecordedMember }
+	| { readonly group: number; readonly pins: readonly RecordedMember[] };
+export type SignalOutcome = "delivered" | "refused" | "failed" | "stale";
+type StopSignal = "SIGTERM" | "SIGKILL";
 
 export interface ProcessTable {
 	identify(pids: readonly number[]): ReadonlyMap<number, Observed>;
+	observe(query: {
+		readonly pgid: number;
+		readonly pids: readonly number[];
+	}): Effect.Effect<Observation>;
+	signal(target: SignalTarget, signal: StopSignal): SignalOutcome;
 	argv(pid: number): readonly string[] | undefined;
 }
 
 export interface ProcessAdapter {
 	read(pids: readonly number[]): ReadonlyMap<number, Observed>;
+	group(pgid: number): Effect.Effect<ReadonlyMap<number, Observed> | undefined>;
+	signal(target: number, signal: StopSignal): void;
 	argv(pid: number): readonly string[] | undefined;
 }
 
@@ -50,7 +72,7 @@ export function sameProcess(
 }
 
 export function makeProcessTable(adapter: ProcessAdapter): ProcessTable {
-	return {
+	const table: ProcessTable = {
 		identify(pids) {
 			const result = new Map<number, Observed>();
 			const valid = [...new Set(pids)].filter(
@@ -66,6 +88,88 @@ export function makeProcessTable(adapter: ProcessAdapter): ProcessTable {
 				result.set(pid, read?.get(pid) ?? { state: "unknown" });
 			return result;
 		},
+		observe: ({ pgid, pids }) =>
+			Effect.gen(function* () {
+				if (yield* Scheduler.PreventSchedulerYield)
+					return yield* Effect.die(
+						"Process-table observation inside a SQL write",
+					);
+				const before = table.identify(pids);
+				const pins: ProcessMember[] = [];
+				for (const [pid, seen] of before)
+					if (seen.state === "running" && seen.pgid === pgid)
+						pins.push({
+							pid,
+							startTime: seen.startTime,
+							...(seen.startKey === undefined
+								? {}
+								: { startKey: seen.startKey }),
+						});
+				if (!pins.length) return { processes: before, group: undefined };
+				const listed = yield* Effect.suspend(() => adapter.group(pgid)).pipe(
+					Effect.catchDefect(() => Effect.succeed(undefined)),
+				);
+				const after = table.identify(pids);
+				const pinned = pins.some((pin) => {
+					const seen = after.get(pin.pid);
+					return (
+						sameProcess(pin, seen) === "same" &&
+						seen?.state === "running" &&
+						seen.pgid === pgid
+					);
+				});
+				if (!pinned || !listed?.size)
+					return { processes: after, group: undefined };
+				const processes = new Map(listed);
+				for (const [pid, seen] of after) processes.set(pid, seen);
+				const group: ProcessMember[] = [];
+				for (const [pid, seen] of listed) {
+					if (
+						(seen.state !== "running" && seen.state !== "zombie") ||
+						seen.pgid !== pgid
+					)
+						return { processes: after, group: undefined };
+					group.push({
+						pid,
+						startTime: seen.startTime,
+						...(seen.startKey === undefined ? {} : { startKey: seen.startKey }),
+					});
+				}
+				return { processes, group };
+			}),
+		signal(target, signal) {
+			const pins = "process" in target ? [target.process] : target.pins;
+			const seen = table.identify(pins.map((pin) => pin.pid));
+			if (
+				!pins.some((pin) => {
+					const current = seen.get(pin.pid);
+					return (
+						sameProcess(pin, current) === "same" &&
+						("process" in target ||
+							(current?.state === "running" && current.pgid === target.group))
+					);
+				})
+			)
+				return "stale";
+			const pid = "process" in target ? target.process.pid : -target.group;
+			if (
+				!Number.isInteger(pid) ||
+				pid === 0 ||
+				Math.abs(pid) > 2147483647 ||
+				("group" in target && target.group <= 0)
+			)
+				return "stale";
+			try {
+				adapter.signal(pid, signal);
+				return "delivered";
+			} catch (error) {
+				return error instanceof Error &&
+					"code" in error &&
+					(error.code === "EPERM" || error.code === "EACCES")
+					? "refused"
+					: "failed";
+			}
+		},
 		argv(pid) {
 			if (!Number.isInteger(pid) || pid <= 0 || pid > 2147483647)
 				return undefined;
@@ -76,17 +180,53 @@ export function makeProcessTable(adapter: ProcessAdapter): ProcessTable {
 			}
 		},
 	};
+	return table;
 }
 
 export function makeMemoryProcessAdapter(input: {
 	readonly processes: ReadonlyMap<number, Observed>;
 	readonly argv?: ReadonlyMap<number, readonly string[]>;
-}): ProcessAdapter {
+	readonly group?: ProcessAdapter["group"];
+	readonly signal?: ProcessAdapter["signal"];
+}): ProcessAdapter & {
+	readonly calls: {
+		reads: number[][];
+		groups: number[];
+		signals: { target: number; signal: StopSignal }[];
+	};
+} {
+	const calls: {
+		reads: number[][];
+		groups: number[];
+		signals: { target: number; signal: StopSignal }[];
+	} = { reads: [], groups: [], signals: [] };
 	return {
-		read: (pids) =>
-			new Map(
+		calls,
+		read: (pids) => {
+			calls.reads.push([...pids]);
+			return new Map(
 				pids.map((pid) => [pid, input.processes.get(pid) ?? { state: "gone" }]),
-			),
+			);
+		},
+		group: (pgid) =>
+			Effect.suspend(() => {
+				calls.groups.push(pgid);
+				if (input.group) return input.group(pgid);
+				const result = new Map<number, Observed>();
+				for (const [pid, seen] of input.processes) {
+					if (seen.state === "unknown") return Effect.succeed(undefined);
+					if (
+						(seen.state === "running" || seen.state === "zombie") &&
+						seen.pgid === pgid
+					)
+						result.set(pid, seen);
+				}
+				return Effect.succeed(result);
+			}),
+		signal: (target, signal) => {
+			calls.signals.push({ target, signal });
+			input.signal?.(target, signal);
+		},
 		argv: (pid) => input.argv?.get(pid),
 	};
 }
@@ -102,6 +242,49 @@ function absent(pid: number): boolean {
 
 export function makePsProcessAdapter(): ProcessAdapter {
 	return {
+		group: (pgid) =>
+			Effect.callback((resume) => {
+				let child: ReturnType<typeof execFile>;
+				try {
+					child = execFile(
+						"ps",
+						["-axo", "pid=,pgid=,lstart=,stat="],
+						{
+							encoding: "utf8",
+							env: { ...process.env, LC_ALL: "C" },
+							timeout: 1000,
+						},
+						(error, stdout) => {
+							if (error) return resume(Effect.succeed(undefined));
+							const result = new Map<number, Observed>();
+							for (const line of stdout.split("\n")) {
+								if (!line.trim()) continue;
+								const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s+(\S+)\s*$/.exec(
+									line,
+								);
+								if (!match?.[1] || !match[2] || !match[3] || !match[4])
+									return resume(Effect.succeed(undefined));
+								if (Number(match[2]) === pgid)
+									result.set(Number(match[1]), {
+										state: match[4].startsWith("Z") ? "zombie" : "running",
+										pgid,
+										startTime: startTime(match[3]),
+									});
+							}
+							resume(Effect.succeed(result));
+						},
+					);
+				} catch {
+					resume(Effect.succeed(undefined));
+					return;
+				}
+				return Effect.sync(() => {
+					child.kill();
+				});
+			}),
+		signal: (target, signal) => {
+			process.kill(target, signal);
+		},
 		read(pids) {
 			const result = new Map<number, Observed>();
 			for (const pid of pids)
@@ -209,20 +392,24 @@ export function makeDarwinProcessAdapter(): ProcessAdapter & {
 		throw new Error("sysctl KERN_ARGMAX outside supported bounds");
 	// KERN_PROCARGS2 can succeed with a zero-filled payload when undersized,
 	// rather than report ENOMEM. Reserve the kernel's maximum once.
-	const buffers = { info: Buffer.alloc(648), argv: Buffer.alloc(argvCapacity) };
+	const buffers = {
+		info: Buffer.alloc(648),
+		group: Buffer.alloc(648 * 16),
+		argv: Buffer.alloc(argvCapacity),
+	};
 	const tm = Buffer.alloc(56);
 	const binding = ffi;
-	function query(pid: number, kind: "info" | "argv"): Buffer {
+	function query(pid: number, kind: "info" | "group" | "argv"): Buffer {
 		mib.writeInt32LE(1, 0); // CTL_KERN
-		mib.writeInt32LE(kind === "info" ? 14 : 49, 4); // KERN_PROC / KERN_PROCARGS2
-		mib.writeInt32LE(kind === "info" ? 1 : pid, 8); // KERN_PROC_PID
+		mib.writeInt32LE(kind === "argv" ? 49 : 14, 4); // KERN_PROCARGS2 / KERN_PROC
+		mib.writeInt32LE(kind === "argv" ? pid : kind === "group" ? 2 : 1, 8); // KERN_PROC_PGRP / KERN_PROC_PID
 		mib.writeInt32LE(pid, 12);
 		for (let attempt = 0; attempt < 4; attempt++) {
 			const buffer = buffers[kind];
 			size.writeBigUInt64LE(BigInt(buffer.length));
 			const rc = functions.sysctl(
 				mib,
-				kind === "info" ? 4 : 3,
+				kind === "argv" ? 3 : 4,
 				buffer,
 				size,
 				null,
@@ -243,6 +430,42 @@ export function makeDarwinProcessAdapter(): ProcessAdapter & {
 		}
 		throw new Error("sysctl buffer kept growing");
 	}
+	function observed(info: Buffer): Observed {
+		const seconds = info.readBigInt64LE();
+		const micros = info.readInt32LE(8);
+		if (!functions.localtime_r(info.subarray(0, 8), tm))
+			throw new Error("localtime_r failed");
+		const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][
+			tm.readInt32LE(24)
+		];
+		const month = [
+			"Jan",
+			"Feb",
+			"Mar",
+			"Apr",
+			"May",
+			"Jun",
+			"Jul",
+			"Aug",
+			"Sep",
+			"Oct",
+			"Nov",
+			"Dec",
+		][tm.readInt32LE(16)];
+		const date = String(tm.readInt32LE(12)).padStart(2, " ");
+		const clock = [8, 4, 0]
+			.map((offset) => String(tm.readInt32LE(offset)).padStart(2, "0"))
+			.join(":");
+		return {
+			state: info.readUInt8(36) === 5 ? "zombie" : "running",
+			pgid: info.readInt32LE(564),
+			startTime: startTime(
+				`${day} ${month} ${date} ${clock} ${tm.readInt32LE(20) + 1900}`,
+			),
+			startKey: `d:${seconds}.${micros}`,
+		};
+	}
+
 	return {
 		selfCheck() {
 			const own = query(process.pid, "info");
@@ -259,6 +482,25 @@ export function makeDarwinProcessAdapter(): ProcessAdapter & {
 					"sysctl self-check failed: incompatible kinfo_proc layout or start time",
 				);
 		},
+		group: (pgid) =>
+			Effect.sync(() => {
+				try {
+					const bytes = query(pgid, "group");
+					if (bytes.length % 648 !== 0) return undefined;
+					const result = new Map<number, Observed>();
+					for (let offset = 0; offset < bytes.length; offset += 648) {
+						const info = bytes.subarray(offset, offset + 648);
+						if (info.readInt32LE(564) !== pgid) return undefined;
+						result.set(info.readInt32LE(40), observed(info));
+					}
+					return result;
+				} catch {
+					return undefined;
+				}
+			}),
+		signal: (target, signal) => {
+			process.kill(target, signal);
+		},
 		read(pids) {
 			const result = new Map<number, Observed>();
 			for (const pid of pids) {
@@ -270,39 +512,7 @@ export function makeDarwinProcessAdapter(): ProcessAdapter & {
 					}
 					if (info.length !== 648 || info.readInt32LE(40) !== pid)
 						throw new Error("unexpected kinfo_proc");
-					const seconds = info.readBigInt64LE();
-					const micros = info.readInt32LE(8);
-					if (!functions.localtime_r(info.subarray(0, 8), tm))
-						throw new Error("localtime_r failed");
-					const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][
-						tm.readInt32LE(24)
-					];
-					const month = [
-						"Jan",
-						"Feb",
-						"Mar",
-						"Apr",
-						"May",
-						"Jun",
-						"Jul",
-						"Aug",
-						"Sep",
-						"Oct",
-						"Nov",
-						"Dec",
-					][tm.readInt32LE(16)];
-					const date = String(tm.readInt32LE(12)).padStart(2, " ");
-					const clock = [8, 4, 0]
-						.map((offset) => String(tm.readInt32LE(offset)).padStart(2, "0"))
-						.join(":");
-					result.set(pid, {
-						state: info.readUInt8(36) === 5 ? "zombie" : "running",
-						pgid: info.readInt32LE(564),
-						startTime: startTime(
-							`${day} ${month} ${date} ${clock} ${tm.readInt32LE(20) + 1900}`,
-						),
-						startKey: `d:${seconds}.${micros}`,
-					});
+					result.set(pid, observed(info));
 				} catch {
 					result.set(pid, { state: "unknown" });
 				}

@@ -5,7 +5,6 @@ import type {
 	RunnerDriverPieces,
 	RunnerProviderInstanceDeps,
 } from "./runner-provider-instance.js";
-import type { RunnerProcessTable } from "./runner-registry.js";
 import type {
 	SessionCommand,
 	SessionFailure,
@@ -20,8 +19,7 @@ export interface ProcessRunnerDeps {
 		import("../../account-directory.js").AccountsState
 	>;
 	readonly daemonConfigDir?: string;
-	readonly processTable?: RunnerProcessTable;
-	readonly processIdentity?: ProcessTable;
+	readonly processTable?: ProcessTable;
 	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
 	readonly subagentPollTimeoutMs?: number;
 	readonly sessionForkSdk?: import("../claude/claude-provider-runtime.js").ClaudeSessionRunnerDeps["sessionForkSdk"];

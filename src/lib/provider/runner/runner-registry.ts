@@ -48,42 +48,11 @@ export interface RunnerProcessTable {
 		readonly startTime?: string;
 		readonly pgid?: number;
 	};
-	readonly signal: (pid: number, signal: NodeJS.Signals) => void;
-	/** Liveness only: false proves the pid gone, true proves no identity. */
-	readonly alive?: (pid: number) => boolean;
 	readonly members?: (pgid: number) => readonly RunnerMember[] | undefined;
 	readonly inspectMany?: (
 		pids: readonly number[],
 	) => ReadonlyMap<number, ReturnType<RunnerProcessTable["inspect"]>>;
 }
-
-export const runnerMembersGone = (
-	table: RunnerProcessTable,
-	members: readonly {
-		readonly pid: number;
-		readonly startTime?: string | undefined;
-	}[],
-) => {
-	if (members.length === 0) return true;
-	const current = table.inspectMany?.([
-		...new Set(members.map((member) => member.pid)),
-	]);
-	const inspect: RunnerProcessTable["inspect"] = (target) =>
-		current
-			? (current.get(target) ?? { state: "unknown" })
-			: table.inspect(target);
-	const gone = (target: number, started?: string) => {
-		const process = inspect(target);
-		return (
-			process.state === "gone" ||
-			process.state === "zombie" ||
-			(started !== undefined &&
-				process.startTime !== undefined &&
-				process.startTime !== started)
-		);
-	};
-	return members.every((member) => gone(member.pid, member.startTime));
-};
 
 /** Legacy role ranking is used only by the one-time cursor backfill. Delete with 32.13. */
 export function legacyRunnerRanking(configDir: string): ReadonlyMap<
@@ -205,8 +174,6 @@ export const runnerProcessTable: RunnerProcessTable = {
 			return { state: runnerPidAlive(pid) ? "unknown" : "gone" };
 		}
 	},
-	signal: (pid, signal) => process.kill(pid, signal),
-	alive: runnerPidAlive,
 	members: (pgid) => {
 		// A group with no member has none to list (6.6).
 		if (!runnerPidAlive(-pgid)) return [];
@@ -228,17 +195,6 @@ export const runnerProcessTable: RunnerProcessTable = {
 		}
 	},
 };
-
-/** Compatibility for retirement until its group and signal migration lands. */
-export function makeRunnerProcessTable(
-	table: ProcessTable,
-): RunnerProcessTable {
-	return {
-		...runnerProcessTable,
-		inspect: (pid) => table.identify([pid]).get(pid) ?? { state: "unknown" },
-		inspectMany: table.identify,
-	};
-}
 
 function runnerTargetDirectory(
 	workspaceRoot: string,

@@ -22,6 +22,7 @@ import {
 } from "../../../src/lib/provider/runner/runner-receipts.js";
 import { makeRunnerStopReconciler } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { toStoreFault } from "../../../src/lib/provider/runner/send-settlement.js";
+import { makeTestProcessTable } from "../../helpers/runner-process-table.js";
 
 const testLayer = Layer.merge(
 	makePersistenceEffectLayer(
@@ -97,10 +98,7 @@ it.effect(
 						...receipts,
 						register: () => Effect.fail(toStoreFault(failure)),
 					},
-					processTable: {
-						inspect: () => ({ state: "gone" }),
-						signal: () => undefined,
-					},
+					processTable: makeTestProcessTable({ processes: new Map() }),
 					committed: () => Effect.void,
 					shutdown: () => Effect.void,
 					evict: () => Effect.void,

@@ -1,7 +1,17 @@
 import { execFile } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { promisify } from "node:util";
+import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
+import { Cause, Effect, Exit, Layer, Scheduler, Schema } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import { afterAll, expect, it } from "vitest";
+import {
+	makeMemoryProcessAdapter,
+	makeProcessTable,
+	type Observed,
+	ProcessStart,
+} from "../../src/lib/provider/runner/process-table.js";
 
 const exec = promisify(execFile);
 const reports: Record<string, unknown> = {};
@@ -11,6 +21,99 @@ afterAll(() => {
 		`test-results/process-table-contract.${process.platform}-${process.arch}.json`,
 		JSON.stringify(reports, null, 2),
 	);
+});
+
+it("observe skips unpinned groups and rejects a pin reused during the listing", async () => {
+	const start = Schema.decodeUnknownSync(ProcessStart)({
+		startTime: "recorded",
+	});
+	const processes = new Map<number, Observed>([
+		[10, { state: "running", pgid: 20, ...start }],
+	]);
+	const adapter = makeMemoryProcessAdapter({
+		processes,
+		group: () =>
+			Effect.sync(() => {
+				processes.set(10, {
+					state: "running",
+					pgid: 10,
+					...start,
+					startTime: Schema.decodeUnknownSync(ProcessStart)({
+						startTime: "reused",
+					}).startTime,
+				});
+				return new Map([
+					[10, { state: "running" as const, pgid: 10, ...start }],
+				]);
+			}),
+	});
+	const table = makeProcessTable(adapter);
+	expect(
+		(await Effect.runPromise(table.observe({ pgid: 10, pids: [10] }))).group,
+	).toBeUndefined();
+	expect(adapter.calls.groups).toEqual([]);
+	processes.set(10, { state: "running", pgid: 10, ...start });
+	expect(
+		(await Effect.runPromise(table.observe({ pgid: 10, pids: [10] }))).group,
+	).toBeUndefined();
+	expect(adapter.calls.groups).toEqual([10]);
+});
+
+it("observe keeps unreadable membership unknown and signal rechecks before delivery", async () => {
+	const start = Schema.decodeUnknownSync(ProcessStart)({
+		startTime: "recorded",
+	});
+	const processes = new Map<number, Observed>([
+		[10, { state: "running", pgid: 10, ...start }],
+		[11, { state: "unknown" }],
+	]);
+	const adapter = makeMemoryProcessAdapter({
+		processes,
+		signal: () => {
+			throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+		},
+	});
+	const table = makeProcessTable(adapter);
+	const observation = await Effect.runPromise(
+		table.observe({ pgid: 10, pids: [10, 11] }),
+	);
+	expect(observation.group).toBeUndefined();
+	expect(observation.processes.get(11)).toEqual({ state: "unknown" });
+	expect(table.signal({ process: { pid: 10, ...start } }, "SIGTERM")).toBe(
+		"refused",
+	);
+	processes.set(10, { state: "unknown" });
+	expect(
+		table.signal({ group: 10, pins: [{ pid: 10, ...start }] }, "SIGKILL"),
+	).toBe("stale");
+	expect(adapter.calls.signals).toEqual([{ target: 10, signal: "SIGTERM" }]);
+});
+
+it("observe inside a tick-atomic SQL write dies before reading the table", async () => {
+	const adapter = makeMemoryProcessAdapter({ processes: new Map() });
+	const table = makeProcessTable(adapter);
+	const exit = await Effect.runPromise(
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			return yield* Effect.exit(
+				sql
+					.withTransaction(table.observe({ pgid: 10, pids: [10] }))
+					.pipe(Effect.provideService(Scheduler.PreventSchedulerYield, true)),
+			);
+		}).pipe(
+			Effect.provide(
+				SqliteNode.layer({ filename: ":memory:" }).pipe(
+					Layer.provide(Reactivity.layer),
+				),
+			),
+		),
+	);
+	expect(Exit.isFailure(exit)).toBe(true);
+	if (Exit.isFailure(exit))
+		expect(Cause.pretty(exit.cause)).toContain(
+			"Process-table observation inside a SQL write",
+		);
+	expect(adapter.calls.reads).toEqual([]);
 });
 
 for (const disabled of [false, true]) {

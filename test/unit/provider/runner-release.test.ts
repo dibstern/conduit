@@ -18,6 +18,7 @@ import {
 	makeRunnerRunLifecycle,
 	makeRunnerStopReconciler,
 } from "../../../src/lib/provider/runner/runner-retirement.js";
+import { makeTestProcessTable } from "../../helpers/runner-process-table.js";
 
 const record: RunnerRetirement = {
 	runnerId: "runner",
@@ -52,16 +53,17 @@ it.effect(
 				const actions: string[] = [];
 				const reconciler = yield* makeRunnerStopReconciler({
 					receipts,
-					processTable: {
-						inspect: () => ({
-							state: "running",
-							startTime: "started",
-							pgid: 123,
-						}),
+					processTable: makeTestProcessTable({
+						processes: new Map(
+							[123, 124].map((pid) => [
+								pid,
+								{ state: "running", startTime: "started", pgid: 123 },
+							]),
+						),
 						signal: () => {
 							actions.push("signal");
 						},
-					},
+					}),
 					release: () => Effect.succeed({ released: false }),
 					released: () =>
 						Effect.sync(() => {
@@ -124,14 +126,15 @@ for (const cached of ["missing", "candidate"])
 					});
 					const reconciler = yield* makeRunnerStopReconciler({
 						receipts,
-						processTable: {
-							inspect: () => ({
-								state: "running",
-								startTime: "started",
-								pgid: 123,
-							}),
+						processTable: makeTestProcessTable({
+							processes: new Map(
+								[123, 124].map((pid) => [
+									pid,
+									{ state: "running", startTime: "started", pgid: 123 },
+								]),
+							),
 							signal: () => undefined,
-						},
+						}),
 						release: (input) => lifecycle.releaseRun(input).pipe(Effect.orDie),
 						released: () => Effect.void,
 						committed: () => Effect.void,
@@ -261,14 +264,15 @@ it.effect(
 				const receipts = yield* makeRunnerReceiptStore(sql);
 				const reconciler = yield* makeRunnerStopReconciler({
 					receipts,
-					processTable: {
-						inspect: () => ({
-							state: "running",
-							startTime: "started",
-							pgid: 123,
-						}),
+					processTable: makeTestProcessTable({
+						processes: new Map(
+							[123, 124].map((pid) => [
+								pid,
+								{ state: "running", startTime: "started", pgid: 123 },
+							]),
+						),
 						signal: () => undefined,
-					},
+					}),
 					committed: () => Effect.void,
 					shutdown: () => Effect.void,
 					evict: () => Effect.void,

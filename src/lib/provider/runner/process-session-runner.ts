@@ -48,7 +48,6 @@ import { runnerFailure } from "./runner-protocol.js";
 import { makeRunnerReceiptStore } from "./runner-receipts.js";
 import {
 	discoverAllRunners,
-	makeRunnerProcessTable,
 	readRunnerEvidence,
 	removeRunnerDiscovery,
 	removeRunnerEvidence,
@@ -98,11 +97,9 @@ export const makeProcessSessionRunner = (
 		const sendScopes = yield* makeSendScopes((sinkId, sessionId) =>
 			emit({ type: "release-sink", sinkId }, sessionId),
 		);
-		const processIdentity =
-			deps.processIdentity ??
-			makeProductionProcessTable((message) => log.warn(message));
 		const processTable =
-			deps.processTable ?? makeRunnerProcessTable(processIdentity);
+			deps.processTable ??
+			makeProductionProcessTable((message) => log.warn(message));
 		const clock = yield* Clock.Clock;
 		const accountDisplayName = (
 			input: Pick<SessionTurn, "account" | "instanceId"> | undefined,
@@ -429,7 +426,7 @@ export const makeProcessSessionRunner = (
 						const socketPath =
 							stops.records.get(retirement.runnerId)?.identity.socketPath ??
 							evidence?.socketPath ??
-							discoverAllRunners(configDir, processIdentity).find(
+							discoverAllRunners(configDir, processTable).find(
 								(registration) => registration.runnerId === retirement.runnerId,
 							)?.socketPath;
 						if (socketPath) {
@@ -485,7 +482,6 @@ export const makeProcessSessionRunner = (
 			nativeSession,
 		} = yield* makeRunnerStarter({
 			deps,
-			processIdentity,
 			driver,
 			runFork,
 			configDir,

@@ -64,9 +64,10 @@ import {
 } from "../../src/lib/instance/managed-opencode-process.js";
 import { projectStorageDir } from "../../src/lib/persistence/project-storage.js";
 import {
-	runnerMembersGone,
-	runnerProcessTable,
-} from "../../src/lib/provider/runner/runner-registry.js";
+	makeProductionProcessTable,
+	sameProcess,
+} from "../../src/lib/provider/runner/process-table.js";
+import { runnerProcessTable } from "../../src/lib/provider/runner/runner-registry.js";
 import type {
 	ModelInfo,
 	ProviderAgentInfo,
@@ -94,6 +95,8 @@ import {
 	type RpcBuildIdentity,
 	RpcDecodeDiagnostics,
 } from "./rpc-decode-diagnostics.js";
+
+const cleanupProcesses = makeProductionProcessTable();
 
 export { responseChunks };
 
@@ -2318,7 +2321,10 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			const startTime = this.runnerStartTimes.get(pid);
 			return startTime === undefined
 				? testRunnerAlive(pid)
-				: !runnerMembersGone(runnerProcessTable, [{ pid, startTime }]);
+				: sameProcess(
+						{ pid, startTime },
+						cleanupProcesses.identify([pid]).get(pid),
+					) !== "gone";
 		});
 	}
 

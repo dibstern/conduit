@@ -2,14 +2,19 @@ import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
+import {
+	makeProductionProcessTable,
+	sameProcess,
+} from "../../src/lib/provider/runner/process-table.js";
 import { RUNNER_PROTOCOL_VERSION } from "../../src/lib/provider/runner/runner-protocol.js";
 import {
 	prepareRunnerDirectory,
 	type RunnerRegistration,
-	runnerMembersGone,
 	runnerProcessTable,
 } from "../../src/lib/provider/runner/runner-registry.js";
 import { isRecord } from "../../src/lib/utils.js";
+
+const cleanupProcesses = makeProductionProcessTable();
 
 export function testRunnerAlive(pid: number): boolean {
 	try {
@@ -174,7 +179,10 @@ export async function cleanupTestClaudeRunners(
 		const startTime = identities.get(pid);
 		return startTime === undefined
 			? testRunnerAlive(pid)
-			: !runnerMembersGone(runnerProcessTable, [{ pid, startTime }]);
+			: sameProcess(
+					{ pid, startTime },
+					cleanupProcesses.identify([pid]).get(pid),
+				) !== "gone";
 	};
 	const signal = (pid: number, value: NodeJS.Signals) => {
 		const startTime = identities.get(pid);
