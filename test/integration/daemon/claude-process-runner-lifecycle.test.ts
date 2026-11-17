@@ -214,6 +214,7 @@ describe("Claude runner admission socket probes", () => {
 				runnerId,
 				sessionId,
 				pid,
+				sendAnswers: [],
 			});
 		let pending:
 			| Extract<
