@@ -62,6 +62,7 @@ import type {
 	ResolvedSendTurnInput,
 	TurnResult,
 } from "../types.js";
+import { makeProductionProcessTable } from "./process-table.js";
 import { makeRecoveredEventSink } from "./runner-event-sink.js";
 import {
 	runnerSinkId,
@@ -184,6 +185,7 @@ export interface RunnerRecoveryDependencies {
 }
 
 export interface RunnerProviderInstanceDeps {
+	readonly processIdentity?: import("./process-table.js").ProcessTable;
 	readonly accountResources?: {
 		readonly use: <A, E, R>(
 			account: Account,
@@ -217,6 +219,9 @@ export const makeRunnerProviderInstance = (
 	) => Effect.Effect<SessionRunner, never, Scope.Scope>,
 ): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
+		const processIdentity =
+			deps.processIdentity ??
+			makeProductionProcessTable((message) => log.warn(message));
 		const providerScope = yield* Effect.scope;
 		const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 		const abortFibers = yield* FiberMap.make<string, void, never>();
@@ -243,7 +248,7 @@ export const makeRunnerProviderInstance = (
 			runner.sendScopes ??
 			(yield* makeSendScopes().pipe(Scope.provide(resourceScope)));
 		instance = new RunnerProviderInstance(
-			deps,
+			{ ...deps, processIdentity },
 			driver,
 			runner,
 			sendScopes,
@@ -354,7 +359,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 						: this.runner.recoverEffect
 				).pipe(Effect.provideService(currentPendingSendOwner, ownsPendingSend));
 				const registrations = yield* Effect.try(() =>
-					discoverAllRunners(this.deps.daemonConfigDir),
+					discoverAllRunners(
+						this.deps.daemonConfigDir,
+						this.deps.processIdentity,
+					),
 				).pipe(
 					Effect.catch((error) =>
 						Effect.logError("Could not verify runner ownership", error).pipe(

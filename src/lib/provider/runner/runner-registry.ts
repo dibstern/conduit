@@ -18,6 +18,11 @@ import { dirname, join, resolve } from "node:path";
 import { Data } from "effect";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { isRecord } from "../../utils.js";
+import {
+	makeProductionProcessTable,
+	type ProcessTable,
+	sameProcess,
+} from "./process-table.js";
 import type { RunnerMember } from "./runner-receipts.js";
 
 class RunnerRegistryError extends Data.TaggedError("RunnerRegistryError")<{
@@ -32,6 +37,7 @@ export interface RunnerRegistration {
 	readonly buildId: string;
 	readonly pid: number;
 	readonly startTime?: string;
+	readonly startKey?: string;
 	readonly registeredAt?: number;
 	readonly signalled?: boolean;
 }
@@ -223,6 +229,17 @@ export const runnerProcessTable: RunnerProcessTable = {
 	},
 };
 
+/** Compatibility for retirement until its group and signal migration lands. */
+export function makeRunnerProcessTable(
+	table: ProcessTable,
+): RunnerProcessTable {
+	return {
+		...runnerProcessTable,
+		inspect: (pid) => table.identify([pid]).get(pid) ?? { state: "unknown" },
+		inspectMany: table.identify,
+	};
+}
+
 function runnerTargetDirectory(
 	workspaceRoot: string,
 	configDir: string,
@@ -283,7 +300,10 @@ function prepareRunnerSocketDirectory(target: string): string {
 	return directory;
 }
 
-export function registerRunner(entry: RunnerRegistration): void {
+export function registerRunner(
+	entry: RunnerRegistration,
+	processTable?: ProcessTable,
+): void {
 	let previous: Partial<RunnerRegistration> = {};
 	try {
 		const value: unknown = JSON.parse(
@@ -295,12 +315,25 @@ export function registerRunner(entry: RunnerRegistration): void {
 		/* First registration. */
 	}
 	const temporary = `${entry.socketPath}.${randomUUID()}.json.tmp`;
+	const seen =
+		entry.startTime === undefined && previous.startTime === undefined
+			? (processTable ?? makeProductionProcessTable())
+					.identify([entry.pid])
+					.get(entry.pid)
+			: undefined;
+	// Choose a whole start from one source. A legacy string must not inherit a key.
+	const start =
+		entry.startTime !== undefined
+			? entry
+			: previous.startTime !== undefined
+				? previous
+				: seen && "startTime" in seen
+					? seen
+					: undefined;
 	const contents = JSON.stringify({
 		...entry,
-		startTime:
-			entry.startTime ??
-			previous.startTime ??
-			runnerProcessTable.inspect(entry.pid).startTime,
+		startTime: start?.startTime,
+		startKey: start?.startKey,
 		registeredAt: previous.registeredAt ?? entry.registeredAt ?? Date.now(),
 	});
 	// Identity remains beside the journal/spool after discovery is removed.
@@ -381,22 +414,17 @@ export function runnerPidAlive(pid: number): boolean {
 
 export function runnerPidMatchesRegistration(
 	entry: RunnerRegistration,
+	processTable: ProcessTable = makeProductionProcessTable(),
 ): boolean {
-	try {
-		const command = execFileSync(
-			"ps",
-			["-ww", "-o", "command=", "-p", String(entry.pid)],
-			{ encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 1000 },
-		);
-		// Whole-argument matches only: `<socketPath>.spool` must not pass.
-		const argv = ` ${command.trim()} `;
-		return (
-			argv.includes(` ${entry.socketPath} `) &&
-			argv.includes(` ${entry.runnerId} `)
-		);
-	} catch {
-		return false;
-	}
+	const argv = processTable.argv(entry.pid);
+	if (!argv) return false;
+	// The ps fallback splits argv on whitespace, so match space-delimited tokens;
+	// exact elements match too, and prefix or suffix near-misses never do.
+	const command = ` ${argv.join(" ")} `;
+	return (
+		command.includes(` ${entry.socketPath} `) &&
+		command.includes(` ${entry.runnerId} `)
+	);
 }
 
 export function removeRunnerDiscovery(socketPath: string): void {
@@ -413,15 +441,16 @@ export function removeRunnerEvidence(socketPath: string): void {
 export function discoverRunners(
 	workspaceRoot: string,
 	configDir = DEFAULT_CONFIG_DIR,
+	processTable: ProcessTable = makeProductionProcessTable(),
 ): RunnerRegistration[] {
 	const directory = prepareRunnerDirectory(workspaceRoot, configDir);
-	return discoverRunnersInDirectory(directory);
+	return discoverRunnersInDirectories([directory], processTable);
 }
 
 /** Daemon recovery includes retained projects whose folders are no longer registered. */
 export function discoverAllRunners(
 	configDir = DEFAULT_CONFIG_DIR,
-	processTable: RunnerProcessTable = runnerProcessTable,
+	processTable: ProcessTable = makeProductionProcessTable(),
 ): RunnerRegistration[] {
 	const root = join(resolve(configDir), "r");
 	let directories: string[];
@@ -431,68 +460,74 @@ export function discoverAllRunners(
 		if (isRecord(cause) && cause["code"] === "ENOENT") return [];
 		throw cause;
 	}
-	return directories.flatMap((directory) => {
-		if (!/^[0-9a-f]{12}$/.test(directory)) return [];
-		const target = join(root, directory);
-		if (!lstatSync(target).isDirectory()) return [];
-		return discoverRunnersInDirectory(
-			prepareRunnerSocketDirectory(target),
-			processTable,
-		);
-	});
+	return discoverRunnersInDirectories(
+		directories.flatMap((directory) => {
+			if (!/^[0-9a-f]{12}$/.test(directory)) return [];
+			const target = join(root, directory);
+			if (!lstatSync(target).isDirectory()) return [];
+			return [prepareRunnerSocketDirectory(target)];
+		}),
+		processTable,
+	);
 }
 
-function discoverRunnersInDirectory(
-	directory: string,
-	processTable = runnerProcessTable,
+function discoverRunnersInDirectories(
+	directories: readonly string[],
+	processTable: ProcessTable,
 ): RunnerRegistration[] {
 	const entries: RunnerRegistration[] = [];
-	for (const filename of readdirSync(directory)) {
-		if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
-		const socketPath = join(directory, filename.slice(0, -5));
-		try {
-			const value: unknown = JSON.parse(
-				readFileSync(`${socketPath}.json`, "utf8"),
-			);
-			if (
-				!isRecord(value) ||
-				value["socketPath"] !== socketPath ||
-				value["runnerId"] !== filename.slice(0, -5) ||
-				typeof value["sessionId"] !== "string" ||
-				typeof value["buildId"] !== "string" ||
-				typeof value["pid"] !== "number" ||
-				!Number.isSafeInteger(value["pid"]) ||
-				value["pid"] <= 0
-			) {
+	for (const directory of directories) {
+		for (const filename of readdirSync(directory)) {
+			if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
+			const socketPath = join(directory, filename.slice(0, -5));
+			try {
+				const value: unknown = JSON.parse(
+					readFileSync(`${socketPath}.json`, "utf8"),
+				);
+				if (
+					!isRecord(value) ||
+					value["socketPath"] !== socketPath ||
+					value["runnerId"] !== filename.slice(0, -5) ||
+					typeof value["sessionId"] !== "string" ||
+					typeof value["buildId"] !== "string" ||
+					typeof value["pid"] !== "number" ||
+					!Number.isSafeInteger(value["pid"]) ||
+					value["pid"] <= 0
+				) {
+					removeRunnerDiscovery(socketPath);
+					continue;
+				}
+				entries.push({
+					// Runner builds predating driverKind were all Claude.
+					driverKind:
+						typeof value["driverKind"] === "string"
+							? value["driverKind"]
+							: "claude",
+					runnerId: filename.slice(0, -5),
+					socketPath,
+					sessionId: value["sessionId"],
+					buildId: value["buildId"],
+					pid: value["pid"],
+					...(typeof value["startTime"] === "string"
+						? { startTime: value["startTime"] }
+						: {}),
+					...(typeof value["startKey"] === "string"
+						? { startKey: value["startKey"] }
+						: {}),
+					registeredAt:
+						typeof value["registeredAt"] === "number"
+							? value["registeredAt"]
+							: lstatSync(`${socketPath}.json`).mtimeMs,
+					...(value["signalled"] === true ? { signalled: true } : {}),
+				});
+			} catch {
 				removeRunnerDiscovery(socketPath);
-				continue;
 			}
-			// A dead process is not a live discovery candidate. Settle uses evidence.
-			if (["gone", "zombie"].includes(processTable.inspect(value["pid"]).state))
-				continue;
-			entries.push({
-				// Runner builds predating driverKind were all Claude.
-				driverKind:
-					typeof value["driverKind"] === "string"
-						? value["driverKind"]
-						: "claude",
-				runnerId: filename.slice(0, -5),
-				socketPath,
-				sessionId: value["sessionId"],
-				buildId: value["buildId"],
-				pid: value["pid"],
-				...(typeof value["startTime"] === "string"
-					? { startTime: value["startTime"] }
-					: {}),
-				registeredAt:
-					typeof value["registeredAt"] === "number"
-						? value["registeredAt"]
-						: lstatSync(`${socketPath}.json`).mtimeMs,
-				...(value["signalled"] === true ? { signalled: true } : {}),
-			});
-		} catch {
-			removeRunnerDiscovery(socketPath);
 		}
 	}
-	return entries;
+	const observed = processTable.identify(entries.map((entry) => entry.pid));
+	// Unknown is retained; only positive identity/exit evidence excludes a runner.
+	return entries.filter(
+		(entry) => sameProcess(entry, observed.get(entry.pid)) !== "gone",
+	);
 }

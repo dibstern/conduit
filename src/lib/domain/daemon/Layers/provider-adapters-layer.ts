@@ -18,6 +18,7 @@ import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { GoalActionSchema } from "../../../contracts/stored-event.js";
 import { loadGlobalSettings } from "../../../daemon/global-settings.js";
 import * as Failure from "../../../effect/failure-classification.js";
+import { createLogger } from "../../../logger.js";
 import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectError,
@@ -46,6 +47,7 @@ import { OpenCodeDriver } from "../../../provider/opencode-provider-instance.js"
 import type { ProviderCallRequest } from "../../../provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../provider/provider-registry.js";
 import { SqliteProviderSessionBindingReadModel } from "../../../provider/provider-session-binding-read-model.js";
+import { makeProductionProcessTable } from "../../../provider/runner/process-table.js";
 import {
 	RunnerProviderInstance,
 	type RunnerRecoveryDependencies,
@@ -99,6 +101,9 @@ export const makeProviderAdaptersLive = (
 			const activity = yield* SessionActivityTag;
 			const watcher = yield* PortWatcher;
 			const registry = new ProviderRegistry();
+			const processIdentity = makeProductionProcessTable((message) =>
+				createLogger("provider-adapters").warn(message),
+			);
 			const shutdown = yield* Effect.cached(
 				Effect.suspend(() => registry.shutdownAllEffect()),
 			);
@@ -456,6 +461,7 @@ export const makeProviderAdaptersLive = (
 						Effect.map((config) => config.autoSettleAfterDays),
 					),
 					daemonConfigDir: configDir,
+					processIdentity,
 					projectRootForSession,
 					recoveryForSession,
 					persistUserMessage,
@@ -549,6 +555,7 @@ export const makeProviderAdaptersLive = (
 				yield* makeCursorProviderRuntime(
 					{
 						daemonConfigDir: configDir,
+						processIdentity,
 						accounts: accounts.snapshot,
 						autoSettleAfterDays: Ref.get(configRef).pipe(
 							Effect.map((config) => config.autoSettleAfterDays),
@@ -564,6 +571,7 @@ export const makeProviderAdaptersLive = (
 				yield* makeCodexProviderRuntime(
 					{
 						daemonConfigDir: configDir,
+						processIdentity,
 						accounts: accounts.snapshot,
 						autoSettleAfterDays: Ref.get(configRef).pipe(
 							Effect.map((config) => config.autoSettleAfterDays),
@@ -610,7 +618,11 @@ export const makeProviderAdaptersLive = (
 					continue;
 				const needsRecovery = yield* Effect.gen(function* () {
 					const runners = yield* Effect.try(() =>
-						discoverRunners(entry.project.folders[0], configDir),
+						discoverRunners(
+							entry.project.folders[0],
+							configDir,
+							processIdentity,
+						),
 					);
 					// Controls can outlive both their runner and session projection.
 					// Lend their registered project's services before the first drain.

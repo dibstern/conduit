@@ -57,25 +57,31 @@ export function recordDaemonBudgetMetrics(directory: string): () => void {
 			histogram.reset();
 		}
 		const ms = (ns: number) => Math.round(ns / 1e3) / 1e3;
+		const measurement = {
+			id: request.id,
+			startedAtMs: performance.timeOrigin + startedAt,
+			durationMs: performance.now() - startedAt,
+			spawns,
+			loopDelayMs: {
+				samples: histogram.count,
+				p50: histogram.count ? ms(histogram.percentile(50)) : 0,
+				p99: histogram.count ? ms(histogram.percentile(99)) : 0,
+				max: histogram.count ? ms(histogram.max) : 0,
+			},
+			subprocess: {
+				...owner,
+				quietForMs: performance.now() - lastActivityAt,
+			},
+		} satisfies DaemonBudgetMeasurement;
 		writeFileSync(
 			join(directory, "response.json"),
-			JSON.stringify({
-				id: request.id,
-				startedAtMs: performance.timeOrigin + startedAt,
-				durationMs: performance.now() - startedAt,
-				spawns,
-				loopDelayMs: {
-					samples: histogram.count,
-					p50: histogram.count ? ms(histogram.percentile(50)) : 0,
-					p99: histogram.count ? ms(histogram.percentile(99)) : 0,
-					max: histogram.count ? ms(histogram.max) : 0,
-				},
-				subprocess: {
-					...owner,
-					quietForMs: performance.now() - lastActivityAt,
-				},
-			} satisfies DaemonBudgetMeasurement),
+			JSON.stringify(measurement),
 		);
+		process.send?.({
+			channel: "conduit-process-test",
+			kind: "budget-snapshot",
+			measurement,
+		});
 	};
 	// Polling avoids coalesced directory watch events losing a phase boundary.
 	const timer = setInterval(respond, 50);

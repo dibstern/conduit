@@ -1,4 +1,5 @@
 import type { Effect, Option } from "effect";
+import type { ProcessTable } from "./process-table.js";
 import type { connectRunner } from "./runner-connection.js";
 import type {
 	RunnerDriverPieces,
@@ -20,6 +21,7 @@ export interface ProcessRunnerDeps {
 	>;
 	readonly daemonConfigDir?: string;
 	readonly processTable?: RunnerProcessTable;
+	readonly processIdentity?: ProcessTable;
 	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
 	readonly subagentPollTimeoutMs?: number;
 	readonly sessionForkSdk?: import("../claude/claude-provider-runtime.js").ClaudeSessionRunnerDeps["sessionForkSdk"];

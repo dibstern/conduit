@@ -212,6 +212,7 @@ export interface ClaudeProviderInstanceDeps {
 	) => Effect.Effect<ClaudeThreadReadResult>;
 	readonly readGoalStatus?: ReadClaudeGoalStatus;
 	readonly daemonConfigDir?: string;
+	readonly processIdentity?: import("../runner/process-table.js").ProcessTable;
 	readonly accounts?: Effect.Effect<AccountsState>;
 	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
 	readonly claudeLaunchConfig?: () => import("./claude-sdk-env.js").ClaudeLaunchConfig;
@@ -247,6 +248,7 @@ export interface ClaudeProviderInstanceDeps {
 export type ClaudeSessionRunnerDeps = Pick<
 	ClaudeProviderInstanceDeps,
 	| "daemonConfigDir"
+	| "processIdentity"
 	| "accounts"
 	| "autoSettleAfterDays"
 	| "claudeLaunchConfig"

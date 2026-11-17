@@ -20,6 +20,7 @@ import {
 	Layer,
 	Logger,
 	Random,
+	Schema,
 	Scope,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -37,6 +38,11 @@ import { sendPreparedClaudeTurn } from "../../../src/lib/provider/claude/prepare
 import type { SendToken } from "../../../src/lib/provider/run-ledger/run-ledger-model.js";
 import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
+import {
+	makeMemoryProcessAdapter,
+	makeProcessTable,
+	ProcessStart,
+} from "../../../src/lib/provider/runner/process-table.js";
 import * as RunnerConnection from "../../../src/lib/provider/runner/runner-connection.js";
 import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-legacy-classification.js";
 import {
@@ -48,6 +54,7 @@ import {
 	sendToken,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import * as RunnerRecovery from "../../../src/lib/provider/runner/runner-recovery.js";
+import * as RunnerRegistry from "../../../src/lib/provider/runner/runner-registry.js";
 import {
 	prepareRunnerDirectory,
 	type RunnerProcessTable,
@@ -1214,8 +1221,28 @@ it.effect(
 					() => {},
 					() => {},
 				);
+				const discover = RunnerRegistry.discoverRunners;
+				// Discovery reads the process table; give it this fixture's processes.
+				const identity = makeProcessTable(
+					makeMemoryProcessAdapter({
+						processes: new Map(
+							[...f.processes].map(([pid, seen]) => [
+								pid,
+								{
+									state: "running" as const,
+									...Schema.decodeUnknownSync(ProcessStart)(seen),
+								},
+							]),
+						),
+					}),
+				);
 				yield* Effect.acquireRelease(
 					Effect.sync(() => [
+						vi
+							.spyOn(RunnerRegistry, "discoverRunners")
+							.mockImplementation((root, config) =>
+								discover(root, config, identity),
+							),
 						vi
 							.spyOn(RunnerConnection, "connectRunner")
 							.mockReturnValue(Effect.succeed(connection)),

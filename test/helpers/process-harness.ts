@@ -978,6 +978,8 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "XPC_SERVICE_NAME"
 				>
 			>;
+			/** Prepend recording command shims for this daemon and its runners. */
+			pathPrefix?: string;
 			/** An already-running OpenCode the default instance should point at. */
 			opencodeUrl?: string;
 			/** OpenCode idle grace, kept for later restarts. */
@@ -1156,10 +1158,15 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 						? { CONDUIT_TEST_SERVER_METRICS: options.metricsFile }
 						: {}),
 					...(options.profile ? { CONDUIT_TEST_SERVER_PROFILE: "1" } : {}),
-					PATH:
-						this.managedOpenCode || this.foregroundCli
-							? `${join(this.root, "bin")}:${process.env["PATH"] ?? ""}`
-							: (process.env["PATH"] ?? ""),
+					PATH: [
+						options.pathPrefix,
+						...(this.managedOpenCode || this.foregroundCli
+							? [join(this.root, "bin")]
+							: []),
+						process.env["PATH"] ?? "",
+					]
+						.filter((part) => part !== undefined)
+						.join(":"),
 					HOME: join(this.root, "home"),
 					SHELL: "/bin/sh",
 					XDG_CONFIG_HOME: join(this.root, "config"),

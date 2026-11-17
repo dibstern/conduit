@@ -63,6 +63,10 @@ function injectedResetAt(configDir: string | undefined): number | undefined {
 }
 
 export type ProcessMark =
+	| {
+			kind: "budget-snapshot";
+			measurement: import("./daemon-budget-metrics.js").DaemonBudgetMeasurement;
+	  }
 	// The daemon's own send-continuation pause (process-session-runner.ts pauseSend).
 	| {
 			kind: "send-continuation-paused";

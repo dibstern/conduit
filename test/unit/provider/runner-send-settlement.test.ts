@@ -19,6 +19,7 @@ import {
 	Layer,
 	Option,
 	Random,
+	Schema,
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -48,6 +49,11 @@ import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestrati
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
+import {
+	makeMemoryProcessAdapter,
+	makeProcessTable,
+	ProcessStart,
+} from "../../../src/lib/provider/runner/process-table.js";
 import {
 	type RunnerHello,
 	type RunnerSocket,
@@ -246,6 +252,18 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 			inspect: (processId) => processes.get(processId) ?? { state: "gone" },
 			signal: () => {},
 		};
+		const processIdentity = makeProcessTable(
+			makeMemoryProcessAdapter({
+				get processes() {
+					return new Map(
+						[...processes].map(([pid, seen]) => [
+							pid,
+							{ ...seen, ...Schema.decodeUnknownSync(ProcessStart)(seen) },
+						]),
+					);
+				},
+			}),
+		);
 		let recovery: RunnerRecoveryDependencies | undefined;
 		let emit: Parameters<typeof makeProcessSessionRunner>[1] = () =>
 			Effect.succeed({});
@@ -255,6 +273,7 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 				accounts: Effect.succeed(accounts),
 				projectRootForSession: () => Effect.succeed(root),
 				processTable,
+				processIdentity,
 				recoveryForSession: () => Effect.succeed(recovery),
 			},
 			(...args) => emit(...args),
@@ -314,7 +333,7 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 		const discover = runnerRegistry.discoverAllRunners;
 		const discovery = vi
 			.spyOn(runnerRegistry, "discoverAllRunners")
-			.mockImplementation((config) => discover(config, processTable));
+			.mockImplementation((config) => discover(config, processIdentity));
 		yield* Effect.addFinalizer(() =>
 			Effect.sync(() => discovery.mockRestore()),
 		);

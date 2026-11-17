@@ -126,6 +126,7 @@ export const CANCELLED_TURN: TurnResult = {
 };
 
 interface RunnerStarterOptions {
+	readonly processIdentity: import("./process-table.js").ProcessTable;
 	readonly deps: ProcessRunnerDeps;
 	readonly driver: ProcessRunnerDriver;
 	readonly runFork: Effect.Success<
@@ -259,6 +260,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 	Effect.gen(function* () {
 		const {
 			deps,
+			processIdentity,
 			driver,
 			runFork,
 			configDir,
@@ -2418,7 +2420,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 						);
 						const discovered = discoverAllRunners(
 							configDir,
-							stops.processTable,
+							processIdentity,
 						).filter(
 							(registration) =>
 								(registration.driverKind ?? "claude") === driver.driverKind &&
@@ -2777,7 +2779,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								if (
 									connected._tag === "Failure" &&
 									connected.failure.code === "runner_incompatible" &&
-									runnerPidMatchesRegistration(registration)
+									runnerPidMatchesRegistration(registration, processIdentity)
 								) {
 									const failure = connected.failure;
 									log.warn(failure.message);

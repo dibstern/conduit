@@ -14,6 +14,7 @@ import { createLogger } from "../../logger.js";
 import { createEventId } from "../../persistence/events.js";
 import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type { TurnResult } from "../types.js";
+import { makeProductionProcessTable } from "./process-table.js";
 import { makeRunnerIdleExit } from "./runner-idle.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
@@ -29,7 +30,6 @@ import {
 	registerRunner,
 	removeRunnerDiscovery,
 	runnerPidAlive,
-	runnerProcessTable,
 } from "./runner-registry.js";
 import { RunnerSendJournal } from "./runner-send-journal.js";
 import { RunnerSpool } from "./runner-spool.js";
@@ -237,6 +237,9 @@ export const runSessionRunner = (
 		const runnerId = process.argv[4];
 		if (!socketPath || !sessionId || !runnerId || !process.send)
 			return yield* Effect.die("Runner requires a socket path and parent IPC");
+		const processTable = makeProductionProcessTable((message) =>
+			log.warn(message),
+		);
 		let reaperWarning = false;
 		const warnReaper = (cause: unknown) => {
 			if (reaperWarning) return;
@@ -288,12 +291,8 @@ export const runSessionRunner = (
 						ready += chunk.toString();
 						if (!ready.includes("\n")) return;
 						if (ready !== "ready\n" || child.pid === undefined) return finish();
-						const current = runnerProcessTable.inspect(child.pid);
-						if (
-							current.state !== "running" ||
-							current.startTime === undefined ||
-							current.pgid !== process.pid
-						)
+						const current = processTable.identify([child.pid]).get(child.pid);
+						if (current?.state !== "running" || current.pgid !== process.pid)
 							return finish(undefined, "Reaper identity could not be verified");
 						finish({ pid: child.pid, startTime: current.startTime });
 					});
@@ -318,14 +317,17 @@ export const runSessionRunner = (
 				? { _tag: "Candidate" }
 				: { _tag: "Serving" };
 		const register = () =>
-			registerRunner({
-				socketPath,
-				sessionId,
-				runnerId,
-				driverKind,
-				buildId: runnerBuildId(),
-				pid: process.pid,
-			});
+			registerRunner(
+				{
+					socketPath,
+					sessionId,
+					runnerId,
+					driverKind,
+					buildId: runnerBuildId(),
+					pid: process.pid,
+				},
+				processTable,
+			);
 		let connection: RunnerSocket | undefined;
 		let idle: ReturnType<typeof makeRunnerIdleExit> | undefined;
 		let exitDeadline: ReturnType<typeof setTimeout> | undefined;

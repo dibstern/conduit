@@ -36,6 +36,7 @@ import type {
 	ProcessRunnerDeps,
 	ProcessRunnerDriver,
 } from "./process-runner-types.js";
+import { makeProductionProcessTable } from "./process-table.js";
 import {
 	legacyAnswerCommandId,
 	makeRunnerDispatch,
@@ -47,10 +48,10 @@ import { runnerFailure } from "./runner-protocol.js";
 import { makeRunnerReceiptStore } from "./runner-receipts.js";
 import {
 	discoverAllRunners,
+	makeRunnerProcessTable,
 	readRunnerEvidence,
 	removeRunnerDiscovery,
 	removeRunnerEvidence,
-	runnerProcessTable,
 } from "./runner-registry.js";
 import {
 	makeRunnerRetirement,
@@ -58,7 +59,7 @@ import {
 } from "./runner-retirement.js";
 import { makeRunnerSendGate } from "./runner-send-feeder.js";
 import { makeRunnerSends, type SendBinding } from "./runner-sends.js";
-import { makeRunnerStarter } from "./runner-starter.js";
+import { log, makeRunnerStarter } from "./runner-starter.js";
 import { failRunnerTurn } from "./runner-turn-failure.js";
 import { makeSendScopes, type SendScope } from "./send-scope.js";
 import {
@@ -97,7 +98,11 @@ export const makeProcessSessionRunner = (
 		const sendScopes = yield* makeSendScopes((sinkId, sessionId) =>
 			emit({ type: "release-sink", sinkId }, sessionId),
 		);
-		const processTable = deps.processTable ?? runnerProcessTable;
+		const processIdentity =
+			deps.processIdentity ??
+			makeProductionProcessTable((message) => log.warn(message));
+		const processTable =
+			deps.processTable ?? makeRunnerProcessTable(processIdentity);
 		const clock = yield* Clock.Clock;
 		const accountDisplayName = (
 			input: Pick<SessionTurn, "account" | "instanceId"> | undefined,
@@ -424,7 +429,7 @@ export const makeProcessSessionRunner = (
 						const socketPath =
 							stops.records.get(retirement.runnerId)?.identity.socketPath ??
 							evidence?.socketPath ??
-							discoverAllRunners(configDir, processTable).find(
+							discoverAllRunners(configDir, processIdentity).find(
 								(registration) => registration.runnerId === retirement.runnerId,
 							)?.socketPath;
 						if (socketPath) {
@@ -480,6 +485,7 @@ export const makeProcessSessionRunner = (
 			nativeSession,
 		} = yield* makeRunnerStarter({
 			deps,
+			processIdentity,
 			driver,
 			runFork,
 			configDir,

@@ -21,6 +21,7 @@ import {
 	Logger,
 	Option,
 	Scheduler,
+	Schema,
 	Scope,
 	Stream,
 } from "effect";
@@ -76,6 +77,11 @@ import type { SendToken } from "../../../src/lib/provider/run-ledger/run-ledger-
 import { makeInProcessSessionRunner } from "../../../src/lib/provider/runner/in-process-session-runner.js";
 import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
+import {
+	makeMemoryProcessAdapter,
+	makeProcessTable,
+	ProcessStart,
+} from "../../../src/lib/provider/runner/process-table.js";
 import {
 	isLegacyRunner,
 	legacyRunnerRunQuery,
@@ -369,6 +375,18 @@ const retirementFixture = (
 				processes.get(pid) ?? { state: "gone" as const },
 			signal: () => {},
 		};
+		const processIdentity = makeProcessTable(
+			makeMemoryProcessAdapter({
+				get processes() {
+					return new Map(
+						[...processes].map(([pid, seen]) => [
+							pid,
+							{ ...seen, ...Schema.decodeUnknownSync(ProcessStart)(seen) },
+						]),
+					);
+				},
+			}),
+		);
 		// A held gate parks every accounts read until the test opens it.
 		const accountsGate: { hold?: Deferred.Deferred<void> } = {};
 		const manager = yield* makeProcessSessionRunner(
@@ -386,6 +404,7 @@ const retirementFixture = (
 				),
 				projectRootForSession: () => Effect.succeed(root),
 				processTable,
+				processIdentity,
 				...(recoveryForSession ? { recoveryForSession } : {}),
 			},
 			output,
@@ -434,6 +453,7 @@ const retirementFixture = (
 			socketPath,
 			driver,
 			processTable,
+			processIdentity,
 			processes,
 			childProcesses,
 			manager,
@@ -1032,7 +1052,7 @@ const s7Fixture = (
 		const discover = runnerRegistry.discoverAllRunners;
 		const discovery = vi
 			.spyOn(runnerRegistry, "discoverAllRunners")
-			.mockImplementation((config) => discover(config, f.processTable));
+			.mockImplementation((config) => discover(config, f.processIdentity));
 		yield* Effect.addFinalizer(() =>
 			Effect.sync(() => discovery.mockRestore()),
 		);
