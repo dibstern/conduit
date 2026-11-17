@@ -281,7 +281,9 @@ it.each([
 it.each(
 	(["claude", "cursor"] as const).flatMap((driver) =>
 		(["unplaced", "accepted", "user-cancelled"] as const).flatMap((placement) =>
-			(placement === "accepted" ? [true, false] : [true]).map((alive) => ({
+			// An accepted steer is held, so the stop commit, not this sweep, settles
+			// it once its runner is lost; only a dead runner's drain settles it here.
+			(placement === "accepted" ? [false] : [true]).map((alive) => ({
 				driver,
 				placement,
 				alive,
@@ -343,6 +345,25 @@ it.each(
 						runId: "run",
 						provider: driver,
 					});
+					// The ledger build holds the send before it transmits.
+					const hold = {
+						runId: "run",
+						runnerId: "runner",
+						commandId: "input",
+						transmission: 1,
+					};
+					yield* commit([
+						canonicalEvent(
+							"evidence.process_started",
+							"session",
+							{ runnerId: "runner", label: "runner:1", reattached: false },
+							{ provider: driver },
+						),
+						canonicalEvent("run.dispatched", "session", hold, {
+							provider: driver,
+							metadata: { runId: "run" },
+						}),
+					]);
 					yield* ingestion.ingest(
 						providerRuntimeEvent(
 							"run.started",

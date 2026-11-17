@@ -283,6 +283,10 @@ it.each([
 						title: "Orphan snapshot",
 					}),
 					canonicalEvent("run.requested", "session", {
+						runId: "owner",
+						inputId: "owner-input",
+					}),
+					canonicalEvent("run.requested", "session", {
 						runId: "run",
 						inputId: "input",
 					}),
@@ -292,12 +296,20 @@ it.each([
 					inputId: "input",
 					runId: "run",
 				});
+				// The send's Run joined the running owner Run as its steer: recovery
+				// fails it through the orphan path, not the ledger's settlement.
 				yield* persist.persistEvents([
 					canonicalEvent(
 						"run.started",
 						"session",
+						{ requestedRunId: "owner", inputId: "owner-input" },
+						{ provider: "claude", metadata: { runId: "owner" } },
+					),
+					canonicalEvent(
+						"run.started",
+						"session",
 						{ requestedRunId: "run", inputId: "input" },
-						{ provider: "claude", metadata: { runId: "run" } },
+						{ provider: "claude", metadata: { runId: "owner" } },
 					),
 					canonicalEvent(
 						"message.created",
