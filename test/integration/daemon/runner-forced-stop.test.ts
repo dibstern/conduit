@@ -67,7 +67,9 @@ const d1Cursor = () => {
 };
 let d1Observations = 0;
 let d1UnreadableReaper;
+let d1ProcessTable;
 globalThis[Symbol.for("d1-wrap-process-table")] = table => {
+  d1ProcessTable = table;
   if (!table.observe) return table;
   const identify = table.identify.bind(table);
   table.identify = pids => {
@@ -81,7 +83,13 @@ globalThis[Symbol.for("d1-wrap-process-table")] = table => {
   table.observe = query => D1Effect.suspend(() => {
     if (!d1Selected(query.pgid)) return observe(query);
     const observation = ++d1Observations;
-    d1Record("process-observe-start", { observation, pgid: query.pgid });
+    d1Record("process-observe-start", { observation, pgid: query.pgid, retirement: d1Cursor() });
+    const control = JSON.parse(readFileSync(d1Selection, "utf8"));
+    if (control.crash === "before-first-observe") {
+      writeFileSync(d1Selection, JSON.stringify({ ...control, crash: undefined, consumedCrash: "before-first-observe" }));
+      d1Record("crash-cut", { stage: "before-first-observe", target: control.pid, retirement: d1Cursor() });
+      process.kill(process.pid, "SIGKILL");
+    }
     return observe(query).pipe(D1Effect.tap(result => D1Effect.sync(() => {
       d1Record("process-observed", { observation, pgid: query.pgid, group: result.group, processes: [...result.processes], retirement: d1Cursor() });
     })));
@@ -136,8 +144,42 @@ if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
   syncBuiltinESMExports();
   process.on("SIGUSR1", () => {
     // Bound the child's lifetime even if the test fails before capturing its identity.
-    const child = childProcess.spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => {}); setTimeout(() => process.exit(0), 120_000); setInterval(() => {}, 1000); process.send({ ready: true });'], {
-      stdio: ["ignore", "ignore", "ignore", "ipc"], env: { ...process.env, NODE_OPTIONS: "" },
+    const control = JSON.parse(readFileSync(d1Selection, "utf8"));
+    const childSource = function() {
+      const { spawn } = require("node:child_process");
+      process.on("SIGTERM", () => {});
+      setTimeout(() => process.exit(0), 120_000);
+      let fork = () => {};
+      // A steady fork workload uses the existing heartbeat, without a spawn storm.
+      setInterval(() => fork(), 1000);
+      if (process.env.D1_FORKING !== "1") return process.send({ ready: true });
+      let forking = true;
+      let pending = false;
+      const children = [];
+      process.on("SIGUSR2", () => { forking = false; process.send({ stopped: true }); });
+      fork = () => {
+        if (!forking || pending) return;
+        pending = true;
+        const grandchild = spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => {}); process.on("disconnect", () => process.exit(0)); setInterval(() => {}, 1000); process.send({ ready: true });'], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
+        grandchild.once("message", () => {
+          pending = false;
+          children.push(grandchild);
+          if (children.length > 4) children.shift().kill("SIGKILL");
+          process.send({ ready: true, grandchildPid: grandchild.pid });
+        });
+      };
+      fork();
+    };
+    const child = childProcess.spawn(process.execPath, ["-e", "(" + childSource.toString() + ")()"], {
+      stdio: ["ignore", "ignore", "ignore", "ipc"], env: { ...process.env, NODE_OPTIONS: "", D1_FORKING: control.forking ? "1" : "0" },
+    });
+    child.on("message", message => {
+      if (message.grandchildPid) {
+        const seen = d1ProcessTable.identify([message.grandchildPid]).get(message.grandchildPid);
+        if (seen?.state !== "running") throw new Error("Fixture grandchild identity unavailable");
+        d1Record("grandchild-started", { childPid: message.grandchildPid, startTime: seen.startTime });
+      }
+      if (message.stopped) process.send?.({ channel: "conduit-process-test", kind: "runner-command", commandId: String(process.pid), type: "d1-forking-stopped" });
     });
     child.once("message", () => {
       d1Record("child-started", { childPid: child.pid, startTime: childProcess.execFileSync("ps", ["-o", "lstart=", "-p", String(child.pid)], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } }).trim() });
@@ -163,6 +205,10 @@ if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
     if (message.type === "command" && message.command.type === "send-turn" && existsSync(d1Selection) && message.command.input.sessionId === JSON.parse(readFileSync(d1Selection, "utf8")).sessionId) selectedSocket = this;
     if (this === selectedSocket && message.type === "command" && existsSync(d1Selection)) {
       const control = JSON.parse(readFileSync(d1Selection, "utf8"));
+      if (message.command.type === "shutdown") {
+        d1Record("shutdown-snapshot", { retirement: d1Cursor(), observation: d1Observations });
+        if (control.forking) process.kill(control.descendantPid, "SIGUSR2");
+      }
       if (message.command.type === "shutdown" && control.crash === "before-shutdown") {
         writeFileSync(d1Selection, JSON.stringify({ ...control, crash: undefined, consumedCrash: "before-shutdown" }));
         d1Record("crash-cut", { stage: "before-shutdown", target: control.pid });
@@ -378,7 +424,9 @@ async function cleanupOwned(
 				});
 		}
 		if (
-			["child-started", "reaper-spawned"].includes(String(entry["kind"])) &&
+			["child-started", "grandchild-started", "reaper-spawned"].includes(
+				String(entry["kind"]),
+			) &&
 			typeof entry["childPid"] === "number" &&
 			typeof entry["startTime"] === "string"
 		)
@@ -585,15 +633,19 @@ describe("runner forced stop with real processes", () => {
 	}, 60_000);
 
 	it.each([
-		{ leaderExits: false, killReaper: false },
-		{ leaderExits: true, killReaper: false },
-		{ leaderExits: true, killReaper: true },
+		{ leaderExits: false, killReaper: false, forking: false },
+		{ leaderExits: false, killReaper: false, forking: true },
+		{ leaderExits: true, killReaper: false, forking: false },
+		{ leaderExits: true, killReaper: true, forking: false },
 	])("clears a TERM-ignoring descendant and settles its accepted run: %j", async ({
 		leaderExits,
 		killReaper,
+		forking,
 	}) => {
 		const artifactPath = artifact(
-			`stop-${leaderExits ? "leader-exits" : "leader-ignores"}-${killReaper ? "reaper-killed" : "reaper-alive"}`,
+			forking
+				? "intent-only-first-pass"
+				: `stop-${leaderExits ? "leader-exits" : "leader-ignores"}-${killReaper ? "reaper-killed" : "reaper-alive"}`,
 		);
 		const evidence: Record<string, unknown> = {
 			passed: false,
@@ -603,11 +655,17 @@ describe("runner forced stop with real processes", () => {
 		const harness = ProcessHarness.create({
 			dist,
 			deadline: performance.now() + 75_000,
+			...(forking
+				? {
+						serverLogFile: artifactPath.replace(/\.json$/, ".daemon.log"),
+						logLevel: "info" as const,
+					}
+				: {}),
 		});
 		let members: RunnerMember[] = [];
 		try {
 			installForcedStopFixture(harness);
-			const fixture = await selectedRunner(harness, leaderExits);
+			const fixture = await selectedRunner(harness, leaderExits, { forking });
 			members = [...fixture.members];
 			evidence["acceptedRun"] = fixture.acceptedRun;
 			expect(runnerProcessTable.inspect(fixture.descendant.pid)).toMatchObject({
@@ -632,7 +690,67 @@ describe("runner forced stop with real processes", () => {
 				sessionId: fixture.sessionId,
 				commandId: randomUUID(),
 			});
+			if (forking) {
+				await harness.waitForMark(
+					(mark) =>
+						mark.kind === "runner-command" &&
+						mark.type === "d1-forking-stopped",
+				);
+			}
 			await fixture.pending;
+			if (forking) {
+				const entries = proof(harness);
+				const firstRead = entries.find(
+					(entry) => entry["kind"] === "process-observe-start",
+				);
+				const shutdown = entries.find(
+					(entry) => entry["kind"] === "shutdown-snapshot",
+				);
+				assert(firstRead && shutdown);
+				assert(
+					isRecord(firstRead["retirement"]) && isRecord(shutdown["retirement"]),
+				);
+				expect(firstRead["retirement"]["stop_state"]).toBe("Requested");
+				expect(
+					JSON.parse(String(firstRead["retirement"]["member_snapshot"])),
+				).toEqual([]);
+				expect(Number(shutdown["observation"])).toBeGreaterThan(0);
+				expect(entries.indexOf(firstRead)).toBeLessThan(
+					entries.indexOf(shutdown),
+				);
+				expect(
+					entries
+						.slice(0, entries.indexOf(shutdown))
+						.filter((entry) => entry["kind"] === "process-signal-snapshot"),
+				).toEqual([]);
+				const committed = Schema.decodeUnknownSync(
+					Schema.fromJsonString(
+						Schema.Array(
+							Schema.Struct({ pid: Schema.Number, startTime: Schema.String }),
+						),
+					),
+				)(shutdown["retirement"]["member_snapshot"]);
+				const grandchildren = entries.flatMap((entry) =>
+					entry["kind"] === "grandchild-started" &&
+					typeof entry["childPid"] === "number" &&
+					typeof entry["startTime"] === "string"
+						? [{ pid: entry["childPid"], startTime: entry["startTime"] }]
+						: [],
+				);
+				expect(grandchildren.length).toBeGreaterThan(0);
+				expect(
+					committed.some((member) =>
+						grandchildren.some(
+							(child) =>
+								child.pid === member.pid &&
+								child.startTime === member.startTime,
+						),
+					),
+				).toBe(true);
+				members.push(...grandchildren);
+				evidence["committedBeforeShutdown"] = committed;
+				evidence["grandchildren"] = grandchildren;
+			}
 			await expectGroupGone(harness, fixture.leader.pid, members);
 			evidence["settledRun"] = await expectRunSettled(
 				harness,
@@ -750,6 +868,7 @@ describe("runner forced stop with real processes", () => {
 			const signals = proof(harness).filter(
 				(mark) =>
 					mark["kind"] === "signal" &&
+					["SIGTERM", "SIGKILL"].includes(String(mark["signal"])) &&
 					[fixture.leader.pid, fixture.descendant.pid].includes(
 						Math.abs(Number(mark["childPid"])),
 					),
@@ -910,6 +1029,7 @@ describe("runner forced stop with real processes", () => {
 	}, 95_000);
 
 	it.each([
+		"before-first-observe",
 		"before-shutdown",
 		"before-term",
 		"during-grace",
@@ -963,13 +1083,19 @@ describe("runner forced stop with real processes", () => {
 			expect(retired.start_time).toBe(fixture.leader.startTime);
 			expect(retired.reaper_pid).toBe(fixture.reaper.pid);
 			expect(retired.reaper_start_time).toBe(fixture.reaper.startTime);
-			expect(JSON.parse(retired.member_snapshot)).toEqual(
-				expect.arrayContaining([
-					fixture.leader,
-					fixture.reaper,
-					fixture.descendant,
-				]),
-			);
+			if (crash === "before-first-observe") {
+				expect(retired.stop_state).toBe("Requested");
+				expect(JSON.parse(retired.member_snapshot)).toEqual([]);
+				expect(JSON.parse(retired.signal_log)).toEqual([]);
+			} else {
+				expect(JSON.parse(retired.member_snapshot)).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining(fixture.leader),
+						expect.objectContaining(fixture.reaper),
+						expect.objectContaining(fixture.descendant),
+					]),
+				);
+			}
 			expect(
 				runnerRuns(harness, basename(fixture.runner.socketPath)),
 			).toContainEqual(
@@ -1241,7 +1367,7 @@ describe("runner forced stop with real processes", () => {
 				lateText,
 			);
 			const members = JSON.parse(retired.member_snapshot) as RunnerMember[];
-			expect(members).toContainEqual(owned[0]);
+			expect(members).toContainEqual(expect.objectContaining(owned[0]));
 			owned.push(...members);
 			const terminal = browser.waitForTurnEnd(
 				sessionId,

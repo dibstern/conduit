@@ -191,7 +191,7 @@ const retirementFixture = (
 			}),
 		);
 		const processes = new Map([
-			[pid, { state: "running" as const, startTime: "original" }],
+			[pid, { state: "running" as const, startTime: "original", pgid: pid }],
 		]);
 		const childProcesses = new Map<number, EventEmitter>();
 		let spawnedProcesses = 0;
@@ -204,7 +204,11 @@ const retirementFixture = (
 				unref: () => {},
 				disconnect: () => {},
 			});
-			processes.set(child.pid, { state: "running", startTime: "replacement" });
+			processes.set(child.pid, {
+				state: "running",
+				startTime: "replacement",
+				pgid: child.pid,
+			});
 			childProcesses.set(child.pid, child);
 			queueMicrotask(() =>
 				child.emit("message", {
@@ -7549,7 +7553,7 @@ it.effect(
 						projectRootForSession: () => Effect.succeed(root),
 						processTable: makeTestProcessTable({
 							processes: new Map([
-								[pid, { state: "running", startTime: "original" }],
+								[pid, { state: "running", startTime: "original", pgid: pid }],
 							]),
 						}),
 					},
@@ -9319,7 +9323,7 @@ it.effect(
 				expect(
 					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE retired_at IS NULL AND role = 'serving'`,
 				).toEqual([]);
-				expect(signals).toEqual([{ pid: 100_088, signal: "SIGTERM" }]);
+				expect(signals).toEqual([{ pid: -100_088, signal: "SIGTERM" }]);
 				expect(f.processes.has(100_088)).toBe(false);
 				expect(
 					f.commands.filter((command) => command.type === "send-turn"),
@@ -9613,6 +9617,7 @@ it.effect(
 					f.processes.set(runner.pid, {
 						state: "running",
 						startTime: "original",
+						pgid: runner.pid,
 					});
 					spawned.commands.set(
 						String(runner.pid),
@@ -9726,7 +9731,11 @@ it.effect(
 							registeredAt,
 						}),
 					);
-					f.processes.set(pid, { state: "running", startTime: "original" });
+					f.processes.set(pid, {
+						state: "running",
+						startTime: "original",
+						pgid: pid,
+					});
 					spawned.commands.set(
 						String(pid),
 						`node runner ${socketPath} ${runnerId}`,

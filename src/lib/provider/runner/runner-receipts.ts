@@ -423,8 +423,8 @@ export const makeRunnerReceiptStore = (
 			}>`SELECT *, COALESCE(retired_at, 0) AS retired_at FROM claude_runner_cursors WHERE runner_id = ${runnerId}`;
 		const saveStop = (record: RunnerRetirement, reason: StopReason) =>
 			sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, driver_kind, retired_at, pid, start_time, reaper_pid, reaper_start_time, member_snapshot, stop_reason)
-				VALUES (${record.runnerId}, 0, '', ${record.sessionId}, ${record.driverKind}, ${record.retiredAt}, ${record.identity.pid ?? null}, ${record.identity.tag === "Verified" ? record.identity.startTime : null}, ${record.reaper?.pid ?? null}, ${record.reaper?.startTime ?? null}, ${JSON.stringify(record.members)}, ${JSON.stringify(reason)})
-				ON CONFLICT(runner_id) DO UPDATE SET retired_at = excluded.retired_at, attachment_id = '', session_id = excluded.session_id, driver_kind = excluded.driver_kind, pid = excluded.pid, start_time = excluded.start_time, reaper_pid = excluded.reaper_pid, reaper_start_time = excluded.reaper_start_time, member_snapshot = excluded.member_snapshot, stop_state = 'Requested', stop_reason = excluded.stop_reason`.pipe(
+				VALUES (${record.runnerId}, 0, '', ${record.sessionId}, ${record.driverKind}, ${record.retiredAt}, ${record.identity.pid ?? null}, ${record.identity.tag === "Verified" ? record.identity.startTime : null}, ${record.reaper?.pid ?? null}, ${record.reaper?.startTime ?? null}, '[]', ${JSON.stringify(reason)})
+				ON CONFLICT(runner_id) DO UPDATE SET retired_at = excluded.retired_at, attachment_id = '', session_id = excluded.session_id, driver_kind = excluded.driver_kind, pid = excluded.pid, start_time = excluded.start_time, reaper_pid = excluded.reaper_pid, reaper_start_time = excluded.reaper_start_time, stop_state = 'Requested', stop_reason = excluded.stop_reason`.pipe(
 				Effect.asVoid,
 			);
 		// The one reader of 6.5's loss: for runners the caller's write first retired,
@@ -530,8 +530,6 @@ export const makeRunnerReceiptStore = (
 		const requestStopMutation = (
 			target: StopTarget,
 			reason: StopReason = { _tag: "Explicit" },
-			observe: (record: RunnerRetirement) => RunnerRetirement = (record) =>
-				record,
 		) =>
 			Effect.gen(function* () {
 				const retiredAt = yield* Clock.currentTimeMillis;
@@ -600,27 +598,20 @@ export const makeRunnerReceiptStore = (
 					}>`SELECT *, COALESCE(retired_at, 0) AS retired_at FROM claude_runner_cursors WHERE session_id = ${target.sessionId} AND role = 'candidate' AND retired_at IS NULL ORDER BY rowid`;
 					for (const raw of live) {
 						yield* saveStop(
-							observe(stopRecord(yield* decodeRetirement(raw), retiredAt)),
+							stopRecord(yield* decodeRetirement(raw), retiredAt),
 							{ _tag: "CandidateAbandoned" },
 						);
 						const [saved] = yield* rawRunner(raw.runner_id);
 						if (saved) candidates.push(yield* decodeRetirement(saved));
 					}
 				}
-				// The row is the identity source. The caller adds the members it
-				// observed and a reaper the row lacks (the hello reports it after
-				// register).
-				const record = observe(
-					stopRecord(
-						existing
-							? {
-									...existing,
-									reaper: existing.reaper ?? target.reaper,
-									members: mergeRunnerMembers(existing.members, target.members),
-								}
-							: target,
-						retiredAt,
-					),
+				// The row owns identity; the hello can supply a reaper not yet stored.
+				// Only the watcher's kill pass may grow membership.
+				const record = stopRecord(
+					existing
+						? { ...existing, reaper: existing.reaper ?? target.reaper }
+						: { ...target, members: [] },
+					retiredAt,
 				);
 				yield* saveStop(record, reason);
 				if (reason._tag === "Superseded")
@@ -698,13 +689,12 @@ export const makeRunnerReceiptStore = (
 			requestStop: (
 				target: StopTarget,
 				reason: StopReason = { _tag: "Explicit" },
-				observe?: (record: RunnerRetirement) => RunnerRetirement,
 			) =>
 				Effect.gen(function* () {
 					let committed = { _tag: "Ignored" } as StopCommit;
 					yield* flushPendingWrites(
 						sql,
-						requestStopMutation(target, reason, observe).pipe(
+						requestStopMutation(target, reason).pipe(
 							Effect.tap((saved) =>
 								Effect.sync(() => {
 									committed = saved;

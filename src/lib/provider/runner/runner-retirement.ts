@@ -50,7 +50,6 @@ import {
 	makeProductionProcessTable,
 	type Observed,
 	type ProcessTable,
-	StartTime,
 	sameProcess,
 } from "./process-table.js";
 import {
@@ -94,7 +93,6 @@ import {
 	runnerDirectory,
 	runnerPidAlive,
 	runnerPidMatchesRegistration,
-	runnerProcessTable,
 } from "./runner-registry.js";
 import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
 import { readRunnerSendJournal } from "./runner-send-journal.js";
@@ -566,8 +564,14 @@ export type RunnerStop =
 	| { readonly _tag: "Gone"; readonly record: RunnerRetirement }
 	| { readonly _tag: "Settled"; readonly record: RunnerRetirement };
 
+const shutdownReady: unique symbol = Symbol("ShutdownReady");
+type ShutdownReady = {
+	readonly [shutdownReady]: true;
+	readonly record: RunnerRetirement;
+	readonly membership: "committed" | "unverified";
+};
 type StopAction =
-	| { readonly _tag: "SendShutdown" }
+	| { readonly _tag: "SendShutdown"; readonly ready: ShutdownReady }
 	| { readonly _tag: "Signal"; readonly signal: "SIGTERM" | "SIGKILL" }
 	| { readonly _tag: "Settle" | "Evict" | "Prune" | "Notice" };
 type StopObservation = {
@@ -576,6 +580,7 @@ type StopObservation = {
 	readonly processes: RunnerRetirementObservation;
 	readonly retry: boolean;
 	readonly notice: boolean;
+	readonly shutdown?: ShutdownReady;
 };
 
 const stoppedState = (record: RunnerRetirement): RunnerStop => ({
@@ -641,18 +646,20 @@ export const decideRunnerStop = (
 			state: { _tag: "Gone", record: { ...record, stopState: "Gone" } },
 			actions: [],
 		};
-	if (state._tag === "Requested")
+	if (state._tag === "Requested") {
+		if (!observation.shutdown) return { state, actions: [] };
 		return {
 			state: {
 				_tag: "Escalating",
 				record: {
 					...record,
 					stopState: "Escalating",
-					stopStartedAt: observation.now,
+					stopStartedAt: record.stopStartedAt ?? record.retiredAt,
 				},
 			},
-			actions: [{ _tag: "SendShutdown" }],
+			actions: [{ _tag: "SendShutdown", ready: observation.shutdown }],
 		};
+	}
 	if (state._tag === "Escalating") {
 		const termElapsed =
 			term?.at === undefined ? elapsed : observation.now - term.at;
@@ -778,8 +785,13 @@ export const makeRunnerStopReconciler = (options: {
 				for (const row of recovered.rows) rows.set(row.runnerId, row);
 				return recovered;
 			});
-		const observe = (record: RunnerRetirement) =>
-			decideRunnerKill(record, observeLegacyRunnerRetirement(record)).record;
+		const commitShutdownMembership = (
+			record: RunnerRetirement,
+		): Effect.Effect<ShutdownReady, import("effect/sql/SqlError").SqlError> =>
+			Effect.gen(function* () {
+				if (options.receipts) yield* options.receipts.commitRetirement(record);
+				return { [shutdownReady]: true, record, membership: "committed" };
+			});
 		/** The durable commit; without a store the routing rows are the store. */
 		const commitStop = (
 			target: StopTarget,
@@ -791,7 +803,7 @@ export const makeRunnerStopReconciler = (options: {
 					inWrite
 						? options.receipts.requestStopMutation
 						: options.receipts.requestStop
-				)(target, reason, observe);
+				)(target, reason);
 			return Effect.suspend(() => {
 				const row = rows.get(target.runnerId);
 				if (row && row.retiredAt !== null)
@@ -823,7 +835,7 @@ export const makeRunnerStopReconciler = (options: {
 										candidate.retiredAt === null,
 								)
 								.map((candidate) =>
-									observe(stopRecord({ ...candidate, members: [] }, retiredAt)),
+									stopRecord({ ...candidate, members: [] }, retiredAt),
 								)
 						: [];
 				const retired = new Set([
@@ -833,7 +845,7 @@ export const makeRunnerStopReconciler = (options: {
 				return Effect.succeed<StopCommit>({
 					_tag: "Requested",
 					record: {
-						...observe(stopRecord(target, retiredAt)),
+						...stopRecord({ ...target, members: [] }, retiredAt),
 						stopReason: JSON.stringify(reason),
 					},
 					candidates,
@@ -1155,14 +1167,15 @@ export const makeRunnerStopReconciler = (options: {
 						state.record,
 						options.processTable,
 					);
-					const observed: RunnerRetirement = decideRunnerKill(
-						state.record,
-						processes,
-					).record;
+					const membership = decideRunnerKill(state.record, processes);
+					const observed = membership.record;
 					const row = rows.get(runnerId);
+					let shutdown: ShutdownReady | undefined;
 					// Phase-2 Stops can have signals but no retired_at yet. Normalize
 					// that legacy intent so progress and pruning can update its row.
-					if (
+					if (state._tag === "Requested" && membership.membershipVerified)
+						shutdown = yield* commitShutdownMembership(observed);
+					else if (
 						options.receipts &&
 						(observed.members.length > state.record.members.length ||
 							row?.retiredAt === null)
@@ -1171,6 +1184,18 @@ export const makeRunnerStopReconciler = (options: {
 						if (row?.retiredAt === null)
 							rows.set(runnerId, { ...row, retiredAt: observed.retiredAt });
 					}
+					// Unknown membership delays the polite exit, but never extends the
+					// durable Stop window. Recovery uses the same original deadline.
+					if (
+						state._tag === "Requested" &&
+						!shutdown &&
+						clock.currentTimeMillisUnsafe() >= stopWindowEnd(observed)
+					)
+						shutdown = {
+							[shutdownReady]: true,
+							record: observed,
+							membership: "unverified",
+						};
 					state = { ...state, record: observed };
 					const decision = decideRunnerStop(state, {
 						_tag: "Observe",
@@ -1178,13 +1203,18 @@ export const makeRunnerStopReconciler = (options: {
 						processes,
 						retry: retryPending,
 						notice: noticePending,
+						...(shutdown ? { shutdown } : {}),
 					});
 					let record: RunnerRetirement = state.record;
 					for (const action of decision.actions) {
 						switch (action._tag) {
 							case "SendShutdown":
+								if (action.ready.membership === "unverified")
+									yield* Effect.logWarning(
+										`Runner Stop membership unverified: runnerId=${runnerId}`,
+									);
 								yield* options
-									.shutdown(record)
+									.shutdown(action.ready.record)
 									.pipe(
 										Effect.interruptible,
 										Effect.timeout("1 second"),
@@ -1441,7 +1471,7 @@ export const makeRunnerStopReconciler = (options: {
 							// retry (4.5, 6.3).
 							return yield* options.commitStop(
 								target,
-								options.receipts.requestStopMutation(target, reason, observe),
+								options.receipts.requestStopMutation(target, reason),
 								yield* journalAbsent(target),
 							);
 						}).pipe(
@@ -1663,6 +1693,11 @@ export const makeRunnerStopReconciler = (options: {
 					const retirements = yield* options.receipts?.retirements(
 						recovered.rows.map((row) => row.runnerId),
 					) ?? Effect.succeed({ rows: [], rejected: [] });
+					const observed = options.processTable.identify(
+						recovered.rows.flatMap((row) =>
+							row.identity.pid === undefined ? [] : [row.identity.pid],
+						),
+					);
 					for (const record of retirements.rows) {
 						if (recoverable && !(yield* recoverable(record))) continue;
 						if (get(record.runnerId)._tag !== "Running") continue;
@@ -1671,11 +1706,6 @@ export const makeRunnerStopReconciler = (options: {
 					}
 					// Startup registers these intents and does not wait on their
 					// commits; a busy store must not hold up reattachment.
-					const observed = options.processTable.identify(
-						recovered.rows.flatMap((row) =>
-							row.identity.pid === undefined ? [] : [row.identity.pid],
-						),
-					);
 					for (const row of recovered.rows) {
 						if (recoverable && !(yield* recoverable(row))) continue;
 						if (row.retiredAt !== null || get(row.runnerId)._tag !== "Running")
@@ -1731,12 +1761,29 @@ export const makeRunnerStopReconciler = (options: {
 					);
 					if ("record" in state) {
 						const deadline = stopWindowEnd(state.record);
-						// Backoff may pass the deadline; the caller's bound must not.
+						// Escalation retries cannot extend the normal Stop window.
 						return yield* wait.pipe(
 							Effect.timeoutOption(
 								Math.max(0, deadline - clock.currentTimeMillisUnsafe()),
 							),
-							Effect.asVoid,
+							// A scoped caller must let Requested send shutdown before it
+							// releases the watcher. A dead watcher gets one further Stop
+							// window, then fails explicitly instead of reporting success.
+							Effect.andThen(
+								until((current) => current._tag !== "Requested").pipe(
+									Effect.asVoid,
+									Effect.timeoutOrElse({
+										duration: "4 seconds",
+										orElse: () =>
+											Effect.fail(
+												runnerFailure("stop runner", {
+													code: "runner_stop_timeout",
+													message: `Runner Stop did not leave Requested: runnerId=${runnerId}`,
+												}),
+											),
+									}),
+								),
+							),
 						);
 					}
 					return yield* wait;
@@ -2399,58 +2446,6 @@ export const observeRunnerRetirement = (
 		],
 	});
 
-// The in-write Stop hook stays synchronous until the intent-only commit lands.
-// Calling ProcessTable.observe here would trip PreventSchedulerYield.
-const observeLegacyRunnerRetirement = (
-	record: RunnerRetirement,
-): RunnerRetirementObservation => {
-	const table = runnerProcessTable;
-	const group =
-		record.identity.pid === undefined
-			? undefined
-			: table.members?.(record.identity.pid);
-	const pids = [
-		...new Set([
-			...(record.identity.pid === undefined ? [] : [record.identity.pid]),
-			...(record.reaper ? [record.reaper.pid] : []),
-			...record.members.map((member) => member.pid),
-			...(group ?? []).map((member) => member.pid),
-		]),
-	];
-	const current = table.inspectMany?.(pids);
-	const processes = new Map<number, Observed>(
-		pids.map((pid) => {
-			const seen = current?.get(pid) ?? table.inspect(pid);
-			return [
-				pid,
-				seen.state === "gone" || seen.state === "unknown"
-					? { state: seen.state }
-					: seen.startTime === undefined
-						? { state: "unknown" }
-						: {
-								...seen,
-								state: seen.state,
-								startTime: StartTime.make(seen.startTime),
-							},
-			];
-		}),
-	);
-	// Verify the pins after enumeration: the group may have been reused while
-	// ps was reading it. Only this later observation can authorize membership.
-	// A successful group listing is also an observation of each member's pgid.
-	for (const member of group ?? []) {
-		const prior = processes.get(member.pid);
-		if (
-			record.identity.pid !== undefined &&
-			prior?.state === "running" &&
-			sameProcess(member, prior) === "same" &&
-			prior.pgid === undefined
-		)
-			processes.set(member.pid, { ...prior, pgid: record.identity.pid });
-	}
-	return { processes, group };
-};
-
 /** Membership only grows while a verified identity pins the original group. */
 export const decideRunnerKill = (
 	record: RunnerRetirement,
@@ -2516,7 +2511,20 @@ export const decideRunnerKill = (
 					signals.push({ signal, target: member.pid, members: [member] });
 			}
 	}
-	return { record: next, signals, gone };
+	const membershipVerified =
+		(!pinned || observation.group !== undefined) &&
+		[
+			...(record.identity.pid === undefined ? [] : [record.identity.pid]),
+			...members.map((member) => member.pid),
+		].every((pid) => {
+			const seen = observation.processes.get(pid);
+			return (
+				seen !== undefined &&
+				seen.state !== "unknown" &&
+				(seen.state !== "running" || seen.pgid !== undefined)
+			);
+		});
+	return { record: next, signals, gone, membershipVerified };
 };
 
 /** The durable snapshot is committed before delivery; delivery never owns membership. */

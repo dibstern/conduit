@@ -136,9 +136,10 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 				registeredAt: 1,
 			}),
 		);
-		const processes = new Map<number, { state: "running"; startTime: string }>([
-			[pid, { state: "running", startTime: "original" }],
-		]);
+		const processes = new Map<
+			number,
+			{ state: "running"; startTime: string; pgid: number }
+		>([[pid, { state: "running", startTime: "original", pgid: pid }]]);
 		let spawnedProcesses = 0;
 		spawned.spawn.mockImplementation(() => {
 			const child = Object.assign(new EventEmitter(), {
@@ -149,7 +150,11 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 				unref: () => {},
 				disconnect: () => {},
 			});
-			processes.set(child.pid, { state: "running", startTime: "replacement" });
+			processes.set(child.pid, {
+				state: "running",
+				startTime: "replacement",
+				pgid: child.pid,
+			});
 			queueMicrotask(() =>
 				child.emit("message", {
 					channel: "conduit-claude-runner",
@@ -1474,8 +1479,9 @@ for (const outcome of ["terminal", "covered"] as const)
 								if (params.includes("run:clean-next")) gates.push("next");
 							}
 							if (
-								query.includes("UPDATE claude_runner_cursors SET") &&
-								query.includes("retired_at")
+								query.includes(
+									"SELECT retired_at, role, session_id FROM claude_runner_cursors",
+								)
 							) {
 								stops++;
 								return Effect.fail(
@@ -1659,6 +1665,11 @@ for (const outcome of ["delivered", "terminal", "covered"] as const)
 					const f = yield* s7Fixture("claude");
 					yield* f.recover;
 					const clock = yield* Clock.Clock;
+					const membership = yield* Deferred.make<void>();
+					const observe = f.processTable.observe;
+					vi.spyOn(f.processTable, "observe").mockImplementation((query) =>
+						Deferred.await(membership).pipe(Effect.andThen(observe(query))),
+					);
 					const signals: Array<{
 						readonly signal: string;
 						readonly at: number;
@@ -1679,6 +1690,14 @@ for (const outcome of ["delivered", "terminal", "covered"] as const)
 					const sending = yield* f.instance
 						.sendTurnEffect(head)
 						.pipe(Effect.forkChild);
+					yield* TestClock.adjust(0);
+					expect(
+						yield* f.sql`SELECT stop_state, stop_started_at, retired_at FROM claude_runner_cursors WHERE runner_id = '131313131313'`,
+					).toEqual([
+						{ stop_state: "Requested", stop_started_at: null, retired_at: 0 },
+					]);
+					expect(signals).toEqual([]);
+					yield* Deferred.succeed(membership, undefined);
 					yield* TestClock.adjust(0);
 					// The park is observable: the reconciler's Stop is in progress.
 					expect(
@@ -1760,6 +1779,11 @@ it.effect(
 			Effect.gen(function* () {
 				const f = yield* s7Fixture("claude");
 				yield* f.recover;
+				const membership = yield* Deferred.make<void>();
+				const observe = f.processTable.observe;
+				vi.spyOn(f.processTable, "observe").mockImplementation((query) =>
+					Deferred.await(membership).pipe(Effect.andThen(observe(query))),
+				);
 				const gates = yield* countGates(f.sql, [
 					"run:queued-a",
 					"run:queued-b",
@@ -1775,6 +1799,11 @@ it.effect(
 				const sendingSecond = yield* f.instance
 					.sendTurnEffect(second)
 					.pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(
+					yield* f.sql`SELECT stop_state FROM claude_runner_cursors WHERE runner_id = '131313131313'`,
+				).toEqual([{ stop_state: "Requested" }]);
+				yield* Deferred.succeed(membership, undefined);
 				yield* TestClock.adjust(0);
 				expect(
 					yield* f.sql`SELECT stop_state FROM claude_runner_cursors WHERE runner_id = '131313131313'`,

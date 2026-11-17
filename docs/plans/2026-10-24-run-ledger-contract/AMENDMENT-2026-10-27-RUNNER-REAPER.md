@@ -47,10 +47,17 @@ so the reaper and the daemon can signal `-P` without a member list.
 
 ## R3. The retirement record is written before the first signal
 
-- Before any signal to a runner (Stop's TERM and KILL, retirement, watcher retries,
-  restart recovery), the daemon commits the retirement record: leader identity, reaper
-  identity if any, the group snapshot, `owned_run_ids` and `retired_at`. A crash after
-  that commit leaves a record that restart recovery finds.
+- The Stop commit records intent only: state, reason and the request timestamp.
+  It reads no processes and writes no membership. Abandoned candidates get their own
+  Stop intent and watcher.
+- While Requested, the watcher's first kill pass observes the leader, reaper, recorded
+  members and the pinned group, merges membership and commits the snapshot before
+  `SendShutdown`. That first pass sends no signals. Only this membership commit or
+  the grace fallback can authorize `SendShutdown`.
+- An unreadable first observation delays shutdown until a later tick. Once the existing
+  Stop grace has elapsed from the stored stop start, shutdown proceeds with a
+  "membership unverified" warning. No first-read marker is stored: a crash leaves the
+  intent Requested and recovery repeats the idempotent first step.
 - Membership and signals are separate facts. The snapshot answers "which processes are
   this runner's"; the signal log answers "what was sent to whom, and was it delivered".
   A refused or failed signal adds to the log and never removes a member.
@@ -92,6 +99,18 @@ with the other legacy paths (32.13).
     inherited limit (A12), not fixed here.
 11. A descendant that leaves group P (`setsid`, `setpgid`): outside the group, so neither
     the reaper nor the snapshot reaches it. Unchanged from main; not fixed here.
+
+## Accepted limits
+
+- A double fault can lose members: the daemon crashes between the Stop commit and the
+  first membership commit, and the leader and reaper are also killed externally. The
+  old in-write read could have captured those members.
+- Without a reaper (R5 or failure mode 6), a fork during a kill pass's membership
+  commit has the same limit as failure mode 10.
+- A microsecond gap remains between the process-table signal method's identity
+  recheck and `kill(2)`. Darwin has no pidfd.
+- Linux group listing scans `/proc`; its cost grows with the process count. The scan
+  is asynchronous, with bounded concurrency.
 
 ## Tests
 

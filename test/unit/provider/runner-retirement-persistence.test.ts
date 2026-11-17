@@ -221,7 +221,7 @@ it.effect(
 );
 
 // The candidates come from the committing transaction, never a caller's
-// snapshot; `observe` records each one's process group there.
+// snapshot; each candidate's watcher owns its later membership observation.
 it.effect(
 	"a serving Stop retires every candidate its own transaction reads",
 	() =>
@@ -231,17 +231,9 @@ it.effect(
 			yield* TestClock.setTime(100);
 			yield* receipts.register("runner", retirement, "serving");
 			yield* receipts.register("candidate", retirement, "candidate");
-			const commit = yield* receipts.requestStop(
-				decodedRetirement,
-				{ _tag: "Explicit" },
-				(record) =>
-					record.runnerId === "candidate"
-						? {
-								...record,
-								members: [{ pid: 124, startTime: "candidate-start" }],
-							}
-						: record,
-			);
+			const commit = yield* receipts.requestStop(decodedRetirement, {
+				_tag: "Explicit",
+			});
 			expect(commit).toMatchObject({
 				_tag: "Requested",
 				record: { runnerId: "runner" },
@@ -255,11 +247,11 @@ it.effect(
 				{
 					runnerId: "candidate",
 					stopReason: '{"_tag":"CandidateAbandoned"}',
-					members: expect.arrayContaining([
-						{ pid: 124, startTime: "candidate-start" },
-					]),
 				},
 			]);
+			expect(
+				yield* sql`SELECT member_snapshot FROM claude_runner_cursors ORDER BY runner_id`,
+			).toEqual([{ member_snapshot: "[]" }, { member_snapshot: "[]" }]);
 			expect(
 				yield* receipts.register("late-candidate", retirement, "candidate"),
 			).toBe("Lost");
