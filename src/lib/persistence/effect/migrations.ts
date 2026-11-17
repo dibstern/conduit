@@ -1588,10 +1588,11 @@ export const effectMigrationEntries = {
 		"ALTER TABLE provider_runs ADD COLUMN held_transmission INTEGER",
 	),
 	// Runner modules read this table, so it exists from migration time rather
-	// than from first use. This migration is its only schema owner: it upgrades
+	// than from first use. This migration owns its base schema: it upgrades
 	// tables older builds created in the order those builds added the columns,
 	// so every store ends with the same column order. journals_before_execution
-	// is NULL for a runner registered before it existed.
+	// is NULL for a runner registered before it existed. Receipt-store startup
+	// adds nullable start keys without a ledger entry, preserving downgrade access.
 	"0089_runner_cursors": Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		yield* executeSqlStatements(`CREATE TABLE IF NOT EXISTS claude_runner_cursors (

@@ -28,6 +28,7 @@ import {
 
 const warnings: string[] = [];
 const psCalls: unknown[] = [];
+// Records adapter spawns, independently of the timing measurements.
 let measuring = false;
 const onSpawn = (message: unknown) => {
 	if (!measuring || !message || typeof message !== "object") return;
@@ -49,20 +50,58 @@ measuring = true;
 const table = makeProductionProcessTable((message) => warnings.push(message));
 measuring = false;
 let worstIdentifyMs = 0;
+const identifyWallSamples: number[] = [];
+let medianIdentifyMs = 0;
+let identifyTimingCalls = 0;
+let worstIdentifyCpuMs = 0;
+let worstIdentifyCpuSample:
+	| { pids: readonly number[]; userUs: number; systemUs: number; call: number }
+	| undefined;
 let worstGroupMs = 0;
+const groupWallSamples: number[] = [];
+let medianGroupMs = 0;
+let worstGroupCpuMs = 0;
 let worstObserveMs = 0;
+// Allow scheduler preemption while still rejecting long kernel stalls.
+const maxNativeWallMs = 50;
+// Under load the main thread can run on an efficiency core, roughly doubling CPU time; 2ms still rejects a ps spawn or full-table scan, and no-spawn is the exact guard.
+const maxNativeCpuMs = 2;
+// A blocking wait slows every call and moves the median; scheduler preemption hits only a few calls.
+const maxNativeMedianWallMs = 1;
+const median = (values: readonly number[]) => {
+	const sorted = [...values].sort((a, b) => a - b);
+	return (
+		((sorted[Math.floor(sorted.length / 2)] ?? Infinity) +
+			(sorted[Math.ceil(sorted.length / 2) - 1] ?? Infinity)) /
+		2
+	);
+};
 const signalCases: unknown[] = [];
 let identifyCalls = 0;
 const identify = table.identify.bind(table);
 table.identify = (pids) => {
 	const begin = performance.now();
-	const previous = measuring;
+	const cpuBefore = process.threadCpuUsage();
+	const previous: boolean = measuring;
 	measuring = true;
 	try {
 		return identify(pids);
 	} finally {
 		measuring = previous;
-		worstIdentifyMs = Math.max(worstIdentifyMs, performance.now() - begin);
+		const cpu = process.threadCpuUsage(cpuBefore);
+		const wallMs = performance.now() - begin;
+		identifyWallSamples.push(wallMs);
+		worstIdentifyMs = Math.max(worstIdentifyMs, wallMs);
+		const cpuMs = (cpu.user + cpu.system) / 1000;
+		if (cpuMs > worstIdentifyCpuMs) {
+			worstIdentifyCpuMs = cpuMs;
+			worstIdentifyCpuSample = {
+				pids: [...pids],
+				userUs: cpu.user,
+				systemUs: cpu.system,
+				call: identifyCalls + 1,
+			};
+		}
 		identifyCalls++;
 	}
 };
@@ -218,9 +257,12 @@ try {
 	measuring = true;
 	const observed = await Effect.runPromise(
 		table.observe({ pgid, pids: targets }),
-	);
-	measuring = false;
-	worstObserveMs = performance.now() - begin;
+	).finally(() => {
+		measuring = false;
+		// Async observation latency is diagnostic, not a main-thread CPU bound.
+		worstObserveMs = performance.now() - begin;
+	});
+	if (native) for (let i = 0; i < 100; i++) table.identify(targets);
 	const groupAdapter =
 		process.platform === "linux"
 			? makeLinuxProcessAdapter()
@@ -231,15 +273,52 @@ try {
 	await Effect.runPromise(groupAdapter.group(pgid));
 	for (let i = 0; i < 100; i++) {
 		const started = performance.now();
+		const cpuBefore =
+			native && process.platform === "darwin"
+				? process.threadCpuUsage()
+				: undefined;
+		const previous: boolean = measuring;
 		measuring = true;
-		if (native && process.platform === "darwin")
-			Effect.runSync(groupAdapter.group(pgid));
-		else await Effect.runPromise(groupAdapter.group(pgid));
-		measuring = false;
-		worstGroupMs = Math.max(worstGroupMs, performance.now() - started);
+		try {
+			if (native && process.platform === "darwin")
+				Effect.runSync(groupAdapter.group(pgid));
+			else await Effect.runPromise(groupAdapter.group(pgid));
+		} finally {
+			measuring = previous;
+			if (cpuBefore !== undefined) {
+				const cpu = process.threadCpuUsage(cpuBefore);
+				worstGroupCpuMs = Math.max(
+					worstGroupCpuMs,
+					(cpu.user + cpu.system) / 1000,
+				);
+			}
+			const wallMs = performance.now() - started;
+			groupWallSamples.push(wallMs);
+			worstGroupMs = Math.max(worstGroupMs, wallMs);
+		}
 	}
-	if (native && process.platform === "darwin")
-		assert.ok(worstGroupMs < 1, `group worst ${worstGroupMs}ms`);
+	medianIdentifyMs = median(identifyWallSamples);
+	identifyTimingCalls = identifyWallSamples.length;
+	medianGroupMs = median(groupWallSamples);
+	if (native)
+		assert.ok(
+			medianIdentifyMs < maxNativeMedianWallMs,
+			`identify wall median ${medianIdentifyMs}ms; maxNativeMedianWallMs=${maxNativeMedianWallMs}ms`,
+		);
+	if (native && process.platform === "darwin") {
+		assert.ok(
+			worstGroupCpuMs < maxNativeCpuMs,
+			`group CPU worst ${worstGroupCpuMs}ms; maxNativeCpuMs=${maxNativeCpuMs}ms`,
+		);
+		assert.ok(
+			worstGroupMs < maxNativeWallMs,
+			`group wall worst ${worstGroupMs}ms; maxNativeWallMs=${maxNativeWallMs}ms`,
+		);
+		assert.ok(
+			medianGroupMs < maxNativeMedianWallMs,
+			`group wall median ${medianGroupMs}ms; maxNativeMedianWallMs=${maxNativeMedianWallMs}ms`,
+		);
+	}
 	const wrongStart = Schema.decodeUnknownSync(ProcessStart)({
 		startTime: "Mon Jan  1 00:00:00 1900",
 	});
@@ -370,9 +449,6 @@ try {
 	const orphan = table.identify([child]).get(child);
 	assert.ok(orphan && "pgid" in orphan);
 	assert.equal(orphan.pgid, pids["leader"]);
-	for (let i = 0; i < 100; i++) {
-		table.identify([child]);
-	}
 	const killOutcome = table.signal(
 		{ process: { pid: child, ...childStart } },
 		"SIGKILL",
@@ -402,10 +478,17 @@ try {
 		Array(4).fill({ state: "unknown" }),
 	);
 	assert.equal(table.argv(-1), undefined);
-	if (native)
-		assert.ok(worstIdentifyMs < 1, `identify worst ${worstIdentifyMs}ms`);
-	if (process.platform === "linux")
-		assert.deepEqual(psCalls, [], "Linux process reads must not spawn ps");
+	if (native) {
+		assert.ok(
+			worstIdentifyCpuMs < maxNativeCpuMs,
+			`identify CPU worst ${worstIdentifyCpuMs}ms; maxNativeCpuMs=${maxNativeCpuMs}ms`,
+		);
+		assert.ok(
+			worstIdentifyMs < maxNativeWallMs,
+			`identify wall worst ${worstIdentifyMs}ms; maxNativeWallMs=${maxNativeWallMs}ms`,
+		);
+		assert.deepEqual(psCalls, [], "Native process reads must not spawn ps");
+	}
 } catch (error) {
 	failure = error;
 } finally {
@@ -439,9 +522,20 @@ console.log(
 	JSON.stringify({
 		native,
 		node: process.version,
+		maxNativeCpuMs,
+		maxNativeWallMs,
+		maxNativeMedianWallMs,
 		warnings,
 		worstIdentifyMs,
+		medianIdentifyMs,
+		identifyTimingCalls,
+		worstIdentifyCpuMs,
+		worstIdentifyCpuSample,
 		worstGroupMs,
+		medianGroupMs,
+		groupTimingCalls: groupWallSamples.length,
+		worstGroupCpuMs:
+			native && process.platform === "darwin" ? worstGroupCpuMs : undefined,
 		worstObserveMs,
 		signalCases,
 		identifyCalls,

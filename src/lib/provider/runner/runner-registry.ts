@@ -20,6 +20,7 @@ import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { isRecord } from "../../utils.js";
 import {
 	makeProductionProcessTable,
+	type ProcessStart,
 	type ProcessTable,
 	sameProcess,
 } from "./process-table.js";
@@ -29,15 +30,14 @@ class RunnerRegistryError extends Data.TaggedError("RunnerRegistryError")<{
 	readonly message: string;
 }> {}
 
-export interface RunnerRegistration {
+export interface RunnerRegistration
+	extends Partial<typeof ProcessStart.Encoded> {
 	readonly driverKind?: string;
 	readonly runnerId: string;
 	readonly sessionId: string;
 	readonly socketPath: string;
 	readonly buildId: string;
 	readonly pid: number;
-	readonly startTime?: string;
-	readonly startKey?: string;
 	readonly registeredAt?: number;
 	readonly signalled?: boolean;
 }

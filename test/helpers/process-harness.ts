@@ -917,6 +917,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_PREVIEW_GATE_LINGER_MS"
 					| "CONDUIT_BUILD_READY_PATH"
 					| "NODE_OPTIONS"
+					| "TZ"
 					| "NODE_TLS_REJECT_UNAUTHORIZED"
 					| "OPENCODE_PURE"
 					| "CONDUIT_SERVER_BUILD_ID"

@@ -787,7 +787,10 @@ export const makeRunnerStopReconciler = (options: {
 			});
 		const commitShutdownMembership = (
 			record: RunnerRetirement,
-		): Effect.Effect<ShutdownReady, import("effect/sql/SqlError").SqlError> =>
+		): Effect.Effect<
+			ShutdownReady,
+			import("effect/sql/SqlError").SqlError | Schema.SchemaError
+		> =>
 			Effect.gen(function* () {
 				if (options.receipts) yield* options.receipts.commitRetirement(record);
 				return { [shutdownReady]: true, record, membership: "committed" };
@@ -1651,6 +1654,9 @@ export const makeRunnerStopReconciler = (options: {
 										tag: "Verified",
 										pid: identity.pid,
 										startTime: identity.startTime,
+										...(identity.startKey === undefined
+											? {}
+											: { startKey: identity.startKey }),
 									}
 								: {
 										tag: "Unverifiable",
@@ -1869,6 +1875,7 @@ export const makeRunnerRetirement = (
 				driverKind: options.driverKind,
 				pid: entry.pid ?? entry.child?.pid,
 				startTime: entry.startTime,
+				startKey: entry.startKey,
 				reaper: entry.reaper,
 				members: retirement?.members ?? [],
 				signalLog: retirement?.signalLog ?? [],
@@ -1893,6 +1900,9 @@ export const makeRunnerRetirement = (
 								tag: "Verified",
 								pid: identity.pid,
 								startTime: identity.startTime,
+								...(identity.startKey === undefined
+									? {}
+									: { startKey: identity.startKey }),
 							}
 						: {
 								tag: "Unverifiable",
@@ -2045,14 +2055,12 @@ export const makeRunnerRetirement = (
 						return record.identity.entry;
 				return undefined;
 			},
-			pidAlive: (pid: number, startTime?: string) => {
+			pidAlive: (
+				pid: number,
+				start?: Pick<RunnerCursorIdentity, "startTime" | "startKey">,
+			) => {
 				const current = options.processTable.identify([pid]).get(pid);
-				return (
-					sameProcess(
-						{ pid, ...(startTime === undefined ? {} : { startTime }) },
-						current,
-					) !== "gone"
-				);
+				return sameProcess({ pid, ...start }, current) !== "gone";
 			},
 			processTable: options.processTable,
 			/** Recovery restores live authority to durable serving rows only. */
@@ -2467,7 +2475,17 @@ export const decideRunnerKill = (
 		pins(leader) || pins(record.reaper) || record.members.some(pins);
 	const members = mergeRunnerMembers(
 		record.members,
-		leader ? [{ pid: leader.pid, startTime: leader.startTime }] : [],
+		leader
+			? [
+					{
+						pid: leader.pid,
+						startTime: leader.startTime,
+						...(leader.startKey === undefined
+							? {}
+							: { startKey: leader.startKey }),
+					},
+				]
+			: [],
 		record.reaper ? [record.reaper] : [],
 		pinned ? (observation.group ?? []) : [],
 	);
@@ -2538,7 +2556,7 @@ const runRunnerKill = (
 	observation?: RunnerRetirementObservation,
 ): Effect.Effect<
 	ReturnType<typeof decideRunnerKill>,
-	import("effect/sql/SqlError").SqlError
+	import("effect/sql/SqlError").SqlError | Schema.SchemaError
 > =>
 	Effect.gen(function* () {
 		const clock = yield* Clock.Clock;
@@ -2720,9 +2738,12 @@ export const stopRegisteredRunners = (
 						const seen = processTable
 							.identify([registration.pid])
 							.get(registration.pid);
-						const startTime = verified
-							? (registration.startTime ??
-								(seen && "startTime" in seen ? seen.startTime : undefined))
+						const start = verified
+							? registration.startTime !== undefined
+								? registration
+								: seen && "startTime" in seen
+									? seen
+									: undefined
 							: undefined;
 						yield* stops.requestStop(
 							{
@@ -2730,9 +2751,16 @@ export const stopRegisteredRunners = (
 								sessionId: registration.sessionId,
 								driverKind: registration.driverKind ?? "claude",
 								identity:
-									startTime === undefined
+									start?.startTime === undefined
 										? { tag: "Unverifiable", pid: registration.pid }
-										: { tag: "Verified", pid: registration.pid, startTime },
+										: {
+												tag: "Verified",
+												pid: registration.pid,
+												startTime: start.startTime,
+												...(start.startKey === undefined
+													? {}
+													: { startKey: start.startKey }),
+											},
 								reaper,
 								members: [],
 							},

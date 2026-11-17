@@ -568,8 +568,7 @@ export const makeProcessSessionRunner = (
 						);
 					if (!entry) return yield* Effect.fail(unavailable());
 					const pid = entry.pid ?? entry.child?.pid;
-					if (pid !== undefined && !stops.pidAlive(pid, entry.startTime))
-						return "gone";
+					if (pid !== undefined && !stops.pidAlive(pid, entry)) return "gone";
 					const connection = entry.connection;
 					if (
 						!connection ||
@@ -605,8 +604,7 @@ export const makeProcessSessionRunner = (
 					const current = stops.currentEntry(sessionId);
 					if (current && current.runnerId !== control.providerProcessId)
 						return "gone";
-					if (pid !== undefined && !stops.pidAlive(pid, entry.startTime))
-						return "gone";
+					if (pid !== undefined && !stops.pidAlive(pid, entry)) return "gone";
 					if (
 						current !== entry ||
 						entry.connection !== connection ||
@@ -692,7 +690,7 @@ export const makeProcessSessionRunner = (
 							identity.pid !== undefined &&
 							stops.pidAlive(
 								identity.pid,
-								identity.tag === "Verified" ? identity.startTime : undefined,
+								identity.tag === "Verified" ? identity : undefined,
 							)
 						)
 							return true;
@@ -705,13 +703,12 @@ export const makeProcessSessionRunner = (
 						if (!record || record.identity.sessionId !== sessionId) continue;
 						const runnerId = record.identity.runnerId;
 						const entry = record.identity.entry;
-						const pid = entry?.pid ?? entry?.child?.pid ?? record.identity.pid;
-						const alive =
-							pid !== undefined &&
-							stops.pidAlive(
-								pid,
-								entry?.startTime ?? record.identity.startTime,
-							);
+						const process =
+							entry?.startTime !== undefined
+								? { ...entry, pid: entry.pid ?? entry.child?.pid }
+								: record.identity;
+						const pid = process.pid;
+						const alive = pid !== undefined && stops.pidAlive(pid, process);
 						if (
 							alive &&
 							record.identity.sessionId === sessionId &&

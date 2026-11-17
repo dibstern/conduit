@@ -8,13 +8,13 @@ import { appendFileSync, chmodSync, existsSync } from "node:fs";
 import { createServer, Socket } from "node:net";
 import { dirname, join } from "node:path";
 import type { Writable } from "node:stream";
-import { Deferred, Effect, FiberSet, Scope } from "effect";
+import { Deferred, Effect, FiberSet, Schema, Scope } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
 import { createEventId } from "../../persistence/events.js";
 import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type { TurnResult } from "../types.js";
-import { makeProductionProcessTable } from "./process-table.js";
+import { makeProductionProcessTable, ProcessStart } from "./process-table.js";
 import { makeRunnerIdleExit } from "./runner-idle.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
@@ -294,7 +294,10 @@ export const runSessionRunner = (
 						const current = processTable.identify([child.pid]).get(child.pid);
 						if (current?.state !== "running" || current.pgid !== process.pid)
 							return finish(undefined, "Reaper identity could not be verified");
-						finish({ pid: child.pid, startTime: current.startTime });
+						finish({
+							pid: child.pid,
+							...Schema.decodeUnknownSync(ProcessStart)(current),
+						});
 					});
 				}),
 			catch: (cause) => cause,

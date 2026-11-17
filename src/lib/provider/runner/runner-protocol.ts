@@ -8,6 +8,7 @@ import { isRecord } from "../../utils.js";
 import type { CursorBackendUrl } from "../cursor/cursor-credential.js";
 import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type { ProviderControlCommandStatus, TurnResult } from "../types.js";
+import type { ProcessMember } from "./process-table.js";
 import {
 	isLegacyRunner,
 	legacyRunnerAnswerCompletions,
@@ -113,7 +114,7 @@ export type RunnerSendAnswer = {
 );
 
 export interface RunnerHello {
-	readonly reaper?: { readonly pid: number; readonly startTime: string };
+	readonly reaper?: typeof ProcessMember.Encoded;
 	readonly type: "hello";
 	readonly driverKind?: string;
 	readonly protocolVersion: number;

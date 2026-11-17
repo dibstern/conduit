@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
 	appendFileSync,
@@ -48,6 +49,41 @@ const PreviousSignalLog = Schema.fromJsonString(
 		}),
 	),
 );
+// Keep the previous release's row/JSON shapes independent of the new start schema.
+const PreviousMember = Schema.Struct({
+	pid: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
+	startTime: Schema.NonEmptyString,
+});
+const PreviousRetirementRow = Schema.Struct({
+	runner_id: Schema.NonEmptyString,
+	session_id: Schema.String,
+	role: Schema.Literals(["serving", "candidate"]),
+	driver_kind: Schema.NonEmptyString,
+	pid: Schema.NullOr(PreviousMember.fields.pid),
+	start_time: Schema.NullOr(Schema.NonEmptyString),
+	retired_at: Schema.Number.check(
+		Schema.isInt(),
+		Schema.isGreaterThanOrEqualTo(0),
+	),
+	signalled: Schema.Literals([0, 1]),
+	retirement_state: Schema.Literals(["Watching", "Complete"]),
+	signal_state: Schema.Literals(["None", "TermSent", "KillSent"]),
+	signal_members: Schema.fromJsonString(Schema.Array(PreviousMember)),
+	signal_sent_members: Schema.fromJsonString(Schema.Array(PreviousMember)),
+	reaper_pid: Schema.NullOr(PreviousMember.fields.pid),
+	reaper_start_time: Schema.NullOr(Schema.NonEmptyString),
+	member_snapshot: Schema.fromJsonString(Schema.Array(PreviousMember)),
+	signal_log: PreviousSignalLog,
+	stop_state: Schema.Literals([
+		"Requested",
+		"Escalating",
+		"Escalated",
+		"Gone",
+		"Settled",
+	]),
+	stop_reason: Schema.String,
+	stop_started_at: Schema.NullOr(Schema.Number),
+});
 
 function installForcedStopFixture(harness: ProcessHarness): void {
 	// Hold only the selected runner's control transport. Its sends and SDK
@@ -117,6 +153,7 @@ registerHooks({
 const { RunnerSocket: D1Socket } = await import(${JSON.stringify(pathToFileURL(resolve(dist ? join(dist, "src/lib/provider/runner/runner-protocol.js") : "src/lib/provider/runner/runner-protocol.ts")).href)});
 const d1Write = D1Socket.prototype.write;
 D1Socket.prototype.write = function(message) {
+  if (message.type === "hello" && message.reaper && existsSync(join(root, "d1-legacy-start"))) delete message.reaper.startKey;
   if (message.type === "hello") d1Record("hello", { hello: message, startTime: childProcess.execFileSync("ps", ["-o", "lstart=", "-p", String(process.pid)], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } }).trim() });
   return d1Write.call(this, message);
 };
@@ -202,6 +239,7 @@ if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
   const write = D1Socket.prototype.write;
   let selectedSocket;
   D1Socket.prototype.write = function(message) {
+    if (message.type === "command" && existsSync(d1Selection) && JSON.parse(readFileSync(d1Selection, "utf8")).holdEverySocket) selectedSocket = this;
     if (message.type === "command" && message.command.type === "send-turn" && existsSync(d1Selection) && message.command.input.sessionId === JSON.parse(readFileSync(d1Selection, "utf8")).sessionId) selectedSocket = this;
     if (this === selectedSocket && message.type === "command" && existsSync(d1Selection)) {
       const control = JSON.parse(readFileSync(d1Selection, "utf8"));
@@ -374,7 +412,7 @@ function artifact(name: string): string {
 function identity(pid: number): RunnerMember {
 	const observation = processTable.identify([pid]).get(pid);
 	assert(observation?.state === "running");
-	return { pid, startTime: observation.startTime };
+	return { pid, ...Schema.decodeUnknownSync(ProcessStart)(observation) };
 }
 
 function membersGone(members: readonly RunnerMember[]): boolean {
@@ -459,8 +497,9 @@ async function selectedRunner(
 	leaderExits: boolean,
 	extra: Record<string, unknown> = {},
 	prompt = "stall-reaper-stop",
+	tz?: string,
 ) {
-	await harness.restart();
+	await harness.restart({ serviceEnvironment: { TZ: tz } });
 	const browser = await harness.connect();
 	const sessionId = await browser.createSession("Reaper forced stop");
 	await browser.send(sessionId, "reaper-before-stop");
@@ -478,7 +517,7 @@ async function selectedRunner(
 		typeof reaper["pid"] === "number" &&
 			typeof reaper["startTime"] === "string",
 	);
-	const reaperIdentity = { pid: reaper["pid"], startTime: reaper["startTime"] };
+	const reaperIdentity = identity(reaper["pid"]);
 	expect(runnerProcessTable.inspect(reaperIdentity.pid)).toMatchObject({
 		state: "running",
 		startTime: reaperIdentity.startTime,
@@ -514,7 +553,11 @@ async function selectedRunner(
 	const members = runnerProcessTable.members?.(runner.pid);
 	assert(members);
 	expect(members).toEqual(
-		expect.arrayContaining([leader, reaperIdentity, descendant]),
+		expect.arrayContaining(
+			[leader, reaperIdentity, descendant].map((member) =>
+				Schema.decodeUnknownSync(PreviousMember)(member),
+			),
+		),
 	);
 	const pending = browser.send(sessionId, prompt, 60_000);
 	void pending.catch(() => undefined);
@@ -574,6 +617,237 @@ async function expectGroupGone(
 
 describe("runner forced stop with real processes", () => {
 	it.each([
+		"timezone",
+		"legacy",
+	] as const)("keeps a %s runner through discovery and stops its whole group", async (mode) => {
+		const writerTZ = "America/St_Johns";
+		const readerTZ = mode === "timezone" ? "Australia/Sydney" : writerTZ;
+		const artifactPath = artifact(`start-key-${mode}`);
+		const evidence: Record<string, unknown> = {
+			passed: false,
+			writerTZ,
+			readerTZ,
+		};
+		const harness = ProcessHarness.create({
+			dist,
+			deadline: performance.now() + 75_000,
+		});
+		let members: RunnerMember[] = [];
+		try {
+			installForcedStopFixture(harness);
+			if (mode === "legacy")
+				writeFileSync(join(harness.root, "d1-legacy-start"), "");
+			const fixture = await selectedRunner(
+				harness,
+				false,
+				{ holdEverySocket: true },
+				"stall-reaper-stop",
+				writerTZ,
+			);
+			members = [...fixture.members];
+			const runnerId = basename(fixture.runner.socketPath);
+			const registryPath = `${fixture.runner.socketPath}.json`;
+			const registry: unknown = JSON.parse(readFileSync(registryPath, "utf8"));
+			assert(isRecord(registry));
+			const psStart = (pid: number, TZ: string) =>
+				execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+					encoding: "utf8",
+					env: { ...process.env, LC_ALL: "C", TZ },
+				}).trim();
+			evidence["registry"] = registry;
+			evidence["lstart"] = {
+				writer: psStart(fixture.leader.pid, writerTZ),
+				reader: psStart(fixture.leader.pid, readerTZ),
+			};
+			if (mode === "timezone")
+				expect(psStart(fixture.leader.pid, writerTZ)).not.toBe(
+					psStart(fixture.leader.pid, readerTZ),
+				);
+			await harness.kill();
+			const db = new Database(harness.daemonStorePath());
+			try {
+				if (mode === "legacy") {
+					// Emulate a ps-era daemon's registry and receipt, without backfilling a key.
+					delete registry["startKey"];
+					registry["startTime"] = psStart(fixture.leader.pid, writerTZ);
+					writeFileSync(registryPath, JSON.stringify(registry));
+					for (const column of ["start_key", "reaper_start_key"])
+						if (
+							db
+								.prepare("PRAGMA table_info(claude_runner_cursors)")
+								.all()
+								.some((row) => isRecord(row) && row["name"] === column)
+						)
+							db.prepare(
+								`UPDATE claude_runner_cursors SET ${column} = NULL WHERE runner_id = ?`,
+							).run(runnerId);
+					for (const column of [
+						"member_snapshot",
+						"signal_members",
+						"signal_sent_members",
+					])
+						db.prepare(
+							`UPDATE claude_runner_cursors SET ${column} = '[]' WHERE runner_id = ?`,
+						).run(runnerId);
+				}
+			} finally {
+				db.close();
+			}
+			const markCursor = harness.marks.length;
+			await harness.restart({ serviceEnvironment: { TZ: readerTZ } });
+			const browser = await harness.connect(fixture.sessionId);
+			await browser.preWarmSession(fixture.sessionId);
+			const adopted = harness.marks
+				.slice(markCursor)
+				.filter((mark) => mark.kind === "runner-started");
+			evidence["adopted"] = adopted;
+			// A missing key used to make this live pid a stranger in the new timezone.
+			expect(adopted).toContainEqual(
+				expect.objectContaining({
+					pid: fixture.leader.pid,
+					socketPath: fixture.runner.socketPath,
+				}),
+			);
+			// New-daemon persistence assertions belong to the timezone case. The
+			// legacy case guards only discovery and Stop for records without keys.
+			if (mode === "timezone") {
+				const reader = new Database(harness.daemonStorePath(), {
+					readonly: true,
+				});
+				try {
+					const columns = reader
+						.prepare("PRAGMA table_info(claude_runner_cursors)")
+						.all()
+						.map((row) => {
+							assert(isRecord(row));
+							return String(row["name"]);
+						});
+					const row = reader
+						.prepare(
+							`SELECT ${columns
+								.filter((name) => name !== "retired_at")
+								.map((name) => `"${name}"`)
+								.join(
+									", ",
+								)}, COALESCE(retired_at, 0) AS retired_at FROM claude_runner_cursors WHERE runner_id = ?`,
+						)
+						.get(runnerId);
+					evidence["row"] = row;
+					const previous = Schema.decodeUnknownSync(PreviousRetirementRow)(row);
+					expect(previous.start_time).toBe(
+						psStart(fixture.leader.pid, writerTZ),
+					);
+					expect(previous.reaper_start_time).toBe(
+						psStart(fixture.reaper.pid, writerTZ),
+					);
+					const oldRegistry = Schema.decodeUnknownSync(
+						Schema.Struct({
+							runnerId: Schema.String,
+							pid: Schema.Number,
+							startTime: Schema.NonEmptyString,
+						}),
+					)(registry);
+					expect(oldRegistry.startTime).toBe(previous.start_time);
+					const hello = proof(harness).find(
+						(mark) =>
+							mark["kind"] === "hello" && mark["pid"] === fixture.leader.pid,
+					)?.["hello"];
+					assert(isRecord(hello));
+					evidence["hello"] = hello;
+					expect(
+						Schema.decodeUnknownSync(PreviousMember)(hello["reaper"]),
+					).toEqual({
+						pid: fixture.reaper.pid,
+						startTime: previous.reaper_start_time,
+					});
+					if (mode === "timezone") {
+						assert(isRecord(row) && isRecord(hello["reaper"]));
+						expect(row["start_key"]).toBe(registry["startKey"]);
+						expect(row["start_key"]).toEqual(expect.stringMatching(/^(d:|l:)/));
+						expect(row["reaper_start_key"]).toBe(hello["reaper"]["startKey"]);
+						expect(row["reaper_start_key"]).toEqual(
+							expect.stringMatching(/^(d:|l:)/),
+						);
+					}
+				} finally {
+					reader.close();
+				}
+			}
+			await harness.requestRpc({
+				_tag: "CancelSession",
+				sessionId: fixture.sessionId,
+				commandId: randomUUID(),
+			});
+			await expectGroupGone(harness, fixture.leader.pid, members);
+			const snapshots = proof(harness).filter(
+				(mark) => mark["kind"] === "process-signal-snapshot",
+			);
+			evidence["signals"] = snapshots;
+			expect(snapshots.length).toBeGreaterThan(0);
+			const previousLog: Array<(typeof PreviousSignalLog.Type)[number]> = [];
+			for (const snapshot of snapshots) {
+				const retirement = snapshot["retirement"];
+				assert(isRecord(retirement));
+				const oldMembers = Schema.decodeUnknownSync(
+					Schema.fromJsonString(Schema.Array(PreviousMember)),
+				)(retirement["member_snapshot"]);
+				expect(oldMembers.map((member) => member.pid)).toEqual(
+					expect.arrayContaining([fixture.leader.pid, fixture.descendant.pid]),
+				);
+				previousLog.push(
+					...Schema.decodeUnknownSync(PreviousSignalLog)(
+						retirement["signal_log"],
+					),
+				);
+				if (mode === "timezone") {
+					const preciseMembers = Schema.decodeUnknownSync(
+						Schema.fromJsonString(
+							Schema.Array(
+								Schema.Struct({ pid: Schema.Number, ...ProcessStart.fields }),
+							),
+						),
+					)(retirement["member_snapshot"]);
+					for (const member of [
+						fixture.leader,
+						fixture.reaper,
+						fixture.descendant,
+					]) {
+						expect(member.startKey).toEqual(expect.stringMatching(/^(d:|l:)/));
+						expect(
+							preciseMembers.filter((saved) => saved.pid === member.pid),
+						).toEqual([
+							expect.objectContaining({
+								startKey: member.startKey,
+							}),
+						]);
+					}
+				}
+			}
+			expect(previousLog).toContainEqual(
+				expect.objectContaining({
+					signal: "SIGTERM",
+					outcome: "delivered",
+					members: expect.arrayContaining([
+						expect.objectContaining({ pid: fixture.descendant.pid }),
+					]),
+				}),
+			);
+			evidence["previousReleaseSignalLog"] = previousLog;
+			evidence["passed"] = true;
+		} catch (cause) {
+			evidence["failure"] = String(cause);
+			throw cause;
+		} finally {
+			evidence["proof"] = proof(harness);
+			try {
+				await cleanupOwned(harness, members);
+				evidence["cleanup"] = harness.proof();
+			} finally {
+				writeFileSync(artifactPath, JSON.stringify(evidence, null, 2));
+			}
+		}
+	}, 95_000);
+	it.each([
 		"spawn-failure",
 		"wrong-group",
 		"identity-failure",
@@ -630,7 +904,7 @@ describe("runner forced stop with real processes", () => {
 				writeFileSync(artifactPath, JSON.stringify(evidence, null, 2));
 			}
 		}
-	}, 60_000);
+	});
 
 	it.each([
 		{ leaderExits: false, killReaper: false, forking: false },
@@ -812,7 +1086,10 @@ describe("runner forced stop with real processes", () => {
 						expect.arrayContaining([
 							expect.objectContaining(fixture.leader),
 							expect.objectContaining(fixture.reaper),
-							expect.objectContaining(fixture.descendant),
+							// The in-write ps capture predates the native kill pass.
+							expect.objectContaining(
+								Schema.decodeUnknownSync(PreviousMember)(fixture.descendant),
+							),
 						]),
 					);
 					const observed = processProof.find(
@@ -1088,13 +1365,26 @@ describe("runner forced stop with real processes", () => {
 				expect(JSON.parse(retired.member_snapshot)).toEqual([]);
 				expect(JSON.parse(retired.signal_log)).toEqual([]);
 			} else {
-				expect(JSON.parse(retired.member_snapshot)).toEqual(
-					expect.arrayContaining([
-						expect.objectContaining(fixture.leader),
-						expect.objectContaining(fixture.reaper),
-						expect.objectContaining(fixture.descendant),
-					]),
+				const snapshot = Schema.decodeUnknownSync(
+					Schema.fromJsonString(
+						Schema.Array(
+							Schema.Struct({ pid: Schema.Number, ...ProcessStart.fields }),
+						),
+					),
+				)(retired.member_snapshot);
+				expect(snapshot).toEqual(
+					expect.arrayContaining([fixture.leader, fixture.reaper]),
 				);
+				const descendant = snapshot.filter(
+					(member) => member.pid === fixture.descendant.pid,
+				);
+				// Early cuts retain the interim ps capture; later native passes persist
+				// the precise child start. Either form must equal the observed identity.
+				expect(descendant).toEqual([
+					descendant[0]?.startKey === undefined
+						? Schema.decodeUnknownSync(PreviousMember)(fixture.descendant)
+						: fixture.descendant,
+				]);
 			}
 			expect(
 				runnerRuns(harness, basename(fixture.runner.socketPath)),

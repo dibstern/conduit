@@ -7,6 +7,7 @@ import { observeTurnTimelineFrame } from "../../domain/daemon/Services/turn-time
 import * as Failure from "../../effect/failure-classification.js";
 import { isRecord } from "../../utils.js";
 import type { SendToken } from "../run-ledger/run-ledger-model.js";
+import type { ProcessStart } from "./process-table.js";
 import { isLegacyRunner } from "./runner-legacy-classification.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
@@ -42,6 +43,7 @@ export const connectRunner = (options: {
 	readonly sessionId: string;
 	readonly runnerId: string;
 	readonly pid?: number;
+	readonly start?: typeof ProcessStart.Encoded;
 	readonly helloTimeoutMs?: number;
 	/** Orphan retirement verifies identity without replaying absent history. */
 	readonly identityOnly?: true;
@@ -249,6 +251,8 @@ export const connectRunner = (options: {
 											.attach(options.runnerId, attachmentId, {
 												sessionId: options.sessionId,
 												pid: message.pid ?? options.pid,
+												...options.start,
+												reaper: message.reaper,
 												driverKind:
 													message.driverKind ?? options.driverKind ?? "claude",
 												journalsBeforeExecution: !isLegacyRunner(message),

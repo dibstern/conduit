@@ -9,6 +9,12 @@ import {
 	canonicalEvent,
 } from "../../persistence/events.js";
 import type { PermissionResponse } from "../types.js";
+import {
+	ProcessMember,
+	ProcessStart,
+	StartTime,
+	sameProcess,
+} from "./process-identity.js";
 import { legacyRunnerRanking } from "./runner-registry.js";
 import { type StoreFault, toStoreFault } from "./send-settlement.js";
 import type { SessionOutputReply } from "./session-runner.js";
@@ -47,12 +53,9 @@ export class RunnerSlotError extends Data.TaggedError("RunnerSlotError")<{
 	readonly cause: string;
 }> {}
 
-const Member = Schema.Struct({
-	pid: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
-	startTime: Schema.NonEmptyString,
-	startKey: Schema.optionalKey(Schema.String),
-});
-export type RunnerMember = typeof Member.Type;
+const Member = ProcessMember;
+const Members = Schema.fromJsonString(Schema.Array(Member));
+export type RunnerMember = typeof Member.Encoded;
 const SignalAttempt = Schema.Struct({
 	signal: Schema.Literals(["SIGTERM", "SIGKILL"]),
 	/** Older logs predate a grace clock anchored to the actual TERM attempt. */
@@ -61,13 +64,12 @@ const SignalAttempt = Schema.Struct({
 	members: Schema.Array(Member),
 	outcome: Schema.Literals(["delivered", "refused", "failed"]),
 });
-export type RunnerSignalAttempt = typeof SignalAttempt.Type;
+export type RunnerSignalAttempt = typeof SignalAttempt.Encoded;
 export type RunnerProcessIdentity =
-	| {
+	| ({
 			readonly tag: "Verified";
 			readonly pid: number;
-			readonly startTime: string;
-	  }
+	  } & typeof ProcessStart.Encoded)
 	| { readonly tag: "Unverifiable"; readonly pid?: number };
 const Signal = Schema.Union([
 	Schema.Struct({
@@ -84,7 +86,7 @@ const Signal = Schema.Union([
 		sent: Schema.Array(Member),
 	}),
 ]);
-export type RunnerSignal = typeof Signal.Type;
+export type RunnerSignal = typeof Signal.Encoded;
 const Reply = Schema.fromJsonString(
 	Schema.StructWithRest(
 		Schema.Struct({
@@ -117,7 +119,8 @@ const RetirementRow = Schema.Struct({
 	role: Schema.Literals(["serving", "candidate"]),
 	driver_kind: Schema.NonEmptyString,
 	pid: Schema.NullOr(Member.fields.pid),
-	start_time: Schema.NullOr(Schema.NonEmptyString),
+	start_time: Schema.NullOr(ProcessStart.fields.startTime),
+	start_key: Schema.NullOr(Schema.String),
 	retired_at: Schema.Number.check(
 		Schema.isInt(),
 		Schema.isGreaterThanOrEqualTo(0),
@@ -125,11 +128,12 @@ const RetirementRow = Schema.Struct({
 	signalled: Schema.Literals([0, 1]),
 	retirement_state: Schema.Literals(["Watching", "Complete"]),
 	signal_state: Schema.Literals(["None", "TermSent", "KillSent"]),
-	signal_members: Schema.fromJsonString(Schema.Array(Member)),
-	signal_sent_members: Schema.fromJsonString(Schema.Array(Member)),
+	signal_members: Members,
+	signal_sent_members: Members,
 	reaper_pid: Schema.NullOr(Member.fields.pid),
-	reaper_start_time: Schema.NullOr(Schema.NonEmptyString),
-	member_snapshot: Schema.fromJsonString(Schema.Array(Member)),
+	reaper_start_time: Schema.NullOr(ProcessStart.fields.startTime),
+	reaper_start_key: Schema.NullOr(Schema.String),
+	member_snapshot: Members,
 	signal_log: Schema.fromJsonString(Schema.Array(SignalAttempt)),
 	stop_state: Schema.Literals([
 		"Requested",
@@ -141,6 +145,20 @@ const RetirementRow = Schema.Struct({
 	stop_reason: Schema.String,
 	stop_started_at: Schema.NullOr(Schema.Number),
 });
+
+// Keep nullable additions outside the migration ledger so older daemons can
+// reopen the store. Imports normalize private copies through this same owner.
+export const ensureRunnerStartColumns = (sql: SqlClient.SqlClient) =>
+	Effect.gen(function* () {
+		const columns = yield* sql<{
+			name: string;
+		}>`PRAGMA table_info(claude_runner_cursors)`;
+		for (const name of ["start_key", "reaper_start_key"])
+			if (!columns.some((column) => column.name === name))
+				yield* sql.unsafe(
+					`ALTER TABLE claude_runner_cursors ADD COLUMN ${name} TEXT`,
+				);
+	});
 
 export class RunnerRetirementDecodeError extends Data.TaggedError(
 	"RunnerRetirementDecodeError",
@@ -210,6 +228,20 @@ export const stopRecord = (
 	retiredAt,
 });
 
+// The string and key cross the SQL boundary together, including legacy NULL keys.
+const processStartRow = {
+	encode: (
+		start: Pick<RunnerCursorIdentity, "startTime" | "startKey"> | undefined,
+	) => ({
+		time: start?.startTime ?? null,
+		key: start?.startTime === undefined ? null : (start.startKey ?? null),
+	}),
+	decode: (time: string | null, key: string | null) =>
+		time === null
+			? undefined
+			: { startTime: time, ...(key === null ? {} : { startKey: key }) },
+};
+
 const decodeRetirement = (raw: { readonly runner_id: string }) =>
 	Effect.gen(function* () {
 		const row = yield* Schema.decodeUnknownEffect(RetirementRow)(raw);
@@ -234,32 +266,35 @@ const decodeRetirement = (raw: { readonly runner_id: string }) =>
 						sent: row.signal_sent_members,
 					},
 		);
+		const start = processStartRow.decode(row.start_time, row.start_key);
+		const reaperStart = processStartRow.decode(
+			row.reaper_start_time,
+			row.reaper_start_key,
+		);
+		const leader =
+			row.pid !== null && start ? { pid: row.pid, ...start } : undefined;
+		const reaper =
+			row.reaper_pid !== null && reaperStart
+				? { pid: row.reaper_pid, ...reaperStart }
+				: undefined;
 		return {
 			runnerId: row.runner_id,
 			sessionId: row.session_id,
 			driverKind: row.driver_kind,
-			identity:
-				row.pid !== null && row.start_time !== null
-					? { tag: "Verified", pid: row.pid, startTime: row.start_time }
-					: {
-							tag: "Unverifiable",
-							...(row.pid === null ? {} : { pid: row.pid }),
-						},
+			identity: leader
+				? { tag: "Verified", ...leader }
+				: {
+						tag: "Unverifiable",
+						...(row.pid === null ? {} : { pid: row.pid }),
+					},
 			retirement: { tag: row.retirement_state },
 			signal,
-			reaper:
-				row.reaper_pid !== null && row.reaper_start_time !== null
-					? { pid: row.reaper_pid, startTime: row.reaper_start_time }
-					: undefined,
+			reaper,
 			members: mergeRunnerMembers(
 				row.member_snapshot,
 				row.signal_members,
-				row.pid !== null && row.start_time !== null
-					? [{ pid: row.pid, startTime: row.start_time }]
-					: [],
-				row.reaper_pid !== null && row.reaper_start_time !== null
-					? [{ pid: row.reaper_pid, startTime: row.reaper_start_time }]
-					: [],
+				leader ? [leader] : [],
+				reaper ? [reaper] : [],
 			),
 			signalLog: row.signal_log,
 			retiredAt: row.retired_at,
@@ -285,25 +320,37 @@ const decodeRetirement = (raw: { readonly runner_id: string }) =>
 export const mergeRunnerMembers = (
 	...snapshots: readonly (readonly RunnerMember[])[]
 ) => {
-	const members = new Map<string, RunnerMember>();
+	const members: RunnerMember[] = [];
 	for (const snapshot of snapshots)
 		for (const member of snapshot) {
-			const key = `${member.pid}:${member.startTime}`;
-			// A legacy leader/reaper must not erase a member's precise identity.
-			if (
+			const index = members.findIndex(
+				(saved) =>
+					saved.pid === member.pid &&
+					sameProcess(saved, {
+						state: "running",
+						...member,
+						startTime: StartTime.make(member.startTime),
+					}) === "same",
+			);
+			if (index === -1) members.push(member);
+			else if (
 				member.startKey !== undefined ||
-				members.get(key)?.startKey === undefined
+				members[index]?.startKey === undefined
 			)
-				members.set(key, member);
+				members[index] = member;
 		}
-	return [...members.values()];
+	return members;
 };
 
-export interface RunnerCursorIdentity {
+export interface RunnerCursorIdentity
+	extends Partial<{
+		[Key in keyof typeof ProcessStart.Encoded]:
+			| (typeof ProcessStart.Encoded)[Key]
+			| undefined;
+	}> {
 	readonly sessionId: string;
 	readonly driverKind?: string | undefined;
 	readonly pid?: number | undefined;
-	readonly startTime?: string | undefined;
 	readonly reaper?: RunnerMember | undefined;
 	/** Recorded at hello; see journalsBeforeExecution. */
 	readonly journalsBeforeExecution?: boolean | undefined;
@@ -352,10 +399,10 @@ export const makeRunnerReceiptStore = (
 	options: { readonly configDir?: string } = {},
 ) =>
 	Effect.gen(function* () {
-		// Migration 0089 owns the table and its columns.
 		yield* flushPendingWrites(
 			sql,
 			Effect.gen(function* () {
+				yield* ensureRunnerStartColumns(sql);
 				const slotIndex =
 					yield* sql`SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_runner_serving_session'`;
 				if (slotIndex.length === 0) {
@@ -421,12 +468,17 @@ export const makeRunnerReceiptStore = (
 				retired_at: number | null;
 				role: RunnerRole;
 			}>`SELECT *, COALESCE(retired_at, 0) AS retired_at FROM claude_runner_cursors WHERE runner_id = ${runnerId}`;
-		const saveStop = (record: RunnerRetirement, reason: StopReason) =>
-			sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, driver_kind, retired_at, pid, start_time, reaper_pid, reaper_start_time, member_snapshot, stop_reason)
-				VALUES (${record.runnerId}, 0, '', ${record.sessionId}, ${record.driverKind}, ${record.retiredAt}, ${record.identity.pid ?? null}, ${record.identity.tag === "Verified" ? record.identity.startTime : null}, ${record.reaper?.pid ?? null}, ${record.reaper?.startTime ?? null}, '[]', ${JSON.stringify(reason)})
-				ON CONFLICT(runner_id) DO UPDATE SET retired_at = excluded.retired_at, attachment_id = '', session_id = excluded.session_id, driver_kind = excluded.driver_kind, pid = excluded.pid, start_time = excluded.start_time, reaper_pid = excluded.reaper_pid, reaper_start_time = excluded.reaper_start_time, stop_state = 'Requested', stop_reason = excluded.stop_reason`.pipe(
+		const saveStop = (record: RunnerRetirement, reason: StopReason) => {
+			const start = processStartRow.encode(
+				record.identity.tag === "Verified" ? record.identity : undefined,
+			);
+			const reaper = processStartRow.encode(record.reaper);
+			return sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, driver_kind, retired_at, pid, start_time, start_key, reaper_pid, reaper_start_time, reaper_start_key, member_snapshot, stop_reason)
+				VALUES (${record.runnerId}, 0, '', ${record.sessionId}, ${record.driverKind}, ${record.retiredAt}, ${record.identity.pid ?? null}, ${start.time}, ${start.key}, ${record.reaper?.pid ?? null}, ${reaper.time}, ${reaper.key}, '[]', ${JSON.stringify(reason)})
+				ON CONFLICT(runner_id) DO UPDATE SET retired_at = excluded.retired_at, attachment_id = '', session_id = excluded.session_id, driver_kind = excluded.driver_kind, pid = excluded.pid, start_time = excluded.start_time, start_key = excluded.start_key, reaper_pid = excluded.reaper_pid, reaper_start_time = excluded.reaper_start_time, reaper_start_key = excluded.reaper_start_key, stop_state = 'Requested', stop_reason = excluded.stop_reason`.pipe(
 				Effect.asVoid,
 			);
+		};
 		// The one reader of 6.5's loss: for runners the caller's write first retired,
 		// none for a runner whose session row is gone or has no project.
 		const processLost = (runnerIds: readonly string[]) =>
@@ -646,6 +698,8 @@ export const makeRunnerReceiptStore = (
 				role: RunnerRole,
 			): Effect.Effect<"Registered" | "Lost", StoreFault> =>
 				Effect.gen(function* () {
+					const start = processStartRow.encode(identity);
+					const reaper = processStartRow.encode(identity.reaper);
 					let result: "Registered" | "Lost" = "Lost";
 					yield* flushPendingWrites(
 						sql,
@@ -667,8 +721,8 @@ export const makeRunnerReceiptStore = (
 								WHERE session_id = ${identity.sessionId} AND retired_at IS NULL LIMIT 1`;
 								if (occupied.length > 0) return "Lost" as const;
 							}
-							yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, driver_kind, pid, start_time, reaper_pid, reaper_start_time, role)
-					VALUES (${runnerId}, 0, ${identity.sessionId}, ${identity.driverKind ?? "claude"}, ${identity.pid ?? null}, ${identity.startTime ?? null}, ${identity.reaper?.pid ?? null}, ${identity.reaper?.startTime ?? null}, ${role})`;
+							yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, driver_kind, pid, start_time, start_key, reaper_pid, reaper_start_time, reaper_start_key, role)
+					VALUES (${runnerId}, 0, ${identity.sessionId}, ${identity.driverKind ?? "claude"}, ${identity.pid ?? null}, ${start.time}, ${start.key}, ${identity.reaper?.pid ?? null}, ${reaper.time}, ${reaper.key}, ${role})`;
 							const [saved] = yield* rawRunner(runnerId);
 							if (saved) yield* decodeRetirement(saved);
 							return "Registered" as const;
@@ -722,15 +776,26 @@ export const makeRunnerReceiptStore = (
 				flushPendingWrites(
 					sql,
 					Effect.gen(function* () {
+						const start = processStartRow.encode(
+							record.identity.tag === "Verified" ? record.identity : undefined,
+						);
+						const reaper = processStartRow.encode(record.reaper);
 						const [before] = yield* sql<{
 							retired_at: number | null;
-						}>`SELECT retired_at FROM claude_runner_cursors WHERE runner_id = ${record.runnerId}`;
-						yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, driver_kind, retired_at, pid, start_time, reaper_pid, reaper_start_time, member_snapshot)
-				VALUES (${record.runnerId}, 0, '', ${record.sessionId}, ${record.driverKind}, ${record.retiredAt}, ${record.identity.pid ?? null}, ${record.identity.tag === "Verified" ? record.identity.startTime : null}, ${record.reaper?.pid ?? null}, ${record.reaper?.startTime ?? null}, ${JSON.stringify(record.members)})
+							member_snapshot: string;
+						}>`SELECT retired_at, member_snapshot FROM claude_runner_cursors WHERE runner_id = ${record.runnerId}`;
+						const members = mergeRunnerMembers(
+							yield* Schema.decodeUnknownEffect(Members)(
+								before?.member_snapshot ?? "[]",
+							),
+							record.members,
+						);
+						yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, driver_kind, retired_at, pid, start_time, start_key, reaper_pid, reaper_start_time, reaper_start_key, member_snapshot)
+				VALUES (${record.runnerId}, 0, '', ${record.sessionId}, ${record.driverKind}, ${record.retiredAt}, ${record.identity.pid ?? null}, ${start.time}, ${start.key}, ${record.reaper?.pid ?? null}, ${reaper.time}, ${reaper.key}, ${JSON.stringify(members)})
 				ON CONFLICT(runner_id) DO UPDATE SET retired_at = COALESCE(claude_runner_cursors.retired_at, excluded.retired_at), attachment_id = '',
-				pid = excluded.pid, start_time = excluded.start_time, reaper_pid = excluded.reaper_pid, reaper_start_time = excluded.reaper_start_time,
+				pid = excluded.pid, start_time = excluded.start_time, start_key = excluded.start_key, reaper_pid = excluded.reaper_pid, reaper_start_time = excluded.reaper_start_time, reaper_start_key = excluded.reaper_start_key,
 				session_id = excluded.session_id, driver_kind = excluded.driver_kind,
-				member_snapshot = (SELECT json_group_array(json(value)) FROM (SELECT value FROM json_each(claude_runner_cursors.member_snapshot) UNION ALL SELECT value FROM json_each(excluded.member_snapshot) WHERE value NOT IN (SELECT value FROM json_each(claude_runner_cursors.member_snapshot))))`;
+				member_snapshot = excluded.member_snapshot`;
 						if (before?.retired_at == null)
 							yield* appendUnprojected(
 								sql,
@@ -745,16 +810,27 @@ export const makeRunnerReceiptStore = (
 			) =>
 				flushPendingWrites(
 					sql,
-					sql`UPDATE claude_runner_cursors SET signal_log = (SELECT json_group_array(json(value)) FROM (SELECT value FROM json_each(signal_log) UNION ALL SELECT value FROM json_each(${JSON.stringify(attempts)}))),
-				member_snapshot = (SELECT json_group_array(json(value)) FROM (SELECT value FROM json_each(member_snapshot) UNION ALL SELECT value FROM json_each(${JSON.stringify(signal.members ?? [])}) WHERE value NOT IN (SELECT value FROM json_each(member_snapshot)))),
+					Effect.gen(function* () {
+						const [before] = yield* sql<{
+							member_snapshot: string;
+						}>`SELECT member_snapshot FROM claude_runner_cursors WHERE runner_id = ${runnerId}`;
+						const members = mergeRunnerMembers(
+							yield* Schema.decodeUnknownEffect(Members)(
+								before?.member_snapshot ?? "[]",
+							),
+							signal.members ?? [],
+						);
+						yield* sql`UPDATE claude_runner_cursors SET signal_log = (SELECT json_group_array(json(value)) FROM (SELECT value FROM json_each(signal_log) UNION ALL SELECT value FROM json_each(${JSON.stringify(attempts)}))),
+				member_snapshot = ${JSON.stringify(members)},
 				signalled = MAX(signalled, ${signal.tag === "None" ? 0 : 1}), signal_state = ${signal.tag},
 				signal_members = ${JSON.stringify(signal.members ?? [])}, signal_sent_members = ${JSON.stringify(signal.tag === "KillSent" ? signal.sent : [])}
-				WHERE runner_id = ${runnerId}`.pipe(Effect.asVoid),
+				WHERE runner_id = ${runnerId}`;
+					}),
 				),
 			retirements: (runnerIds?: readonly string[]) =>
 				sql<{
 					runner_id: string;
-				}>`SELECT runner_id, session_id, role, driver_kind, pid, start_time, COALESCE(retired_at, 0) AS retired_at, signalled, retirement_state, signal_state, signal_members, signal_sent_members, reaper_pid, reaper_start_time, member_snapshot, signal_log, stop_state, stop_reason, stop_started_at
+				}>`SELECT runner_id, session_id, role, driver_kind, pid, start_time, start_key, COALESCE(retired_at, 0) AS retired_at, signalled, retirement_state, signal_state, signal_members, signal_sent_members, reaper_pid, reaper_start_time, reaper_start_key, member_snapshot, signal_log, stop_state, stop_reason, stop_started_at
 					FROM claude_runner_cursors WHERE retired_at IS NOT NULL OR signal_members <> '[]' OR member_snapshot <> '[]'`.pipe(
 					Effect.flatMap((rows) =>
 						Effect.partition(
@@ -794,16 +870,20 @@ export const makeRunnerReceiptStore = (
 				runnerId: string,
 				attachmentId: string,
 				identity?: RunnerCursorIdentity,
-			) =>
-				sql<{
+			) => {
+				const start = processStartRow.encode(identity);
+				const reaper = processStartRow.encode(identity?.reaper);
+				return sql<{
 					sequence: number;
 					result_json: string;
-				}>`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, pid, start_time, driver_kind, reaper_pid, reaper_start_time, journals_before_execution)
-					VALUES (${runnerId}, 0, ${attachmentId}, ${identity?.sessionId ?? ""}, ${identity?.pid ?? null}, ${identity?.startTime ?? null}, ${identity?.driverKind ?? "claude"}, ${identity?.reaper?.pid ?? null}, ${identity?.reaper?.startTime ?? null}, ${identity?.journalsBeforeExecution === undefined ? null : Number(identity.journalsBeforeExecution)})
+				}>`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, pid, start_time, start_key, driver_kind, reaper_pid, reaper_start_time, reaper_start_key, journals_before_execution)
+					VALUES (${runnerId}, 0, ${attachmentId}, ${identity?.sessionId ?? ""}, ${identity?.pid ?? null}, ${start.time}, ${start.key}, ${identity?.driverKind ?? "claude"}, ${identity?.reaper?.pid ?? null}, ${reaper.time}, ${reaper.key}, ${identity?.journalsBeforeExecution === undefined ? null : Number(identity.journalsBeforeExecution)})
 					ON CONFLICT(runner_id) DO UPDATE SET attachment_id = excluded.attachment_id,
 					session_id = COALESCE(NULLIF(excluded.session_id, ''), claude_runner_cursors.session_id),
 					pid = COALESCE(excluded.pid, claude_runner_cursors.pid), start_time = COALESCE(excluded.start_time, claude_runner_cursors.start_time),
+					start_key = CASE WHEN excluded.start_time IS NULL THEN claude_runner_cursors.start_key ELSE excluded.start_key END,
 					reaper_pid = COALESCE(excluded.reaper_pid, claude_runner_cursors.reaper_pid), reaper_start_time = COALESCE(excluded.reaper_start_time, claude_runner_cursors.reaper_start_time),
+					reaper_start_key = CASE WHEN excluded.reaper_start_time IS NULL THEN claude_runner_cursors.reaper_start_key ELSE excluded.reaper_start_key END,
 					journals_before_execution = COALESCE(excluded.journals_before_execution, claude_runner_cursors.journals_before_execution),
 					driver_kind = CASE WHEN ${identity?.driverKind !== undefined} THEN excluded.driver_kind ELSE claude_runner_cursors.driver_kind END
 					WHERE claude_runner_cursors.retired_at IS NULL
@@ -818,7 +898,8 @@ export const makeRunnerReceiptStore = (
 							})),
 						),
 					),
-				),
+				);
+			},
 			acknowledge: (
 				runnerId: string,
 				sequence: number,

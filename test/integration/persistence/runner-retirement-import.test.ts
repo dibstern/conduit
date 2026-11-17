@@ -133,6 +133,14 @@ it.live(
 					destination.exec(
 						"DROP INDEX IF EXISTS idx_runner_serving_session; DELETE FROM effect_sql_migrations WHERE migration_id IN (89, 93)",
 					);
+					const columns = destination
+						.prepare("PRAGMA table_info(claude_runner_cursors)")
+						.all();
+					for (const name of ["start_key", "reaper_start_key"])
+						if (columns.some((column) => column["name"] === name))
+							destination.exec(
+								`ALTER TABLE claude_runner_cursors DROP COLUMN ${name}`,
+							);
 					for (const field of [
 						"retired_at",
 						"pid",

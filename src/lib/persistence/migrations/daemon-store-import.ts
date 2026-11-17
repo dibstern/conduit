@@ -25,6 +25,7 @@ import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { AttachmentStoreTag } from "../../domain/persistence/Services/attachment-store.js";
 import { releaseCopiedInputDraftClaims } from "../../domain/project-services/Services/input-drafts.js";
+import { ensureRunnerStartColumns } from "../../provider/runner/runner-receipts.js";
 import { legacyRunnerRanking } from "../../provider/runner/runner-registry.js";
 import { makeAttachmentStore } from "../attachment-store.js";
 import {
@@ -162,7 +163,8 @@ const deployedRedesignMigrationIds = new Map<string, readonly number[]>([
 	["turn_recaps", [68, 69, 73]],
 	["sessions_goal_stuck", [69]],
 ]);
-// Runner tables the importer copies. Migration 0089 owns claude_runner_cursors;
+// Runner tables the importer copies. Migration 0089 owns the base cursor schema;
+// ensureRunnerStartColumns normalizes its nullable additions on both sides.
 // claude_runner_permission_replies is created on first use, so a destination
 // that never ran a runner lacks it.
 const runnerTables = [
@@ -1274,11 +1276,13 @@ function withNormalisedSource(
 				});
 				const attachmentNormalisation = yield* Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
+					yield* ensureRunnerStartColumns(sql);
 					const destination = daemonStorePath(configDir);
 					// A seed promotes this copy, so its blobs already live at their
 					// destination. Runtime imports put directly into the shared store.
 					const summary = existsSync(destination)
 						? yield* Effect.gen(function* () {
+								yield* ensureRunnerStartColumns(yield* SqlClient.SqlClient);
 								return yield* normaliseInlineAttachments(
 									sql,
 									yield* makeAttachmentStore,
@@ -1313,7 +1317,7 @@ function withNormalisedSource(
 					const copy = new DatabaseSync(copyPath);
 					try {
 						verifyStore(copy, "main", project);
-						// Migration 0089 has given the copy every cursor column by now.
+						// Migrations and nullable additions have normalized the copy by now.
 						backfillRunnerRoles(copy, configDir);
 					} finally {
 						copy.close();

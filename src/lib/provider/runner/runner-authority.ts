@@ -4,6 +4,7 @@ import {
 	currentWriteAuthorization,
 	MissingWriteAuthorization,
 } from "../../persistence/effect/commit-and-signal.js";
+import type { ProcessStart } from "./process-table.js";
 import type {
 	makeRunnerReceiptStore,
 	RunnerMember,
@@ -35,12 +36,16 @@ export interface AuthorizedWrite {
 	readonly write: Write;
 }
 
-export interface RunnerIdentity<A> {
+export interface RunnerIdentity<A>
+	extends Partial<{
+		[Key in keyof typeof ProcessStart.Encoded]:
+			| (typeof ProcessStart.Encoded)[Key]
+			| undefined;
+	}> {
 	readonly runnerId: string;
 	readonly sessionId: string;
 	readonly driverKind: string;
 	readonly pid: number | undefined;
-	readonly startTime: string | undefined;
 	readonly reaper: RunnerMember | undefined;
 	readonly members: readonly RunnerMember[];
 	readonly signalLog: readonly RunnerSignalAttempt[];
@@ -114,6 +119,7 @@ export const makeRunnerAuthority = <A>(
 				driverKind: identity.driverKind ?? "claude",
 				pid: identity.pid,
 				startTime: identity.startTime,
+				startKey: identity.startKey,
 				reaper: identity.reaper
 					? Object.freeze({ ...identity.reaper })
 					: undefined,
@@ -320,9 +326,15 @@ export const makeRunnerAuthority = <A>(
 					const tombstone = retired.rows.find(
 						(row) => row.runnerId === registration.runnerId,
 					);
+					const start =
+						registration.startTime !== undefined
+							? registration
+							: record?.identity;
 					const identity = normalize({
 						...record?.identity,
 						...registration,
+						startTime: start?.startTime,
+						startKey: start?.startKey,
 						entry: registration.entry ?? record?.identity.entry,
 						...tombstone,
 						...(tombstone
@@ -331,6 +343,10 @@ export const makeRunnerAuthority = <A>(
 									startTime:
 										tombstone.identity.tag === "Verified"
 											? tombstone.identity.startTime
+											: undefined,
+									startKey:
+										tombstone.identity.tag === "Verified"
+											? tombstone.identity.startKey
 											: undefined,
 									signal: tombstone.signal,
 									signalled: tombstone.signal.tag !== "None",
@@ -444,7 +460,10 @@ export const makeRunnerAuthority = <A>(
 			},
 			captureBeforeRevoke: (
 				runnerId: string,
-				evidence: Pick<RunnerIdentity<A>, "pid" | "startTime" | "signalled"> & {
+				evidence: Pick<
+					RunnerIdentity<A>,
+					"pid" | "startTime" | "startKey" | "signalled"
+				> & {
 					readonly signal?: RunnerSignal;
 					readonly reaper?: RunnerMember | undefined;
 					readonly members?: readonly RunnerMember[];
@@ -463,6 +482,7 @@ export const makeRunnerAuthority = <A>(
 						...record.identity,
 						pid: evidence.pid,
 						startTime: evidence.startTime,
+						startKey: evidence.startKey,
 						signalled: record.identity.signalled || evidence.signalled,
 						signal: evidence.signal ?? record.identity.signal,
 						reaper: evidence.reaper ?? record.identity.reaper,

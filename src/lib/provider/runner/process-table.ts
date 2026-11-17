@@ -1,24 +1,24 @@
 import { execFile, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
-import { Brand, Effect, Scheduler, Schema } from "effect";
+import { Brand, Effect, Scheduler } from "effect";
+import {
+	type Observed,
+	type ProcessMember,
+	type StartTime,
+	sameProcess,
+} from "./process-identity.js";
 
-export const StartTime = Schema.NonEmptyString.pipe(Schema.brand("StartTime"));
-export type StartTime = typeof StartTime.Type;
+export {
+	type Observed,
+	ProcessMember,
+	ProcessStart,
+	StartTime,
+	sameProcess,
+} from "./process-identity.js";
+
 // Readers already prove the text nonempty; avoid compiling a schema on a read.
 const startTime = Brand.nominal<StartTime>();
-export const ProcessStart = Schema.Struct({
-	startTime: StartTime,
-	startKey: Schema.optionalKey(Schema.String),
-});
-export type ProcessStart = typeof ProcessStart.Type;
-export type Observed =
-	| ({
-			readonly state: "running" | "zombie";
-			readonly pgid?: number;
-	  } & ProcessStart)
-	| { readonly state: "gone" | "unknown" };
-export type ProcessMember = { readonly pid: number } & ProcessStart;
 export interface Observation {
 	readonly processes: ReadonlyMap<number, Observed>;
 	readonly group: readonly ProcessMember[] | undefined;
@@ -49,28 +49,6 @@ export interface ProcessAdapter {
 	group(pgid: number): Effect.Effect<ReadonlyMap<number, Observed> | undefined>;
 	signal(target: number, signal: StopSignal): void;
 	argv(pid: number): readonly string[] | undefined;
-}
-
-export function sameProcess(
-	recorded: {
-		readonly pid: number;
-		readonly startTime?: string;
-		readonly startKey?: string;
-	},
-	seen: Observed | undefined,
-): "same" | "gone" | "unknown" {
-	if (seen?.state !== "running")
-		return seen?.state === "gone" || seen?.state === "zombie"
-			? "gone"
-			: "unknown";
-	const scheme = recorded.startKey?.split(":", 1)[0];
-	if (
-		(scheme === "d" || scheme === "l") &&
-		seen.startKey?.startsWith(`${scheme}:`)
-	)
-		return recorded.startKey === seen.startKey ? "same" : "gone";
-	if (recorded.startTime === undefined) return "unknown";
-	return recorded.startTime === seen.startTime ? "same" : "gone";
 }
 
 export function makeProcessTable(adapter: ProcessAdapter): ProcessTable {

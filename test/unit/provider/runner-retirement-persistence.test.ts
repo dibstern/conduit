@@ -16,6 +16,7 @@ import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migra
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	makeRunnerReceiptStore,
+	mergeRunnerMembers,
 	type RunnerRetirement,
 	RunnerRetirementDecodeError,
 	type StopCommit,
@@ -65,6 +66,118 @@ const stopped = (commit: StopCommit): RunnerRetirement =>
 const seedLegacy = (sql: SqlClient.SqlClient, signalled = true) =>
 	sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, retired_at, session_id, pid, start_time, signalled, driver_kind)
 	VALUES ('runner', 0, '', 100, 'session', 123, 'process-start', ${signalled ? 1 : 0}, 'cursor')`;
+
+it.effect(
+	"keeps whole precise starts through register, attach, Stop and recovery",
+	() =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const receipts = yield* makeRunnerReceiptStore(sql);
+			const leader = {
+				pid: 123,
+				startTime: "process-start",
+				startKey: "d:100.1",
+			};
+			const reaper = {
+				pid: 124,
+				startTime: "reaper-start",
+				startKey: "d:100.2",
+			};
+			const identity = { sessionId: "session", ...leader, reaper };
+			yield* receipts.register("runner", identity, "serving");
+			expect((yield* receipts.runners()).rows[0]).toMatchObject({
+				identity: { tag: "Verified", ...leader },
+				reaper,
+			});
+			// An attachment carrying a legacy start must replace the whole prior value.
+			yield* receipts.attach("runner", "legacy", {
+				sessionId: "session",
+				pid: 123,
+				startTime: "legacy-start",
+				reaper: { pid: 124, startTime: "legacy-reaper" },
+			});
+			expect((yield* receipts.runners()).rows[0]?.identity).toEqual({
+				tag: "Verified",
+				pid: 123,
+				startTime: "legacy-start",
+			});
+			yield* receipts.attach("runner", "precise", identity);
+			yield* receipts.attach("runner", "no-identity");
+			const target = {
+				...decodedRetirement,
+				identity: { tag: "Verified" as const, ...leader },
+				reaper,
+				members: [leader, reaper],
+			};
+			yield* receipts.requestStop(target);
+			yield* receipts.commitRetirement(target);
+			yield* receipts.appendSignalLog(
+				"runner",
+				[
+					{
+						signal: "SIGTERM",
+						target: -123,
+						members: [leader, reaper],
+						outcome: "delivered",
+					},
+				],
+				{ tag: "TermSent", members: [leader, reaper] },
+			);
+			const recovered = (yield* receipts.retirements()).rows[0];
+			expect(recovered).toMatchObject({
+				identity: { tag: "Verified", ...leader },
+				reaper,
+				members: [leader, reaper],
+				signalLog: [{ members: [leader, reaper] }],
+			});
+		}).pipe(Effect.provide(testLayer)),
+);
+
+it.effect(
+	"adds nullable start keys to an already migrated store without backfill or a new migration id",
+	() =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			yield* seedLegacy(sql);
+			const columns = yield* sql<{
+				name: string;
+			}>`PRAGMA table_info(claude_runner_cursors)`;
+			for (const name of ["start_key", "reaper_start_key"])
+				if (columns.some((column) => column.name === name))
+					yield* sql.unsafe(
+						`ALTER TABLE claude_runner_cursors DROP COLUMN ${name}`,
+					);
+			const before =
+				yield* sql`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+			const receipts = yield* makeRunnerReceiptStore(sql);
+			expect(
+				yield* sql`SELECT start_key, reaper_start_key FROM claude_runner_cursors WHERE runner_id = 'runner'`,
+			).toEqual([{ start_key: null, reaper_start_key: null }]);
+			expect((yield* receipts.retirements()).rows[0]?.identity).toEqual(
+				decodedRetirement.identity,
+			);
+			expect(
+				yield* sql`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`,
+			).toEqual(before);
+		}).pipe(Effect.provide(testLayer)),
+);
+
+it("deduplicates members across timezones by precise identity and preserves distinct reused pids", () => {
+	const first = { pid: 123, startTime: "zone-one", startKey: "l:boot:10" };
+	const changedZone = { ...first, startTime: "zone-two" };
+	const reused = { ...first, startKey: "l:boot:11" };
+	expect(mergeRunnerMembers([first], [changedZone])).toEqual([changedZone]);
+	expect(
+		mergeRunnerMembers([first], [{ pid: 123, startTime: first.startTime }]),
+	).toEqual([first]);
+	expect(
+		mergeRunnerMembers([{ pid: 123, startTime: first.startTime }], [first]),
+	).toEqual([first]);
+	expect(mergeRunnerMembers([first], [reused])).toEqual([first, reused]);
+	expect(
+		mergeRunnerMembers([first], [{ ...first, startKey: "future:1" }]),
+	).toHaveLength(1);
+});
 
 it.effect(
 	"registration distinguishes unavailable storage from corrupt and constrained rows",

@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { Cause, Deferred, Effect, Exit, Scope, type Semaphore } from "effect";
 import type { PendingInteractionService } from "../../domain/project-services/Services/pending-interaction-service.js";
 import type { ProviderRuntimeIngestion } from "../../domain/project-services/Services/provider-runtime-ingestion-service.js";
+import type { ProcessStart } from "./process-table.js";
 import {
 	type RunnerHello,
 	type RunnerSocket,
@@ -21,7 +22,12 @@ import type {
 } from "./session-runner.js";
 
 /** Read-only outside this module, which is the only writer of every field. */
-export interface RunnerChild {
+export interface RunnerChild
+	extends Partial<{
+		[Key in keyof typeof ProcessStart.Encoded]:
+			| (typeof ProcessStart.Encoded)[Key]
+			| undefined;
+	}> {
 	readonly recoveringCommands?: boolean;
 	/** The attached host's hello querySeq, its start's label (CONTRACT 6.1). */
 	readonly querySeq?: number;
@@ -46,7 +52,6 @@ export interface RunnerChild {
 	readonly ingestion?: ProviderRuntimeIngestion | undefined;
 	readonly pendingInteractions?: PendingInteractionService | undefined;
 	readonly pid?: number | undefined;
-	readonly startTime?: string | undefined;
 	readonly reaper?: RunnerMember | undefined;
 	readonly child?: ChildProcess;
 	readonly connection?: RunnerSocket;
@@ -355,14 +360,17 @@ export const bindProcess = (
 	process: {
 		readonly child?: ChildProcess;
 		readonly pid: number | undefined;
-		readonly startTime: (pid: number) => string | undefined;
+		readonly start: (pid: number) => typeof ProcessStart.Encoded | undefined;
 	},
 ) => {
 	const writable: Writable<RunnerChild> = entry;
 	if (process.child) writable.child = process.child;
 	writable.pid = process.pid;
-	if (process.pid !== undefined)
-		writable.startTime ??= process.startTime(process.pid);
+	if (process.pid !== undefined && entry.startTime === undefined) {
+		const start = process.start(process.pid);
+		writable.startTime = start?.startTime;
+		writable.startKey = start?.startKey;
+	}
 };
 
 /** A verified hello. The socket attaches only while the caller still owns the entry. */
@@ -372,13 +380,13 @@ export const connect = (
 		readonly hello: RunnerHello;
 		readonly connection: RunnerSocket;
 		readonly attachmentId: string | undefined;
-		readonly startTime: (pid: number) => string | undefined;
+		readonly start: (pid: number) => typeof ProcessStart.Encoded | undefined;
 		readonly owns: () => boolean;
 	},
 ) => {
 	const { hello, connection } = attachment;
 	const writable: Writable<RunnerChild> = entry;
-	bindProcess(entry, { pid: hello.pid, startTime: attachment.startTime });
+	bindProcess(entry, { pid: hello.pid, start: attachment.start });
 	writable.reaper = hello.reaper;
 	if (attachment.owns() && !connection.closed) {
 		writable.connection = connection;

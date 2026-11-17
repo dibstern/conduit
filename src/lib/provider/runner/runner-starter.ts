@@ -1110,6 +1110,16 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 					sessionId,
 					runnerId: entry.runnerId,
 					...(entry.pid !== undefined ? { pid: entry.pid } : {}),
+					...(entry.startTime !== undefined
+						? {
+								start: {
+									startTime: entry.startTime,
+									...(entry.startKey === undefined
+										? {}
+										: { startKey: entry.startKey }),
+								},
+							}
+						: {}),
 					helloTimeoutMs: entry.child ? startupTimeoutMs : 2000,
 					...(identityOnly ? { identityOnly: true as const } : {}),
 					deps: {
@@ -1357,11 +1367,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								hello,
 								connection,
 								attachmentId: (yield* currentRunnerOutput)?.attachmentId,
-								startTime: (pid) => {
+								start: (pid) => {
 									const seen = stops.processTable.identify([pid]).get(pid);
-									return seen && "startTime" in seen
-										? seen.startTime
-										: undefined;
+									return seen && "startTime" in seen ? seen : undefined;
 								},
 								owns: ownsEntry,
 							});
@@ -1964,11 +1972,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							Entry.bindProcess(entry, {
 								child,
 								pid: child.pid,
-								startTime: (pid) => {
+								start: (pid) => {
 									const seen = stops.processTable.identify([pid]).get(pid);
-									return seen && "startTime" in seen
-										? seen.startTime
-										: undefined;
+									return seen && "startTime" in seen ? seen : undefined;
 								},
 							});
 							return child;
@@ -2488,7 +2494,12 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								driverKind: row.driverKind,
 								pid: row.identity.pid,
 								...(row.identity.tag === "Verified"
-									? { startTime: row.identity.startTime }
+									? {
+											startTime: row.identity.startTime,
+											...(row.identity.startKey === undefined
+												? {}
+												: { startKey: row.identity.startKey }),
+										}
 									: {}),
 								socketPath: join(
 									runnerDirectory(root, configDir),
@@ -2773,7 +2784,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									(connected._tag === "Failure"
 										? connected.failure.code !== "runner_incompatible"
 										: connected.success.closed) &&
-									stops.pidAlive(registration.pid, registration.startTime) &&
+									stops.pidAlive(registration.pid, registration) &&
 									retry < 4;
 									retry++
 								) {
@@ -2800,9 +2811,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									stopUnawaited(
 										Effect.gen(function* () {
 											yield* stops.stopRunner(entry, undefined, "failure");
-											if (
-												stops.pidAlive(registration.pid, registration.startTime)
-											)
+											if (stops.pidAlive(registration.pid, registration))
 												return yield* retireSurvivor(entry, failure);
 											Entry.transition(entry, { _tag: "Recovered" });
 											Entry.transition(entry, { _tag: "Fail", failure });
@@ -2819,9 +2828,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 													"recover runner",
 													"Runner disconnected during recovery",
 												);
-									if (
-										!stops.pidAlive(registration.pid, registration.startTime)
-									) {
+									if (!stops.pidAlive(registration.pid, registration)) {
 										Entry.transition(entry, { _tag: "Recovered" });
 										const abandonedFailure: SessionFailure = {
 											...failure,
