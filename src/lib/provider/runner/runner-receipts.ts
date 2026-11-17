@@ -9,7 +9,6 @@ import {
 	canonicalEvent,
 } from "../../persistence/events.js";
 import type { PermissionResponse } from "../types.js";
-import { legacyRunnerRanking } from "./runner-registry.js";
 import { type StoreFault, toStoreFault } from "./send-settlement.js";
 import type { SessionOutputReply } from "./session-runner.js";
 
@@ -339,10 +338,7 @@ export const createRunnerPermissionReplies = (sql: SqlClient.SqlClient) =>
 		PRIMARY KEY (session_id, request_id)
 	)`;
 
-export const makeRunnerReceiptStore = (
-	sql: SqlClient.SqlClient,
-	options: { readonly configDir?: string } = {},
-) =>
+export const makeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 	Effect.gen(function* () {
 		// Migration 0089 owns the table and its columns.
 		yield* flushPendingWrites(
@@ -351,15 +347,7 @@ export const makeRunnerReceiptStore = (
 				const slotIndex =
 					yield* sql`SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_runner_serving_session'`;
 				if (slotIndex.length === 0) {
-					// Legacy-only role ranking. Delete with 32.13 after retained rows migrate.
-					const configDir = options.configDir;
-					const registry: ReturnType<typeof legacyRunnerRanking> = configDir
-						? yield* Effect.sync(() => legacyRunnerRanking(configDir))
-						: new Map();
-					// main's rows have no session_id; its registration names the session (S9.6).
-					for (const [runnerId, { sessionId }] of registry)
-						if (sessionId)
-							yield* sql`UPDATE claude_runner_cursors SET session_id = ${sessionId} WHERE runner_id = ${runnerId} AND session_id = ''`;
+					// A store without the index keeps each session's newest serving cursor.
 					const live = yield* sql<{
 						runner_id: string;
 						session_id: string;
@@ -372,19 +360,6 @@ export const makeRunnerReceiptStore = (
 							row,
 						]);
 					for (const rows of sessions.values()) {
-						const rank = (runnerId: string) =>
-							registry.get(runnerId)?.role === "candidate"
-								? 2
-								: registry.get(runnerId)?.role === "retiring"
-									? 1
-									: 0;
-						rows.sort(
-							(a, b) =>
-								rank(a.runner_id) - rank(b.runner_id) ||
-								(registry.get(b.runner_id)?.registeredAt ?? 0) -
-									(registry.get(a.runner_id)?.registeredAt ?? 0) ||
-								b.sequence - a.sequence,
-						);
 						for (const row of rows.slice(1))
 							yield* sql`UPDATE claude_runner_cursors SET role = 'candidate' WHERE runner_id = ${row.runner_id}`;
 					}

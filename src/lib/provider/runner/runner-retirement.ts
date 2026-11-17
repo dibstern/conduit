@@ -2632,7 +2632,7 @@ export const stopRegisteredRunners = (
 						(cause) => new RunnerProcessError({ message: String(cause) }),
 					),
 				);
-			const receipts = yield* makeRunnerReceiptStore(sql, { configDir }).pipe(
+			const receipts = yield* makeRunnerReceiptStore(sql).pipe(
 				Effect.mapError(
 					(cause) => new RunnerProcessError({ message: String(cause) }),
 				),

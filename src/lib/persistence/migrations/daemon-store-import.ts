@@ -25,7 +25,6 @@ import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { AttachmentStoreTag } from "../../domain/persistence/Services/attachment-store.js";
 import { releaseCopiedInputDraftClaims } from "../../domain/project-services/Services/input-drafts.js";
-import { legacyRunnerRanking } from "../../provider/runner/runner-registry.js";
 import { makeAttachmentStore } from "../attachment-store.js";
 import {
 	makePersistenceEffectLayer,
@@ -170,17 +169,10 @@ const runnerTables = [
 	"claude_runner_permission_replies",
 ];
 
-// Legacy-only normalization for stores imported before runner slots existed.
-// Delete with the retained-runner compatibility paths in 32.13.
-function backfillRunnerRoles(db: DatabaseSync, configDir: string) {
+// Normalization for stores imported before runner slots existed: each session
+// keeps its newest serving cursor. Main's runner registry no longer ranks them.
+function backfillRunnerRoles(db: DatabaseSync) {
 	if (!tables(db, "main").includes("claude_runner_cursors")) return;
-	const registry = legacyRunnerRanking(configDir);
-	// Older rows have no session_id; their registration names the session (S9.6).
-	const backfill = db.prepare(
-		"UPDATE claude_runner_cursors SET session_id = ? WHERE runner_id = ? AND session_id = ''",
-	);
-	for (const [runnerId, { sessionId }] of registry)
-		if (sessionId) backfill.run(sessionId, runnerId);
 	const live = rows<{
 		runner_id: string;
 		session_id: string;
@@ -195,25 +187,11 @@ function backfillRunnerRoles(db: DatabaseSync, configDir: string) {
 			...(sessions.get(row.session_id) ?? []),
 			row,
 		]);
-	for (const candidates of sessions.values()) {
-		const rank = (id: string) =>
-			registry.get(id)?.role === "candidate"
-				? 2
-				: registry.get(id)?.role === "retiring"
-					? 1
-					: 0;
-		candidates.sort(
-			(a, b) =>
-				rank(a.runner_id) - rank(b.runner_id) ||
-				(registry.get(b.runner_id)?.registeredAt ?? 0) -
-					(registry.get(a.runner_id)?.registeredAt ?? 0) ||
-				b.sequence - a.sequence,
-		);
+	for (const candidates of sessions.values())
 		for (const row of candidates.slice(1))
 			db.prepare(
 				"UPDATE claude_runner_cursors SET role = 'candidate' WHERE runner_id = ?",
 			).run(row.runner_id);
-	}
 	db.exec(
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_runner_serving_session ON claude_runner_cursors(session_id) WHERE retired_at IS NULL AND role = 'serving'",
 	);
@@ -1096,7 +1074,7 @@ function importOne(
 					"Translated counters exceed the safe integer range",
 				);
 			copyProject(db, project, names, offsets);
-			backfillRunnerRoles(db, configDir);
+			backfillRunnerRoles(db);
 			// Release only copied claims, before another connection can claim these rows.
 			releaseCopiedInputDraftClaims(db);
 			options.checkpoint?.("import-copied", project.projectId);
@@ -1314,7 +1292,7 @@ function withNormalisedSource(
 					try {
 						verifyStore(copy, "main", project);
 						// Migration 0089 has given the copy every cursor column by now.
-						backfillRunnerRoles(copy, configDir);
+						backfillRunnerRoles(copy);
 					} finally {
 						copy.close();
 					}

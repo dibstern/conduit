@@ -123,7 +123,7 @@ export const makeProcessSessionRunner = (
 						.pipe(Effect.map((recovery) => recovery?.ingestion))
 				: Effect.succeed(ingestion);
 		const receipts = sql
-			? yield* makeRunnerReceiptStore(sql, { configDir }).pipe(Effect.orDie)
+			? yield* makeRunnerReceiptStore(sql).pipe(Effect.orDie)
 			: undefined;
 		const sessionCommit = (sessionId: string) =>
 			Effect.gen(function* () {
