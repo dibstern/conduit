@@ -174,7 +174,7 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 		} = {};
 		const driver: ProcessRunnerDriver = {
 			driverKind,
-			legacyPrepareTurnEffect: (input) =>
+			prepareStoredTurnEffect: (input) =>
 				Effect.succeed({
 					input: {
 						...input,
@@ -220,7 +220,6 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 						sessionId: "s",
 						pid: options.pid ?? 0,
 						bindings: [],
-						sendJournalAnswers: true,
 						sendAnswers: [],
 					};
 					connections.push(connection);
@@ -365,7 +364,7 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 			commandId: string,
 			sequence = 1,
 			attempt = 1,
-			transmission: "legacy" | "held" | "unheld" = "legacy",
+			transmission: "held" | "unheld" = "held",
 		) =>
 			Effect.gen(function* () {
 				const turn = {
@@ -385,13 +384,7 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 						canonicalEvent(
 							"run.dispatched",
 							"s",
-							{
-								runId: turn.runId,
-								runnerId,
-								...(transmission === "held"
-									? { commandId, transmission: 1 }
-									: {}),
-							},
+							{ runId: turn.runId, runnerId, commandId, transmission: 1 },
 							{ provider: driverKind, metadata: { runId: turn.runId } },
 						),
 					]);
@@ -2102,7 +2095,6 @@ const journalHello =
 		...hello,
 		bindings: [],
 		sendTokens: [],
-		sendJournalAnswers: true,
 		sendAnswers: [
 			{
 				token: sendToken("hold", commandId, 1),
@@ -2326,108 +2318,6 @@ it.effect(
 				}>`SELECT json_extract(data, '$.transmission') AS n FROM events
 					WHERE type = 'run.dispatched' ORDER BY sequence`;
 				expect(dispatched.map(({ n }) => n)).toEqual([1, 2, 3]);
-			}),
-		),
-);
-
-it.effect(
-	"F69 legacy replay with retryable unset fails once without replay",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("cursor");
-				yield* f.seed("legacy");
-				yield* f.hello(
-					({
-						sendJournalAnswers: _capability,
-						sendAnswers: _answers,
-						...hello
-					}) => ({
-						...hello,
-						bindings: [],
-						sendTokens: [],
-						completedCommands: [],
-					}),
-				);
-				let attempts = 0;
-				f.replaySend.execute = () =>
-					Effect.suspend(() => {
-						attempts++;
-						return Effect.fail({
-							operation: "send-turn",
-							code: "bad_configuration",
-							message: "configuration rejected",
-						});
-					});
-				yield* f.recover;
-				yield* TestClock.adjust("5 seconds");
-				expect(attempts).toBe(1);
-				expect(
-					yield* f.sql`SELECT status, error_code FROM provider_command_outbox`,
-				).toEqual([{ status: "failed", error_code: "bad_configuration" }]);
-				expect(yield* f.sql`SELECT status FROM provider_runs`).toEqual([
-					{ status: "error" },
-				]);
-			}),
-		),
-);
-
-// A token names one transmission (CONTRACT 66-67). An older runner's replayed
-// claim whose resume is rejected must not send its fresh fallback under the
-// claim's token: the fallback is the next transmission (4.8).
-it.effect(
-	"a legacy replay's rejected resume never sends a fallback under its claim's token",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("claude");
-				yield* f.seed("legacy-resume");
-				yield* f.sql`INSERT INTO provider_state (session_id,key,value) VALUES ('s','nativeThread:account',${JSON.stringify({ configDir: configuredClaudeConfigDir(f.root), resumeSessionId: "stale", firstSequence: 0, deliveredThrough: 0 })})`;
-				yield* f.hello(
-					({
-						sendJournalAnswers: _capability,
-						sendAnswers: _answers,
-						...hello
-					}) => ({
-						...hello,
-						bindings: [],
-						sendTokens: [],
-						completedCommands: [],
-					}),
-				);
-				const frames: Array<{ token: string; fresh: boolean }> = [];
-				f.replaySend.execute = (token, command) =>
-					Effect.sync(() => {
-						const fresh = command.input.nativeResumeFallback === true;
-						frames.push({ token, fresh });
-						return fresh
-							? terminalResult()
-							: {
-									...terminalResult(),
-									status: "error" as const,
-									error: {
-										code: "claude_resume_refused",
-										message:
-											"Resume rejected by --resume-drops-turn: native context rejected",
-										retryable: false,
-									},
-								};
-					});
-				yield* f.recover;
-				yield* TestClock.adjust("5 seconds");
-				expect(frames[0]).toEqual({
-					token: sendToken("tx", "legacy-resume", 1),
-					fresh: false,
-				});
-				expect(new Set(frames.map(({ token }) => token)).size).toBe(
-					frames.length,
-				);
-				// The claim requeues with the marker; its next claim sends the fallback.
-				expect(
-					yield* f.sql`SELECT status, attempt_count, json_extract(payload_json, '$.nativeResumeFallback') AS fallback FROM provider_command_outbox`,
-				).toEqual([
-					{ status: "retryable_failed", attempt_count: 1, fallback: 1 },
-				]);
 			}),
 		),
 );
@@ -2663,7 +2553,6 @@ it.effect(
 					...hello,
 					bindings: [],
 					sendTokens: [token],
-					sendJournalAnswers: true,
 					sendAnswers: [{ token, status: "uncertain" }],
 				}));
 				yield* f.recover;
@@ -2785,58 +2674,6 @@ it.effect(
 		),
 );
 
-it.effect(
-	"legacy safe replay retains its dedup key through explicitly transient failure",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("cursor");
-				yield* f.seed("legacy-transient");
-				yield* f.hello(
-					({
-						sendJournalAnswers: _capability,
-						sendAnswers: _answers,
-						...hello
-					}) => ({
-						...hello,
-						bindings: [],
-						sendTokens: [],
-						completedCommands: [],
-					}),
-				);
-				const attempted = yield* Deferred.make<void>();
-				const keys: string[] = [];
-				f.replaySend.execute = (token) =>
-					Effect.gen(function* () {
-						keys.push(token);
-						if (keys.length === 1) {
-							yield* Deferred.succeed(attempted, undefined);
-							return yield* Effect.fail({
-								operation: "send-turn",
-								code: "account_switch_busy",
-								message: "busy before intake",
-								retryable: true,
-							});
-						}
-						return terminalResult();
-					});
-				yield* f.recover;
-				yield* Deferred.await(attempted);
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox`,
-				).toEqual([{ status: "running" }]);
-				yield* TestClock.adjust("1 second");
-				expect(keys).toEqual([
-					sendToken("tx", "legacy-transient", 1),
-					sendToken("tx", "legacy-transient", 1),
-				]);
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox`,
-				).toEqual([{ status: "completed" }]);
-			}),
-		),
-);
-
 // Fail the second half of the actual SQLite projection transaction. The run
 // terminal and its status have already been written when the outbox write fails.
 const failSettlementWrite = (
@@ -2916,12 +2753,7 @@ for (const source of ["adoption", "retained reply", "reactor reply"] as const)
 				Effect.gen(function* () {
 					const f = yield* s7Fixture("claude");
 					const reactor = source === "reactor reply";
-					yield* f.seed(
-						"atomic",
-						1,
-						reactor ? 0 : 1,
-						reactor ? "legacy" : "held",
-					);
+					yield* f.seed("atomic", 1, reactor ? 0 : 1);
 					const result = {
 						...terminalResult(
 							reactor ? "error" : "completed",
@@ -3397,12 +3229,7 @@ for (const source of ["adoption", "retained reply", "reactor reply"] as const)
 				Effect.gen(function* () {
 					const f = yield* s7Fixture("claude");
 					const reactor = source === "reactor reply";
-					yield* f.seed(
-						"stable",
-						1,
-						reactor ? 0 : 1,
-						reactor ? "legacy" : "held",
-					);
+					yield* f.seed("stable", 1, reactor ? 0 : 1);
 					const result = terminalResult("error", {
 						code: "temporary",
 						message: "transient terminal",
@@ -3823,10 +3650,7 @@ it.effect(
 		),
 );
 
-const failSessionStore = (
-	sql: SqlClient.SqlClient,
-	operation: "read" | "register",
-) =>
+const failSessionRegistration = (sql: SqlClient.SqlClient) =>
 	Effect.gen(function* () {
 		const connection = yield* Effect.scoped(sql.reserve);
 		const execute = connection.execute;
@@ -3837,12 +3661,10 @@ const failSessionStore = (
 			.spyOn(connection, "execute")
 			.mockImplementation((query, params, transform) =>
 				Effect.suspend(() => {
-					const selected =
-						operation === "read"
-							? query.includes(" AS legacy")
-							: query.includes("INSERT INTO claude_runner_cursors") &&
-								query.includes("role");
-					if (selected) {
+					if (
+						query.includes("INSERT INTO claude_runner_cursors") &&
+						query.includes("role")
+					) {
 						attempts++;
 						if (unavailable)
 							return Deferred.succeed(entered, undefined).pipe(
@@ -3850,7 +3672,7 @@ const failSessionStore = (
 									Effect.fail(
 										new SqlError({
 											reason: new ConnectionError({
-												cause: `injected ${operation} unavailable`,
+												cause: "injected register unavailable",
 											}),
 										}),
 									),
@@ -3870,58 +3692,6 @@ const failSessionStore = (
 		};
 	});
 
-for (const operation of ["read"] as const)
-	it.effect(
-		`F79 unavailable ${operation} retries its owned store operation without a new process or claim`,
-		() =>
-			runRetirement(
-				Effect.gen(function* () {
-					const f = yield* s7Fixture("claude");
-					yield* f.seed("store", 1, 0);
-					if (operation === "read") yield* f.recover;
-					f.replaySend.execute = () =>
-						Effect.succeed(
-							terminalResult("error", {
-								code: "final",
-								message: "final reply",
-							}),
-						);
-					const fault = yield* failSessionStore(f.sql, operation);
-					const sending = yield* f.reactor.runOnce().pipe(Effect.forkChild);
-					yield* Deferred.await(fault.entered);
-					yield* TestClock.adjust(0);
-					expect(
-						yield* f.sql`SELECT status, runner_id FROM provider_runs`,
-					).toEqual([{ status: "pending", runner_id: null }]);
-					expect(
-						yield* f.sql`SELECT status, attempt_count FROM provider_command_outbox`,
-					).toEqual([{ status: "running", attempt_count: 1 }]);
-					expect(
-						yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-					).toEqual([]);
-					expect(f.commands.filter((c) => c.type === "send-turn")).toEqual([]);
-					const starts = spawned.spawn.mock.calls.length;
-					expect(starts).toBe(operation === "read" ? 0 : 1);
-					fault.recover();
-					yield* TestClock.adjust("1 second");
-					expect(sending.pollUnsafe()).toMatchObject({ _tag: "Success" });
-					// The submit's legacy read fails once and is retried; the reply's
-					// settlement then proves the send modern with the same read.
-					expect(fault.attempts()).toBe(operation === "read" ? 3 : 2);
-					expect(spawned.spawn).toHaveBeenCalledTimes(starts);
-					expect(f.commands.filter((c) => c.type === "send-turn")).toHaveLength(
-						1,
-					);
-					expect(
-						yield* f.sql`SELECT status, attempt_count FROM provider_command_outbox`,
-					).toEqual([{ status: "failed", attempt_count: 1 }]);
-					expect(yield* f.sql`SELECT status FROM provider_runs`).toEqual([
-						{ status: "error" },
-					]);
-				}),
-			),
-	);
-
 it.effect(
 	"F79 unavailable registration ends its start retryable and the reactor retries a fresh run",
 	() =>
@@ -3933,7 +3703,7 @@ it.effect(
 					Effect.succeed(
 						terminalResult("error", { code: "final", message: "final reply" }),
 					);
-				const fault = yield* failSessionStore(f.sql, "register");
+				const fault = yield* failSessionRegistration(f.sql);
 				const sending = yield* f.reactor.runOnce().pipe(Effect.forkChild);
 				yield* Deferred.await(fault.entered);
 				yield* TestClock.adjust(0);

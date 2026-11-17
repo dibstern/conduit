@@ -98,7 +98,6 @@ it.effect("runner hello and status keep each send token separate", () =>
 		});
 		let connection = yield* connect;
 		expect(hello).toMatchObject({
-			sendJournalAnswers: true,
 			sendAnswers: [],
 		});
 		let detached = 0;
@@ -281,11 +280,6 @@ it.effect("runner hello and status keep each send token separate", () =>
 			fresh: true,
 			status: "running",
 		});
-		expect(
-			hello?.completedCommands?.some(
-				({ commandId }) => commandId === sendToken("tx", "fallback", 2),
-			),
-		).toBe(false);
 		expect(hello?.bindings).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ sinkId: "send:1", token: send1 }),
@@ -295,23 +289,6 @@ it.effect("runner hello and status keep each send token separate", () =>
 					sinkId: "fallback:2",
 					token: sendToken("tx", "fallback", 2),
 				}),
-			]),
-		);
-		expect(hello?.completedCommands).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					commandId: send1,
-					result: expect.objectContaining({ cost: 1 }),
-				}),
-				expect.objectContaining({
-					commandId: send2,
-					result: expect.objectContaining({ cost: 2 }),
-				}),
-				expect.objectContaining({
-					commandId: sendToken("tx", "fallback", 1),
-					result: expect.objectContaining({ nativeResumeRejected: true }),
-				}),
-				expect.objectContaining({ commandId: "control" }),
 			]),
 		);
 	}),

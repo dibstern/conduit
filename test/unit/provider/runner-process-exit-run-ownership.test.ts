@@ -36,7 +36,6 @@ import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/project-ser
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	claudeLoginChange,
@@ -53,7 +52,6 @@ import {
 	sendToken,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
-import { failRunnerTurn } from "../../../src/lib/provider/runner/runner-turn-failure.js";
 import type { SessionCommand } from "../../../src/lib/provider/runner/session-runner.js";
 import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
@@ -481,32 +479,18 @@ afterEach(() => {
 		rmSync(root, { recursive: true, force: true });
 });
 
-// A confirmed exit must settle its exact durable commands even without a sink.
+// A confirmed exit leaves a held send's in-flight completion to settle its run.
 // Joined commands resolve to their accepted owner; a replacement's unadmitted
-// reservation must survive. Before intake, the exact placed input (including a
-// continuation's cut-off turn) must fail even if exit wins the failRunnerTurn
-// race; leaving it pending loses the inbox's error pause. No OS signals are sent.
-for (const [
-	joined,
-	pendingCompletion,
-	unaccepted,
-	continuation,
-	acknowledged,
-	childOnly = false,
-] of [
-	[false, false, false, false, false],
-	[true, false, false, false, false],
-	[false, true, false, false, false],
-	[true, true, false, false, false],
-	[false, false, true, false, false],
-	[false, false, true, true, false],
-	[false, false, false, false, true],
-	[false, false, false, false, false, true],
+// reservation must survive. No OS signals are sent.
+for (const [joined, pendingCompletion, childOnly = false] of [
+	[false, true],
+	[true, true],
+	[false, false, true],
 ] as const) {
 	it(
 		childOnly
 			? "recovers tool-linked child runs without parent reservations and preserves Side Threads"
-			: `${pendingCompletion ? "preserves an in-flight completion for" : "settles only"} the exited runner's ${unaccepted ? (continuation ? "pre-intake continuation" : "pre-intake input") : joined ? "joined" : acknowledged ? "acknowledged" : "own"} run without a binding`,
+			: `preserves an in-flight completion for the exited runner's ${joined ? "joined" : "own"} run without a binding`,
 		async () => {
 			const root = mkdtempSync(join(tmpdir(), "run-exit-"));
 			roots.push(root);
@@ -522,7 +506,10 @@ for (const [
 				return child;
 			});
 			let completeNative: (() => Effect.Effect<void>) | undefined;
-			let legacyCommit: Effect.Success<typeof makeCommitAndSignal> | undefined;
+			let dispatchCommit:
+				| Effect.Success<typeof makeCommitAndSignal>
+				| undefined;
+			const held = sendToken("hold", "old-command", 1);
 			const driver: ProcessRunnerDriver = {
 				driverKind: "claude",
 				connect: (options) =>
@@ -560,23 +547,24 @@ for (const [
 							},
 							commandEffect: () => Effect.succeed(undefined),
 						} as unknown as RunnerSocket;
-						// This fixture advertises the retained legacy sendTokens shape.
-						// Its command-less dispatch event selects that same recovery path;
-						// modern unheld owner sends belong to the continuation feeder.
-						const commit = legacyCommit;
+						// The runner holds the send's first transmission and answers it running.
+						const commit = dispatchCommit;
 						if (!commit)
-							return yield* Effect.die("Missing fixture legacy commit");
+							return yield* Effect.die("Missing fixture dispatch commit");
 						yield* commit([
 							canonicalEvent(
 								"run.dispatched",
 								"s",
-								{ runId: "old-run", runnerId: options.runnerId },
+								{
+									runId: "old-run",
+									runnerId: options.runnerId,
+									commandId: "old-command",
+									transmission: 1,
+								},
 								{ provider: "claude", metadata: { runId: "old-run" } },
 							),
 						]).pipe(
-							Effect.mapError((cause) =>
-								runnerFailure("test legacy dispatch", cause),
-							),
+							Effect.mapError((cause) => runnerFailure("test dispatch", cause)),
 						);
 						yield* options.onHello(
 							{
@@ -587,15 +575,14 @@ for (const [
 								runnerId: options.runnerId,
 								sessionId: options.sessionId,
 								pid: child.pid,
-								sendTokens: childOnly
+								sendTokens: childOnly ? [] : [held],
+								sendAnswers: childOnly
 									? []
-									: [sendToken("tx", "old-command", 1)],
+									: [{ token: held, status: "running" }],
 								bindings: [],
 							},
 							connection,
 						);
-						if (acknowledged)
-							options.onCommandsSettled?.([sendToken("tx", "old-command", 1)]);
 						return connection;
 					}),
 				settingsDeferredCode: "test-deferred",
@@ -614,7 +601,7 @@ for (const [
 					const sql = yield* SqlClient.SqlClient;
 					const ingestion = yield* ProviderRuntimeIngestionTag;
 					const events = yield* EventStoreEffectTag;
-					legacyCommit = yield* makeCommitAndSignal;
+					dispatchCommit = yield* makeCommitAndSignal;
 					const completionEntered = yield* Deferred.make<void>();
 					const releaseCompletion = yield* Deferred.make<void>();
 					const syntheticTerminalCommitted = yield* Deferred.make<void>();
@@ -624,7 +611,7 @@ for (const [
 					yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at)
 				VALUES ('s', 'test-project', 'claude', 1, 1)`;
 					yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
-				VALUES ('old-run', 's', ${childOnly ? "completed" : unaccepted ? "pending" : "running"}, 1), ('future-run', 's', 'pending', 2)`;
+				VALUES ('old-run', 's', ${childOnly ? "completed" : "running"}, 1), ('future-run', 's', 'pending', 2)`;
 					if (childOnly) {
 						yield* sql`INSERT INTO sessions (id, project_id, provider, parent_id, created_at, updated_at)
 					VALUES ('child', 'test-project', 'claude', 's', 1, 1), ('nested', 'test-project', 'claude', 's', 1, 1), ('side', 'test-project', 'claude', 's', 1, 1)`;
@@ -639,22 +626,6 @@ for (const [
 					VALUES ('child-prompt', 'child', 'child-prompt', 'child-run', 'running', 1), ('side-prompt', 'side', 'side-prompt', 'side-run', 'running', 1)`;
 					}
 					const reservation = joined ? "joined-reservation" : "old-run";
-					const userMessageId = continuation ? "cut-off-input" : "old-command";
-					if (unaccepted) {
-						yield* sql`INSERT INTO messages (id, session_id, role, text, input_id, created_at, updated_at)
-						VALUES (${userMessageId}, 's', 'user', 'placed before intake', ${userMessageId}, 1, 1)`;
-						yield* sql`INSERT INTO turns (id, session_id, user_message_id, run_id, state, requested_at)
-						VALUES (${userMessageId}, 's', ${userMessageId}, 'old-run', 'pending', 1)`;
-						const commit = yield* makeCommitAndSignal;
-						yield* commit([
-							canonicalEvent("input.admitted", "s", {
-								sessionId: "s",
-								inputId: "queued-b",
-								delivery: "queue",
-								request: { text: "send after recovery" },
-							}),
-						]);
-					}
 					if (joined)
 						yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
 				VALUES (${reservation}, 's', 'pending', 1)`;
@@ -698,7 +669,7 @@ for (const [
 							{ state: "running", run_id: "old-run" },
 						]);
 					}
-					if (!unaccepted && !joined)
+					if (!joined)
 						yield* events.appendBatch([
 							canonicalEvent(
 								"run.started",
@@ -710,7 +681,7 @@ for (const [
 					yield* sql`INSERT INTO provider_command_outbox
 				(request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
 				VALUES (1, 'old-command', 'test-project', 's', 'claude', 'send_turn',
-					${reservation}, ${JSON.stringify({ inputId: "old-command", ...(continuation ? { continuation: { cutOffMessageId: userMessageId } } : {}) })}, ${childOnly ? "completed" : "running"}, 1, 1, 1),
+					${reservation}, '{"inputId":"old-command"}', ${childOnly ? "completed" : "running"}, 1, 1, 1),
 				(2, 'future-command', 'test-project', 's', 'claude', 'send_turn',
 					'future-run', '{"inputId":"future-command"}', 'pending', 0, 2, 2)`;
 					const runner = yield* makeProcessSessionRunner(
@@ -811,8 +782,7 @@ for (const [
 									),
 								).toEqual([
 									{
-										status:
-											pendingCompletion || childOnly ? "completed" : "error",
+										status: "completed",
 									},
 								]);
 								if (childOnly) {
@@ -848,63 +818,9 @@ for (const [
 							yield* sql`SELECT state FROM turns WHERE session_id = 'side'`,
 						).toEqual([{ state: "running" }]);
 					}
-					if (unaccepted) {
-						const ended =
-							yield* sql`SELECT run.completed_at AS run_end, turn.completed_at AS turn_end
-						FROM provider_runs run JOIN turns turn ON turn.id = ${userMessageId}
-						WHERE run.id = 'old-run'`;
-						// Repeated failure delivery cannot append another run terminal.
-						yield* failRunnerTurn(
-							(output) =>
-								output.type === "event"
-									? ingestion.ingest(output.event).pipe(
-											Effect.as({}),
-											Effect.mapError((error) =>
-												runnerFailure("test output", error),
-											),
-										)
-									: Effect.succeed({}),
-							"old-sink",
-							{
-								sessionId: "s",
-								runId: "old-run",
-								messageId: "",
-							},
-							runnerFailure("runner exit", "runner stopped"),
-							"claude",
-						);
-						expect(
-							yield* sql`SELECT state, run_id FROM turns WHERE id = ${userMessageId}`,
-						).toEqual([{ state: "error", run_id: "old-run" }]);
-						expect(
-							yield* sql`SELECT run.completed_at AS run_end, turn.completed_at AS turn_end
-							FROM provider_runs run JOIN turns turn ON turn.id = ${userMessageId}
-							WHERE run.id = 'old-run'`,
-						).toEqual(ended);
-						expect(
-							yield* sql`SELECT json_extract(data, '$.userMessageId') AS user_message_id FROM events WHERE type = 'turn.error'`,
-						).toEqual([{ user_message_id: null }]);
-						expect(
-							yield* sql`SELECT type FROM events WHERE type = 'run.started'`,
-						).toEqual([]);
-						expect(
-							yield* sql`SELECT started_at FROM provider_runs WHERE id = 'old-run'`,
-						).toEqual([{ started_at: null }]);
-						const read = yield* ReadQueryEffectTag;
-						expect(yield* read.readInboxState("s")).toMatchObject({
-							// Busy and paused are independent: the failure after that
-							// handoff must keep queued work paused even when it completes.
-							paused: true,
-						});
-						expect(
-							yield* sql`SELECT input_id, state FROM pending_inputs WHERE input_id = 'queued-b'`,
-						).toEqual([{ input_id: "queued-b", state: "queued" }]);
-					}
 					expect(
 						yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'turn.error'`,
-					).toEqual(
-						pendingCompletion || childOnly ? [] : [{ run_id: "old-run" }],
-					);
+					).toEqual([]);
 					if (joined) {
 						child.emit("exit", 0, null);
 						expect(
@@ -912,7 +828,7 @@ for (const [
 						).toEqual(
 							["old-command", "sibling-command"].map((id) => ({
 								id,
-								state: pendingCompletion ? "completed" : "error",
+								state: "completed",
 								run_id: "old-run",
 							})),
 						);

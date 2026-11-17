@@ -38,14 +38,14 @@ import { ProviderRuntimeIngestionLive } from "../../helpers/daemon-turns.js";
 
 // Settle at the reconciler's interface over a real store: a gone runner's held
 // send with no journal is released only when the runner journals before it
-// executes. The cursor row records that at hello (BC-1); rows from before
-// migration 0089 have no record and fall back to the evidence file's build.
+// executes. Every runner this build attaches does; only a cursor an older
+// build recorded as not journalling first reads 0 (BC-1).
 // Each committed evidence settles through main's Send Settlement, and a
 // sendless owner through the runner's settleRuns, so a test reads the label
 // each lost run ends with.
 const runnerId = "0123456789ab";
 const settle = (
-	journals: boolean | undefined,
+	journals: boolean,
 	buildId: string,
 	reason: StopReason = { _tag: "Explicit" },
 	answer?: TurnResult,
@@ -155,11 +155,10 @@ const settle = (
 				{ sessionId: "session", pid: 124, startTime: "started" },
 				"candidate",
 			);
-		// The hello's cursor claim records whether this runner journals first.
-		yield* receipts.attach(runnerId, "attachment", {
-			sessionId: "session",
-			...(journals === undefined ? {} : { journalsBeforeExecution: journals }),
-		});
+		yield* receipts.attach(runnerId, "attachment", { sessionId: "session" });
+		// An older build recorded 0 for a runner that did not journal first.
+		if (!journals)
+			yield* sql`UPDATE claude_runner_cursors SET journals_before_execution = 0 WHERE runner_id = ${runnerId}`;
 		expect(
 			yield* lifecycle.holdRun({
 				sessionId: "session",
@@ -277,21 +276,6 @@ it.effect(
 	() =>
 		Effect.gen(function* () {
 			expect(yield* settle(false, runnerBuildId())).toMatchObject({
-				released: [],
-				committed: [{ _tag: "delivery_unknown", runId: "run" }],
-			});
-		}),
-);
-
-it.effect(
-	"a row with no journal record still falls back to the evidence build",
-	() =>
-		Effect.gen(function* () {
-			expect(yield* settle(undefined, runnerBuildId())).toMatchObject({
-				released: [{ reason: "JournalAbsent", runId: "run" }],
-				committed: [],
-			});
-			expect(yield* settle(undefined, "previous-build")).toMatchObject({
 				released: [],
 				committed: [{ _tag: "delivery_unknown", runId: "run" }],
 			});

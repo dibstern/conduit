@@ -175,7 +175,6 @@ describe("T5-writers", () => {
 				// Pending-prompt retirement's cancelControls body.
 				"src/lib/persistence/effect/retire-pending-prompts.ts#retirePendingPrompts(argument 1): pending,running,retryable_failed -> cancelled",
 				"src/lib/provider/runner/send-settlement-outbox.ts#settleDirectSend: running -> completed,failed,retryable_failed",
-				"src/lib/provider/runner/send-settlement-outbox.ts#settleLegacySend: running -> retryable_failed",
 				"src/lib/provider/runner/send-settlement-outbox.ts#requeueLegacySend: running -> retryable_failed",
 				// CONTRACT.md 3.12 says every writer but markCompleted and writeFailure guards
 				// status IN (from). settleRunCommands guards through its SELECT in the same

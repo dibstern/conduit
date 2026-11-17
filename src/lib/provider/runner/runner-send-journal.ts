@@ -271,11 +271,6 @@ export class RunnerSendJournal {
 		}
 	}
 
-	/** Opaque fences can answer only a same-key command, never a complete snapshot. */
-	get canAnswerRetainedSends(): boolean {
-		return [...this.retained].every((filename) => this.records.has(filename));
-	}
-
 	/** Disk evidence gives the outcome; only a call in this journal gives ownership. */
 	get answers(): readonly RunnerSendAnswer[] {
 		return [...this.retained].flatMap((filename): RunnerSendAnswer[] => {

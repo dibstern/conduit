@@ -68,11 +68,6 @@ describe("runner connection writers", () => {
 		expect(writers.sort()).toEqual([
 			// Dispatch: the one send writer, behind its WritePermission.
 			"src/lib/provider/runner/runner-dispatch.ts: payload",
-			// A legacy run holds no transmission, so its retained replay has no permission to take.
-			"src/lib/provider/runner/runner-legacy-recovery.ts: command",
-			// onHello replays a legacy send on the connection that said hello, before ready lets
-			// Dispatch serve it, and a legacy run holds no transmission for Dispatch to permit.
-			"src/lib/provider/runner/runner-starter.ts: command",
 			// Upgrade warm: a pre-warm carries no turn bytes.
 			"src/lib/provider/runner/runner-starter.ts: driver.warmCommand(sessionId, state, snapshot)",
 		]);

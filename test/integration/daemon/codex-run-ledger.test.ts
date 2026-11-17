@@ -1172,109 +1172,47 @@ describe("Codex on the Run Ledger", () => {
 		);
 	});
 
-	// Two-build upgrade (CONTRACT.md 3051): main's daemon holds a Codex turn, is SIGKILLed, and
-	// the current build restarts on its store.
-	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
-	it("settles a Codex turn main's runner held through an upgrade once, never re-sent", async (context) => {
+	// Two-build upgrade (82tn.32.14, 32.47; CONTRACT.md 7.4): the ledger build's daemon holds a
+	// Codex turn, is SIGKILLed, and the current build restarts on its store and adopts its runner.
+	// test-waits-allow timeout-override: a cold cache builds the ledger build's tree before the test runs.
+	it("finishes a Codex turn the ledger build's runner held through an upgrade once, never re-sent", async (context) => {
 		const historical = await historicalRunnerBundle(
-			"020678548921ff6419796274482a1a9ecc5dfc69",
+			"4b2fe6eee9b9d44974e82471857196c8afeee830",
 		);
-		if (!historical.available) context.skip(historical.reason);
-		if (!historical.available) return;
-		// main's session detail feed fails this build's schema (82tn.51 dropped its rewind row),
-		// so the browser leaves main's session unviewed.
+		if (!historical.available) return context.skip(historical.reason);
 		const { fixture, browser, sessionId, restart } = await start(
 			"two-build",
 			fixtureRows("basic"),
 			{},
 			{ dist: historical.dist },
-			false,
 		);
 		const delta = fixtureRows("basic").find(
 			({ message }) => message?.method === "item/agentMessage/delta",
 		)?.["at"];
 		writeFileSync(gatePath, String(delta));
-		await submit(browser, sessionId, "Say hello", "queue", randomUUID(), false);
+		await submit(browser, sessionId, "Say hello", "queue", randomUUID());
 		// test-waits-allow polling: the app-server's output reaches only its capture file.
 		await vi.waitFor(
 			() => expect(captured("item/agentMessage/delta")).not.toEqual([]),
 			{ timeout: TIMEOUT },
 		);
-		expect(captured("turn/start", "out")).toHaveLength(1);
 		await fixture.kill();
 		await restart(process.env["CONDUIT_TEST_DIST"] ?? "dist");
 		await (await fixture.connect()).followSession(sessionId);
-		// main's runner is an older build: this build retires it and ends its turn once, never
-		// re-sending it (CONTRACT.md 3051, F39).
-		await turns(fixture, sessionId, ["error"]);
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		await turns(fixture, sessionId, ["completed"]);
 		const ledger = read(fixture, sessionId);
 		endsOnce(ledger);
 		expect(ledger.ends).toEqual([
-			expect.objectContaining({ outcome: "error" }),
+			expect.objectContaining({ outcome: "completed" }),
 		]);
-		expect(ledger.runs).toHaveLength(1);
+		reattachedOnce(ledger);
+		expect(captured("turn/start", "out")).toHaveLength(1);
 		proveCrashMatrixCell(
 			"two-build/codex",
 			fixture.daemonStorePath(),
 			sessionId,
 		);
-	}, 300_000);
-	// main records a turn's start only at Codex's turn/started, so a daemon that dies after
-	// turn/start went out leaves an open Run with no start and no hold.
-	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
-	it("settles a Codex turn main's runner sent before its start was recorded once, never re-sent", async (context) => {
-		const historical = await historicalRunnerBundle(
-			"020678548921ff6419796274482a1a9ecc5dfc69",
-		);
-		if (!historical.available) return context.skip(historical.reason);
-		const { fixture, browser, sessionId, restart } = await start(
-			"two-build-unstarted",
-			fixtureRows("basic"),
-			{},
-			{ dist: historical.dist },
-			false,
-		);
-		const accepted = fixtureRows("basic").find(
-			({ message }) => message?.result?.["turn"],
-		)?.["at"];
-		writeFileSync(gatePath, String(Number(accepted) - 1));
-		await submit(browser, sessionId, "Say hello", "queue", randomUUID(), false);
-		// test-waits-allow polling: the app-server's input reaches only its capture file.
-		await vi.waitFor(
-			() => expect(captured("turn/start", "out")).toHaveLength(1),
-			{ timeout: TIMEOUT },
-		);
-		await fixture.kill();
-		const db = new Database(fixture.daemonStorePath(), { readonly: true });
-		try {
-			expect(
-				db
-					.prepare(
-						"SELECT type FROM events WHERE session_id = ? AND type IN ('run.started', 'run.dispatched')",
-					)
-					.all(sessionId),
-			).toEqual([]);
-		} finally {
-			db.close();
-		}
-		const from = fixture.marks.length;
-		await restart(process.env["CONDUIT_TEST_DIST"] ?? "dist");
-		// Nothing holds Codex back now: a turn sent again would complete.
-		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
-		await (await fixture.connect()).followSession(sessionId);
-		await turns(fixture, sessionId, ["error"]);
-		const ledger = read(fixture, sessionId);
-		endsOnce(ledger);
-		expect(ledger.runs).toHaveLength(1);
-		// No runner of this build was asked to send it (the capture restarts with each app-server).
-		expect(
-			fixture.marks
-				.slice(from)
-				.filter(
-					(mark) =>
-						mark.kind === "runner-started" && mark.sessionId === sessionId,
-				),
-		).toEqual([]);
 	}, 300_000);
 	it("keeps a wake running through a daemon restart; it ends once at its own result", async () => {
 		const { fixture, sessionId, trace, restart } = await wake(

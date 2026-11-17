@@ -1189,12 +1189,12 @@ describe("Cursor on the Run Ledger", () => {
 		);
 	}, 120_000);
 
-	// Two-build upgrade (CONTRACT.md 3051): main's daemon holds a Cursor turn, is SIGKILLed, and
-	// the current build restarts on its store.
-	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
-	it("settles a Cursor turn main's runner held through an upgrade once, never re-sent", async (context) => {
+	// Two-build upgrade (82tn.32.14, 32.47; CONTRACT.md 7.4): the ledger build's daemon holds a
+	// Cursor turn, is SIGKILLed, and the current build restarts on its store and adopts its runner.
+	// test-waits-allow timeout-override: a cold cache builds the ledger build's tree before the test runs.
+	it("finishes a Cursor turn the ledger build's runner held through an upgrade once, never re-sent", async (context) => {
 		const historical = await historicalRunnerBundle(
-			"020678548921ff6419796274482a1a9ecc5dfc69",
+			"4b2fe6eee9b9d44974e82471857196c8afeee830",
 		);
 		if (!historical.available) context.skip(historical.reason);
 		if (!historical.available) return;
@@ -1214,12 +1214,10 @@ describe("Cursor on the Run Ledger", () => {
 		await fixture.kill();
 		await restart(undefined, process.env["CONDUIT_TEST_DIST"] ?? "dist");
 		await fixture.connect(sessionId);
-		// main's runner is an older build: this build retires it and ends its turn once, never
-		// re-sending it (CONTRACT.md 3051, F39).
-		await turns(fixture, sessionId, ["error"]);
 		rmSync(gate);
+		await turns(fixture, sessionId, ["completed"]);
 		expect(cellRuns(fixture, sessionId)).toEqual([
-			{ status: "error", ends: ["error"] },
+			{ status: "completed", ends: ["completed"] },
 		]);
 		expect(captured("send.options")).toHaveLength(1);
 		proveCrashMatrixCell(
@@ -1227,141 +1225,6 @@ describe("Cursor on the Run Ledger", () => {
 			fixture.daemonStorePath(),
 			sessionId,
 		);
-	}, 300_000);
-
-	// main's runner took the send, but main's daemon died before it recorded the turn's start
-	// (main records it at the provider's first running update). The send gate holds main's
-	// runner inside the SDK's send, after its capture, so the store has no start.
-	const upgradeBeforeStart = async (name: string) => {
-		const historical = await historicalRunnerBundle(
-			"020678548921ff6419796274482a1a9ecc5dfc69",
-		);
-		if (!historical.available) return historical;
-		const sendGate = held();
-		const gate = held();
-		const started = await start(
-			name,
-			"basic",
-			{
-				CONDUIT_TEST_CURSOR_SEND_GATE: sendGate,
-				CONDUIT_TEST_CURSOR_STREAM_GATE: gate,
-			},
-			undefined,
-			historical.dist,
-		);
-		const { fixture, browser, sessionId } = started;
-		await submit(browser, sessionId, "Replay the captured basic turn.");
-		// test-waits-allow polling: the SDK's take of the send reaches only its capture file.
-		await vi.waitFor(() => expect(captured("send.options")).toHaveLength(1), {
-			timeout: TIMEOUT,
-		});
-		await fixture.kill();
-		const db = new Database(fixture.daemonStorePath(), { readonly: true });
-		try {
-			expect(
-				db
-					.prepare(
-						"SELECT type FROM events WHERE session_id = ? AND type IN ('run.started', 'run.dispatched')",
-					)
-					.all(sessionId),
-			).toEqual([]);
-		} finally {
-			db.close();
-		}
-		const [mainRunner] = fixture.remainingRunnerPids();
-		if (mainRunner === undefined) throw new Error("main's runner is gone");
-		const open = () => {
-			rmSync(sendGate);
-			rmSync(gate);
-		};
-		return { ...started, available: true as const, mainRunner, open };
-	};
-	// No runner of this build said hello for the session since `from`.
-	const helloes = (fixture: ProcessHarness, sessionId: string, from: number) =>
-		fixture.marks
-			.slice(from)
-			.filter(
-				(mark) =>
-					mark.kind === "runner-started" && mark.sessionId === sessionId,
-			);
-	const settledOnce = (fixture: ProcessHarness, sessionId: string) => {
-		expect(cellRuns(fixture, sessionId)).toEqual([
-			{ status: "error", ends: ["error"] },
-		]);
-		expect(captured("send.options")).toHaveLength(1);
-	};
-
-	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
-	it("settles a Cursor turn main's runner took before its start was recorded, its runner exiting at the restart", async (context) => {
-		const upgrade = await upgradeBeforeStart("two-build-exit");
-		if (!upgrade.available) return context.skip(upgrade.reason);
-		const { fixture, sessionId, restart, mainRunner, open } = upgrade;
-		const from = fixture.marks.length;
-		await restart(undefined, process.env["CONDUIT_TEST_DIST"] ?? "dist");
-		// This build may already be retiring it; either way it exits now.
-		fixture.signalOwnedRunner(mainRunner, "SIGKILL");
-		// Nothing holds the provider back now: a turn sent again would complete.
-		open();
-		await fixture.connect(sessionId);
-		await turns(fixture, sessionId, ["error"]);
-		settledOnce(fixture, sessionId);
-		expect(helloes(fixture, sessionId, from)).toEqual([]);
-	}, 300_000);
-
-	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
-	it("settles a Cursor turn main's runner took before its start was recorded, its runner alive at the restart", async (context) => {
-		const upgrade = await upgradeBeforeStart("two-build-alive");
-		if (!upgrade.available) return context.skip(upgrade.reason);
-		const { fixture, sessionId, restart, open } = upgrade;
-		const from = fixture.marks.length;
-		await restart(undefined, process.env["CONDUIT_TEST_DIST"] ?? "dist");
-		const browser = await fixture.connect(sessionId);
-		await turns(fixture, sessionId, ["error"]);
-		expect(helloes(fixture, sessionId, from)).toEqual([]);
-		// The next queued message runs once, on a runner of this build.
-		open();
-		await submit(browser, sessionId, "Replay the captured basic turn again.");
-		await turns(fixture, sessionId, ["error", "completed"]);
-		expect(cellRuns(fixture, sessionId)).toEqual([
-			{ status: "error", ends: ["error"] },
-			{ status: "completed", ends: ["completed"] },
-		]);
-		expect(captured("send.options")).toHaveLength(2);
-	}, 300_000);
-
-	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
-	it("settles a Cursor turn main's runner took before its start was recorded, its runner gone before the restart", async (context) => {
-		const upgrade = await upgradeBeforeStart("two-build-gone");
-		if (!upgrade.available) return context.skip(upgrade.reason);
-		const { fixture, sessionId, restart, mainRunner, open } = upgrade;
-		expect(fixture.signalOwnedRunner(mainRunner, "SIGKILL")).toBe(true);
-		// test-waits-allow polling: the killed runner's exit reaches only the process table.
-		await vi.waitFor(() => expect(fixture.remainingRunnerPids()).toEqual([]), {
-			timeout: TIMEOUT,
-		});
-		const from = fixture.marks.length;
-		await restart(undefined, process.env["CONDUIT_TEST_DIST"] ?? "dist");
-		// Nothing holds the provider back now: a turn sent again would complete.
-		open();
-		await fixture.connect(sessionId);
-		await turns(fixture, sessionId, ["error"]);
-		settledOnce(fixture, sessionId);
-		expect(helloes(fixture, sessionId, from)).toEqual([]);
-	}, 300_000);
-
-	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
-	it("ends main's taken Cursor turn once when a Stop lands as the upgraded daemon recovers it", async (context) => {
-		const upgrade = await upgradeBeforeStart("two-build-stop");
-		if (!upgrade.available) return context.skip(upgrade.reason);
-		const { fixture, sessionId, restart, open } = upgrade;
-		const from = fixture.marks.length;
-		await restart(undefined, process.env["CONDUIT_TEST_DIST"] ?? "dist");
-		const browser = await fixture.connect(sessionId);
-		await stop(browser, sessionId);
-		await turns(fixture, sessionId, ["error"]);
-		open();
-		settledOnce(fixture, sessionId);
-		expect(helloes(fixture, sessionId, from)).toEqual([]);
 	}, 300_000);
 
 	// test-waits-allow timeout-override: a daemon restart and the steered turn each take seconds.

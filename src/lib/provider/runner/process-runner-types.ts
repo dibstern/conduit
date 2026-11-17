@@ -33,7 +33,7 @@ export interface ProcessRunnerDeps {
 export interface ProcessRunnerDriver {
 	readonly spawnEnvironment?: Readonly<Record<string, string>>;
 	readonly driverKind: string;
-	readonly legacyPrepareTurnEffect?: RunnerDriverPieces["prepareTurnEffect"];
+	readonly prepareStoredTurnEffect?: RunnerDriverPieces["prepareTurnEffect"];
 	/** The account owner retains this demand until the native sink is released. */
 	readonly withAccountScope?: (
 		accountId: string,

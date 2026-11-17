@@ -42,7 +42,7 @@ export function makeCursorProviderRuntime(
 				emit,
 				{
 					driverKind: "cursor",
-					legacyPrepareTurnEffect: driver.prepareTurnEffect,
+					prepareStoredTurnEffect: driver.prepareTurnEffect,
 					withAccountScope: (accountId: string, work: Effect.Effect<void>) =>
 						Effect.gen(function* () {
 							const accounts = yield* deps.accounts;

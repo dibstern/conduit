@@ -117,7 +117,6 @@ it("reads an older build's attempt-keyed record of the same command as unreadabl
 	const host = new RunnerSendJournal(f.input.directory, "s", "claude", {
 		allowOpaqueFences: true,
 	});
-	expect(host.canAnswerRetainedSends).toBe(true);
 	expect(host.tokens).toEqual([]);
 });
 

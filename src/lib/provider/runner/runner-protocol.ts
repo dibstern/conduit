@@ -8,11 +8,6 @@ import { isRecord } from "../../utils.js";
 import type { CursorBackendUrl } from "../cursor/cursor-credential.js";
 import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type { ProviderControlCommandStatus, TurnResult } from "../types.js";
-import {
-	isLegacyRunner,
-	legacyRunnerAnswerCompletions,
-	legacyRunnerRetainedSends,
-} from "./runner-legacy-classification.js";
 import type { RunnerUpgradeState } from "./runner-upgrade.js";
 import type {
 	SessionCommand,
@@ -136,8 +131,6 @@ export interface RunnerHello {
 	readonly declaresLogin?: true;
 	/** Cursor sends consume the daemon's admitted account credential envelope. */
 	readonly scopedCursorCredentials?: true;
-	/** The journal reports each retained send's outcome and process call ownership. */
-	readonly sendJournalAnswers?: true;
 	/** A new hello cannot overtake unread commands from the previous socket. */
 	readonly drainsConnections?: true;
 	readonly sendAnswers?: readonly RunnerSendAnswer[];
@@ -155,12 +148,6 @@ export interface RunnerHello {
 	readonly pendingOutputs?: readonly {
 		readonly sequence: number;
 		readonly output: SessionOutput;
-	}[];
-	/** The host's command receipts by frame id; a send's frame id is its token. */
-	readonly completedCommands?: readonly {
-		readonly commandId: string;
-		readonly result?: TurnResult;
-		readonly failure?: SessionFailure;
 	}[];
 	readonly sendTokens?: readonly SendToken[];
 	readonly config?: {
@@ -445,7 +432,6 @@ export const RUNNER_WRITE_GATE_CLOSED = "runner_write_gate_closed";
 
 interface PendingReply {
 	reply: (reply: RunnerReply) => void;
-	retryOnIdle: boolean;
 	accepted: boolean;
 	/** The host's refusal of this frame, read before its reply resolves. */
 	refused?: RunnerRefusalReason;
@@ -548,16 +534,9 @@ export class RunnerSocket {
 					this.scopedCursorCredentials =
 						message.scopedCursorCredentials === true;
 					this.peerDriverKind = message.driverKind;
-					this.helloSends = isLegacyRunner(message)
-						? legacyRunnerRetainedSends(message)
-						: (message.sendAnswers ?? []).map((answer) => answer.token);
-					if (!this.peerSettlesAnswers && isLegacyRunner(message))
-						for (const command of legacyRunnerAnswerCompletions(message))
-							if (command.commandId.endsWith(":answer"))
-								this.completedCommands.set(
-									command.commandId,
-									command.failure ? "failed" : "completed",
-								);
+					this.helloSends = (message.sendAnswers ?? []).map(
+						(answer) => answer.token,
+					);
 				}
 				if (!this.peerAttachmentRefs) {
 					if (message.type === "output")
@@ -626,19 +605,6 @@ export class RunnerSocket {
 											: `output:${message.outputId}`;
 					const reply = this.pending.get(key);
 					if (reply) {
-						// Only a legacy reply before acceptance proves non-delivery.
-						if (
-							message.type === "command-reply" &&
-							reply.retryOnIdle &&
-							!reply.accepted &&
-							message.failure?.code === "runner_idle_exit"
-						) {
-							const failure: RunnerCommandFailure = {
-								...message.failure,
-								delivery: { _tag: "Refused", reason: "exiting" },
-							};
-							message = { ...message, failure };
-						}
 						const refusal =
 							message.type === "command-reply" && message.failure
 								? runnerDeliveryEvidence(message.failure)
@@ -854,10 +820,7 @@ export class RunnerSocket {
 			const result = yield* Deferred.make<A, RunnerCommandFailure>();
 			const dispatch = Effect.try({
 				try: () => {
-					const retryOnIdle =
-						message.type === "command" && message.command.type === "send-turn";
 					const entry: PendingReply = {
-						retryOnIdle,
 						accepted: false,
 						reply: (reply) => {
 							connection.pending.delete(key);
@@ -901,7 +864,8 @@ export class RunnerSocket {
 						const failure: RunnerCommandFailure = {
 							...(connection.failure ??
 								runnerFailure("runner socket", "Socket is closed")),
-							...(retryOnIdle
+							...(message.type === "command" &&
+							message.command.type === "send-turn"
 								? { delivery: { _tag: "NotSent" as const } }
 								: {}),
 						};

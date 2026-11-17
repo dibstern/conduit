@@ -1,4 +1,4 @@
-import { Effect, Result, Schema, Semaphore } from "effect";
+import { Effect, Result, Schema, type Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import {
 	accountsStateFromConfig,
@@ -14,7 +14,6 @@ import {
 } from "../../contracts/stored-event.js";
 import { defaultDaemonConfig } from "../../daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import * as Failure from "../../effect/failure-classification.js";
 import { makeAttachmentStore } from "../../persistence/attachment-store.js";
 import {
 	makeProviderStateEffect,
@@ -44,35 +43,21 @@ import type {
 	ProviderNativeSession,
 	TurnResult,
 } from "../types.js";
-import {
-	currentSendToken,
-	type RunnerSendAnswer,
-	type RunnerSocket,
-	runnerFailure,
-	sendToken,
-} from "./runner-protocol.js";
+import { currentSendToken, runnerFailure } from "./runner-protocol.js";
 import {
 	launchRunnerTurn,
 	type RunnerDriverPieces,
 	type RunnerProviderInstanceDeps,
 } from "./runner-provider-instance.js";
-import { runningRunnerCommands } from "./runner-recovery.js";
-import {
-	classify,
-	retrySettlementWrite,
-	sendRetryBackoff,
-	terminalFailureResult,
-	toStoreFault,
-} from "./send-settlement.js";
-import { LegacySendKey } from "./send-settlement-outbox.js";
+import type { runningRunnerCommands } from "./runner-recovery.js";
+import { terminalFailureResult, toStoreFault } from "./send-settlement.js";
 import type {
 	DurableSessionTurn,
 	SessionCommand,
 	SessionFailure,
 } from "./session-runner.js";
 
-// Delete this compatibility module once no main-built runner can remain alive (32.13).
-const LegacyTurn = Schema.Struct({
+const StoredTurn = Schema.Struct({
 	sessionId: Schema.optionalKey(Schema.String),
 	projectId: Schema.optionalKey(Schema.String),
 	inputId: Schema.optionalKey(Schema.String),
@@ -166,7 +151,7 @@ export type RunningRunnerCommand = Effect.Success<
 	ReturnType<typeof runningRunnerCommands>
 >[number];
 
-export interface LegacyReplayOutcome {
+export interface StoredSendOutcome {
 	readonly result: TurnResult | undefined;
 	readonly nativeResumeFallback: boolean;
 }
@@ -179,148 +164,18 @@ const recoveryFailure = (operation: string, cause: unknown): SessionFailure => {
 		: failure;
 };
 
-/** Main's replay is the owner until its one reply passes common settlement. */
-export const recoverLegacyRunnerCommands = (options: {
-	readonly sql: SqlClient.SqlClient;
-	readonly sessionId: string;
-	readonly driverKind: string;
-	readonly accounts?: RunnerProviderInstanceDeps["accounts"];
-	readonly ownsPendingSend: (row: RunningRunnerCommand) => boolean;
-	readonly retain: (token: SendToken, commandId: string) => void;
-	readonly ready: Effect.Effect<void, SessionFailure>;
-	readonly replay: (
-		row: RunningRunnerCommand,
-		replayLock: Semaphore.Semaphore,
-	) => Effect.Effect<LegacyReplayOutcome, SessionFailure>;
-	readonly settle: (
-		answer: Extract<RunnerSendAnswer, { readonly status: "finished" }> & {
-			readonly nativeResumeFallback: boolean;
-		},
-		key: LegacySendKey | undefined,
-	) => Effect.Effect<void, SessionFailure>;
-	readonly release: (commandId: string) => Effect.Effect<void>;
-	readonly closing: () => boolean;
-	readonly fail: (failure: SessionFailure) => void;
-	readonly runFork: (effect: Effect.Effect<void>) => unknown;
-}): Effect.Effect<void, SessionFailure> =>
-	Effect.gen(function* () {
-		const replayLock = yield* Semaphore.make(1);
-		const accounts = yield* options.accounts ?? Effect.succeed(undefined);
-		const rows = yield* runningRunnerCommands(
-			options.sql,
-			options.driverKind,
-			(accountId) =>
-				accounts?.accounts.find(({ id }) => id === accountId)?.driver ??
-				accounts?.deleted.find(({ id }) => id === accountId)?.driver ??
-				(accountId === options.driverKind ? options.driverKind : undefined),
-			options.sessionId,
-		).pipe(
-			Effect.mapError((cause) =>
-				runnerFailure("recover runner commands", cause),
-			),
-		);
-		for (const row of rows) {
-			if (
-				row.error_code === "delivery_indeterminate" ||
-				options.ownsPendingSend(row)
-			)
-				continue;
-			options.retain(currentSendToken(row), row.command_id);
-			const work = Effect.gen(function* () {
-				// A cached key can reply immediately. Failure handling becomes active
-				// only once the attachment has finished its recovery transition.
-				yield* options.ready;
-				if (options.closing()) return;
-				const observed = yield* Effect.gen(function* () {
-					let ordinal = 0;
-					while (!options.closing()) {
-						const live = yield* retrySettlementWrite(
-							Effect.gen(function* () {
-								const [current] =
-									yield* options.sql`SELECT 1 FROM provider_command_outbox command
-									LEFT JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
-									WHERE command.request_sequence = ${row.request_sequence} AND command.project_key = ${row.project_key}
-										AND command.session_id = ${row.session_id} AND command.command_id = ${row.command_id}
-										AND command.attempt_count = ${row.attempt_count} AND command.status = 'running'
-										AND COALESCE(run.joined_into, run.id) = ${row.run_id}`;
-								// C 7.4: a modern run replays here too; it settles through
-								// Send Settlement, so only legacy provenance gets a key.
-								return current
-									? { key: yield* LegacySendKey.prove(options.sql, row) }
-									: undefined;
-							}),
-						);
-						if (!live || options.closing()) return;
-						const reply = yield* Effect.result(options.replay(row, replayLock));
-						if (
-							reply._tag === "Success" ||
-							classify({ _tag: "failed", failure: reply.failure }) !==
-								"retryable"
-						)
-							return { reply, key: live.key };
-						yield* Effect.sleep(sendRetryBackoff(++ordinal));
-					}
-					return undefined;
-				});
-				if (!observed || options.closing()) return;
-				const { reply: outcome, key } = observed;
-				yield* options
-					.settle(
-						{
-							token: currentSendToken(row),
-							status: "finished",
-							nativeResumeFallback:
-								outcome._tag === "Success"
-									? outcome.success.nativeResumeFallback
-									: true,
-							...(outcome._tag === "Success"
-								? outcome.success.result
-									? { result: outcome.success.result }
-									: {}
-								: { failure: outcome.failure }),
-						},
-						key,
-					)
-					.pipe(retrySettlementWrite);
-				const pending =
-					outcome._tag === "Success" &&
-					(outcome.success.result === undefined ||
-						["accepted", "joined", "indeterminate"].includes(
-							outcome.success.result.status,
-						));
-				if (!pending) yield* options.release(row.command_id);
-			});
-			options.runFork(
-				work.pipe(
-					Effect.catchCause((cause) =>
-						Effect.sync(() =>
-							options.fail(
-								runnerFailure(
-									"recover runner commands",
-									Failure.squashCause(cause),
-								),
-							),
-						),
-					),
-				),
-			);
-		}
-	});
-
-/** Main's same-key replay preparation; the caller owns admission and settlement. */
-export const replayLegacyRunnerSend = (options: {
+/** Rebuilds a stored send from its outbox row and transmits it; the caller owns admission and settlement. */
+export const replayStoredSend = (options: {
 	readonly sql: SqlClient.SqlClient;
 	readonly row: RunningRunnerCommand;
 	readonly driverKind: string;
-	readonly connection?: RunnerSocket | undefined;
 	readonly replayLock: Semaphore.Semaphore;
 	readonly prepareTurnEffect?: RunnerDriverPieces["prepareTurnEffect"];
 	readonly admitReplay: (
 		input: DurableSessionTurn,
 		sinkId: string,
-		replay: Effect.Effect<LegacyReplayOutcome, SessionFailure>,
-		journaled?: boolean,
-	) => Effect.Effect<LegacyReplayOutcome, SessionFailure>;
+		replay: Effect.Effect<StoredSendOutcome, SessionFailure>,
+	) => Effect.Effect<StoredSendOutcome, SessionFailure>;
 	readonly deps: {
 		readonly accounts?: RunnerProviderInstanceDeps["accounts"];
 		readonly autoSettleAfterDays?: RunnerProviderInstanceDeps["autoSettleAfterDays"];
@@ -339,16 +194,12 @@ export const replayLegacyRunnerSend = (options: {
 		token: SendToken,
 		command: Extract<SessionCommand, { type: "send-turn" }>,
 	) => Effect.Effect<TurnResult | undefined, SessionFailure>;
-	readonly sendRetained?: (
-		token: SendToken,
-		command: Extract<SessionCommand, { type: "send-turn" }>,
-	) => Effect.Effect<TurnResult | undefined, SessionFailure>;
 	readonly closing: () => boolean;
-}): Effect.Effect<LegacyReplayOutcome, SessionFailure> =>
+}): Effect.Effect<StoredSendOutcome, SessionFailure> =>
 	Effect.gen(function* () {
 		const { row, deps, driverKind } = options;
 		const payload = yield* Schema.decodeUnknownEffect(
-			Schema.fromJsonString(LegacyTurn),
+			Schema.fromJsonString(StoredTurn),
 		)(row.payload_json).pipe(
 			Effect.mapError((cause) => ({
 				...runnerFailure("decodeRunnerTurn", cause),
@@ -408,42 +259,6 @@ export const replayLegacyRunnerSend = (options: {
 			row.attempt_count,
 			input.nativeResumeFallback,
 		);
-		switch (driverKind) {
-			case "claude":
-				break;
-			default: {
-				// A send keeps the token it went out under: its claim's, even once held.
-				const retained = [
-					currentSendToken(row),
-					sendToken("tx", row.command_id, row.attempt_count),
-				].find((token) => options.connection?.retainedSends?.includes(token));
-				if (retained && options.connection) {
-					// The unchanged key makes main's journal answer without running this payload.
-					// No credentials, attachment bytes or provider preparation are needed.
-					const { images: _images, ...turn } = input;
-					const command = {
-						type: "send-turn" as const,
-						sinkId,
-						aborted: false,
-						input: turn,
-					};
-					return yield* options.admitReplay(
-						input,
-						sinkId,
-						(options.sendRetained
-							? options.sendRetained(retained, command)
-							: options.connection.commandEffect(retained, command)
-						).pipe(
-							Effect.map((result) => ({
-								result,
-								nativeResumeFallback: input.nativeResumeFallback === true,
-							})),
-						),
-						true,
-					);
-				}
-			}
-		}
 		const admittedInput = input;
 		return yield* options.admitReplay(
 			input,
@@ -548,7 +363,7 @@ export const replayLegacyRunnerSend = (options: {
 				}
 				const { images: _images, ...claudeTurn } = input;
 				const launch = yield* Effect.try(() =>
-					// Main selects the folder before filling or refreshing account credentials.
+					// Select the folder before filling or refreshing account credentials.
 					normalizeClaudeSessionTurn(
 						{ ...claudeTurn, account: payload.account },
 						() => claudeLaunchConfigFromAccounts(accounts),

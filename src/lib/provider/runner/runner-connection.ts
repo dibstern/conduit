@@ -7,7 +7,6 @@ import { observeTurnTimelineFrame } from "../../domain/daemon/Services/turn-time
 import * as Failure from "../../effect/failure-classification.js";
 import { isRecord } from "../../utils.js";
 import type { SendToken } from "../run-ledger/run-ledger-model.js";
-import { isLegacyRunner } from "./runner-legacy-classification.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
 	type RunnerMessage,
@@ -251,7 +250,6 @@ export const connectRunner = (options: {
 												pid: message.pid ?? options.pid,
 												driverKind:
 													message.driverKind ?? options.driverKind ?? "claude",
-												journalsBeforeExecution: !isLegacyRunner(message),
 											})
 											.pipe(
 												Effect.mapError((cause) =>

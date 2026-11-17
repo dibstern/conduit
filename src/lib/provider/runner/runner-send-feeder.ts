@@ -26,8 +26,6 @@ import type {
 } from "./process-runner-types.js";
 import type { makeRunnerDispatch } from "./runner-dispatch.js";
 import type { RunnerChild } from "./runner-entry-lifecycle.js";
-import { legacyRunnerRunQuery } from "./runner-legacy-classification.js";
-import { replayLegacyRunnerSend } from "./runner-legacy-recovery.js";
 import {
 	runnerCommandReplied,
 	runnerDeliveryEvidence,
@@ -45,6 +43,7 @@ import type {
 } from "./runner-retirement.js";
 import type { makeRunnerSends } from "./runner-sends.js";
 import { CANCELLED_TURN, type makeRunnerStarter } from "./runner-starter.js";
+import { replayStoredSend } from "./runner-stored-send.js";
 import type { SendScope } from "./send-scope.js";
 import {
 	classify,
@@ -624,17 +623,7 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 				return dispatch(command, send, recovered);
 			const runId = command.input.runId;
 			return Effect.gen(function* () {
-				const legacy = yield* legacyRunnerRunQuery(
-					sql,
-					command.input.sessionId,
-					runId,
-				).pipe(
-					retrySettlementWrite,
-					Effect.mapError((cause) => runnerFailure("send-turn", cause)),
-				);
 				// From 32.5 a joined steer goes through the feeder and the hold (CONTRACT 1555-1556).
-				if (legacy)
-					return yield* dispatch(command, send, recovered, undefined, legacy);
 				const commandId =
 					(yield* runSendCommandIdQuery(
 						sql,
@@ -709,7 +698,6 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 									send,
 									recovered,
 									hold,
-									false,
 									permission,
 								).pipe(
 									Effect.catchIf(
@@ -782,14 +770,7 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 						if (!first) return yield* submit(command, admitted);
 						first = false;
 						const attempt = yield* Effect.result(
-							dispatch(
-								command,
-								admitted,
-								undefined,
-								held,
-								false,
-								permission,
-							).pipe(
+							dispatch(command, admitted, undefined, held, permission).pipe(
 								Effect.catchIf(
 									(failure) =>
 										runnerCommandReplied(failure) &&
@@ -829,13 +810,13 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 								}
 							: attempt.success;
 					});
-				const outcome = yield* replayLegacyRunnerSend({
+				const outcome = yield* replayStoredSend({
 					sql,
 					row,
 					driverKind: driver.driverKind,
 					replayLock,
-					...(driver.legacyPrepareTurnEffect
-						? { prepareTurnEffect: driver.legacyPrepareTurnEffect }
+					...(driver.prepareStoredTurnEffect
+						? { prepareTurnEffect: driver.prepareStoredTurnEffect }
 						: {}),
 					deps: {
 						...(deps.accounts ? { accounts: deps.accounts } : {}),
@@ -885,7 +866,6 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 					resolveSinkId: (id, _inputId, attempt, fallback) =>
 						runnerSinkId(id, attempt, fallback),
 					send: sendPrepared,
-					sendRetained: sendPrepared,
 					closing: () => stops.closing,
 				}).pipe(
 					Effect.catch((failure) =>
@@ -1009,11 +989,7 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 					JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id
 					WHERE command.request_sequence = ${row.request_sequence} AND command.project_key = ${row.project_key}
 						AND run.runner_id IS NULL AND owner.status IN ('pending','running')`;
-					if (
-						!unheld ||
-						(yield* legacyRunnerRunQuery(sql, row.session_id, unheld.id))
-					)
-						continue;
+					if (!unheld) continue;
 					const [rejected] = yield* sql<{
 						instance_id: string;
 						fork_refused: number;

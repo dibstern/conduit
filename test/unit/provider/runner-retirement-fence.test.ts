@@ -24,7 +24,7 @@ import {
 	Scope,
 	Stream,
 } from "effect";
-import { SqlClient, Statement } from "effect/sql";
+import { SqlClient } from "effect/sql";
 import {
 	ConnectionError,
 	LockTimeoutError,
@@ -36,10 +36,6 @@ import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { ContinuationTag } from "../../../src/lib/domain/project-services/Services/continuation.js";
-import {
-	InputDraftsTag,
-	makeInputDrafts,
-} from "../../../src/lib/domain/project-services/Services/input-drafts.js";
 import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -76,10 +72,6 @@ import type { SendToken } from "../../../src/lib/provider/run-ledger/run-ledger-
 import { makeInProcessSessionRunner } from "../../../src/lib/provider/runner/in-process-session-runner.js";
 import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
-import {
-	isLegacyRunner,
-	legacyRunnerRunQuery,
-} from "../../../src/lib/provider/runner/runner-legacy-classification.js";
 import {
 	type RunnerCommandFailure,
 	type RunnerHello,
@@ -118,7 +110,6 @@ import {
 	DaemonTurnsOrOwn,
 	ProviderRuntimeIngestionLive,
 } from "../../helpers/daemon-turns.js";
-import { MainRunnerSendJournal } from "../../helpers/main-runner-send-journal.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 import {
 	createMockEventSink,
@@ -232,7 +223,7 @@ const retirementFixture = (
 		const replayLoss = { armed: false };
 		const driver: ProcessRunnerDriver = {
 			driverKind,
-			legacyPrepareTurnEffect: (input) =>
+			prepareStoredTurnEffect: (input) =>
 				Effect.succeed({
 					input: {
 						...input,
@@ -321,7 +312,6 @@ const retirementFixture = (
 											released: false,
 										}))
 									: [],
-							sendJournalAnswers: true,
 							sendAnswers:
 								options.runnerId === runnerId
 									? retainedSinkIds.map((commandId) => ({
@@ -542,80 +532,6 @@ it.effect("whole-manager recovery holds upgrades back until it ends", () =>
 			expect(f.attachments.length).toBeGreaterThan(1);
 		}),
 	),
-);
-
-it.effect(
-	"S7 recovery requeues a missing send without dispatch or visible events",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* sendScopeFixture(undefined, undefined, "cursor");
-				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('s7-run', 's', 'pending', 1)`;
-				yield* (yield* makeCommitAndSignal)([
-					canonicalEvent("run.dispatched", "s", {
-						runId: "s7-run",
-						runnerId: "131313131313",
-					}),
-				]);
-				yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id)
-		VALUES (7, 's7-command', 'test-project', 's', 'account', 'send_turn', ${JSON.stringify({ ...f.input, prompt: "queued", history: [] })}, 'running', 2, 1, 1, 's7-run')`;
-				yield* f.instance.recoverProjectContextsEffect(() =>
-					Effect.succeed(undefined),
-				);
-				expect(
-					yield* f.sql`SELECT status, attempt_count, request_sequence, run_id, next_attempt_at FROM provider_command_outbox WHERE command_id = 's7-command'`,
-				).toEqual([
-					{
-						status: "retryable_failed",
-						attempt_count: 2,
-						request_sequence: 7,
-						run_id: "s7-run",
-						next_attempt_at: expect.any(Number),
-					},
-				]);
-				expect(
-					f.commands.filter((command) => command.type === "send-turn"),
-				).toEqual([]);
-				expect(f.sendHandles).toEqual([]);
-				expect(f.terminalCount()).toBe(0);
-			}),
-		),
-);
-
-it.effect(
-	"R2 missing journal answer preserves owner intake and retained steer replay",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture();
-				yield* f.seed("active-owner");
-				yield* f.seed("joined-steer", 2);
-				yield* f.sql`UPDATE provider_runs SET status='running', started_at=1 WHERE id='run:active-owner'`;
-				yield* f.sql`UPDATE provider_runs SET status='joined', joined_into='run:active-owner' WHERE id='run:joined-steer'`;
-				yield* f.hello((hello) => ({
-					...hello,
-					bindings: [],
-					sendAnswers: [],
-					sendJournalAnswers: true,
-				}));
-				yield* f.recover;
-				expect(
-					yield* f.sql`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`,
-				).toEqual([
-					{ command_id: "active-owner", status: "running" },
-					{ command_id: "joined-steer", status: "retryable_failed" },
-				]);
-				expect(
-					yield* f.sql`SELECT id, status FROM provider_runs ORDER BY id`,
-				).toEqual([
-					{ id: "run:active-owner", status: "running" },
-					{ id: "run:joined-steer", status: "joined" },
-				]);
-				expect(
-					f.commands.filter((command) => command.type === "send-turn"),
-				).toEqual([]);
-			}),
-		),
 );
 
 const runRetirement = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
@@ -1069,7 +985,7 @@ const s7Fixture = (
 			commandId: string,
 			sequence = 1,
 			attempt = 1,
-			transmission: "legacy" | "held" = "legacy",
+			transmission: "held" | "unheld" = "held",
 		) =>
 			Effect.gen(function* () {
 				const input = {
@@ -1087,9 +1003,9 @@ const s7Fixture = (
 				VALUES (${sequence}, ${commandId}, 'test-project', 's', 'account', 'send_turn', ${JSON.stringify(input)}, 'running', ${attempt}, 1, 1, ${input.runId})`;
 				if (attempt === 0)
 					yield* f.sql`UPDATE provider_command_outbox SET status = 'pending' WHERE command_id = ${commandId}`;
-				// Attempt zero is a queued successor that has never been transmitted.
-				// Older transmitted sends retain the command-less legacy dispatch.
-				if (attempt > 0)
+				// Attempt zero is a queued successor that has never been transmitted;
+				// an unheld send went out under its claim's token, with no run.dispatched.
+				if (attempt > 0 && transmission === "held")
 					yield* commit([
 						canonicalEvent(
 							"run.dispatched",
@@ -1097,9 +1013,8 @@ const s7Fixture = (
 							{
 								runId: input.runId,
 								runnerId: "131313131313",
-								...(transmission === "held"
-									? { commandId, transmission: 1 }
-									: {}),
+								commandId,
+								transmission: 1,
 							},
 							{ provider: driverKind, metadata: { runId: input.runId } },
 						),
@@ -1118,10 +1033,7 @@ const s7Fixture = (
 							configurable: true,
 							get: () => retained.sendTokens,
 						});
-						return f.sql`UPDATE claude_runner_cursors SET journals_before_execution = ${Number(!isLegacyRunner(retained))} WHERE runner_id = ${options.runnerId}`.pipe(
-							Effect.orDie,
-							Effect.andThen(options.onHello(retained, connection, replay)),
-						);
+						return options.onHello(retained, connection, replay);
 					},
 				}),
 			);
@@ -1133,8 +1045,6 @@ const s7Fixture = (
 		) =>
 			Effect.gen(function* () {
 				if (!input.runId) return yield* Effect.die("Missing send run");
-				if (yield* legacyRunnerRunQuery(f.sql, input.sessionId, input.runId))
-					return result;
 				const [command] = yield* f.sql<{
 					command_id: string;
 				}>`SELECT command_id FROM provider_command_outbox
@@ -1176,9 +1086,9 @@ const s7Fixture = (
 		};
 	});
 
-// S10 answer mapping must not reconstruct journal state from legacy hello fields.
-for (const answer of ["running", "finished", "uncertain", "absent"] as const)
-	it.effect(`S10 current journal ${answer} owns or settles the send once`, () =>
+// S10 a current journal answer owns its send and never resends it.
+for (const answer of ["running", "uncertain"] as const)
+	it.effect(`S10 current journal ${answer} owns the send once`, () =>
 		runRetirement(
 			Effect.gen(function* () {
 				const f = yield* s7Fixture();
@@ -1186,13 +1096,9 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 					"answer",
 					1,
 					1,
-					answer === "uncertain" ? "held" : "legacy",
+					answer === "uncertain" ? "held" : "unheld",
 				);
 				yield* f.seed("answer-next", 2, 0);
-				if (answer === "finished") {
-					yield* f.sql`CREATE TEMP TABLE s10_finished_writes (command_id TEXT)`;
-					yield* f.sql`CREATE TEMP TRIGGER s10_finished_write AFTER UPDATE ON provider_command_outbox WHEN NEW.command_id = 'answer' AND NEW.status = 'completed' BEGIN INSERT INTO s10_finished_writes VALUES (NEW.command_id); END`;
-				}
 				const result = {
 					status: "completed",
 					cost: 0,
@@ -1208,17 +1114,7 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 				);
 				yield* f.hello((hello) => ({
 					...hello,
-					sendJournalAnswers: true,
-					sendAnswers:
-						answer === "absent"
-							? []
-							: [
-									{
-										token,
-										status: answer,
-										...(answer === "finished" ? { result } : {}),
-									},
-								],
+					sendAnswers: [{ token, status: answer }],
 					bindings:
 						answer === "running"
 							? [
@@ -1230,54 +1126,19 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 									},
 								]
 							: [],
-					sendTokens: answer === "absent" ? [] : [token],
-					completedCommands: [],
+					sendTokens: [token],
 				}));
 				yield* f.recover;
-				if (answer === "finished") {
-					const attachment = f.attachments[0];
-					if (!attachment?.onCommandReply)
-						return yield* Effect.die("missing answer reply handler");
-					const reply = {
-						type: "command-reply",
-						commandId: token,
-						result,
-					} as const;
-					yield* attachment.onCommandReply(reply);
-					yield* attachment.onCommandReply(reply);
-					expect(
-						yield* f.sql`SELECT command_id FROM s10_finished_writes`,
-					).toEqual([{ command_id: "answer" }]);
-				}
 				expect(
 					yield* f.sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'answer'`,
-				).toEqual([
-					{
-						status:
-							answer === "running" || answer === "uncertain"
-								? "running"
-								: answer === "finished"
-									? "completed"
-									: "retryable_failed",
-						error_code: null,
-					},
-				]);
+				).toEqual([{ status: "running", error_code: null }]);
 				expect(f.sendHandles).toHaveLength(answer === "running" ? 1 : 0);
 				const send = vi
 					.spyOn(f.instance, "sendTurnEffect")
 					.mockImplementation((input) => f.reply(input, result));
 				yield* f.reactor.drain();
 				yield* f.reactor.drain();
-				if (answer === "running" || answer === "uncertain")
-					expect(send).not.toHaveBeenCalled();
-				else {
-					expect(send.mock.calls.map(([input]) => input.inputId)).toEqual(
-						answer === "absent" ? ["answer", "answer-next"] : ["answer-next"],
-					);
-					expect(
-						yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'answer-next'`,
-					).toEqual([{ status: "completed" }]);
-				}
+				expect(send).not.toHaveBeenCalled();
 				if (answer === "uncertain")
 					expect(
 						yield* f.sql`SELECT status, runner_id, held_transmission FROM provider_runs WHERE id = 'run:answer'`,
@@ -1292,892 +1153,6 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 		),
 	);
 
-for (const status of ["accepted", "joined", "indeterminate"] as const)
-	for (const fallback of [false, true])
-		it.effect(
-			`S10 finished ${status} answer retains native output and account ownership (fallback=${fallback})`,
-			() =>
-				runRetirement(
-					Effect.gen(function* () {
-						const f = yield* s7Fixture("claude");
-						yield* f.seed("native-held");
-						yield* f.seed("native-next", 2, 0);
-						const result: TurnResult = {
-							status,
-							cost: 0,
-							tokens: { input: 0, output: 0 },
-							durationMs: 0,
-							providerStateUpdates: [],
-						};
-						const sinkId = runnerSinkId("native-held", 1, fallback);
-						// The send's mode lives on its payload; its token is the claim's.
-						if (fallback)
-							yield* f.sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.nativeResumeFallback', json('true')) WHERE command_id = 'native-held'`;
-						const token = sendToken("tx", "native-held", 1);
-						yield* f.hello((hello) => ({
-							...hello,
-							sendTokens: [],
-							bindings: [{ token, sessionId: "s", sinkId, released: false }],
-							sendJournalAnswers: true,
-							sendAnswers: [{ status: "finished", token, result }],
-						}));
-						yield* f.recover;
-						expect(f.sendHandles).toHaveLength(1);
-						expect(f.account).toEqual({ acquired: 1, released: 0 });
-						expect(
-							yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'native-held'`,
-						).toEqual([{ status: "running" }]);
-						const send = vi.spyOn(f.instance, "sendTurnEffect").mockReturnValue(
-							Effect.succeed({
-								status: "completed",
-								cost: 0,
-								tokens: { input: 0, output: 0 },
-								durationMs: 0,
-								providerStateUpdates: [],
-							}),
-						);
-						yield* f.reactor.drain();
-						expect(send).not.toHaveBeenCalled();
-						const attachment = f.attachments[0];
-						if (!attachment)
-							return yield* Effect.die("Missing native attachment");
-						for (const type of ["run.started", "turn.completed"] as const)
-							yield* attachment.emit(
-								{
-									type: "event",
-									sinkId,
-									event: {
-										eventId: `native-held:${type}`,
-										type,
-										providerId: "claude",
-										sessionId: "s",
-										runId: "run:native-held",
-										providerRefs: {},
-										rawSource: { kind: "test.native" },
-										createdAt: 3,
-										data:
-											type === "run.started"
-												? {
-														inputId: "native-held",
-														requestedRunId: "run:native-held",
-													}
-												: { messageId: "", duration: 1 },
-									},
-								},
-								"s",
-							);
-						yield* attachment.emit({ type: "release-sink", sinkId }, "s");
-						yield* Effect.all([f.reactor.drain(), f.reactor.drain()]);
-						expect(send).toHaveBeenCalledTimes(1);
-						expect(send.mock.calls[0]?.[0].inputId).toBe("native-next");
-						expect(f.account).toEqual({ acquired: 1, released: 1 });
-						expect(f.sendHandles[0]?.assignment._tag).toBe("Closed");
-						expect(
-							f.commands.filter((command) => command.type === "send-turn"),
-						).toEqual([]);
-						expect(
-							yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'native-held'`,
-						).toEqual([{ status: "completed" }]);
-						expect(
-							yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-						).toEqual([{ type: "turn.completed" }]);
-					}),
-				),
-		);
-
-it.effect(
-	"S10 main attachment retry never replays on the previous closed connection",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture();
-				yield* f.seed("attach-retry");
-				yield* f.seed("attach-next", 2, 0);
-				yield* f.sql`UPDATE provider_command_outbox SET status='pending' WHERE command_id='attach-next'`;
-				yield* f.sql`CREATE TEMP TABLE s10_attach_settled (command_id TEXT)`;
-				yield* f.sql`CREATE TEMP TRIGGER s10_attach_settled AFTER UPDATE ON provider_command_outbox WHEN NEW.command_id='attach-retry' AND NEW.status='completed' BEGIN INSERT INTO s10_attach_settled VALUES (NEW.command_id); END`;
-				vi.spyOn(f.processTable, "signal").mockImplementation(() => {
-					f.processes.delete(100_088);
-				});
-				const result = {
-					status: "completed",
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-					providerStateUpdates: [],
-				} satisfies TurnResult;
-				const journal = new MainRunnerSendJournal(
-					runnerRegistry.runnerDirectory(f.root, f.root),
-					"s",
-					"cursor",
-				);
-				// An older build keys a send by the frame id it was sent, attempt 0.
-				const token = sendToken("tx", "attach-retry", 1);
-				yield* journal.execute(token, 0, false, Effect.succeed(result));
-				const replayed = vi.fn();
-				f.replaySend.execute = (id, command) =>
-					Effect.sync(() => replayed()).pipe(
-						Effect.andThen(
-							journal.execute(
-								id,
-								0,
-								command.input.nativeResumeFallback === true,
-								Effect.die("cached retry key must not execute"),
-							),
-						),
-					);
-				yield* f.hello(
-					({
-						sendJournalAnswers: _capability,
-						sendAnswers: _answers,
-						...hello
-					}) => ({
-						...hello,
-						bindings: [],
-						sendTokens: [token],
-						completedCommands: [],
-					}),
-				);
-				const firstClosed = yield* Deferred.make<void>();
-				const oldCommand = vi.fn(() =>
-					Effect.fail(runnerFailure("send-turn", "old connection is closed")),
-				);
-				const connect = vi.mocked(f.driver.connect).getMockImplementation();
-				if (!connect) return yield* Effect.die("missing retry connection");
-				let first = true;
-				vi.mocked(f.driver.connect).mockImplementation((options) =>
-					connect(options).pipe(
-						Effect.tap((connection) => {
-							if (!first) return Effect.void;
-							first = false;
-							Object.assign(connection, { closed: true });
-							vi.spyOn(connection, "commandEffect").mockImplementation(
-								oldCommand,
-							);
-							return Deferred.succeed(firstClosed, undefined);
-						}),
-					),
-				);
-				const recovering = yield* f.recover.pipe(Effect.forkChild);
-				yield* Deferred.await(firstClosed);
-				yield* TestClock.adjust("150 millis");
-				yield* Fiber.join(recovering);
-				yield* TestClock.adjust("6 seconds");
-				expect(f.attachments).toHaveLength(2);
-				expect(oldCommand).not.toHaveBeenCalled();
-				expect(replayed).toHaveBeenCalledTimes(1);
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id='attach-retry'`,
-				).toEqual([{ status: "completed" }]);
-				expect(yield* f.sql`SELECT command_id FROM s10_attach_settled`).toEqual(
-					[{ command_id: "attach-retry" }],
-				);
-				expect(f.sendHandles.map((send) => send.assignment._tag)).toEqual([
-					"Closed",
-				]);
-				expect(f.account).toEqual({ acquired: 1, released: 1 });
-				const next = vi
-					.spyOn(f.instance, "sendTurnEffect")
-					.mockImplementation((input) => f.reply(input, result));
-				yield* f.reactor.drain();
-				yield* f.reactor.drain();
-				expect(next.mock.calls.map(([input]) => input.inputId)).toEqual([
-					"attach-next",
-				]);
-			}),
-		),
-);
-
-it.effect(
-	"S10 main cached reply settlement failure during held hello cannot lose the send owner",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture();
-				yield* f.seed("main-race");
-				vi.spyOn(f.processTable, "signal").mockImplementation(() => {
-					f.processes.delete(100_088);
-				});
-				const result = {
-					status: "completed",
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-					providerStateUpdates: [],
-				} satisfies TurnResult;
-				const journal = new MainRunnerSendJournal(
-					runnerRegistry.runnerDirectory(f.root, f.root),
-					"s",
-					"cursor",
-				);
-				const token = sendToken("tx", "main-race", 1);
-				yield* journal.execute(token, 0, false, Effect.succeed(result));
-				f.replaySend.execute = (id, command) =>
-					journal.execute(
-						id,
-						0,
-						command.input.nativeResumeFallback === true,
-						Effect.die("cached main key must not execute"),
-					);
-				yield* f.hello(
-					({
-						sendJournalAnswers: _capability,
-						sendAnswers: _answers,
-						...hello
-					}) => ({
-						...hello,
-						bindings: [],
-						sendTokens: [token],
-						completedCommands: [],
-					}),
-				);
-				const sqlConnection = yield* Effect.scoped(f.sql.reserve);
-				const execute = sqlConnection.execute;
-				let storeAvailable = false;
-				const failedWrite = vi
-					.spyOn(sqlConnection, "execute")
-					.mockImplementation((query, params, transform) =>
-						Effect.suspend(() =>
-							!storeAvailable &&
-							query.includes("UPDATE provider_command_outbox") &&
-							params.includes("completed")
-								? Effect.fail(
-										new SqlError({
-											reason: new ConnectionError({
-												cause: "S10 cached reply write unavailable",
-											}),
-										}),
-									)
-								: execute(query, params, transform),
-						),
-					);
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() => failedWrite.mockRestore()),
-				);
-				const helloDone = yield* Deferred.make<void>();
-				const releaseHello = yield* Deferred.make<void>();
-				const connect = vi.mocked(f.driver.connect).getMockImplementation();
-				if (!connect) return yield* Effect.die("missing race connection");
-				vi.mocked(f.driver.connect).mockImplementation((options) =>
-					connect({
-						...options,
-						onHello: (hello, connection, replay) =>
-							options
-								.onHello(hello, connection, replay)
-								.pipe(
-									Effect.andThen(Deferred.succeed(helloDone, undefined)),
-									Effect.andThen(Deferred.await(releaseHello)),
-								),
-					}),
-				);
-				const recovering = yield* f.recover.pipe(Effect.forkChild);
-				yield* Deferred.await(helloDone);
-				yield* TestClock.adjust(0);
-				yield* Deferred.succeed(releaseHello, undefined);
-				yield* TestClock.adjust("6 seconds");
-				yield* Fiber.join(recovering);
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id='main-race'`,
-				).toEqual([{ status: "running" }]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.error', 'turn.interrupted')`,
-				).toEqual([]);
-				storeAvailable = true;
-				yield* TestClock.adjust("30 seconds");
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id='main-race'`,
-				).toEqual([{ status: "completed" }]);
-				expect(
-					yield* f.sql`SELECT status FROM provider_runs WHERE id='run:main-race'`,
-				).toEqual([{ status: "completed" }]);
-			}),
-		),
-);
-
-for (const binding of ["missing", "released"] as const)
-	it.effect(
-		`S10 current running answer owns the send with ${binding} output binding`,
-		() =>
-			runRetirement(
-				Effect.gen(function* () {
-					const f = yield* s7Fixture();
-					yield* f.seed("owned-answer");
-					yield* f.seed("owned-next", 2, 0);
-					const token = sendToken("tx", "owned-answer", 1);
-					yield* f.hello((hello) => ({
-						...hello,
-						sendJournalAnswers: true,
-						sendTokens: [token],
-						sendAnswers: [{ token, status: "running" }],
-						bindings:
-							binding === "missing"
-								? []
-								: [
-										{
-											token,
-											sinkId: runnerSinkId("owned-answer", 1),
-											sessionId: "s",
-											released: true,
-										},
-									],
-					}));
-					yield* f.recover;
-					expect(f.sendHandles).toHaveLength(1);
-					expect(
-						yield* f.sql`SELECT status,error_code FROM provider_command_outbox WHERE command_id='owned-answer'`,
-					).toEqual([{ status: "running", error_code: null }]);
-					const result = {
-						status: "completed",
-						cost: 0,
-						tokens: { input: 0, output: 0 },
-						durationMs: 0,
-						providerStateUpdates: [],
-					} satisfies TurnResult;
-					const send = vi
-						.spyOn(f.instance, "sendTurnEffect")
-						.mockImplementation((input) => f.reply(input, result));
-					yield* f.reactor.drain();
-					expect(send).not.toHaveBeenCalled();
-					const attachment = f.attachments[0];
-					if (!attachment?.onCommandReply)
-						return yield* Effect.die("missing owned-answer attachment");
-					yield* attachment.onCommandReply({
-						type: "command-reply",
-						commandId: token,
-						result,
-					});
-					yield* f.reactor.drain();
-					yield* f.reactor.drain();
-					expect(send.mock.calls.map(([input]) => input.inputId)).toEqual([
-						"owned-next",
-					]);
-				}),
-			),
-	);
-
-for (const scenario of [
-	"attemptless historical completion",
-	"finished inherited sendCommands",
-	"unfinished inherited sendCommands",
-	"replayed cached key",
-	// The claim's send went out before main held the run: it keeps its claim's token.
-	"replayed cached key once held",
-	"input-keyed live retry",
-	"started without dispatch",
-	"transmitted before start without dispatch",
-] as const)
-	it.effect(
-		`S10 main replay ${scenario} follows main journal semantics and unblocks the next send`,
-		() =>
-			runRetirement(
-				Effect.gen(function* () {
-					const f = yield* s7Fixture();
-					const committed = yield* Deferred.make<void>();
-					const wake = f.recovery.wakeReactor ?? Effect.void;
-					Object.assign(f.recovery, {
-						wakeReactor: Effect.gen(function* () {
-							yield* wake;
-							const [command] = yield* f.sql<{
-								status: string;
-							}>`SELECT status FROM provider_command_outbox WHERE command_id = 'main-command'`;
-							if (command?.status === "completed")
-								yield* Deferred.succeed(committed, undefined);
-						}).pipe(Effect.orDie),
-					});
-					const attempt =
-						scenario === "attemptless historical completion" ||
-						scenario === "input-keyed live retry"
-							? 2
-							: 1;
-					yield* f.seed(
-						"main-command",
-						1,
-						attempt,
-						scenario === "replayed cached key once held" ? "held" : "legacy",
-					);
-					if (scenario.endsWith("without dispatch")) {
-						yield* f.sql`DELETE FROM events WHERE type = 'run.dispatched' AND json_extract(data, '$.runId') = 'run:main-command'`;
-						yield* f.sql`UPDATE provider_runs SET runner_id = NULL, held_transmission = NULL,
-							status = ${scenario === "started without dispatch" ? "running" : "pending"},
-							started_at = ${scenario === "started without dispatch" ? 1 : null}
-						WHERE id = 'run:main-command'`;
-						yield* f.sql`CREATE TEMP TABLE r2_legacy_completed (command_id TEXT)`;
-						yield* f.sql`CREATE TEMP TRIGGER r2_legacy_completed_write AFTER UPDATE ON provider_command_outbox
-						WHEN OLD.status <> 'completed' AND NEW.command_id = 'main-command' AND NEW.status = 'completed'
-						BEGIN INSERT INTO r2_legacy_completed VALUES (NEW.command_id); END`;
-					}
-					yield* f.seed("main-next", 2, 0);
-					yield* f.sql`UPDATE provider_command_outbox SET status = 'pending' WHERE command_id = 'main-next'`;
-					const inputId =
-						scenario === "input-keyed live retry"
-							? "distinct-main-input"
-							: "main-command";
-					yield* f.sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.inputId', ${inputId}) WHERE command_id = 'main-command'`;
-					const directory = runnerRegistry.runnerDirectory(f.root, f.root);
-					const original = new MainRunnerSendJournal(directory, "s", "cursor");
-					const result = {
-						status: "completed",
-						cost: 0,
-						tokens: { input: 0, output: 0 },
-						durationMs: 0,
-						providerStateUpdates: [],
-					} satisfies TurnResult;
-					const failure = {
-						operation: "send-turn",
-						message: "account unavailable",
-						code: "auth_required",
-						retryable: false,
-					};
-					const liveResult = yield* Deferred.make<TurnResult>();
-					const begun = yield* Deferred.make<void>();
-					const live =
-						scenario === "input-keyed live retry" ||
-						scenario === "unfinished inherited sendCommands";
-					// An older build keys a send by the frame id it was sent, attempt 0.
-					const executed = sendToken("tx", "main-command", live ? attempt : 1);
-					const active = live
-						? yield* original
-								.execute(
-									executed,
-									0,
-									false,
-									Deferred.succeed(begun, undefined).pipe(
-										Effect.andThen(Deferred.await(liveResult)),
-									),
-								)
-								.pipe(Effect.forkChild)
-						: undefined;
-					if (active) yield* Deferred.await(begun);
-					else
-						yield* Effect.result(
-							original.execute(
-								executed,
-								0,
-								false,
-								scenario === "finished inherited sendCommands"
-									? Effect.fail(failure)
-									: Effect.succeed(result),
-							),
-						);
-					const retained = new MainRunnerSendJournal(directory, "s", "cursor");
-					const replayed = yield* Deferred.make<void>();
-					const deliveries = vi.fn();
-					const keys: Array<{
-						token: SendToken;
-						fallback: boolean;
-						sinkId: string;
-					}> = [];
-					f.replaySend.execute = (token, command) =>
-						Effect.gen(function* () {
-							keys.push({
-								token,
-								fallback: command.input.nativeResumeFallback === true,
-								sinkId: command.sinkId,
-							});
-							// Main's host joins the already pending RPC before consulting its journal.
-							if (scenario === "input-keyed live retry" && active) {
-								yield* Deferred.succeed(replayed, undefined);
-								return yield* Fiber.join(active);
-							}
-							return yield* retained
-								.execute(
-									token,
-									0,
-									command.input.nativeResumeFallback === true,
-									Effect.sync(() => deliveries()).pipe(Effect.as(result)),
-								)
-								.pipe(
-									Effect.onExit(() => Deferred.succeed(replayed, undefined)),
-								);
-						});
-					yield* f.hello(
-						({
-							sendJournalAnswers: _capability,
-							sendAnswers: _answers,
-							...hello
-						}) => ({
-							...hello,
-							bindings: scenario.startsWith("replayed cached key")
-								? []
-								: [
-										{
-											token: sendToken("tx", "main-command", 1),
-											sessionId: "s",
-											sinkId: runnerSinkId("main-command", 1),
-											released: true,
-										},
-										...(scenario === "input-keyed live retry"
-											? [
-													{
-														token: sendToken("tx", "main-command", 2),
-														sessionId: "s",
-														sinkId: runnerSinkId(inputId, 2),
-														released: false,
-													},
-												]
-											: []),
-									],
-							sendTokens: [executed],
-							completedCommands:
-								scenario === "finished inherited sendCommands" ||
-								scenario === "unfinished inherited sendCommands" ||
-								scenario === "input-keyed live retry"
-									? []
-									: [{ commandId: "main-command", result }],
-						}),
-					);
-					yield* f.recover;
-					yield* Deferred.await(replayed);
-					if (scenario === "input-keyed live retry") {
-						expect(keys).toEqual([
-							{
-								token: sendToken("tx", "main-command", 2),
-								fallback: false,
-								sinkId: runnerSinkId(inputId, 2),
-							},
-						]);
-						expect(
-							yield* f.sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'main-command'`,
-						).toEqual([{ status: "running", error_code: null }]);
-						const later = vi
-							.spyOn(f.instance, "sendTurnEffect")
-							.mockImplementation((input) => f.reply(input, result));
-						yield* f.reactor.drain();
-						expect(later).not.toHaveBeenCalled();
-						yield* f.ingestion.ingest({
-							eventId: "main-live-completed",
-							type: "turn.completed",
-							providerId: "cursor",
-							sessionId: "s",
-							runId: "run:main-command",
-							providerRefs: {},
-							rawSource: { kind: "test.main" },
-							createdAt: 3,
-							data: { messageId: "", duration: 1 },
-						});
-						yield* Deferred.succeed(liveResult, result);
-						yield* TestClock.adjust(0);
-					} else {
-						expect(keys).toEqual([
-							{
-								token: sendToken("tx", "main-command", attempt),
-								fallback: false,
-								sinkId: runnerSinkId("main-command", attempt),
-							},
-						]);
-						expect(deliveries).toHaveBeenCalledTimes(
-							scenario === "attemptless historical completion" ? 1 : 0,
-						);
-					}
-					yield* TestClock.adjust(0);
-					if (scenario === "transmitted before start without dispatch")
-						yield* Deferred.await(committed);
-					expect(
-						yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'main-command'`,
-					).toEqual([
-						{
-							status: scenario.endsWith("inherited sendCommands")
-								? "failed"
-								: "completed",
-						},
-					]);
-					if (scenario === "unfinished inherited sendCommands")
-						expect(
-							yield* f.sql`SELECT error_code FROM provider_command_outbox WHERE command_id='main-command'`,
-						).toEqual([{ error_code: "runner_send_uncertain" }]);
-					if (scenario.startsWith("replayed cached key")) {
-						expect(f.sendHandles).toHaveLength(1);
-						expect(f.sendHandles.map((send) => send.assignment._tag)).toEqual([
-							"Closed",
-						]);
-						expect(f.account).toEqual({ acquired: 1, released: 1 });
-					}
-					if (scenario.endsWith("without dispatch")) {
-						yield* f.instance.attachSessionsEffect(["s"], () =>
-							Effect.succeed(f.recovery),
-						);
-						yield* TestClock.adjust(0);
-						expect(deliveries).not.toHaveBeenCalled();
-						expect(
-							yield* f.sql`SELECT command_id FROM r2_legacy_completed`,
-						).toEqual([{ command_id: "main-command" }]);
-					}
-					if (scenario === "started without dispatch") {
-						expect(
-							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'run:main-command'`,
-						).toEqual([{ status: "completed" }]);
-						expect(
-							yield* f.sql`SELECT COUNT(*) AS count FROM events WHERE type = 'turn.completed' AND json_extract(metadata, '$.runId') = 'run:main-command'`,
-						).toEqual([{ count: 1 }]);
-					}
-					const next = vi
-						.spyOn(f.instance, "sendTurnEffect")
-						.mockImplementation((input) => f.reply(input, result));
-					yield* f.reactor.drain();
-					yield* f.reactor.drain();
-					expect(next.mock.calls.map(([input]) => input.inputId)).toEqual([
-						"main-next",
-					]);
-					expect(
-						yield* f.sql`SELECT status FROM provider_command_outbox ORDER BY request_sequence`,
-					).toEqual([
-						{
-							status: scenario.endsWith("inherited sendCommands")
-								? "failed"
-								: "completed",
-						},
-						{ status: "completed" },
-					]);
-				}),
-			),
-	);
-
-for (const current of [true, false])
-	for (const markerCommitted of [false, true])
-		it.effect(
-			`S10 ${current ? "current" : "main"} primary rejection delivers one fallback with its journal key (markerCommitted=${markerCommitted})`,
-			() =>
-				runRetirement(
-					Effect.gen(function* () {
-						const f = yield* s7Fixture("claude");
-						yield* f.seed("fallback-answer");
-						if (markerCommitted)
-							yield* f.sql`UPDATE provider_command_outbox SET payload_json=json_set(payload_json, '$.nativeResumeFallback', json('true')) WHERE command_id='fallback-answer'`;
-						yield* f.seed("fallback-next", 2, 0);
-						yield* f.sql`UPDATE provider_command_outbox SET status = 'pending' WHERE command_id = 'fallback-next'`;
-						Object.assign(f.recovery, {
-							resolveCallContext: () =>
-								Effect.succeed({
-									projectId: "test-project",
-									sessionId: "s",
-									account: { id: "account", name: "Account", driver: "claude" },
-									workspaceRoot: f.root,
-									extraFolders: [],
-									shellEnv: {},
-								}),
-						});
-						yield* f.sql`INSERT INTO provider_state (session_id,key,value) VALUES ('s','nativeThread:account',${JSON.stringify({ configDir: configuredClaudeConfigDir(f.root), resumeSessionId: "stale", firstSequence: 0, deliveredThrough: 0 })})`;
-						const directory = runnerRegistry.runnerDirectory(f.root, f.root);
-						const journal = current
-							? new RunnerSendJournal(directory, "s", "claude")
-							: new MainRunnerSendJournal(directory, "s", "claude");
-						const rejection = {
-							status: "error",
-							nativeResumeRejected: true,
-							error: {
-								code: "claude_resume_refused",
-								message:
-									"Resume rejected by --resume-drops-turn: native context cannot be preserved",
-							},
-							cost: 0,
-							tokens: { input: 0, output: 0 },
-							durationMs: 0,
-							providerStateUpdates: [],
-						} satisfies TurnResult;
-						const result = {
-							status: "completed",
-							cost: 0,
-							tokens: { input: 0, output: 0 },
-							durationMs: 0,
-							providerStateUpdates: [],
-						} satisfies TurnResult;
-						// The claim's token; an older build keys it by frame id, attempt 0.
-						const token = sendToken("tx", "fallback-answer", 1);
-						yield* journal instanceof RunnerSendJournal
-							? journal.execute(token, Effect.succeed(rejection))
-							: journal.execute(token, 0, false, Effect.succeed(rejection));
-						const delivered = vi.fn();
-						const keys: Array<{ token: SendToken; fallback: boolean }> = [];
-						f.replaySend.execute = (id, command) => {
-							const fallback = command.input.nativeResumeFallback === true;
-							keys.push({ token: id, fallback });
-							const delivery = Effect.sync(() => delivered()).pipe(
-								Effect.as(result),
-							);
-							return journal instanceof RunnerSendJournal
-								? journal.execute(id, delivery)
-								: journal.execute(id, 0, fallback, delivery);
-						};
-						yield* f.hello(
-							({
-								sendJournalAnswers: _capability,
-								sendAnswers: _answers,
-								...hello
-							}) => ({
-								...hello,
-								...(current
-									? {
-											sendJournalAnswers: true as const,
-											sendAnswers: [
-												{
-													token,
-													status: "finished" as const,
-													result: rejection,
-												},
-											],
-										}
-									: {
-											sendTokens: [token],
-											completedCommands: [
-												{ commandId: "fallback-answer", result: rejection },
-											],
-										}),
-								bindings: [],
-							}),
-						);
-						yield* f.recover;
-						const send = vi
-							.spyOn(f.instance, "sendTurnEffect")
-							.mockImplementation((input) =>
-								(journal instanceof RunnerSendJournal
-									? journal.execute(
-											sendToken("tx", input.inputId, input.commandAttempt ?? 0),
-											Effect.sync(() => delivered()).pipe(Effect.as(result)),
-										)
-									: journal.execute(
-											input.inputId,
-											input.commandAttempt ?? 0,
-											input.nativeResumeFallback === true,
-											Effect.sync(() => delivered()).pipe(Effect.as(result)),
-										)
-								).pipe(
-									Effect.flatMap((value) =>
-										value
-											? f.reply(input, value)
-											: Effect.die("missing fallback result"),
-									),
-									Effect.mapError(
-										(cause) =>
-											new ProviderInstanceFailure({
-												providerId: "claude",
-												operation: "send-turn",
-												cause,
-											}),
-									),
-								),
-							);
-						yield* TestClock.adjust(0);
-						yield* f.reactor.drain();
-						yield* TestClock.adjust(0);
-						yield* f.reactor.drain();
-						// An older journal sends a fallback only under its rejected primary's
-						// key, but a token names one transmission (CONTRACT 66-67): the claim
-						// requeues, and the older journal refuses the fresh token's fallback.
-						const refused = !current && !markerCommitted;
-						expect(
-							yield* f.sql`SELECT status, attempt_count FROM provider_command_outbox WHERE command_id = 'fallback-answer'`,
-						).toEqual([
-							refused
-								? { status: "failed", attempt_count: 2 }
-								: { status: "completed", attempt_count: current ? 2 : 1 },
-						]);
-						if (!current) {
-							expect(f.sendHandles.map((send) => send.assignment._tag)).toEqual(
-								["Closed"],
-							);
-							expect(f.account).toEqual({ acquired: 1, released: 1 });
-						}
-						expect(delivered).toHaveBeenCalledTimes(refused ? 1 : 2);
-						if (!markerCommitted || current)
-							expect(send.mock.calls[0]?.[0]).toMatchObject({
-								inputId: "fallback-answer",
-								commandAttempt: 2,
-								nativeResumeFallback: true,
-							});
-						if (!current)
-							expect(keys).toEqual([{ token, fallback: markerCommitted }]);
-						expect(
-							yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'fallback-next'`,
-						).toEqual([{ status: "completed" }]);
-					}),
-				),
-		);
-
-it.effect(
-	"S10 an adopted fallback ignores an earlier transmission's reply and settles its own reply once",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("claude");
-				yield* f.seed("held-fallback", 1, 2);
-				yield* f.seed("held-fallback-next", 2, 0);
-				yield* f.sql`UPDATE provider_command_outbox SET payload_json=json_set(payload_json,'$.nativeResumeFallback',json('true')) WHERE command_id='held-fallback'`;
-				const sinkId = runnerSinkId("held-fallback", 2, true);
-				// The fallback is its own transmission (4.8), so its own token.
-				const token = sendToken("tx", "held-fallback", 2);
-				yield* f.hello((hello) => ({
-					...hello,
-					sendJournalAnswers: true,
-					// The host recorded this transmission as the fresh fallback (4.8).
-					sendAnswers: [{ token, fresh: true, status: "running" }],
-					bindings: [
-						{
-							token,
-							sinkId,
-							sessionId: "s",
-							released: false,
-						},
-					],
-				}));
-				yield* f.recover;
-				expect(f.sendHandles).toHaveLength(1);
-				const attachment = f.attachments[0];
-				if (!attachment?.onCommandReply)
-					return yield* Effect.die("missing fallback attachment");
-				const rejection = {
-					status: "error",
-					nativeResumeRejected: true,
-					error: {
-						code: "resume_rejected",
-						message: "native resume was rejected",
-					},
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-					providerStateUpdates: [],
-				} satisfies TurnResult;
-				yield* attachment.onCommandReply({
-					type: "command-reply",
-					commandId: sendToken("tx", "held-fallback", 1),
-					result: rejection,
-				});
-				expect(
-					yield* f.sql`SELECT status,error_code FROM provider_command_outbox WHERE command_id='held-fallback'`,
-				).toEqual([{ status: "running", error_code: null }]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed','turn.error','turn.interrupted')`,
-				).toEqual([]);
-				const reply = {
-					type: "command-reply",
-					commandId: token,
-					result: rejection,
-				} as const;
-				yield* attachment.onCommandReply(reply);
-				yield* attachment.onCommandReply(reply);
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id='held-fallback'`,
-				).toEqual([{ status: "failed" }]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed','turn.error','turn.interrupted')`,
-				).toEqual([{ type: "turn.error" }]);
-				const send = vi.spyOn(f.instance, "sendTurnEffect").mockReturnValue(
-					Effect.succeed({
-						status: "completed",
-						cost: 0,
-						tokens: { input: 0, output: 0 },
-						durationMs: 0,
-						providerStateUpdates: [],
-					}),
-				);
-				yield* f.reactor.drain();
-				yield* f.reactor.drain();
-				expect(send.mock.calls.map(([input]) => input.inputId)).toEqual([
-					"held-fallback-next",
-				]);
-			}),
-		),
-);
-
 for (const finished of [false, true])
 	it.effect(
 		`S10 current predecessor journal ${finished ? "finished" : "unfinished"} key never gains a phantom owner`,
@@ -2185,7 +1160,7 @@ for (const finished of [false, true])
 			runRetirement(
 				Effect.gen(function* () {
 					const f = yield* s7Fixture();
-					yield* f.seed("predecessor", 1, 1, finished ? "legacy" : "held");
+					yield* f.seed("predecessor");
 					yield* f.seed("predecessor-next", 2, 0);
 					const directory = runnerRegistry.runnerDirectory(f.root, f.root);
 					const previous = new RunnerSendJournal(directory, "s", "cursor");
@@ -2198,8 +1173,7 @@ for (const finished of [false, true])
 						durationMs: 0,
 						providerStateUpdates: [],
 					} satisfies TurnResult;
-					// A held send's token is its hold's transmission, else its claim's.
-					const token = sendToken(finished ? "tx" : "hold", "predecessor", 1);
+					const token = sendToken("hold", "predecessor", 1);
 					if (finished) yield* previous.execute(token, Effect.succeed(result));
 					else {
 						yield* previous
@@ -2215,11 +1189,9 @@ for (const finished of [false, true])
 					const journal = new RunnerSendJournal(directory, "s", "cursor");
 					yield* f.hello((hello) => ({
 						...hello,
-						sendJournalAnswers: true,
 						sendAnswers: journal.answers,
 						bindings: [],
 						sendTokens: journal.tokens,
-						completedCommands: [],
 					}));
 					yield* f.recover;
 					expect(f.sendHandles).toEqual([]);
@@ -2246,130 +1218,6 @@ for (const finished of [false, true])
 				}),
 			),
 	);
-
-for (const outcome of ["completed", "failed", "older attempt"] as const)
-	it.effect(
-		`S7 completed hello ${outcome} settles only its exact attempt without dispatch`,
-		() =>
-			runRetirement(
-				Effect.gen(function* () {
-					const f = yield* s7Fixture();
-					yield* f.seed("finished");
-					yield* f.hello((hello) => ({
-						...hello,
-						sendJournalAnswers: true,
-						sendAnswers: [
-							{
-								status: "finished",
-								token: sendToken(
-									"tx",
-									"finished",
-									outcome === "older attempt" ? 0 : 1,
-								),
-								...(outcome === "failed"
-									? {
-											failure: {
-												...runnerFailure("send-turn", "runner failed"),
-												code: "runner_failed",
-												retryable: false,
-											},
-										}
-									: {
-											result: {
-												status: "completed",
-												cost: 0,
-												tokens: { input: 0, output: 0 },
-												durationMs: 0,
-												providerStateUpdates: [
-													{ key: "s7-completed", value: "yes" },
-												],
-											},
-										}),
-							},
-						],
-					}));
-					yield* f.recover;
-					expect(
-						yield* f.sql`SELECT status, attempt_count, run_id FROM provider_command_outbox`,
-					).toEqual([
-						{
-							status:
-								outcome === "older attempt"
-									? "retryable_failed"
-									: outcome === "failed"
-										? "failed"
-										: "completed",
-							attempt_count: 1,
-							run_id: "run:finished",
-						},
-					]);
-					expect(
-						f.commands.filter((command) => command.type === "send-turn"),
-					).toEqual([]);
-					expect(f.sendHandles).toEqual([]);
-					expect(
-						yield* f.sql`SELECT value FROM provider_state WHERE key = 's7-completed'`,
-					).toEqual(outcome === "completed" ? [{ value: "yes" }] : []);
-					if (outcome === "failed") {
-						expect(
-							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'run:finished'`,
-						).toEqual([{ status: "error" }]);
-						expect(
-							yield* f.sql`SELECT input_id FROM messages WHERE role = 'user'`,
-						).toEqual([{ input_id: "finished" }]);
-						expect(
-							yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-						).toEqual([{ type: "turn.error" }]);
-					}
-				}),
-			),
-	);
-
-it.effect(
-	"S7 a terminal cached hello reply creates no retained admission or account demand",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture();
-				yield* f.seed("finished");
-				const token = sendToken("tx", "finished", 1);
-				yield* f.hello((hello) => ({
-					...hello,
-					bindings: [
-						{
-							token,
-							sinkId: runnerSinkId("finished", 1),
-							sessionId: "s",
-							released: false,
-						},
-					],
-					sendJournalAnswers: true,
-					sendAnswers: [
-						{
-							status: "finished",
-							token,
-							result: {
-								status: "completed",
-								cost: 0,
-								tokens: { input: 0, output: 0 },
-								durationMs: 0,
-								providerStateUpdates: [],
-							},
-						},
-					],
-				}));
-				yield* f.recover;
-				expect(f.sendHandles).toEqual([]);
-				expect(f.account).toEqual({ acquired: 0, released: 0 });
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox`,
-				).toEqual([{ status: "completed" }]);
-				expect(
-					f.commands.filter((command) => command.type === "send-turn"),
-				).toEqual([]);
-			}),
-		),
-);
 
 for (const driverKind of ["claude", "cursor"] as const)
 	it.effect(
@@ -2426,7 +1274,6 @@ for (const driverKind of ["claude", "cursor"] as const)
 	);
 
 for (const [helloAttempt, bindingAttempt, rowAttempt] of [
-	[0, 0, 1],
 	[1, 1, 1],
 	[2, 1, 2],
 ] as const)
@@ -2436,7 +1283,7 @@ for (const [helloAttempt, bindingAttempt, rowAttempt] of [
 			runRetirement(
 				Effect.gen(function* () {
 					const f = yield* s7Fixture();
-					yield* f.seed("held", 1, rowAttempt);
+					yield* f.seed("held", 1, rowAttempt, "unheld");
 					yield* f.hello((hello) => ({
 						...hello,
 						bindings: [
@@ -2447,7 +1294,6 @@ for (const [helloAttempt, bindingAttempt, rowAttempt] of [
 								released: false,
 							},
 						],
-						sendJournalAnswers: true,
 						sendTokens: [sendToken("tx", "held", helloAttempt)],
 						sendAnswers: [
 							{
@@ -2461,14 +1307,11 @@ for (const [helloAttempt, bindingAttempt, rowAttempt] of [
 						yield* f.sql`SELECT status, attempt_count FROM provider_command_outbox`,
 					).toEqual([
 						{
-							status:
-								helloAttempt === rowAttempt ? "running" : "retryable_failed",
+							status: "running",
 							attempt_count: rowAttempt,
 						},
 					]);
-					expect(f.sendHandles).toHaveLength(
-						helloAttempt === rowAttempt ? 1 : 0,
-					);
+					expect(f.sendHandles).toHaveLength(1);
 					expect(
 						f.commands.filter((command) => command.type === "send-turn"),
 					).toEqual([]);
@@ -2482,10 +1325,9 @@ it.effect(
 		runRetirement(
 			Effect.gen(function* () {
 				const f = yield* s7Fixture();
-				yield* f.seed("held", 1, 2);
+				yield* f.seed("held", 1, 2, "unheld");
 				yield* f.hello((hello) => ({
 					...hello,
-					sendJournalAnswers: true,
 					sendTokens: [sendToken("tx", "held", 2)],
 					sendAnswers: [
 						{ status: "running", token: sendToken("tx", "held", 2) },
@@ -2506,223 +1348,6 @@ it.effect(
 				).toEqual([{ status: "running", attempt_count: 2 }]);
 			}),
 		),
-);
-
-it.effect(
-	"S7 reactor retries the original run once and keeps the next send behind it",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture();
-				yield* f.seed("first");
-				yield* f.seed("second", 2, 0);
-				yield* f.sql`UPDATE provider_command_outbox SET status = 'pending' WHERE command_id = 'second'`;
-				const entered = yield* Deferred.make<void>();
-				const release = yield* Deferred.make<void>();
-				const calls: Array<{
-					inputId: string;
-					runId: string | undefined;
-					attempt: number | undefined;
-				}> = [];
-				const send = f.instance.sendTurnEffect.bind(f.instance);
-				vi.spyOn(f.instance, "sendTurnEffect").mockImplementation((input) =>
-					Effect.gen(function* () {
-						calls.push({
-							inputId: input.inputId,
-							runId: input.runId,
-							attempt: input.commandAttempt,
-						});
-						if (input.inputId === "first") {
-							yield* Deferred.succeed(entered, undefined);
-							yield* Deferred.await(release);
-						}
-						const result = yield* send(input);
-						const attachment = f.attachments.at(-1);
-						if (!attachment)
-							return yield* Effect.die("missing native attachment");
-						yield* attachment.emit(
-							{
-								type: "place-user-message",
-								sinkId: runnerSinkId(input.inputId, input.commandAttempt),
-								input: {
-									sessionId: "s",
-									inputId: input.inputId,
-									text: input.text ?? input.prompt,
-									...(input.runId ? { runId: input.runId } : {}),
-								},
-							},
-							"s",
-						);
-						const now = yield* Clock.currentTimeMillis;
-						for (const type of ["run.started", "turn.completed"] as const)
-							yield* input.eventSink.push({
-								eventId: `s7-native:${input.inputId}:${type}`,
-								type,
-								providerId: "cursor",
-								sessionId: "s",
-								runId: input.runId,
-								providerRefs: {},
-								rawSource: { kind: "test.runner" },
-								createdAt: now,
-								data:
-									type === "run.started"
-										? { inputId: input.inputId, requestedRunId: input.runId }
-										: { messageId: "", duration: 1 },
-							});
-						yield* attachment.emit(
-							{
-								type: "release-sink",
-								sinkId: runnerSinkId(input.inputId, input.commandAttempt),
-							},
-							"s",
-						);
-						return result;
-					}).pipe(
-						Effect.mapError((cause) =>
-							cause instanceof ProviderInstanceFailure
-								? cause
-								: new ProviderInstanceFailure({
-										providerId: "cursor",
-										operation: "test native output",
-										cause,
-									}),
-						),
-					),
-				);
-				yield* Deferred.succeed(f.pending, {
-					status: "completed",
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-					providerStateUpdates: [],
-				});
-				yield* f.recover;
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'first'`,
-				).toEqual([{ status: "retryable_failed" }]);
-				expect(calls).toEqual([]);
-				expect(
-					f.commands.filter((command) => command.type === "send-turn"),
-				).toEqual([]);
-				const draining = yield* Effect.forkChild(f.reactor.drain());
-				yield* Deferred.await(entered);
-				yield* Effect.all([f.reactor.drain(), f.reactor.drain()]);
-				expect(calls).toEqual([
-					{ inputId: "first", runId: "run:first", attempt: 2 },
-				]);
-				yield* Deferred.succeed(release, undefined);
-				yield* Fiber.join(draining);
-				expect(calls).toEqual([
-					{ inputId: "first", runId: "run:first", attempt: 2 },
-					{ inputId: "second", runId: "run:second", attempt: 1 },
-				]);
-				expect(
-					f.commands.filter((command) => command.type === "send-turn"),
-				).toHaveLength(2);
-				expect(
-					yield* f.sql`SELECT command_id, status, run_id, attempt_count FROM provider_command_outbox ORDER BY request_sequence`,
-				).toEqual([
-					{
-						command_id: "first",
-						status: "completed",
-						run_id: "run:first",
-						attempt_count: 2,
-					},
-					{
-						command_id: "second",
-						status: "completed",
-						run_id: "run:second",
-						attempt_count: 1,
-					},
-				]);
-				expect(
-					yield* f.sql`SELECT input_id FROM messages WHERE role = 'user' ORDER BY created_at, input_id`,
-				).toEqual([{ input_id: "first" }, { input_id: "second" }]);
-				expect(
-					yield* f.sql`SELECT json_extract(metadata, '$.runId') AS run_id, COUNT(*) AS count FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted') GROUP BY run_id ORDER BY run_id`,
-				).toEqual([
-					{ run_id: "run:first", count: 1 },
-					{ run_id: "run:second", count: 1 },
-				]);
-			}),
-		),
-);
-
-it.effect(
-	"S7 requeued admission timeout places one failed message and restores one draft",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture();
-				yield* f.seed("refused");
-				const drafts = yield* makeInputDrafts;
-				const restore = vi.spyOn(drafts, "restoreChange");
-				const place = vi.spyOn(f.persist, "persistUserMessage");
-				const execute = f.manager.executeEffect.bind(f.manager);
-				vi.spyOn(f.manager, "executeEffect").mockImplementation(
-					(command, send) =>
-						command.type === "send-turn"
-							? Effect.fail(
-									new SendAdmissionTimeout({ reason: "retunePending" }),
-								)
-							: execute(command, send).pipe(Effect.as(undefined)),
-				);
-				yield* f.recover;
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'refused'`,
-				).toEqual([{ status: "retryable_failed" }]);
-				expect(restore).not.toHaveBeenCalled();
-				expect(yield* drafts.read({ session: "s" })).toBeUndefined();
-				expect(place).not.toHaveBeenCalled();
-				expect(
-					yield* f.reactor
-						.runCommand("refused")
-						.pipe(Effect.provideService(InputDraftsTag, drafts)),
-				).toMatchObject({ status: "error" });
-				expect(place).toHaveBeenCalledTimes(1);
-				expect(restore).toHaveBeenCalledExactlyOnceWith(
-					{ session: "s" },
-					"refused",
-					[],
-					"text refused",
-					yield* Clock.currentTimeMillis,
-				);
-				expect(yield* drafts.read({ session: "s" })).toBe("text refused");
-				expect(
-					yield* f.sql`SELECT input_id FROM messages WHERE role = 'user'`,
-				).toEqual([{ input_id: "refused" }]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-				).toEqual([{ type: "turn.error" }]);
-				expect(
-					yield* f.sql`SELECT status, error_code, attempt_count, run_id FROM provider_command_outbox`,
-				).toEqual([
-					{
-						status: "failed",
-						error_code: "send_admission_timeout",
-						attempt_count: 2,
-						run_id: "run:refused",
-					},
-				]);
-				expect(
-					f.commands.filter((command) => command.type === "send-turn"),
-				).toEqual([]);
-			}),
-		),
-);
-
-it.effect("S7 recovery wakes the reactor only after the requeue commits", () =>
-	runRetirement(
-		Effect.gen(function* () {
-			const f = yield* s7Fixture();
-			yield* f.seed("wake");
-			yield* f.recover;
-			yield* TestClock.adjust(0);
-			expect(f.wakes).toEqual([
-				[{ command_id: "wake", status: "retryable_failed" }],
-			]);
-		}),
-	),
 );
 
 it.effect(
@@ -2834,7 +1459,6 @@ it.effect(
 				);
 				yield* f.hello((hello) => ({
 					...hello,
-					sendJournalAnswers: true,
 					sendAnswers: [
 						{
 							status: "running",
@@ -2935,109 +1559,6 @@ it.effect(
 		),
 );
 
-for (const fault of ["read", "settlement"] as const)
-	it.effect(
-		`S7 recovery ${fault} failure rolls back and reconnect settles every row`,
-		() =>
-			runRetirement(
-				Effect.gen(function* () {
-					const f = yield* s7Fixture();
-					yield* f.seed("finished");
-					yield* f.seed("missing", 2);
-					yield* f.hello((hello) => ({
-						...hello,
-						sendJournalAnswers: true,
-						sendAnswers: [
-							{
-								status: "finished",
-								token: sendToken("tx", "finished", 1),
-								result: {
-									status: "completed",
-									cost: 0,
-									tokens: { input: 0, output: 0 },
-									durationMs: 0,
-									providerStateUpdates: [
-										{ key: "s7-atomic", value: "committed" },
-									],
-								},
-							},
-						],
-					}));
-					if (fault === "settlement")
-						yield* f.sql`CREATE TEMP TRIGGER fail_s7_requeue BEFORE UPDATE ON provider_command_outbox
-					WHEN OLD.command_id = 'missing' AND NEW.status = 'retryable_failed'
-					BEGIN SELECT RAISE(ABORT, 'injected S7 settlement failure'); END`;
-					const firstHello =
-						yield* Deferred.make<Exit.Exit<void, SessionFailure>>();
-					const connect = vi.mocked(f.driver.connect).getMockImplementation();
-					if (!connect) return yield* Effect.die("missing recovery connection");
-					vi.mocked(f.driver.connect).mockImplementation((options) =>
-						connect({
-							...options,
-							onHello: (hello, connection, replay) =>
-								options
-									.onHello(hello, connection, replay)
-									.pipe(
-										Effect.onExit((exit) => Deferred.succeed(firstHello, exit)),
-									),
-						}),
-					);
-					let readFailed = false;
-					const recovering = yield* Effect.forkChild(
-						f.recover.pipe(
-							Effect.provideService(
-								Statement.CurrentTransformer,
-								(statement) => {
-									const [query] = statement.compile();
-									if (
-										fault !== "read" ||
-										readFailed ||
-										!query.includes("SELECT outbox.request_sequence")
-									)
-										return Effect.succeed(statement);
-									readFailed = true;
-									return Effect.succeed(
-										f.sql`SELECT * FROM s7_injected_missing_read_table`,
-									);
-								},
-							),
-						),
-					);
-					expect(yield* Deferred.await(firstHello)).toMatchObject({
-						_tag: "Failure",
-					});
-					expect(
-						yield* f.sql`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`,
-					).toEqual([
-						{ command_id: "finished", status: "running" },
-						{ command_id: "missing", status: "running" },
-					]);
-					expect(
-						yield* f.sql`SELECT value FROM provider_state WHERE key = 's7-atomic'`,
-					).toEqual([]);
-					expect(recovering.pollUnsafe()).toBeUndefined();
-					expect(f.wakes).toEqual([]);
-					if (fault === "settlement")
-						yield* f.sql`DROP TRIGGER fail_s7_requeue`;
-					yield* TestClock.adjust("150 millis");
-					yield* Fiber.join(recovering);
-					expect(
-						yield* f.sql`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`,
-					).toEqual([
-						{ command_id: "finished", status: "completed" },
-						{ command_id: "missing", status: "retryable_failed" },
-					]);
-					expect(
-						yield* f.sql`SELECT value FROM provider_state WHERE key = 's7-atomic'`,
-					).toEqual([{ value: "committed" }]);
-					expect(f.attachments).toHaveLength(2);
-					expect(
-						f.commands.filter((command) => command.type === "send-turn"),
-					).toEqual([]);
-				}),
-			),
-	);
-
 for (const outcome of ["completed", "failed"] as const)
 	it.effect(
 		`S7 ${outcome} hello drains native output once and never redelivers the cached command`,
@@ -3056,7 +1577,6 @@ for (const outcome of ["completed", "failed"] as const)
 								options.onHello(
 									{
 										...hello,
-										sendJournalAnswers: true,
 										sendAnswers: [
 											{
 												status: "finished",
@@ -3159,60 +1679,6 @@ for (const outcome of ["completed", "failed"] as const)
 				}),
 			),
 	);
-
-it.effect(
-	"S7 persistent hello settlement failure retires the attachment and settles the unclaimed send",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture();
-				yield* f.seed("unreceived");
-				// Dispatch commits its holder before the runner can receive the command.
-				yield* f.sql`UPDATE provider_runs SET runner_id = '131313131313' WHERE id = 'run:unreceived'`;
-				vi.spyOn(f.processTable, "signal").mockImplementation(() => {
-					f.processes.delete(100_088);
-				});
-				yield* f.sql`CREATE TEMP TRIGGER reject_s7_requeue BEFORE UPDATE ON provider_command_outbox
-			WHEN NEW.status = 'retryable_failed' BEGIN SELECT RAISE(ABORT, 'persistent S7 settlement failure'); END`;
-				const firstHello = yield* Deferred.make<void>();
-				const connect = vi.mocked(f.driver.connect).getMockImplementation();
-				if (!connect)
-					return yield* Effect.die("missing persistent-failure connection");
-				vi.mocked(f.driver.connect).mockImplementation((options) =>
-					connect({
-						...options,
-						onHello: (hello, connection, replay) =>
-							options
-								.onHello(hello, connection, replay)
-								.pipe(
-									Effect.onExit(() => Deferred.succeed(firstHello, undefined)),
-								),
-					}),
-				);
-				const recovering = yield* Effect.forkChild(f.recover);
-				yield* Deferred.await(firstHello);
-				yield* TestClock.adjust("2 seconds");
-				yield* Fiber.join(recovering);
-				expect(f.attachments).toHaveLength(5);
-				expect(yield* f.manager.hasLiveProcessEffect("s", "131313131313")).toBe(
-					false,
-				);
-				expect(
-					yield* f.sql`SELECT status, error_code FROM provider_command_outbox`,
-				).toEqual([{ status: "failed", error_code: "runner_stopped" }]);
-				expect(
-					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'run:unreceived'`,
-				).toEqual([{ status: "error" }]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-				).toEqual([{ type: "turn.error" }]);
-				expect(f.wakes).toEqual([]);
-				expect(
-					f.commands.filter((command) => command.type === "send-turn"),
-				).toEqual([]);
-			}),
-		),
-);
 
 for (const invalidation of ["none", "after retry"] as const) {
 	const invalidateAfterRetry = invalidation === "after retry";
@@ -4933,54 +3399,6 @@ for (const origin of ["Adopted"] as const)
 		),
 	);
 
-for (const origin of ["continuation", "retry"] as const)
-	it.effect(
-		`S7 recovery requeues a current ${origin} despite an older turn terminal`,
-		() =>
-			runRetirement(
-				Effect.gen(function* () {
-					const f = yield* sendScopeFixture(undefined, undefined, "cursor");
-					const input = {
-						...f.input,
-						prompt: "recovered",
-						history: [],
-						...(origin === "continuation"
-							? { continuation: { cutOffMessageId: "old-input" } }
-							: {}),
-					};
-					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('current-run', 's', 'pending', 1)`;
-					yield* (yield* makeCommitAndSignal)([
-						canonicalEvent("run.dispatched", "s", {
-							runId: "current-run",
-							runnerId: "131313131313",
-						}),
-					]);
-					yield* f.sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at, run_id) VALUES ('old-turn', 's', 'interrupted', ${origin === "continuation" ? "old-input" : input.inputId}, 1, 'old-run')`;
-					yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id)
-		VALUES (1, 'current-command', 'test-project', 's', 'account', 'send_turn', ${JSON.stringify(input)}, 'running', 0, 1, 1, 'current-run')`;
-					yield* Deferred.succeed(f.pending, {
-						status: "completed",
-						cost: 0,
-						tokens: { input: 0, output: 0 },
-						durationMs: 0,
-						providerStateUpdates: [],
-					});
-					yield* f.instance.recoverProjectContextsEffect(() =>
-						Effect.succeed(undefined),
-					);
-					yield* TestClock.adjust(0);
-					expect(
-						f.commands.filter((command) => command.type === "send-turn"),
-					).toHaveLength(0);
-					expect(f.sendHandles).toEqual([]);
-					expect(
-						yield* f.sql`SELECT status, run_id FROM provider_command_outbox`,
-					).toEqual([{ status: "retryable_failed", run_id: "current-run" }]);
-					expect(f.account).toEqual({ acquired: 0, released: 0 });
-				}),
-			),
-	);
-
 it.effect(
 	"an acknowledged command completed at intake keeps its active native run resources",
 	() =>
@@ -5006,7 +3424,6 @@ it.effect(
 							options.onHello(
 								{
 									...hello,
-									sendJournalAnswers: true,
 									sendAnswers: [],
 									bindings: [
 										{
@@ -5060,7 +3477,6 @@ it.effect(
 								.onHello(
 									{
 										...hello,
-										sendJournalAnswers: true,
 										sendAnswers: [
 											{
 												token: sendToken("tx", "adopted-command", 0),
@@ -5705,101 +4121,6 @@ it.effect("releases retained sinks and account demand on normal exit", () =>
 	),
 );
 
-it.effect("an unsent failure cannot release a sink rebound after detach", () =>
-	runRetirement(
-		Effect.gen(function* () {
-			const f = yield* retirementFixture(false);
-			const commit = yield* makeCommitAndSignal;
-			// This pre-amendment retry uses the legacy unsent-failure path. Its
-			// command-less dispatch must keep it outside C2 and C3.
-			yield* commit([
-				canonicalEvent("run.requested", "s", {
-					runId: "unsent-first",
-					inputId: "first",
-				}),
-				canonicalEvent("run.dispatched", "s", {
-					runId: "unsent-first",
-					runnerId: "131313131313",
-				}),
-			]);
-			const entered = yield* Deferred.make<void>();
-			const resume = yield* Deferred.make<void>();
-			const record = f.output.getMockImplementation();
-			if (!record) return yield* Effect.die("missing output recorder");
-			f.output.mockImplementation((output, sessionId) =>
-				(output.type === "place-user-message"
-					? Deferred.succeed(entered, undefined).pipe(
-							Effect.andThen(Deferred.await(resume)),
-						)
-					: Effect.void
-				).pipe(Effect.andThen(record(output, sessionId))),
-			);
-			vi.mocked(f.driver.connect).mockImplementationOnce(() =>
-				Effect.gen(function* () {
-					const child = f.childProcesses.get(100_020);
-					if (!child) return yield* Effect.die("missing cold child");
-					f.processes.delete(100_020);
-					Object.assign(child, { exitCode: 1 });
-					return yield* Effect.fail(
-						runnerFailure("hello", "cold startup failed"),
-					);
-				}),
-			);
-			const first = yield* Effect.forkChild(
-				f
-					.admitCommand({
-						type: "send-turn",
-						sinkId: "reused",
-						aborted: false,
-						input: {
-							...f.input,
-							inputId: "first",
-							runId: "unsent-first",
-							prompt: "first",
-							history: [],
-						},
-					})
-					.pipe(Effect.result),
-			);
-			yield* Deferred.await(entered);
-			if (!f.manager.detachSessionEffect)
-				return yield* Effect.die("missing detach");
-			yield* f.manager.detachSessionEffect("s");
-			const second = yield* Effect.forkChild(
-				f.admitCommand({
-					type: "send-turn",
-					sinkId: "reused",
-					aborted: false,
-					input: {
-						...f.input,
-						inputId: "second",
-						prompt: "second",
-						history: [],
-					},
-				}),
-			);
-			yield* TestClock.adjust(0);
-			expect(second.pollUnsafe()).toBeUndefined();
-			yield* Deferred.succeed(resume, undefined);
-			yield* Fiber.join(first);
-			yield* Fiber.join(second);
-			expect(f.sendHandles[0]?.assignment._tag).toBe("Closed");
-			expect(f.sendHandles.at(-1)?.assignment._tag).toBe("Dispatched");
-			expect(
-				f.outputs.filter(
-					(output) =>
-						output.type === "release-sink" && output.sinkId === "reused",
-				),
-			).toHaveLength(1);
-			yield* f.manager.executeEffect(
-				{ type: "abort", sinkId: "reused" },
-				f.sendHandles.at(-1),
-			);
-			expect(f.commands.at(-1)?.type).toBe("abort");
-		}),
-	),
-);
-
 for (const failure of ["connection failure", "process exit"] as const) {
 	it.effect(
 		`cleans daemon-owned cold-send resources and reports one failure after ${failure} before hello`,
@@ -6433,7 +4754,6 @@ for (const failed of ["receipt", "ownership SQL"] as const) {
 								options.onHello(
 									{
 										...hello,
-										sendJournalAnswers: true,
 										sendAnswers: [
 											{
 												status: "running",
@@ -7526,7 +5846,6 @@ it.effect(
 									sessionId: "s",
 									pid,
 									bindings: [],
-									sendJournalAnswers: true,
 									sendAnswers: [],
 								},
 								connection,
@@ -7627,57 +5946,6 @@ it.effect(
 		);
 	},
 );
-it.effect("R2audit cached failed unplaced steer returns to queued", () =>
-	runRetirement(
-		Effect.gen(function* () {
-			const f = yield* s7Fixture();
-			yield* f.seed("steer");
-			const commit = yield* makeCommitAndSignal;
-			yield* commit([
-				canonicalEvent("input.admitted", "s", {
-					sessionId: "s",
-					inputId: "steer",
-					delivery: "steer",
-					request: { text: "steer text" },
-				}),
-				canonicalEvent("input.sent", "s", {
-					sessionId: "s",
-					inputId: "steer",
-					steer: true,
-				}),
-			]);
-			yield* f.hello((hello) => ({
-				...hello,
-				bindings: [],
-				sendTokens: [],
-				sendJournalAnswers: true,
-				sendAnswers: [
-					{
-						status: "finished",
-						token: sendToken("tx", "steer", 1),
-						failure: {
-							operation: "send-turn",
-							code: "provider_failure",
-							message: "send refused",
-							retryable: false,
-						},
-					},
-				],
-			}));
-			yield* f.recover;
-			expect(yield* f.sql`SELECT status FROM provider_command_outbox`).toEqual([
-				{ status: "failed" },
-			]);
-			expect(
-				yield* f.sql`SELECT input_id FROM messages WHERE role = 'user'`,
-			).toEqual([]);
-			expect(
-				yield* f.sql`SELECT state FROM pending_inputs WHERE input_id = 'steer'`,
-			).toEqual([{ state: "queued" }]);
-		}),
-	),
-);
-
 it.effect(
 	"R2audit cached native resume rejection without a fallback must not fail the input",
 	() =>
@@ -7689,7 +5957,6 @@ it.effect(
 					...hello,
 					bindings: [],
 					sendTokens: [],
-					sendJournalAnswers: true,
 					sendAnswers: [
 						{
 							status: "finished",
@@ -7713,762 +5980,6 @@ it.effect(
 				expect(
 					yield* f.sql`SELECT status FROM provider_command_outbox`,
 				).not.toEqual([{ status: "failed" }]);
-			}),
-		),
-);
-
-it.effect(
-	"R2audit an adopted send settling by reply after hello must release the durable claim",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("claude");
-				yield* f.seed("late-reply");
-
-				const { createServer } = yield* Effect.promise(
-					() => import("node:net"),
-				);
-				const { RunnerSocket: Peer, RUNNER_PROTOCOL_VERSION } =
-					yield* Effect.promise(
-						() => import("../../../src/lib/provider/runner/runner-protocol.js"),
-					);
-				const { connectRunner } = yield* Effect.promise(
-					() => import("../../../src/lib/provider/runner/runner-connection.js"),
-				);
-				let peer: InstanceType<typeof Peer> | undefined;
-				const server = createServer((socket) => {
-					peer = new Peer(
-						socket,
-						(message) => {
-							if (message.type === "hello")
-								peer?.write({
-									type: "hello",
-									driverKind: "claude",
-									protocolVersion: RUNNER_PROTOCOL_VERSION,
-									buildId: runnerBuildId(),
-									runnerId: "131313131313",
-									sessionId: "s",
-									pid: 100_088,
-									stampsRunIds: true,
-									sendTokens: [],
-									sendJournalAnswers: true,
-									sendAnswers: [
-										{
-											status: "running",
-											token: sendToken("tx", "late-reply", 1),
-										},
-									],
-									bindings: [
-										{
-											token: sendToken("tx", "late-reply", 1),
-											sessionId: "s",
-											sinkId: runnerSinkId("late-reply", 1),
-											released: false,
-										},
-									],
-								});
-							if (message.type === "replay")
-								peer?.write({
-									type: "upgrade-state",
-									state: { quiescent: false, turnInFlight: true, revision: 0 },
-								});
-						},
-						() => {},
-					);
-				});
-				yield* Effect.addFinalizer(() =>
-					Effect.promise(
-						() =>
-							new Promise<void>((resolve) => {
-								peer?.destroy();
-								server.close(() => resolve());
-							}),
-					),
-				);
-				yield* Effect.promise(
-					() =>
-						new Promise<void>((resolve, reject) => {
-							server.once("error", reject);
-							server.listen(f.socketPath, resolve);
-						}),
-				);
-				vi.mocked(f.driver.connect).mockImplementation((options) =>
-					connectRunner(options),
-				);
-				yield* f.recover;
-				expect(f.sendHandles).toHaveLength(1);
-				yield* Effect.sync(() => {
-					peer?.write({
-						type: "output",
-						outputId: "release",
-						sequence: 1,
-						output: {
-							type: "release-sink",
-							sinkId: runnerSinkId("late-reply", 1),
-						},
-					});
-					const reply = {
-						type: "command-reply",
-						commandId: sendToken("tx", "late-reply", 1),
-						result: {
-							status: "error",
-							nativeResumeRejected: true,
-							error: {
-								code: "provider_error",
-								message: "No conversation found with session ID missing",
-							},
-							cost: 0,
-							tokens: { input: 0, output: 0 },
-							durationMs: 0,
-							providerStateUpdates: [],
-						},
-					} satisfies {
-						readonly type: "command-reply";
-						readonly commandId: string;
-						readonly result: TurnResult;
-					};
-
-					peer?.write(reply);
-				});
-				yield* Effect.promise(
-					() => new Promise<void>((resolve) => setTimeout(resolve, 50)),
-				);
-				expect(f.sendHandles[0]?.assignment._tag).toBe("Closed");
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox`,
-				).not.toEqual([{ status: "running" }]);
-			}),
-		),
-);
-
-it.effect(
-	"R2audit an S7 requeued steer failing in the background returns to the inbox",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture();
-				yield* f.seed("background-steer");
-				const commit = yield* makeCommitAndSignal;
-				yield* commit([
-					canonicalEvent("input.admitted", "s", {
-						sessionId: "s",
-						inputId: "background-steer",
-						delivery: "steer",
-						request: { text: "steer text" },
-					}),
-					canonicalEvent("input.sent", "s", {
-						sessionId: "s",
-						inputId: "background-steer",
-						steer: true,
-					}),
-				]);
-				yield* f.hello((hello) => ({
-					...hello,
-					bindings: [],
-					sendTokens: [],
-					sendJournalAnswers: true,
-					sendAnswers: [],
-				}));
-				yield* f.recover;
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox`,
-				).toEqual([{ status: "retryable_failed" }]);
-				// The inbox startup sweep precedes this later background provider failure.
-				const { requeueFailedSteers } = yield* Effect.promise(
-					() =>
-						import(
-							"../../../src/lib/persistence/effect/input-requeue-effect.js"
-						),
-				);
-				yield* requeueFailedSteers(f.sql, f.persist, "s");
-				vi.spyOn(f.instance, "sendTurnEffect").mockReturnValue(
-					Effect.fail(
-						new ProviderInstanceFailure({
-							providerId: "cursor",
-							operation: "send-turn",
-							cause: {
-								code: "provider_failure",
-								message: "send failed",
-								retryable: false,
-							},
-						}),
-					),
-				);
-				yield* f.reactor.runOnce();
-				expect(
-					yield* f.sql`SELECT status,attempt_count FROM provider_command_outbox`,
-				).toEqual([{ status: "failed", attempt_count: 2 }]);
-				expect(
-					yield* f.sql`SELECT input_id FROM messages WHERE role = 'user'`,
-				).toEqual([]);
-				expect(
-					yield* f.sql`SELECT state FROM pending_inputs WHERE input_id = 'background-steer'`,
-				).toEqual([{ state: "queued" }]);
-			}),
-		),
-);
-
-it.effect(
-	"S7fix cached native rejection clears the stale cursor and ordinary reactor preparation sends fresh once",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("claude");
-				yield* f.seed("fresh-resume");
-				const stale = JSON.stringify({
-					configDir: configuredClaudeConfigDir(f.root),
-					resumeSessionId: "missing-native",
-					firstSequence: 0,
-					deliveredThrough: 0,
-				});
-				const other = JSON.stringify({
-					configDir: configuredClaudeConfigDir(f.root),
-					resumeSessionId: "other-native",
-					firstSequence: 0,
-					deliveredThrough: 0,
-				});
-				for (const [key, value] of [
-					["nativeThread:account", stale],
-					["nativeThread:other", other],
-					["resumeSessionId", "missing-native"],
-					["claudeConfigDir", f.root],
-				] as const)
-					yield* f.sql`INSERT INTO provider_state (session_id, key, value) VALUES ('s', ${key}, ${value})`;
-				yield* f.hello((hello) => ({
-					...hello,
-					bindings: [],
-					sendTokens: [],
-					sendJournalAnswers: true,
-					sendAnswers: [
-						{
-							status: "finished",
-							token: sendToken("tx", "fresh-resume", 1),
-							result: {
-								status: "error",
-								nativeResumeRejected: true,
-								error: {
-									code: "resume_rejected",
-									message:
-										"No conversation found with session ID missing-native",
-								},
-								cost: 0,
-								tokens: { input: 0, output: 0 },
-								durationMs: 0,
-								providerStateUpdates: [],
-							},
-						},
-					],
-				}));
-				yield* f.recover;
-				expect(
-					yield* f.sql`SELECT status, json_extract(payload_json, '$.nativeResumeFallback') AS fallback FROM provider_command_outbox`,
-				).toEqual([{ status: "retryable_failed", fallback: 1 }]);
-				expect(
-					yield* f.sql`SELECT key, value FROM provider_state WHERE key IN ('nativeThread:account', 'nativeThread:other', 'resumeSessionId', 'claudeConfigDir') ORDER BY key`,
-				).toEqual([{ key: "nativeThread:other", value: other }]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-				).toEqual([]);
-				const send = vi
-					.spyOn(f.instance, "sendTurnEffect")
-					.mockImplementation((input) =>
-						Effect.gen(function* () {
-							expect(input).toMatchObject({
-								inputId: "fresh-resume",
-								runId: "run:fresh-resume",
-								commandAttempt: 2,
-								nativeResumeFallback: true,
-								startFreshNativeSession: true,
-							});
-							expect(input.resumeSessionId).toBeUndefined();
-							expect(input.nativeThread).toBeUndefined();
-							yield* input.eventSink.push({
-								eventId: "fresh-resume-completed",
-								type: "turn.completed",
-								providerId: "claude",
-								sessionId: "s",
-								runId: input.runId,
-								providerRefs: {},
-								rawSource: { kind: "test.native" },
-								createdAt: 2,
-								data: { messageId: "", duration: 1 },
-							});
-							return {
-								status: "completed",
-								cost: 0,
-								tokens: { input: 0, output: 0 },
-								durationMs: 0,
-								providerStateUpdates: [],
-							} satisfies TurnResult;
-						}).pipe(
-							Effect.mapError(
-								(cause) =>
-									new ProviderInstanceFailure({
-										providerId: "claude",
-										operation: "test native output",
-										cause,
-									}),
-							),
-						),
-					);
-				yield* Effect.all([f.reactor.drain(), f.reactor.drain()]);
-				yield* f.reactor.drain();
-				expect(send).toHaveBeenCalledTimes(1);
-				expect(
-					yield* f.sql`SELECT status, attempt_count FROM provider_command_outbox`,
-				).toEqual([{ status: "completed", attempt_count: 2 }]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-				).toEqual([{ type: "turn.completed" }]);
-				expect(
-					yield* f.sql`SELECT value FROM provider_state WHERE key = 'nativeThread:other'`,
-				).toEqual([{ value: other }]);
-			}),
-		),
-);
-
-it.effect(
-	"S7fix a rejected fresh fallback settles once without another fallback",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("claude");
-				yield* f.seed("rejected-fallback");
-				yield* f.sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.nativeResumeFallback', json('true'))`;
-				yield* f.hello((hello) => ({
-					...hello,
-					bindings: [],
-					sendTokens: [],
-					sendJournalAnswers: true,
-					sendAnswers: [
-						{
-							status: "finished",
-							token: sendToken("tx", "rejected-fallback", 1),
-							// The host recorded this transmission as the fresh fallback (4.8).
-							fresh: true,
-							result: {
-								status: "error",
-								nativeResumeRejected: true,
-								error: {
-									code: "resume_rejected",
-									message: "native resume was rejected",
-								},
-								cost: 0,
-								tokens: { input: 0, output: 0 },
-								durationMs: 0,
-								providerStateUpdates: [],
-							},
-						},
-					],
-				}));
-				yield* f.recover;
-				expect(
-					yield* f.sql`SELECT status, attempt_count FROM provider_command_outbox`,
-				).toEqual([{ status: "failed", attempt_count: 1 }]);
-				yield* f.reactor.drain();
-				yield* f.reactor.drain();
-				expect(
-					f.commands.filter((command) => command.type === "send-turn"),
-				).toEqual([]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-				).toEqual([{ type: "turn.error" }]);
-			}),
-		),
-);
-
-it.effect(
-	"S7fix cached admission timeout restores original text and images once",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture();
-				yield* f.seed("cached-timeout");
-				const { makeAttachmentStore } = yield* Effect.promise(
-					() => import("../../../src/lib/persistence/attachment-store.js"),
-				);
-				const attachmentStore = yield* makeAttachmentStore;
-				const image = yield* attachmentStore.put(
-					"data:image/png;base64,aW1hZ2U=",
-				);
-				yield* f.sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.text', 'original text', '$.images', json(${JSON.stringify([image])}))`;
-				const drafts = yield* makeInputDrafts;
-				Object.assign(f.recovery, { inputDrafts: drafts });
-				const restore = vi.spyOn(drafts, "restoreChange");
-				yield* f.hello((hello) => ({
-					...hello,
-					bindings: [],
-					sendTokens: [],
-					sendJournalAnswers: true,
-					sendAnswers: [
-						{
-							status: "finished",
-							token: sendToken("tx", "cached-timeout", 1),
-							failure: {
-								operation: "send-turn",
-								code: "send_admission_timeout",
-								message: "admission timed out",
-								retryable: false,
-							},
-						},
-					],
-				}));
-				yield* f.recover;
-				yield* f.reactor.drain();
-				expect(restore).toHaveBeenCalledExactlyOnceWith(
-					{ session: "s" },
-					"cached-timeout",
-					[image],
-					"original text",
-					yield* Clock.currentTimeMillis,
-				);
-				expect(yield* drafts.read({ session: "s" })).toBe("original text");
-				expect(
-					yield* f.sql`SELECT COUNT(*) AS count FROM draft_attachments WHERE draft_key = 's' AND state = 'live'`,
-				).toEqual([{ count: 1 }]);
-				expect(
-					yield* f.sql`SELECT input_id FROM messages WHERE role = 'user'`,
-				).toEqual([{ input_id: "cached-timeout" }]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-				).toEqual([{ type: "turn.error" }]);
-				expect(
-					f.commands.filter((command) => command.type === "send-turn"),
-				).toEqual([]);
-			}),
-		),
-);
-
-for (const admissionTimeout of [false, true])
-	it.effect(
-		`S7fix adopted ${admissionTimeout ? "timeout restores the draft" : "refusal unblocks the next send"} once after release and duplicate replies`,
-		() =>
-			runRetirement(
-				Effect.gen(function* () {
-					const f = yield* s7Fixture("claude");
-					yield* f.seed("socket-held");
-
-					yield* f.seed("socket-next", 2, 0);
-					yield* f.sql`UPDATE provider_command_outbox SET status = 'pending' WHERE command_id = 'socket-next'`;
-					const drafts = yield* makeInputDrafts;
-					Object.assign(f.recovery, { inputDrafts: drafts });
-					const restore = vi.spyOn(drafts, "restoreChange");
-					const { makeAttachmentStore } = yield* Effect.promise(
-						() => import("../../../src/lib/persistence/attachment-store.js"),
-					);
-					const attachmentStore = yield* makeAttachmentStore;
-					const image = yield* attachmentStore.put(
-						"data:image/png;base64,aW1hZ2U=",
-					);
-					yield* f.sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.text', 'original socket text', '$.images', json(${JSON.stringify([image])})) WHERE command_id = 'socket-held'`;
-					const { createServer } = yield* Effect.promise(
-						() => import("node:net"),
-					);
-					const { RunnerSocket: Peer, RUNNER_PROTOCOL_VERSION } =
-						yield* Effect.promise(
-							() =>
-								import("../../../src/lib/provider/runner/runner-protocol.js"),
-						);
-					const { connectRunner } = yield* Effect.promise(
-						() =>
-							import("../../../src/lib/provider/runner/runner-connection.js"),
-					);
-					let peer: InstanceType<typeof Peer> | undefined;
-					const sent: string[] = [];
-					let sequence = 0;
-					const server = createServer((socket) => {
-						peer = new Peer(
-							socket,
-							(message) => {
-								if (message.type === "hello")
-									peer?.write({
-										type: "hello",
-										driverKind: "claude",
-										protocolVersion: RUNNER_PROTOCOL_VERSION,
-										buildId: runnerBuildId(),
-										runnerId: "131313131313",
-										sessionId: "s",
-										pid: 100_088,
-										stampsRunIds: true,
-										sendTokens: [],
-										sendJournalAnswers: true,
-										sendAnswers: [
-											{
-												status: "running",
-												token: sendToken("tx", "socket-held", 1),
-											},
-										],
-										bindings: [
-											{
-												token: sendToken("tx", "socket-held", 1),
-												sessionId: "s",
-												sinkId: runnerSinkId("socket-held", 1),
-												released: false,
-											},
-										],
-									});
-								if (message.type === "replay")
-									peer?.write({
-										type: "upgrade-state",
-										state: {
-											quiescent: false,
-											turnInFlight: true,
-											revision: 0,
-										},
-									});
-								if (
-									message.type === "command" &&
-									message.command.type === "send-turn"
-								) {
-									const input = message.command.input;
-									sent.push(input.inputId);
-									const sinkId = message.command.sinkId;
-									peer?.write({
-										type: "output",
-										outputId: "socket-next-place",
-										sequence: ++sequence,
-										output: {
-											type: "place-user-message",
-											sinkId,
-											input: {
-												sessionId: "s",
-												inputId: input.inputId,
-												text: input.text ?? input.prompt,
-												...(input.runId ? { runId: input.runId } : {}),
-											},
-										},
-									});
-									for (const type of ["run.started", "turn.completed"] as const)
-										peer?.write({
-											type: "output",
-											outputId: `socket-next-${type}`,
-											sequence: ++sequence,
-											output: {
-												type: "event",
-												sinkId,
-												event: {
-													eventId: `socket-next-${type}`,
-													type,
-													providerId: "claude",
-													sessionId: "s",
-													runId: input.runId,
-													providerRefs: {},
-													rawSource: { kind: "test.native" },
-													createdAt: 3,
-													data:
-														type === "run.started"
-															? {
-																	inputId: input.inputId,
-																	requestedRunId: input.runId,
-																}
-															: { messageId: "", duration: 1 },
-												},
-											},
-										});
-									peer?.write({
-										type: "output",
-										outputId: "socket-next-release",
-										sequence: ++sequence,
-										output: { type: "release-sink", sinkId },
-									});
-									peer?.write({
-										type: "command-reply",
-										commandId: message.commandId,
-										result: {
-											status: "completed",
-											cost: 0,
-											tokens: { input: 0, output: 0 },
-											durationMs: 0,
-											providerStateUpdates: [],
-										},
-									});
-								}
-							},
-							() => {},
-						);
-					});
-					yield* Effect.addFinalizer(() =>
-						Effect.promise(
-							() =>
-								new Promise<void>((resolve) => {
-									peer?.destroy();
-									server.close(() => resolve());
-								}),
-						),
-					);
-					yield* Effect.promise(
-						() =>
-							new Promise<void>((resolve, reject) => {
-								server.once("error", reject);
-								server.listen(f.socketPath, resolve);
-							}),
-					);
-					vi.mocked(f.driver.connect).mockImplementation((options) =>
-						connectRunner(options),
-					);
-					yield* f.recover;
-					expect(sent).toEqual([]);
-					const failure = {
-						operation: "send-turn",
-						code: admissionTimeout
-							? "send_admission_timeout"
-							: "provider_failure",
-						message: "send was refused",
-						retryable: false,
-					};
-					peer?.write({
-						type: "command-reply",
-						commandId: sendToken("tx", "socket-held", 0),
-						failure,
-					});
-					yield* Effect.promise(
-						() => new Promise<void>((resolve) => setTimeout(resolve, 20)),
-					);
-					expect(
-						yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'socket-held'`,
-					).toEqual([{ status: "running" }]);
-					peer?.write({
-						type: "output",
-						outputId: "held-release",
-						sequence: ++sequence,
-						output: {
-							type: "release-sink",
-							sinkId: runnerSinkId("socket-held", 1),
-						},
-					});
-
-					peer?.write({
-						type: "command-reply",
-						commandId: sendToken("tx", "socket-held", 1),
-						failure,
-					});
-					peer?.write({
-						type: "command-reply",
-						commandId: sendToken("tx", "socket-held", 1),
-						failure,
-					});
-					for (let count = 0; count < 100; count++) {
-						const rows = yield* f.sql<{
-							status: string;
-						}>`SELECT status FROM provider_command_outbox WHERE command_id = 'socket-held'`;
-						if (
-							rows[0]?.status === "failed" &&
-							(!admissionTimeout || restore.mock.calls.length > 0)
-						)
-							break;
-						yield* Effect.promise(
-							() => new Promise<void>((resolve) => setTimeout(resolve, 5)),
-						);
-					}
-					expect(
-						yield* f.sql`SELECT status, attempt_count FROM provider_command_outbox WHERE command_id = 'socket-held'`,
-					).toEqual([{ status: "failed", attempt_count: 1 }]);
-					expect(f.sendHandles[0]?.assignment._tag).toBe("Closed");
-					if (admissionTimeout) {
-						expect(restore).toHaveBeenCalledExactlyOnceWith(
-							{ session: "s" },
-							"socket-held",
-							[image],
-							"original socket text",
-							yield* Clock.currentTimeMillis,
-						);
-						expect(yield* drafts.read({ session: "s" })).toBe(
-							"original socket text",
-						);
-						expect(
-							yield* f.sql`SELECT COUNT(*) AS count FROM draft_attachments WHERE draft_key = 's' AND state = 'live'`,
-						).toEqual([{ count: 1 }]);
-					}
-					yield* f.reactor.drain();
-					expect(sent).toEqual(["socket-next"]);
-					expect(
-						yield* f.sql`SELECT command_id, status, attempt_count FROM provider_command_outbox ORDER BY request_sequence`,
-					).toEqual([
-						{ command_id: "socket-held", status: "failed", attempt_count: 1 },
-						{
-							command_id: "socket-next",
-							status: "completed",
-							attempt_count: 1,
-						},
-					]);
-					expect(
-						yield* f.sql`SELECT json_extract(metadata, '$.runId') AS run_id, COUNT(*) AS count FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted') GROUP BY run_id ORDER BY run_id`,
-					).toEqual([
-						{ run_id: "run:socket-held", count: 1 },
-						{ run_id: "run:socket-next", count: 1 },
-					]);
-					expect(
-						yield* f.sql`SELECT input_id FROM messages WHERE role = 'user' ORDER BY input_id`,
-					).toEqual([{ input_id: "socket-held" }, { input_id: "socket-next" }]);
-				}),
-			),
-	);
-
-it.effect(
-	"S7fix recovered fork refusal keeps later inputs fresh without a command fallback marker",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("claude");
-				const commit = yield* makeCommitAndSignal;
-				yield* commit([
-					canonicalEvent("session.created", "parent", {
-						sessionId: "parent",
-						title: "Fork parent",
-						provider: "account",
-					}),
-				]);
-				yield* f.sql`UPDATE sessions SET forked_from = 'parent', provider = 'account' WHERE id = 's'`;
-				yield* f.seed("fork-refusal");
-				yield* f.hello((hello) => ({
-					...hello,
-					bindings: [],
-					sendTokens: [],
-					sendJournalAnswers: true,
-					sendAnswers: [
-						{
-							status: "finished",
-							token: sendToken("tx", "fork-refusal", 1),
-							result: {
-								status: "error",
-								nativeResumeRejected: true,
-								error: {
-									code: "resume_rejected",
-									message: "No conversation found with session ID s",
-								},
-								cost: 0,
-								tokens: { input: 0, output: 0 },
-								durationMs: 0,
-								providerStateUpdates: [],
-							},
-						},
-					],
-				}));
-				yield* f.recover;
-				expect(
-					yield* f.sql`SELECT status, json_extract(payload_json, '$.nativeResumeFallback') AS fallback FROM provider_command_outbox`,
-				).toEqual([{ status: "retryable_failed", fallback: 1 }]);
-				const readTranscript = vi.fn(async () => []);
-				const forkSession = vi.fn(async () => ({ sessionId: "unused" }));
-				const { makePrepareTurn } = yield* Effect.promise(
-					() => import("../../../src/lib/provider/claude/prepare-turn.js"),
-				);
-				const prepare = yield* makePrepareTurn({
-					folderSource: "account",
-					configDir: configuredClaudeConfigDir(f.root),
-					workspaceRoot: f.root,
-					sessionForkSdk: { readTranscript, forkSession },
-				});
-				const prepared = yield* prepare("s", "account", "later input");
-				expect(prepared.resumeSessionId).toBeUndefined();
-				expect(readTranscript).not.toHaveBeenCalled();
-				expect(forkSession).not.toHaveBeenCalled();
-				expect(
-					yield* f.sql`SELECT value FROM provider_state WHERE session_id = 's' AND key = 'claude.forkRefused:account'`,
-				).toEqual([{ value: "true" }]);
-				expect(
-					yield* f.sql`SELECT key FROM provider_state WHERE session_id = 's' AND key = 'nativeThread:account'`,
-				).toEqual([]);
 			}),
 		),
 );
@@ -8534,7 +6045,6 @@ for (const order of [
 						...hello,
 						bindings: [],
 						sendTokens: [],
-						sendJournalAnswers: true,
 						sendAnswers:
 							order === "hello"
 								? [
@@ -8681,281 +6191,6 @@ for (const order of [
 			),
 	);
 
-it.effect(
-	"S7round2 cached primary rejection after fallback marker but before fallback delivery still requeues",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("claude");
-				yield* f.seed("fallback-window");
-				const journal = new RunnerSendJournal(f.root, "s", "claude");
-				const rejection = {
-					status: "error",
-					nativeResumeRejected: true,
-					error: {
-						code: "resume_rejected",
-						message: "No conversation found with session ID stale",
-					},
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-					providerStateUpdates: [],
-				} satisfies TurnResult;
-				yield* journal.execute(
-					sendToken("tx", "fallback-window", 1),
-					Effect.succeed(rejection),
-				);
-				yield* f.sql`INSERT INTO provider_state (session_id, key, value) VALUES ('s','nativeThread:account','stale')`;
-				yield* f.sql`CREATE TABLE cursor_deletions (key TEXT)`;
-				yield* f.sql`CREATE TRIGGER count_cursor_clear AFTER DELETE ON provider_state WHEN OLD.key = 'nativeThread:account' BEGIN INSERT INTO cursor_deletions VALUES (OLD.key); END`;
-				const { recordClaudeNativeResumeFallback } = yield* Effect.promise(
-					() => import("../../../src/lib/provider/claude/prepare-turn.js"),
-				);
-				yield* f.sql.withTransaction(
-					recordClaudeNativeResumeFallback(f.sql, {
-						sessionId: "s",
-						instanceId: "account",
-						commandId: "fallback-window",
-					}),
-				);
-				yield* f.hello((hello) => ({
-					...hello,
-					bindings: [
-						{
-							token: sendToken("tx", "fallback-window", 1),
-							sessionId: "s",
-							sinkId: runnerSinkId("fallback-window", 1),
-							released: true,
-						},
-					],
-					sendTokens: [],
-					sendJournalAnswers: true,
-					sendAnswers: [
-						{
-							status: "finished",
-							token: sendToken("tx", "fallback-window", 1),
-							result: {
-								status: "error",
-								nativeResumeRejected: true,
-								error: {
-									code: "resume_rejected",
-									message: "No conversation found with session ID stale",
-								},
-								cost: 0,
-								tokens: { input: 0, output: 0 },
-								durationMs: 0,
-								providerStateUpdates: [],
-							},
-						},
-					],
-				}));
-				yield* f.recover;
-
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox`,
-				).toEqual([{ status: "retryable_failed" }]);
-				const delivered = vi.fn(() =>
-					Effect.gen(function* () {
-						yield* f.ingestion.ingest({
-							eventId: "fallback-window-completed",
-							type: "turn.completed",
-							providerId: "claude",
-							sessionId: "s",
-							runId: "run:fallback-window",
-							providerRefs: {},
-							rawSource: { kind: "test.native" },
-							createdAt: 3,
-							data: { messageId: "", duration: 1 },
-						});
-						return {
-							status: "completed",
-							cost: 0,
-							tokens: { input: 0, output: 0 },
-							durationMs: 0,
-							providerStateUpdates: [],
-						} satisfies TurnResult;
-					}),
-				);
-				vi.spyOn(f.instance, "sendTurnEffect").mockImplementation((input) => {
-					expect(input.commandAttempt).toBe(2);
-					expect(input.nativeResumeFallback).toBe(true);
-					expect(input.startFreshNativeSession).toBe(true);
-					expect(input.resumeSessionId).toBeUndefined();
-					return journal
-						.execute(
-							sendToken("tx", "fallback-window", input.commandAttempt ?? 0),
-							delivered().pipe(
-								Effect.mapError((cause) =>
-									runnerFailure("test native completion", cause),
-								),
-							),
-						)
-						.pipe(
-							Effect.flatMap((result) =>
-								result
-									? Effect.succeed(result)
-									: Effect.die("Missing journal completion"),
-							),
-							Effect.mapError(
-								(cause) =>
-									new ProviderInstanceFailure({
-										providerId: "claude",
-										operation: "journal fallback",
-										cause,
-									}),
-							),
-						);
-				});
-				yield* Effect.all([f.reactor.drain(), f.reactor.drain()]);
-				yield* f.reactor.drain();
-				expect(delivered).toHaveBeenCalledTimes(1);
-				expect(
-					yield* f.sql`SELECT status, attempt_count FROM provider_command_outbox`,
-				).toEqual([{ status: "completed", attempt_count: 2 }]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed','turn.error','turn.interrupted')`,
-				).toEqual([{ type: "turn.completed" }]);
-				expect(yield* f.sql`SELECT key FROM cursor_deletions`).toEqual([
-					{ key: "nativeThread:account" },
-				]);
-			}),
-		),
-);
-
-it.effect(
-	"S7round2 review rejection rollback preserves the native cursor and fallback eligibility",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("claude");
-				yield* f.seed("rollback-resume");
-				yield* f.sql`INSERT INTO provider_state (session_id, key, value) VALUES ('s','nativeThread:account','old-cursor')`;
-				yield* f.sql`CREATE TRIGGER abort_requeue BEFORE UPDATE ON provider_command_outbox WHEN NEW.status = 'retryable_failed' BEGIN SELECT RAISE(ABORT, 'probe rollback'); END`;
-				const { runningRunnerCommands } = yield* Effect.promise(
-					() => import("../../../src/lib/provider/runner/runner-recovery.js"),
-				);
-				const [row] = yield* runningRunnerCommands(
-					f.sql,
-					"claude",
-					() => "claude",
-					"s",
-				);
-				if (!row) return yield* Effect.die("Missing recovery command");
-				const { LegacySendKey, settleLegacySend } = yield* Effect.promise(
-					() =>
-						import(
-							"../../../src/lib/provider/runner/send-settlement-outbox.js"
-						),
-				);
-				const key = yield* LegacySendKey.prove(f.sql, row);
-				if (!key) return yield* Effect.die("Missing legacy recovery key");
-				const commit = yield* makeCommitAndSignal;
-				const exit = yield* Effect.exit(
-					commit.write((project, stamp) =>
-						settleLegacySend(
-							{
-								sql: f.sql,
-								project,
-								stamp,
-								persistUserMessage: f.persist.persistUserMessage,
-							},
-							key,
-							{
-								status: "error",
-								nativeResumeRejected: true,
-								error: {
-									code: "resume_rejected",
-									message: "No conversation found with session ID stale",
-								},
-								cost: 0,
-								tokens: { input: 0, output: 0 },
-								durationMs: 0,
-								providerStateUpdates: [],
-							},
-							undefined,
-							2,
-							{
-								nativeResumeFallback: false,
-							},
-						),
-					),
-				);
-				expect(Exit.isFailure(exit)).toBe(true);
-				expect(
-					yield* f.sql`SELECT status, json_extract(payload_json, '$.nativeResumeFallback') AS fallback FROM provider_command_outbox`,
-				).toEqual([{ status: "running", fallback: null }]);
-				expect(
-					yield* f.sql`SELECT value FROM provider_state WHERE key = 'nativeThread:account'`,
-				).toEqual([{ value: "old-cursor" }]);
-			}),
-		),
-);
-
-// Failure mode: a key proved while the run was in a legacy cohort settles the run
-// after it has left the cohort, though it was never started or dispatched.
-it.effect(
-	"BC-2 legacy settlement rechecks the legacy predicate, not only the outbox claim",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("claude");
-				const input = yield* f.seed("cohort-left", 1, 0);
-				yield* f.sql`UPDATE provider_command_outbox SET status = 'running', attempt_count = 1`;
-				// A main-built start with no dispatch puts the run in the legacy cohort.
-				yield* f.sql`UPDATE provider_runs SET started_at = 1 WHERE id = ${input.runId}`;
-				const { runningRunnerCommands } = yield* Effect.promise(
-					() => import("../../../src/lib/provider/runner/runner-recovery.js"),
-				);
-				const [row] = yield* runningRunnerCommands(
-					f.sql,
-					"claude",
-					() => "claude",
-					"s",
-				);
-				if (!row) return yield* Effect.die("Missing recovery command");
-				const { LegacySendKey, settleLegacySend } = yield* Effect.promise(
-					() =>
-						import(
-							"../../../src/lib/provider/runner/send-settlement-outbox.js"
-						),
-				);
-				const key = yield* LegacySendKey.prove(f.sql, row);
-				if (!key) return yield* Effect.die("Missing legacy recovery key");
-				yield* f.sql`UPDATE provider_runs SET started_at = NULL WHERE id = ${input.runId}`;
-				expect(yield* legacyRunnerRunQuery(f.sql, "s", input.runId)).toBe(
-					false,
-				);
-				const commit = yield* makeCommitAndSignal;
-				yield* commit.write((project, stamp) =>
-					settleLegacySend(
-						{
-							sql: f.sql,
-							project,
-							stamp,
-							persistUserMessage: f.persist.persistUserMessage,
-						},
-						key,
-						{
-							status: "completed",
-							cost: 0,
-							tokens: { input: 0, output: 0 },
-							durationMs: 0,
-							providerStateUpdates: [],
-						},
-						undefined,
-						2,
-					),
-				);
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox`,
-				).toEqual([{ status: "running" }]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed','turn.error','turn.interrupted')`,
-				).toEqual([]);
-			}),
-		),
-);
-
 // Failure modes: terminal settlement commits without its returned input, or rollback announces it.
 it.effect(
 	"S7round2 failed-steer requeue rolls back with its native terminal and publishes only after commit",
@@ -9055,7 +6290,7 @@ for (const failure of ["attachment_missing", "account_unavailable"] as const)
 						SET status = 'running', attempt_count = 1,
 							payload_json = ${JSON.stringify(payload)}
 						WHERE command_id = ${commandId}`;
-					const prepare = vi.spyOn(f.driver, "legacyPrepareTurnEffect");
+					const prepare = vi.spyOn(f.driver, "prepareStoredTurnEffect");
 					yield* f.recover;
 					yield* TestClock.adjust("1 second");
 					expect(
@@ -9098,117 +6333,6 @@ for (const failure of ["attachment_missing", "account_unavailable"] as const)
 			),
 	);
 
-it.effect(
-	"legacy recovery hides a transient preparation failure and retries the same owner",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("cursor");
-				yield* f.seed("legacy-transient");
-				yield* f.hello(
-					({
-						sendJournalAnswers: _capability,
-						sendAnswers: _answers,
-						...hello
-					}) => ({
-						...hello,
-						bindings: [],
-						sendTokens: [],
-						completedCommands: [],
-					}),
-				);
-				const originalPrepare = f.driver.legacyPrepareTurnEffect;
-				if (!originalPrepare)
-					return yield* Effect.die("missing fixture preparation");
-				const firstFailure = yield* Deferred.make<void>();
-				let attempts = 0;
-				vi.spyOn(f.driver, "legacyPrepareTurnEffect").mockImplementation(
-					(input) =>
-						Effect.gen(function* () {
-							attempts++;
-							if (attempts === 1) {
-								yield* Deferred.succeed(firstFailure, undefined);
-								return yield* Effect.fail(
-									new ProviderInstanceFailure({
-										providerId: "cursor",
-										operation: "prepare recovered turn",
-										cause: {
-											code: "SQLITE_BUSY",
-											message: "SQLite busy",
-											retryable: true,
-										},
-									}),
-								);
-							}
-							return yield* originalPrepare(input);
-						}),
-				);
-				f.replaySend.execute = () =>
-					Effect.succeed({
-						status: "completed",
-						cost: 0,
-						tokens: { input: 0, output: 0 },
-						durationMs: 0,
-						providerStateUpdates: [],
-					});
-				yield* f.recover;
-				yield* Deferred.await(firstFailure);
-				yield* TestClock.adjust(0);
-				expect(
-					yield* f.sql`SELECT status, error_code, attempt_count
-						FROM provider_command_outbox WHERE command_id = 'legacy-transient'`,
-				).toEqual([{ status: "running", error_code: null, attempt_count: 1 }]);
-				expect(
-					yield* f.sql`SELECT type FROM events
-						WHERE type IN ('input.requeued', 'turn.error', 'turn.interrupted')`,
-				).toEqual([]);
-				expect(
-					f.commands.filter((command) => command.type === "send-turn"),
-				).toEqual([]);
-				yield* TestClock.adjust("1 second");
-				expect(attempts).toBe(2);
-				expect(
-					f.commands.filter((command) => command.type === "send-turn"),
-				).toHaveLength(1);
-				expect(
-					yield* f.sql`SELECT status, error_code, attempt_count
-						FROM provider_command_outbox WHERE command_id = 'legacy-transient'`,
-				).toEqual([
-					{ status: "completed", error_code: null, attempt_count: 1 },
-				]);
-				expect(
-					yield* f.sql`SELECT type FROM events
-						WHERE type IN ('input.requeued', 'turn.error', 'turn.interrupted')`,
-				).toEqual([]);
-			}),
-		),
-);
-
-for (const reason of ["ResumeRejected", "JournalAbsent"] as const)
-	it.effect(
-		`R2 released ${reason} run with legacy-shaped history is never legacy`,
-		() =>
-			runRetirement(
-				Effect.gen(function* () {
-					const f = yield* s7Fixture();
-					yield* f.seed("released-history");
-					// A run.released is definitive provenance even for imported history.
-					yield* (yield* makeCommitAndSignal)([
-						canonicalEvent("run.released", "s", {
-							runId: "run:released-history",
-							runnerId: "131313131313",
-							commandId: "released-history",
-							transmission: 1,
-							reason,
-						}),
-					]);
-					expect(
-						yield* legacyRunnerRunQuery(f.sql, "s", "run:released-history"),
-					).toBe(false);
-				}),
-			),
-	);
-
 for (const answerAtHello of [true, false])
 	it.effect(
 		`R2 held indeterminate ${answerAtHello ? "hello" : "reply"} remains owned without adoption writing uncertainty`,
@@ -9216,7 +6340,7 @@ for (const answerAtHello of [true, false])
 			runRetirement(
 				Effect.gen(function* () {
 					const f = yield* s7Fixture("claude");
-					yield* f.seed("held-uncertainty", 1, 1, "held");
+					yield* f.seed("held-uncertainty");
 					const result: TurnResult = {
 						status: "indeterminate",
 						cost: 0,
@@ -9235,7 +6359,6 @@ for (const answerAtHello of [true, false])
 							},
 						],
 						sendTokens: [],
-						sendJournalAnswers: true,
 						sendAnswers: [
 							{
 								token: sendToken("hold", "held-uncertainty", 1),

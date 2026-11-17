@@ -82,10 +82,6 @@ Socket.prototype.write = function (...args) {
     if (messages) {
       for (const message of messages) {
         if (message.type === "hello" && message.config && existsSync(root + "/legacy-launch")) delete message.config.autoSettleAfterDays;
-        if (message.type === "hello" && message.runnerId && existsSync(root + "/legacy-recovery")) {
-          delete message.sendJournalAnswers;
-          delete message.sendAnswers;
-        }
         if (message.type !== "command" || message.command?.type !== "send-turn") continue;
         if (existsSync(root + "/legacy-peer")) {
           delete message.command.autoSettleAfterDays;
@@ -171,12 +167,7 @@ afterEach(async ({ task }) => {
 	}
 });
 
-for (const mode of [
-	"restart",
-	"legacy-send",
-	"rollback",
-	"legacy-command",
-] as const) {
+for (const mode of ["restart", "rollback"] as const) {
 	it.skipIf(mode === "rollback" && !rollbackDist)(
 		`retains an admitted disabled idle policy through ${mode}`,
 		async () => {
@@ -204,15 +195,7 @@ for (const mode of [
 			if (runner.kind !== "runner-started") throw new Error("Missing runner");
 			const original = sends(fixture)[0];
 			expect(original?.days).toBeNull();
-			if (mode === "restart" || mode === "legacy-command")
-				await browser.setAutoSettle(1);
-			if (mode === "legacy-send")
-				writeFileSync(join(fixture.root, "legacy-peer"), "omit metadata");
-			if (mode === "legacy-send" || mode === "legacy-command")
-				writeFileSync(
-					join(fixture.root, "legacy-recovery"),
-					"main journal replay",
-				);
+			if (mode === "restart") await browser.setAutoSettle(1);
 			await fixture.kill();
 			await held;
 			if (mode === "rollback")
@@ -220,16 +203,6 @@ for (const mode of [
 					join(fixture.root, "rollback-daemon"),
 					"old daemon reads are allowed",
 				);
-			if (mode === "legacy-command") {
-				const db = new Database(fixture.daemonStorePath());
-				try {
-					db.prepare(
-						"UPDATE provider_command_outbox SET payload_json = json_remove(payload_json, '$.autoSettleAfterDays') WHERE session_id = ?",
-					).run(sessionId);
-				} finally {
-					db.close();
-				}
-			}
 			await fixture.restart({
 				...(mode === "rollback" && rollbackDist ? { dist: rollbackDist } : {}),
 				startupTimeoutMs: 90_000,
@@ -246,8 +219,7 @@ for (const mode of [
 				});
 				const replay = sends(fixture)[1];
 				expect(replay?.commandId).toBe(original?.commandId);
-				if (mode === "legacy-command") expect(replay?.days).toBe(1);
-				else expect(replay?.hasPolicy).toBe(false);
+				expect(replay?.hasPolicy).toBe(false);
 			}
 			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
@@ -282,11 +254,7 @@ for (const mode of [
 				runner,
 				retainedRunner: existsSync(runner.socketPath),
 			};
-			if (mode === "legacy-command") {
-				await vi.waitFor(() =>
-					expect(existsSync(runner.socketPath)).toBe(false),
-				);
-			} else expect(existsSync(runner.socketPath)).toBe(true);
+			expect(existsSync(runner.socketPath)).toBe(true);
 		},
 		120_000,
 	);
