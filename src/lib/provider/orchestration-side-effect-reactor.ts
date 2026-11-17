@@ -103,9 +103,7 @@ import {
 } from "./runner/send-settlement.js";
 import {
 	appendSendSettlement,
-	LegacySendKey,
 	settleDirectSend,
-	settleLegacySend,
 	settleSend,
 } from "./runner/send-settlement-outbox.js";
 import type { SessionFailure } from "./runner/session-runner.js";
@@ -1352,20 +1350,6 @@ export class ProviderSideEffectReactor {
 											{ provider: row.provider_id, createdAt: now },
 										),
 									]);
-								}
-								const legacy = yield* LegacySendKey.prove(
-									this.options.sql,
-									row,
-								);
-								if (legacy) {
-									if (scope !== "all" || run.joined === 1) return;
-									return yield* settleLegacySend(
-										settlementTx,
-										legacy,
-										reply,
-										failure,
-										now,
-									);
 								}
 								const send = {
 									sessionId: row.session_id,

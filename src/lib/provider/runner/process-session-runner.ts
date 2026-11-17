@@ -43,7 +43,6 @@ import {
 } from "./runner-dispatch.js";
 import type { RunnerChild } from "./runner-entry-lifecycle.js";
 import * as Entry from "./runner-entry-lifecycle.js";
-import { legacyRunnerRunQuery } from "./runner-legacy-classification.js";
 import { runnerFailure } from "./runner-protocol.js";
 import { makeRunnerReceiptStore } from "./runner-receipts.js";
 import {
@@ -125,7 +124,7 @@ export const makeProcessSessionRunner = (
 						.pipe(Effect.map((recovery) => recovery?.ingestion))
 				: Effect.succeed(ingestion);
 		const receipts = sql
-			? yield* makeRunnerReceiptStore(sql, { configDir }).pipe(Effect.orDie)
+			? yield* makeRunnerReceiptStore(sql).pipe(Effect.orDie)
 			: undefined;
 		const sessionCommit = (sessionId: string) =>
 			Effect.gen(function* () {
@@ -642,10 +641,10 @@ export const makeProcessSessionRunner = (
 			): Effect.Effect<boolean> {
 				if (!sql) return Effect.succeed(false);
 				return Effect.gen(function* () {
+					// Migration 0097: no feeder owns an older build's unstarted claim; recovery settles it.
 					const [modern] =
-						yield* sql`SELECT 1 FROM provider_runs run JOIN provider_command_outbox command ON command.run_id = run.id AND command.session_id = run.session_id WHERE run.id = ${runId} AND run.session_id = ${sessionId} AND run.joined_into IS NULL AND run.status IN ('pending', 'running') AND command.effect_type = 'send_turn' AND command.status = 'running'`;
-					if (modern && !(yield* legacyRunnerRunQuery(sql, sessionId, runId)))
-						return true;
+						yield* sql`SELECT 1 FROM provider_runs run JOIN provider_command_outbox command ON command.run_id = run.id AND command.session_id = run.session_id WHERE run.id = ${runId} AND run.session_id = ${sessionId} AND run.joined_into IS NULL AND run.legacy_claim = 0 AND run.status IN ('pending', 'running') AND command.effect_type = 'send_turn' AND command.status = 'running'`;
+					if (modern) return true;
 					return yield* sql<{
 						held: number;
 					}>`SELECT EXISTS (SELECT 1 FROM provider_runs requested

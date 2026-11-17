@@ -62,6 +62,18 @@ it.each([
 						canonicalEvent(
 							"run.requested",
 							sessionId,
+							{ runId: "owner", inputId: "owner-input" },
+							{ provider: "claude", metadata: { runId: "owner" } },
+						),
+						canonicalEvent(
+							"run.started",
+							sessionId,
+							{ requestedRunId: "owner", inputId: "owner-input" },
+							{ provider: "claude", metadata: { runId: "owner" } },
+						),
+						canonicalEvent(
+							"run.requested",
+							sessionId,
 							{ runId: "run", inputId: "input" },
 							metadata,
 						),
@@ -71,11 +83,13 @@ it.each([
 							{ messageId: "input", sessionId, role: "user", inputId: "input" },
 							metadata,
 						),
+						// The send's Run joined the running owner Run as its steer:
+						// recovery fails it through the orphan path.
 						canonicalEvent(
 							"run.started",
 							sessionId,
 							{ requestedRunId: "run", inputId: "input" },
-							metadata,
+							{ provider: "claude", metadata: { runId: "owner" } },
 						),
 					]);
 					yield* sql`INSERT INTO command_receipts

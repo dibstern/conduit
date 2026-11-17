@@ -40,7 +40,6 @@ import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/proce
 import * as ProcessTables from "../../../src/lib/provider/runner/process-table.js";
 import { makeProcessTable } from "../../../src/lib/provider/runner/process-table.js";
 import * as RunnerConnection from "../../../src/lib/provider/runner/runner-connection.js";
-import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-legacy-classification.js";
 import {
 	type RunnerCommandFailure,
 	type RunnerSendAnswer,
@@ -60,7 +59,6 @@ import {
 } from "../../../src/lib/provider/runner/runner-registry.js";
 import { stopRegisteredRunners } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { RunnerSendJournal } from "../../../src/lib/provider/runner/runner-send-journal.js";
-import { failRunnerTurn } from "../../../src/lib/provider/runner/runner-turn-failure.js";
 import type {
 	SessionCommand,
 	SessionOutput,
@@ -413,7 +411,6 @@ const stopIntentFixture = Effect.gen(function* () {
 					sessionId: "s",
 					pid: options.pid ?? 0,
 					bindings: [],
-					sendJournalAnswers: true,
 					sendAnswers: [],
 				},
 				connection,
@@ -613,7 +610,6 @@ const swapFixture = Effect.gen(function* () {
 					sessionId: "s",
 					pid: options.pid ?? 0,
 					bindings: [],
-					sendJournalAnswers: true,
 					sendAnswers: [],
 					upgradeState: { quiescent: false, revision: 0 },
 				},
@@ -1087,7 +1083,6 @@ it.effect("keeps descendant grace and escalates after the runner exits", () =>
 							sessionId: "s",
 							pid: options.pid ?? 0,
 							bindings: [],
-							sendJournalAnswers: true,
 							sendAnswers: [],
 						},
 						connection,
@@ -2710,7 +2705,6 @@ for (const restart of [false, true])
 									sessionId: "s",
 									pid: options.pid ?? 0,
 									bindings: [],
-									sendJournalAnswers: true,
 									sendAnswers: [],
 								},
 								connection,
@@ -3375,7 +3369,6 @@ it.effect(
 								sessionId: options.sessionId,
 								pid: options.pid ?? 0,
 								bindings: [],
-								sendJournalAnswers: true,
 								sendAnswers: [],
 							},
 							connection,
@@ -3449,7 +3442,6 @@ it.effect(
 								sessionId: options.sessionId,
 								pid: options.pid ?? 0,
 								bindings: [],
-								sendJournalAnswers: true,
 								sendAnswers: [],
 							},
 							connection,
@@ -3490,7 +3482,7 @@ for (const crossDirectory of [false, true])
 						retired: false,
 					});
 					// The holder is the one copy of which runs a runner owns (CONTRACT.md 6.5).
-					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, started_at, runner_id) VALUES ('old-run', 's', 'running', 1, 1, ${older.runnerId}), ('new-run', 's', 'running', 2, 2, NULL)`;
+					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, started_at, runner_id, held_transmission) VALUES ('old-run', 's', 'running', 1, 1, ${older.runnerId}, 1), ('new-run', 's', 'running', 2, 2, ${newer.runnerId}, 1)`;
 					yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, provider_process_id, payload_json, status, attempt_count, requested_at, updated_at)
 					VALUES (1, 'old-command', 'test-project', 's', 'claude', 'send_turn', 'old-run', NULL, '{}', 'running', 1, 1, 1), (2, 'new-command', 'test-project', 's', 'claude', 'send_turn', 'new-run', NULL, '{}', 'running', 1, 2, 2)`;
 					yield* f.sql`UPDATE claude_runner_cursors SET role = 'candidate', sequence = 1 WHERE runner_id = ${older.runnerId}`;
@@ -3523,7 +3515,7 @@ for (const crossDirectory of [false, true])
 							"s",
 						);
 						mkdirSync(directory, { recursive: true });
-						const token = sendToken("tx", commandId, 1);
+						const token = sendToken("hold", commandId, 1);
 						const key = createHash("sha256")
 							.update(JSON.stringify(["claude", "s", token]))
 							.digest("hex");
@@ -3550,11 +3542,10 @@ for (const crossDirectory of [false, true])
 									sessionId: "s",
 									pid: options.pid ?? 0,
 									bindings: [],
-									sendJournalAnswers: true,
 									sendAnswers: [
 										{
 											token: sendToken(
-												"tx",
+												"hold",
 												options.runnerId === older.runnerId
 													? "old-command"
 													: "new-command",
@@ -3690,7 +3681,6 @@ for (const outcome of ["retired", "exited"] as const)
 											? [{ sinkId: "blocked", sessionId: "s", released: false }]
 											: []),
 									],
-									sendJournalAnswers: true,
 									sendAnswers: [],
 								},
 								connection,
@@ -3828,7 +3818,6 @@ it.effect(
 								bindings: [
 									{ sinkId: "restored", sessionId: "s", released: false },
 								],
-								sendJournalAnswers: true,
 								sendAnswers: [],
 							},
 							connection,
@@ -3916,7 +3905,6 @@ for (const deniedTerm of [false, true])
 									sessionId: "s",
 									pid: options.pid ?? 0,
 									bindings: [],
-									sendJournalAnswers: true,
 									sendAnswers: [],
 								},
 								connection,
@@ -4205,11 +4193,9 @@ import { EventEmitter } from "node:events";
 import { gatedWrite } from "../../helpers/runner-write-gate.js";
 
 // C2/C3 failure cases: a release races cleanup/reconciliation; every replacement
-// refuses; provider retry changes runs; journal evidence is uncertain or corrupt;
-// legacy holderless work must not enter the new transmission gate.
+// refuses; provider retry changes runs; journal evidence is uncertain or corrupt.
 const continuationFixture = (
 	options: {
-		readonly journalCapable?: boolean;
 		readonly drainsConnections?: boolean;
 		readonly adoptionAnswer?: RunnerSendAnswer;
 	} = {},
@@ -4305,35 +4291,23 @@ const continuationFixture = (
 						);
 					},
 				);
-				// A real connection's hello claim records whether this runner journals.
-				yield* f.sql`UPDATE claude_runner_cursors SET journals_before_execution = ${Number(options.journalCapable !== false)} WHERE runner_id = ${connection.runnerId}`.pipe(
-					Effect.orDie,
-				);
 				yield* connection.onHello(
 					{
 						type: "hello",
 						protocolVersion: 1,
-						buildId:
-							options.journalCapable === false
-								? "historical-build"
-								: runnerBuildId(),
+						buildId: runnerBuildId(),
 						stampsRunIds: true,
 						runnerId: connection.runnerId,
 						sessionId: "s",
 						pid: connection.pid ?? 0,
 						bindings: [],
-						...(options.journalCapable === false
-							? {}
-							: {
-									sendJournalAnswers: true,
-									...(options.drainsConnections
-										? { drainsConnections: true as const }
-										: {}),
-									sendAnswers:
-										connections.length > 1 && options.adoptionAnswer
-											? [options.adoptionAnswer]
-											: [],
-								}),
+						...(options.drainsConnections
+							? { drainsConnections: true as const }
+							: {}),
+						sendAnswers:
+							connections.length > 1 && options.adoptionAnswer
+								? [options.adoptionAnswer]
+								: [],
 					},
 					socket,
 				);
@@ -4774,15 +4748,13 @@ for (const discovery of [true, false])
 				),
 		);
 
-for (const evidence of ["received", "corrupt", "older-build"] as const)
+for (const evidence of ["received", "corrupt"] as const)
 	it.effect(
 		`SEND-CONTINUATION ${evidence === "received" ? 27 : 28} ${evidence} journal never retransmits uncertain delivery`,
 		() =>
 			run(
 				Effect.gen(function* () {
-					const f = yield* continuationFixture({
-						journalCapable: evidence !== "older-build",
-					});
+					const f = yield* continuationFixture();
 					yield* f.seed("run");
 					f.respond(() => Effect.never);
 					const sending = yield* f.dispatch("run").pipe(Effect.forkChild);
@@ -4836,92 +4808,6 @@ for (const evidence of ["received", "corrupt", "older-build"] as const)
 	);
 
 it.effect(
-	"SEND-CONTINUATION 38 legacy holderless dispatched work keeps legacy recovery and never enters C2",
-	() =>
-		run(
-			Effect.gen(function* () {
-				const f = yield* setup;
-				const old = yield* f.register("legacy", 100_350);
-				f.processes.set(old.pid, { state: "gone" });
-				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('legacy-run', 's', 'running', 1)`;
-				yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id, provider_process_id)
-		VALUES (1, 'legacy-send', 'test-project', 's', 'claude', 'send_turn', '{"inputId":"legacy-send","prompt":"legacy"}', 'running', 1, 1, 1, 'legacy-run', ${old.pid})`;
-				const commit = yield* makeCommitAndSignal;
-				yield* commit([
-					canonicalEvent(
-						"run.dispatched",
-						"s",
-						{ runId: "legacy-run", runnerId: "legacy" },
-						{ provider: "claude", metadata: { runId: "legacy-run" } },
-					),
-				]);
-				// Historical imports already projected this event before runner_id
-				// existed; migration adds NULL and does not infer its delivery.
-				yield* f.sql`UPDATE provider_runs SET runner_id = NULL WHERE id = 'legacy-run'`;
-				const ingestion = yield* ProviderRuntimeIngestionTag;
-				f.output.mockImplementation((output) =>
-					output.type === "event"
-						? ingestion.ingest(output.event).pipe(
-								Effect.mapError((cause) =>
-									runnerFailure("test ingestion", cause),
-								),
-								Effect.as({}),
-							)
-						: Effect.succeed({}),
-				);
-				yield* f.recover;
-				yield* TestClock.adjust("12 seconds");
-				expect(f.connect).not.toHaveBeenCalled();
-				expect(f.children.size).toBe(0);
-				// A run with no holder is not the reconciler's (CONTRACT.md 6.5);
-				// legacy recovery settles it.
-				expect(
-					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'legacy-run'`,
-				).toEqual([{ status: "running" }]);
-				expect(
-					yield* f.manager.ownsRetirementCleanupEffect?.("s", "legacy-run") ??
-						Effect.die("missing retirement ownership seam"),
-				).toBe(false);
-				yield* RunnerRecovery.settleUnclaimedRunnerCommands(
-					f.sql,
-					new Set(),
-					"claude",
-					() => "claude",
-					(sinkId, turn, failure, beforeProject) =>
-						failRunnerTurn(
-							(output) =>
-								output.type === "event"
-									? ingestion
-											.ingestBatch([output.event], { beforeProject })
-											.pipe(
-												Effect.mapError((cause) =>
-													runnerFailure("test legacy recovery", cause),
-												),
-												Effect.as({}),
-											)
-									: Effect.succeed({}),
-							sinkId,
-							turn,
-							failure,
-							"claude",
-						),
-				);
-				expect(
-					yield* f.sql`SELECT status, runner_id, held_transmission FROM provider_runs WHERE id = 'legacy-run'`,
-				).toEqual([
-					{ status: "error", runner_id: null, held_transmission: null },
-				]);
-				expect(
-					yield* f.sql`SELECT json_extract(data, '$.commandId') AS command FROM events WHERE type = 'run.dispatched'`,
-				).toEqual([{ command: null }]);
-				expect(
-					yield* f.sql`SELECT COUNT(*) AS n FROM events WHERE type = 'run.released'`,
-				).toEqual([{ n: 0 }]);
-			}),
-		),
-);
-
-it.effect(
 	"SEND-CONTINUATION 41 idle pre-write NotSent evidence immediately re-holds on a successor",
 	() =>
 		run(
@@ -4965,56 +4851,6 @@ it.effect(
 				expect(
 					yield* f.sql`SELECT json_extract(data, '$.transmission') AS n FROM events WHERE type = 'run.dispatched' ORDER BY sequence`,
 				).toEqual([{ n: 1 }, { n: 2 }]);
-			}),
-		),
-);
-
-it.effect(
-	// C 7.4: a runner without the journal-answer capability gets main's own
-	// recovery, "replay the same key", "selected by the capability check alone".
-	"SEND-CONTINUATION older-build unknown adoption replays a modern held transmission by the same key",
-	() =>
-		run(
-			Effect.gen(function* () {
-				const f = yield* continuationFixture({ journalCapable: false });
-				yield* f.seed("run");
-				f.respond(() => Effect.never);
-				const sending = yield* f.dispatch("run").pipe(Effect.forkChild);
-				yield* TestClock.adjust(0);
-				expect(f.sends).toHaveLength(1);
-				const old = f.connections[0];
-				if (!old?.pid) return yield* Effect.die("missing older-build runner");
-				yield* Fiber.interrupt(sending);
-				yield* Scope.close(f.managerScope, Exit.void);
-				const recovered = yield* f.makeManager();
-				const recovering = yield* recovered.manager.recoverEffect.pipe(
-					Effect.forkChild,
-				);
-				yield* TestClock.adjust("2 seconds");
-				yield* Fiber.join(recovering);
-				expect(f.delivered).toEqual([]);
-				expect(f.sends).toHaveLength(2);
-				expect(f.sends[1]?.runnerId).toBe(old.runnerId);
-				expect(f.sends[1]?.command.input.inputId).toBe(
-					f.sends[0]?.command.input.inputId,
-				);
-				expect(f.connections).toHaveLength(2);
-				expect(f.connections[1]?.runnerId).toBe(old.runnerId);
-				expect(f.processes.get(old.pid)?.state).toBe("running");
-				expect(
-					yield* f.sql`SELECT status, runner_id, held_transmission FROM provider_runs WHERE id = 'run'`,
-				).toEqual([
-					{ status: "pending", runner_id: old.runnerId, held_transmission: 1 },
-				]);
-				expect(
-					yield* f.sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'send'`,
-				).toEqual([{ status: "running", error_code: null }]);
-				expect(
-					yield* f.sql`SELECT COUNT(*) AS n FROM events WHERE type = 'run.dispatched'`,
-				).toEqual([{ n: 1 }]);
-				expect(
-					yield* f.sql`SELECT COUNT(*) AS n FROM events WHERE type = 'run.released'`,
-				).toEqual([{ n: 0 }]);
 			}),
 		),
 );
@@ -5409,76 +5245,6 @@ for (const answer of [
 			),
 	);
 
-it.effect(
-	"REVIEW R1 pre-upgrade started holderless owner stays on legacy recovery",
-	() =>
-		run(
-			Effect.gen(function* () {
-				const f = yield* continuationFixture();
-				yield* f.seed("legacy-run", "legacy-send");
-				const commit = yield* makeCommitAndSignal;
-				yield* commit([
-					canonicalEvent(
-						"run.started",
-						"s",
-						{ inputId: "legacy-send", requestedRunId: "legacy-run" },
-						{ provider: "claude", metadata: { runId: "legacy-run" } },
-					),
-				]);
-				expect(
-					yield* f.manager.ownsRetirementCleanupEffect?.("s", "legacy-run") ??
-						Effect.die("missing retirement ownership seam"),
-				).toBe(false);
-				yield* Scope.close(f.managerScope, Exit.void);
-				const recovered = yield* f.makeManager();
-				yield* recovered.manager.recoverEffect;
-				yield* TestClock.adjust("2 seconds");
-				expect(f.sends).toEqual([]);
-				expect(
-					yield* f.sql`SELECT COUNT(*) AS n FROM events WHERE type = 'run.dispatched'`,
-				).toEqual([{ n: 0 }]);
-				const ingestion = yield* ProviderRuntimeIngestionTag;
-				yield* RunnerRecovery.settleUnclaimedRunnerCommands(
-					f.sql,
-					new Set(),
-					"claude",
-					() => "claude",
-					(sinkId, turn, failure, beforeProject) =>
-						failRunnerTurn(
-							(output) =>
-								output.type === "event"
-									? ingestion
-											.ingestBatch([output.event], { beforeProject })
-											.pipe(
-												Effect.mapError((cause) =>
-													runnerFailure("test legacy recovery", cause),
-												),
-												Effect.as({}),
-											)
-									: Effect.succeed({}),
-							sinkId,
-							turn,
-							failure,
-							"claude",
-						),
-					undefined,
-					undefined,
-					undefined,
-					(sessionId, runId) =>
-						recovered.manager.ownsRetirementCleanupEffect?.(sessionId, runId) ??
-						Effect.succeed(false),
-				);
-				expect(
-					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'legacy-run'`,
-				).toEqual([{ status: "error" }]);
-				expect(
-					yield* f.sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'legacy-send'`,
-				).toEqual([{ status: "failed", error_code: "runner_stopped" }]);
-				expect(f.sends).toEqual([]);
-			}),
-		),
-);
-
 for (const status of ["accepted", "completed"] as const)
 	it.effect(
 		`REVIEW R1 Gone journal ${status} settles one consistent run and command terminal`,
@@ -5585,43 +5351,6 @@ it.effect(
 		),
 );
 
-for (const reason of ["ResumeRejected", "JournalAbsent"] as const)
-	it.effect(
-		`R2 SQL legacy cohort cannot override modern ${reason} or pending owner provenance`,
-		() =>
-			run(
-				Effect.gen(function* () {
-					const f = yield* setup;
-					yield* f.register("cececececece", 100_902);
-					yield* f.sql`INSERT INTO provider_runs (id,session_id,status,requested_at) VALUES ('released','s','running',1),('modern','s','pending',1),('queued','s','pending',1),('discovered','s','running',1)`;
-					const commit = yield* makeCommitAndSignal;
-					yield* commit([
-						canonicalEvent("run.dispatched", "s", {
-							runId: "released",
-							runnerId: "cececececece",
-							commandId: "released-send",
-							transmission: 1,
-						}),
-						canonicalEvent("run.released", "s", {
-							runId: "released",
-							runnerId: "cececececece",
-							commandId: "released-send",
-							transmission: 1,
-							reason,
-						}),
-						canonicalEvent("run.dispatched", "s", {
-							runId: "modern",
-							runnerId: "cececececece",
-							commandId: "modern-send",
-							transmission: 1,
-						}),
-					]);
-					for (const runId of ["released", "modern", "queued", "discovered"])
-						expect(yield* legacyRunnerRunQuery(f.sql, "s", runId)).toBe(false);
-				}),
-			),
-	);
-
 it.effect(
 	"REVIEW R1 startup Gone Settle keeps retrying after its first transaction fails",
 	() =>
@@ -5701,18 +5430,13 @@ it.effect(
 				yield* TestClock.adjust("12 seconds");
 				yield* Fiber.join(sending);
 				expect(f.delivered).toEqual(["send"]);
-				// A successor attachment snapshots only this session's held sends.
 				// The release must not launch the project-wide recovery scan.
-				expect(scans.mock.calls.slice(before)).toEqual([
-					[f.sql, "claude", expect.any(Function), "s", undefined, true],
-				]);
+				expect(scans.mock.calls.slice(before)).toEqual([]);
 				expect(
 					yield* f.manager.ownsRetirementCleanupEffect?.("s", "run") ??
 						Effect.die("missing retirement ownership seam"),
 				).toBe(false);
-				expect(scans.mock.calls.slice(before)).toEqual([
-					[f.sql, "claude", expect.any(Function), "s", undefined, true],
-				]);
+				expect(scans.mock.calls.slice(before)).toEqual([]);
 			}),
 		),
 );

@@ -467,15 +467,26 @@ it.each([
 			),
 	);
 	const processTable = makeProductionProcessTable();
-	vi.spyOn(processTable, "identify").mockImplementation(
-		(pids) =>
-			new Map(
-				pids.map((pid) => [
+	const identify = processTable.identify;
+	vi.spyOn(processTable, "identify").mockImplementation((pids) => {
+		const observed = identify(pids);
+		return new Map(
+			pids.map((pid) => {
+				const process = observed.get(pid);
+				if (!unverifiable && !identities.has(pid))
+					return [pid, process ?? { state: "unknown" }];
+				return [
 					pid,
-					testProcess(runnerRegistry.runnerProcessTable.inspect(pid)),
-				]),
-			),
-	);
+					testProcess({
+						...runnerRegistry.runnerProcessTable.inspect(pid),
+						...(process?.state === "running" && process.pgid !== undefined
+							? { pgid: process.pgid }
+							: {}),
+					}),
+				];
+			}),
+		);
+	});
 	const signals = vi.spyOn(processTable, "signal");
 	const store = makePersistenceStoreLayer(fixture.daemonStorePath());
 	const persistence = makePersistenceProjectLayer("project-b").pipe(

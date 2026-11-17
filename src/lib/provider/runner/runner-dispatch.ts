@@ -113,7 +113,6 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 		send: SendScope,
 		recovered?: RunnerChild,
 		held?: Held,
-		legacySend?: boolean,
 		permission?: WritePermission,
 	): Effect.Effect<TurnResult, SessionFailure>;
 	function dispatch(
@@ -121,7 +120,6 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 		send?: SendScope,
 		recovered?: RunnerChild,
 		held?: Held,
-		legacySend?: boolean,
 		permission?: WritePermission,
 	): Effect.Effect<void, SessionFailure>;
 	function dispatch(
@@ -129,7 +127,6 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 		send: SendScope,
 		recovered?: RunnerChild,
 		held?: Held,
-		legacySend?: boolean,
 		permission?: WritePermission,
 	): Effect.Effect<TurnResult | undefined, SessionFailure>;
 	function dispatch(
@@ -137,7 +134,6 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 		send?: SendScope,
 		recovered?: RunnerChild,
 		held?: Held,
-		legacySend = false,
 		permission?: WritePermission,
 	): Effect.Effect<TurnResult | undefined, SessionFailure> {
 		const turn: SendBinding | undefined =
@@ -981,7 +977,7 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 					: Effect.fail(failure),
 			),
 			Effect.onError((cause) => {
-				if (command.type === "send-turn" && command.input.runId && !legacySend)
+				if (command.type === "send-turn" && command.input.runId)
 					return Effect.void;
 				if (
 					runnerFailure(command.type, Failure.squashCause(cause)).code ===

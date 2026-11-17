@@ -15,7 +15,6 @@ import {
 	StartTime,
 	sameProcess,
 } from "./process-identity.js";
-import { legacyRunnerRanking } from "./runner-registry.js";
 import { type StoreFault, toStoreFault } from "./send-settlement.js";
 import type { SessionOutputReply } from "./session-runner.js";
 
@@ -352,8 +351,6 @@ export interface RunnerCursorIdentity
 	readonly driverKind?: string | undefined;
 	readonly pid?: number | undefined;
 	readonly reaper?: RunnerMember | undefined;
-	/** Recorded at hello; see journalsBeforeExecution. */
-	readonly journalsBeforeExecution?: boolean | undefined;
 }
 
 /** Only the server consumes this context and writes the durable checkpoint. */
@@ -394,10 +391,7 @@ export const createRunnerPermissionReplies = (sql: SqlClient.SqlClient) =>
 		PRIMARY KEY (session_id, request_id)
 	)`;
 
-export const makeRunnerReceiptStore = (
-	sql: SqlClient.SqlClient,
-	options: { readonly configDir?: string } = {},
-) =>
+export const makeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 	Effect.gen(function* () {
 		yield* flushPendingWrites(
 			sql,
@@ -406,15 +400,7 @@ export const makeRunnerReceiptStore = (
 				const slotIndex =
 					yield* sql`SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_runner_serving_session'`;
 				if (slotIndex.length === 0) {
-					// Legacy-only role ranking. Delete with 32.13 after retained rows migrate.
-					const configDir = options.configDir;
-					const registry: ReturnType<typeof legacyRunnerRanking> = configDir
-						? yield* Effect.sync(() => legacyRunnerRanking(configDir))
-						: new Map();
-					// main's rows have no session_id; its registration names the session (S9.6).
-					for (const [runnerId, { sessionId }] of registry)
-						if (sessionId)
-							yield* sql`UPDATE claude_runner_cursors SET session_id = ${sessionId} WHERE runner_id = ${runnerId} AND session_id = ''`;
+					// A store without the index keeps each session's newest serving cursor.
 					const live = yield* sql<{
 						runner_id: string;
 						session_id: string;
@@ -427,19 +413,6 @@ export const makeRunnerReceiptStore = (
 							row,
 						]);
 					for (const rows of sessions.values()) {
-						const rank = (runnerId: string) =>
-							registry.get(runnerId)?.role === "candidate"
-								? 2
-								: registry.get(runnerId)?.role === "retiring"
-									? 1
-									: 0;
-						rows.sort(
-							(a, b) =>
-								rank(a.runner_id) - rank(b.runner_id) ||
-								(registry.get(b.runner_id)?.registeredAt ?? 0) -
-									(registry.get(a.runner_id)?.registeredAt ?? 0) ||
-								b.sequence - a.sequence,
-						);
 						for (const row of rows.slice(1))
 							yield* sql`UPDATE claude_runner_cursors SET role = 'candidate' WHERE runner_id = ${row.runner_id}`;
 					}
@@ -876,15 +849,14 @@ export const makeRunnerReceiptStore = (
 				return sql<{
 					sequence: number;
 					result_json: string;
-				}>`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, pid, start_time, start_key, driver_kind, reaper_pid, reaper_start_time, reaper_start_key, journals_before_execution)
-					VALUES (${runnerId}, 0, ${attachmentId}, ${identity?.sessionId ?? ""}, ${identity?.pid ?? null}, ${start.time}, ${start.key}, ${identity?.driverKind ?? "claude"}, ${identity?.reaper?.pid ?? null}, ${reaper.time}, ${reaper.key}, ${identity?.journalsBeforeExecution === undefined ? null : Number(identity.journalsBeforeExecution)})
+				}>`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, pid, start_time, start_key, driver_kind, reaper_pid, reaper_start_time, reaper_start_key)
+					VALUES (${runnerId}, 0, ${attachmentId}, ${identity?.sessionId ?? ""}, ${identity?.pid ?? null}, ${start.time}, ${start.key}, ${identity?.driverKind ?? "claude"}, ${identity?.reaper?.pid ?? null}, ${reaper.time}, ${reaper.key})
 					ON CONFLICT(runner_id) DO UPDATE SET attachment_id = excluded.attachment_id,
 					session_id = COALESCE(NULLIF(excluded.session_id, ''), claude_runner_cursors.session_id),
 					pid = COALESCE(excluded.pid, claude_runner_cursors.pid), start_time = COALESCE(excluded.start_time, claude_runner_cursors.start_time),
 					start_key = CASE WHEN excluded.start_time IS NULL THEN claude_runner_cursors.start_key ELSE excluded.start_key END,
 					reaper_pid = COALESCE(excluded.reaper_pid, claude_runner_cursors.reaper_pid), reaper_start_time = COALESCE(excluded.reaper_start_time, claude_runner_cursors.reaper_start_time),
 					reaper_start_key = CASE WHEN excluded.reaper_start_time IS NULL THEN claude_runner_cursors.reaper_start_key ELSE excluded.reaper_start_key END,
-					journals_before_execution = COALESCE(excluded.journals_before_execution, claude_runner_cursors.journals_before_execution),
 					driver_kind = CASE WHEN ${identity?.driverKind !== undefined} THEN excluded.driver_kind ELSE claude_runner_cursors.driver_kind END
 					WHERE claude_runner_cursors.retired_at IS NULL
 				RETURNING sequence, result_json`.pipe(

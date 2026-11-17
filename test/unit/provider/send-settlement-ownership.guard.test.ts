@@ -24,7 +24,7 @@ describe("send settlement ownership", () => {
 			"runner-send-feeder.ts",
 			"send-settlement.ts",
 			"send-settlement-outbox.ts",
-			"runner-legacy-recovery.ts",
+			"runner-stored-send.ts",
 		]) {
 			const source = readFileSync(
 				join(root, "src/lib/provider/runner", name),
@@ -274,7 +274,6 @@ describe("send settlement ownership", () => {
 			});
 		expect(writes).toEqual([
 			`${adapter}:settleDirectSend`,
-			`${adapter}:settleLegacySend`,
 			`${adapter}:requeueLegacySend`,
 		]);
 		// Outside the adapter, the only outbox UPDATE is a write-lock touch that changes no column.

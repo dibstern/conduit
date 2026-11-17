@@ -213,6 +213,7 @@ async function runnerSocket(options: {
 						pid,
 						bindings: [{ sinkId: "adoption-sink", sessionId, released: false }],
 						pendingOutputs: [{ sequence: 0, output: pending }],
+						sendAnswers: [],
 					});
 				else if (message.type === "command") {
 					commands.push(message);

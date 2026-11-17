@@ -61,12 +61,7 @@ import { connectRunner } from "./runner-connection.js";
 import type { RunnerChild } from "./runner-entry-lifecycle.js";
 import * as Entry from "./runner-entry-lifecycle.js";
 import {
-	journalsBeforeExecution,
-	legacyRunnerRunPredicate,
-} from "./runner-legacy-classification.js";
-import {
 	type RunnerSocket,
-	runnerBuildId,
 	runnerFailure,
 	sendToken,
 } from "./runner-protocol.js";
@@ -912,10 +907,8 @@ export const makeRunnerStopReconciler = (options: {
 				const [cursor] = yield* sql<{
 					journals_before_execution: number | null;
 				}>`SELECT journals_before_execution FROM claude_runner_cursors WHERE runner_id = ${retirement.runnerId}`;
-				const journalBuild = journalsBeforeExecution(
-					cursor,
-					evidence?.buildId === runnerBuildId(),
-				);
+				// Only a cursor an older build recorded as not journalling first reads 0.
+				const journalBuild = cursor?.journals_before_execution !== 0;
 				const journalDirectory = evidence
 					? dirname(evidence.socketPath)
 					: directory;
@@ -1115,11 +1108,10 @@ export const makeRunnerStopReconciler = (options: {
 			FROM provider_runs requested JOIN provider_runs owner
 			ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
 			WHERE requested.session_id = ${sessionId} AND owner.status IN ('pending', 'running')
-			AND (${legacyRunnerRunPredicate(sql, sessionId, sql`owner.id`)}
-				OR NOT EXISTS (SELECT 1 FROM provider_command_outbox command
-					JOIN provider_runs send_run ON send_run.id = command.run_id AND send_run.session_id = command.session_id
-					WHERE command.session_id = requested.session_id AND command.effect_type = 'send_turn'
-					AND COALESCE(send_run.joined_into, send_run.id) = owner.id))
+			AND NOT EXISTS (SELECT 1 FROM provider_command_outbox command
+				JOIN provider_runs send_run ON send_run.id = command.run_id AND send_run.session_id = command.session_id
+				WHERE command.session_id = requested.session_id AND command.effect_type = 'send_turn'
+				AND COALESCE(send_run.joined_into, send_run.id) = owner.id)
 			AND owner.runner_id = ${retirement.runnerId}`;
 				// Every retirement but the user's End ends its launched runs process
 				// lost, an error as on main (3.8, 3.11). An orphan's EndSession
@@ -2667,7 +2659,7 @@ export const stopRegisteredRunners = (
 						(cause) => new RunnerProcessError({ message: String(cause) }),
 					),
 				);
-			const receipts = yield* makeRunnerReceiptStore(sql, { configDir }).pipe(
+			const receipts = yield* makeRunnerReceiptStore(sql).pipe(
 				Effect.mapError(
 					(cause) => new RunnerProcessError({ message: String(cause) }),
 				),

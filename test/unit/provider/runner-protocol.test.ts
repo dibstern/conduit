@@ -143,33 +143,6 @@ for (const reason of ["exiting", "retiring", "interrupted"] as const) {
 	});
 }
 
-for (const accepted of [false, true]) {
-	it(`42: legacy idle reply ${accepted ? "after" : "before"} acceptance ${accepted ? "does not release" : "proves refusal"}`, async () => {
-		const f = await fixture((message, socket) => {
-			if (message.type !== "command") return;
-			if (accepted)
-				socket.write(
-					`${JSON.stringify({ type: "command-accepted", commandId: message.commandId, attempt: 0, sinkId: "sink" })}\n`,
-				);
-			socket.write(
-				`${JSON.stringify({ type: "command-reply", commandId: message.commandId, failure: { operation: "send-turn", message: "idle", code: "runner_idle_exit" } })}\n`,
-			);
-		});
-		try {
-			const result = await runtime.runPromise(
-				Effect.result(f.client.commandEffect("send", send)),
-			);
-			expect(result._tag).toBe("Failure");
-			if (result._tag === "Failure")
-				expect(runnerDeliveryEvidence(result.failure)).toEqual(
-					accepted ? undefined : { _tag: "Refused", reason: "exiting" },
-				);
-		} finally {
-			await f.close();
-		}
-	});
-}
-
 it("a write never called is NotSent; a called write that fails stays uncertain", async () => {
 	const f = await fixture(() => {});
 	try {

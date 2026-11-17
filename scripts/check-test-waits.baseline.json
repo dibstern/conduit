@@ -754,7 +754,7 @@
 		"timeout-override": 1
 	},
 	"test/integration/daemon/daemon-config-replay.test.ts": {
-		"polling": 11,
+		"polling": 10,
 		"real-wait": 4,
 		"timeout-override": 6
 	},
@@ -1506,6 +1506,25 @@
 	"test/unit/pipeline/pipeline-properties.test.ts": {
 		"timeout-override": 1
 	},
+	"test/unit/project-services/interim-badge-broadcast.test.ts": {
+		"polling": 8
+	},
+	"test/unit/project-services/monitoring-wiring.test.ts": {
+		"polling": 1
+	},
+	"test/unit/project-services/opencode-health-removal.test.ts": {
+		"polling": 1
+	},
+	"test/unit/project-services/push-notification-done.test.ts": {
+		"polling": 1
+	},
+	"test/unit/project-services/shared-opencode-reconnect.test.ts": {
+		"polling": 20
+	},
+	"test/unit/project-services/sse-stream.test.ts": {
+		"polling": 6,
+		"real-wait": 3
+	},
 	"test/unit/provider/claude/claude-permission-bridge.test.ts": {
 		"polling": 5,
 		"real-wait": 1
@@ -1569,28 +1588,6 @@
 	},
 	"test/unit/provider/runner-process-exit-run-ownership.test.ts": {
 		"polling": 1
-	},
-	"test/unit/provider/runner-retirement-fence.test.ts": {
-		"real-wait": 3
-	},
-	"test/unit/project-services/interim-badge-broadcast.test.ts": {
-		"polling": 8
-	},
-	"test/unit/project-services/monitoring-wiring.test.ts": {
-		"polling": 1
-	},
-	"test/unit/project-services/opencode-health-removal.test.ts": {
-		"polling": 1
-	},
-	"test/unit/project-services/push-notification-done.test.ts": {
-		"polling": 1
-	},
-	"test/unit/project-services/shared-opencode-reconnect.test.ts": {
-		"polling": 20
-	},
-	"test/unit/project-services/sse-stream.test.ts": {
-		"polling": 6,
-		"real-wait": 3
 	},
 	"test/unit/server/pty-storm.test.ts": {
 		"timeout-override": 1

@@ -114,8 +114,8 @@
 		{
 			"case": "F21",
 			"status": "nearest-reading",
-			"tests": "test/integration/persistence/runner-retirement-import.test.ts; runner-survivors.test.ts: \"imports new retired cursors into a populated legacy cursor table\" (65); \"SEND-CONTINUATION 38 legacy holderless dispatched work keeps legacy recovery\u2026\" (4618)",
-			"reading": "Import of owned_run_ids rows is tested (runner-retirement-import, 65), and a holderless run settles through the same fallback the legacy holderless case uses (SEND-CONTINUATION 38, 4618). No path builds a holderless run from an imported row except that fallback."
+			"tests": "test/integration/persistence/runner-retirement-import.test.ts: \"imports new retired cursors into a populated legacy cursor table\" (65); runner-survivors.test.ts: \"32.2.15 a runner's ${exit} exit that commits Exited ends a sendless owner process lost\" (2383)",
+			"reading": "Import of owned_run_ids rows is tested (runner-retirement-import, 65). Every ledger-build send is held, so a run with no holder is a sendless owner, settled by its runner's retirement (32.2.15, 2383). The legacy holderless fallback went with the main-built paths (32.47)."
 		},
 		{
 			"case": "F22",
@@ -160,7 +160,7 @@
 			"case": "F29",
 			"status": "nearest-reading",
 			"tests": "runner-host-source-delivery.test.ts: (131), comment at 906: \"Hello clears Reserved \u2026 including legacy replay flags\"",
-			"reading": "two-build/claude runs main's own runner: the current build retires it rather than serve it (CONTRACT.md 2695, 3051, F39), so the older wire, role and preserveRole are never read. runner-host-source-delivery (131, 906) covers a Reserved runner clearing on hello."
+			"reading": "two-build/claude (run-ledger-two-build) adopts the ledger build's runner mid-turn and finishes its turn and steer on the unchanged wire; main's runner is refused at hello since 32.47. The role and preserveRole are not asserted there. runner-host-source-delivery (131, 906) covers a Reserved runner clearing on hello."
 		},
 		{
 			"case": "F30",
@@ -259,8 +259,8 @@
 		},
 		{
 			"case": "F49",
-			"status": "covered",
-			"tests": "SURV: SEND-CONTINUATION 38 legacy holderless dispatched work keeps legacy recovery and never enters C2 (4618)"
+			"status": "not-applicable",
+			"reason": "32.47 deleted legacy recovery (CONTRACT 7.4): the ledger build refuses every main-built runner (claude-runner-historical:99), so no holderless dispatched run is made"
 		},
 		{
 			"case": "F50",
@@ -280,9 +280,8 @@
 		},
 		{
 			"case": "F53",
-			"status": "nearest-reading",
-			"tests": "test/unit/provider/runner-protocol.test.ts: 42: legacy idle reply ${before\\",
-			"reading": "runner-protocol.test.ts (42) covers Refused{exiting} before acceptance at the wire; delivery once on a new runner is the F52 path the idle commit already proves."
+			"status": "not-applicable",
+			"reason": "32.47 deleted the runner_idle_exit reading (CONTRACT 7.4): only a main-built host sends it, and the ledger build refuses every main-built runner (claude-runner-historical:99)"
 		},
 		{
 			"case": "F54",
@@ -550,7 +549,7 @@
 		{
 			"cell": "main-built/legacy-recovery",
 			"status": "covered",
-			"tests": "unit runner-retirement-fence:1657, :1387, :1490; integration claude-runner-historical:99, :312 (refusal path)"
+			"tests": "integration claude-runner-historical:99, :312 (refusal path; 32.47 deleted the recovery, as the ledger build refuses every main-built runner)"
 		},
 		{
 			"cell": "background/confirm",

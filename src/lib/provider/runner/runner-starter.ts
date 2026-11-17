@@ -56,16 +56,6 @@ import type { RunnerRecord } from "./runner-authority.js";
 import type { RunnerChild } from "./runner-entry-lifecycle.js";
 import * as Entry from "./runner-entry-lifecycle.js";
 import {
-	isLegacyRunner,
-	legacyRunnerBindings,
-	legacyRunnerRetainedSends,
-	legacyRunnerRunPredicate,
-} from "./runner-legacy-classification.js";
-import {
-	recoverLegacyRunnerCommands,
-	replayLegacyRunnerSend,
-} from "./runner-legacy-recovery.js";
-import {
 	currentSendToken,
 	type RunnerHello,
 	type RunnerSendAnswer,
@@ -102,14 +92,8 @@ import {
 	terminalTurnResult,
 	toStoreFault,
 } from "./send-settlement.js";
-import {
-	LegacySendKey,
-	requeueLegacySend,
-	settleLegacySend,
-	settleSend,
-} from "./send-settlement-outbox.js";
+import { requeueLegacySend, settleSend } from "./send-settlement-outbox.js";
 import type {
-	AdmitSend,
 	SessionFailure,
 	SessionOutput,
 	SessionOutputReply,
@@ -627,7 +611,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 
 				let recoveredHello: RunnerHello | undefined;
 				const recoveredSendRefs = new Map<SendToken, HeldSendRef>();
-				const legacySendKeys = new Map<SendToken, LegacySendKey>();
 				// Hello bindings name tokens; the commands come from main's own rows.
 				let recoveryBindings: readonly (NonNullable<
 					RunnerHello["bindings"]
@@ -734,12 +717,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 													)
 														continue;
 													const token = currentSendToken(row);
-													const legacy = legacySendKeys.get(token);
-													const [modern] = legacy
-														? []
-														: yield* sql`SELECT 1 FROM provider_runs run
-															WHERE run.id = ${row.run_id} AND run.session_id = ${sessionId} AND run.joined_into IS NULL
-															AND NOT ${legacyRunnerRunPredicate(sql, sessionId, sql`run.id`)}`;
+													const [modern] =
+														yield* sql`SELECT 1 FROM provider_runs run
+															WHERE run.id = ${row.run_id} AND run.session_id = ${sessionId} AND run.joined_into IS NULL`;
 													const answer = answers.find(
 														(answer) => answer.token === token,
 													);
@@ -782,22 +762,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 																	answer: completed,
 																	observedAt,
 																});
-														} else {
-															const key = legacy;
-															if (key)
-																yield* settleLegacySend(
-																	tx,
-																	key,
-																	completed.result,
-																	completed.failure,
-																	observedAt,
-																	{
-																		nativeResumeFallback:
-																			completed.nativeResumeFallback ??
-																			completed.fresh === true,
-																		driverKind: driver.driverKind,
-																	},
-																);
 														}
 														continue;
 													}
@@ -839,271 +803,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 						),
 					);
 				};
-				const recoverLegacySends = (connection: RunnerSocket) =>
-					sql
-						? Effect.gen(function* () {
-								// C 7.4: a runner without journal answers replays every running
-								// send, selected by the capability check alone.
-								return yield* recoverLegacyRunnerCommands({
-									sql,
-									sessionId,
-									driverKind: driver.driverKind,
-									...(deps.accounts ? { accounts: deps.accounts } : {}),
-									ownsPendingSend: (row) =>
-										entry.ownsPendingSend?.(
-											sessionId,
-											row.command_id,
-											row.request_sequence,
-											row.attempt_count,
-										) === true,
-									retain: (token, commandId) =>
-										sends.retain(entry, token, commandId),
-									ready: Deferred.await(entry.ready).pipe(Effect.asVoid),
-									replay: (row, replayLock) => {
-										let admittedSend: SendScope | undefined;
-										const withAdmission = <A>(
-											input: Parameters<AdmitSend>[0]["input"],
-											sinkId: string,
-											work: (
-												send: SendScope,
-											) => Effect.Effect<A, SessionFailure>,
-											journaled = false,
-										) => {
-											const retained = sends.route(sinkId)?.sendScope;
-											return sends.admit(
-												{
-													origin: { _tag: "Adopted" },
-													sinkId,
-													input,
-													...(retained
-														? { retained }
-														: admittedSend
-															? { previous: admittedSend }
-															: {}),
-													isEnded: runnerCommandEnded(
-														sql,
-														sessionId,
-														row.command_id,
-														row.attempt_count,
-													),
-													refuse: () => Effect.void,
-												},
-												(send) =>
-													Effect.gen(function* () {
-														admittedSend = send;
-														const pending = {
-															sessionId,
-															runId: input.runId,
-															cancelled: yield* Deferred.make<void>(),
-														};
-														yield* stops
-															.guarded(
-																stops.grantOf(outputAuthority),
-																{ kind: "output" },
-																Effect.gen(function* () {
-																	yield* sends.bind(sinkId, {
-																		sendScope: send,
-																		sessionId,
-																		commandId: row.command_id,
-																		inputId: input.inputId,
-																		runId: input.runId,
-																		messageId: row.assistant_message_id ?? "",
-																		commandPending: true,
-																	});
-																	yield* sends.bindPending(
-																		send,
-																		sinkId,
-																		pending,
-																	);
-																	if (journaled) sends.dispatch(send, entry);
-																	if (
-																		!recoveryBindings.some(
-																			(binding) =>
-																				binding.commandId === row.command_id &&
-																				binding.sinkId === sinkId,
-																		)
-																	)
-																		recoveryBindings = [
-																			...recoveryBindings,
-																			{
-																				sessionId,
-																				commandId: row.command_id,
-																				token: currentSendToken(row),
-																				sinkId,
-																				released: false,
-																			},
-																		];
-																}),
-															)
-															.pipe(
-																Effect.flatMap(
-																	Option.match({
-																		onNone: () => Effect.interrupt,
-																		onSome: Effect.succeed,
-																	}),
-																),
-															);
-														return yield* Effect.raceFirst(
-															Deferred.await(pending.cancelled).pipe(
-																Effect.andThen(
-																	Effect.fail({
-																		...runnerFailure(
-																			"send-turn",
-																			"Input cancelled before intake",
-																		),
-																		code: "cancelled",
-																	}),
-																),
-															),
-															work(send),
-														);
-													}),
-											);
-										};
-										return replayLegacyRunnerSend({
-											sql,
-											row,
-											replayLock,
-											driverKind: driver.driverKind,
-											connection,
-											...(driver.legacyPrepareTurnEffect
-												? { prepareTurnEffect: driver.legacyPrepareTurnEffect }
-												: {}),
-											deps,
-											admitReplay: (input, sinkId, replay, journaled = false) =>
-												withAdmission(
-													input,
-													sinkId,
-													(send) =>
-														sends
-															.retainAccount(
-																send,
-																sinkId,
-																input.account?.id ?? row.provider_id,
-																connection,
-															)
-															.pipe(
-																Effect.catchIf(
-																	() => journaled,
-																	() => Effect.void,
-																),
-																Effect.andThen(replay),
-															),
-													journaled,
-												).pipe(
-													Effect.map(
-														(outcome) =>
-															Option.getOrUndefined(outcome) ?? {
-																result: undefined,
-																nativeResumeFallback:
-																	input.nativeResumeFallback === true,
-															},
-													),
-													Effect.catchIf(
-														(failure) => failure.code === "cancelled",
-														() =>
-															Effect.succeed({
-																result: CANCELLED_TURN,
-																nativeResumeFallback:
-																	input.nativeResumeFallback === true,
-															}),
-													),
-												),
-											liveSession: nativeSession(sessionId),
-											resolveSinkId: (
-												commandId,
-												inputId,
-												attempt,
-												fallback,
-											) => {
-												const inputSink = runnerSinkId(
-													inputId,
-													attempt,
-													fallback,
-												);
-												return sends.route(inputSink)
-													? inputSink
-													: runnerSinkId(commandId, attempt, fallback);
-											},
-											closing: () =>
-												stops.closing ||
-												stops.currentEntry(sessionId) !== entry ||
-												entry.connection !== connection ||
-												connection.closed,
-											send: (token, command) => {
-												const dispatch = (send: SendScope) =>
-													Effect.gen(function* () {
-														if (send.assignment._tag === "Closed")
-															return CANCELLED_TURN;
-														yield* sends.retainAccount(
-															send,
-															command.sinkId,
-															row.provider_id,
-															connection,
-														);
-														const pending = sends.pending(send);
-														if (
-															pending &&
-															Deferred.isDoneUnsafe(pending.cancelled)
-														)
-															return CANCELLED_TURN;
-														sends.dispatch(send, entry);
-														const targetConnection = connection;
-														return yield* targetConnection.commandEffect(
-															token,
-															command,
-														);
-													});
-												const retained = sends.route(command.sinkId)?.sendScope;
-												return retained
-													? dispatch(retained)
-													: withAdmission(
-															command.input,
-															command.sinkId,
-															dispatch,
-														).pipe(Effect.map(Option.getOrUndefined));
-											},
-										}).pipe(
-											(effect) =>
-												stops.guarded(
-													stops.grantOf(outputAuthority),
-													{ kind: "output" },
-													effect,
-												),
-											Effect.flatMap(
-												Option.match({
-													onNone: () => Effect.interrupt,
-													onSome: Effect.succeed,
-												}),
-											),
-										);
-									},
-									settle: (answer, key) => {
-										if (key) legacySendKeys.set(answer.token, key);
-										return settleRecoveredSends([answer], false);
-									},
-									release: (commandId) =>
-										Effect.gen(function* () {
-											for (const binding of recoveryBindings) {
-												if (binding.commandId !== commandId) continue;
-												const send = sends.route(binding.sinkId)?.sendScope;
-												if (send) yield* send.close;
-											}
-										}),
-									closing: () =>
-										stops.closing ||
-										stops.currentEntry(sessionId) !== entry ||
-										entry.connection !== connection ||
-										connection.closed,
-									fail: (failure) => failed(sessionId, entry, failure),
-									runFork,
-								});
-							}).pipe(
-								Effect.mapError((cause) =>
-									runnerFailure("recover legacy runner sends", cause),
-								),
-							)
-						: Effect.void;
 				return yield* driver.connect({
 					driverKind: driver.driverKind,
 					socketPath: entry.socketPath,
@@ -1252,32 +951,19 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 					onHello: (rawHello, connection, replay) =>
 						Effect.gen(function* () {
 							const hello = rawHello;
+							// The ledger build (4b2fe6ee) omits every answer when one retained journal
+							// file is unreadable. Refused as an older build, it retires and settles its
+							// held sends delivery_indeterminate, never re-sent (CONTRACT 7.3).
+							if (entry.recoveringCommands && hello.sendAnswers === undefined)
+								return yield* Effect.fail({
+									...runnerFailure(
+										"runner hello",
+										`Runner journal cannot answer its retained sends (peer build ${hello.buildId})`,
+									),
+									code: "runner_incompatible",
+								});
 							recoveredHello = hello;
-							if (sql && !identityOnly) {
-								const accounts = yield* deps.accounts ??
-									Effect.succeed(undefined);
-								const rows = yield* runningRunnerCommands(
-									sql,
-									driver.driverKind,
-									(accountId) =>
-										accounts?.accounts.find(({ id }) => id === accountId)
-											?.driver ??
-										accounts?.deleted.find(({ id }) => id === accountId)
-											?.driver ??
-										(accountId === driver.driverKind
-											? driver.driverKind
-											: undefined),
-									sessionId,
-									undefined,
-									true,
-								);
-								for (const row of rows) {
-									const key = yield* LegacySendKey.prove(sql, row);
-									if (key) legacySendKeys.set(currentSendToken(row), key);
-								}
-							}
-							// A main-built runner's replay settles its held sends too (C 7.4). A joined
-							// steer's hold is its own run's while its owner's Run is open (CONTRACT 2021-2025).
+							// A joined steer's hold is its own run's while its owner's Run is open (CONTRACT 2021-2025).
 							if (sql && !identityOnly) {
 								const held = yield* sql<{
 									run_id: string;
@@ -1307,9 +993,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 										},
 									);
 							}
-							const bindings = isLegacyRunner(hello)
-								? legacyRunnerBindings(hello)
-								: (hello.bindings ?? []);
+							const bindings = hello.bindings ?? [];
 							const issued = yield* issuedSendTokens(sql, sessionId, [
 								...new Set([
 									...(hello.sendTokens ?? []),
@@ -1326,36 +1010,34 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									? { ...binding, commandId: command.commandId }
 									: binding;
 							});
-							if (!isLegacyRunner(hello)) {
-								// The journal owns classification. A retained call needs an admission
-								// even when it has not emitted an output binding yet.
-								for (const answer of hello.sendAnswers ?? []) {
-									const command = issued.get(answer.token);
-									if (
-										answer.status !== "running" ||
-										!command ||
-										recoveryBindings.some(
-											(binding) =>
-												binding.token === answer.token &&
-												binding.released !== true,
-										)
+							// The journal owns classification. A retained call needs an admission
+							// even when it has not emitted an output binding yet.
+							for (const answer of hello.sendAnswers ?? []) {
+								const command = issued.get(answer.token);
+								if (
+									answer.status !== "running" ||
+									!command ||
+									recoveryBindings.some(
+										(binding) =>
+											binding.token === answer.token &&
+											binding.released !== true,
 									)
-										continue;
-									recoveryBindings = [
-										...recoveryBindings,
-										{
-											sessionId,
-											commandId: command.commandId,
-											token: answer.token,
-											released: false,
-											sinkId: runnerSinkId(
-												command.commandId,
-												command.attempt,
-												command.fallback,
-											),
-										},
-									];
-								}
+								)
+									continue;
+								recoveryBindings = [
+									...recoveryBindings,
+									{
+										sessionId,
+										commandId: command.commandId,
+										token: answer.token,
+										released: false,
+										sinkId: runnerSinkId(
+											command.commandId,
+											command.attempt,
+											command.fallback,
+										),
+									},
+								];
 							}
 							const ownsEntry = () =>
 								(entry.lifecycle.candidate
@@ -1450,13 +1132,13 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							sends.recovered(
 								entry,
 								new Map(
-									legacyRunnerRetainedSends(hello).map((token) => [
+									(hello.sendTokens ?? []).map((token) => [
 										token,
 										issued.get(token)?.commandId,
 									]),
 								),
 							);
-							if (sql && !isLegacyRunner(hello)) {
+							if (sql) {
 								// From 32.5 a joined steer's held transmission is released under its own run
 								// id while its owner's Run is open, and the feeder re-holds it (CONTRACT 1868-1869).
 								const held = yield* sql<{
@@ -1562,7 +1244,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 											)
 										)
 											continue;
-										if (!isLegacyRunner(hello) && row.status === "running") {
+										if (row.status === "running") {
 											const token = currentSendToken(row);
 											const answer = hello.sendAnswers?.find(
 												(answer) => answer.token === token,
@@ -1777,9 +1459,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									);
 								}
 								// Journal answers do not wait for backlog delivery to unblock startup.
-								if (!isLegacyRunner(hello))
-									yield* settleRecoveredSends(hello.sendAnswers ?? [], true);
-								else yield* recoverLegacySends(connection);
+								yield* settleRecoveredSends(hello.sendAnswers ?? [], true);
 							}
 							// Recovery can await output ACKs that publish a newer revision.
 							Entry.observeDelivery(
@@ -1807,7 +1487,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 						),
 					onCommandReply: (reply) =>
 						Effect.gen(function* () {
-							if (!recoveredHello || isLegacyRunner(recoveredHello)) return;
+							if (!recoveredHello) return;
 							// A send's frame id is its token.
 							const held = recoveredHello.sendAnswers?.find(
 								(answer) =>

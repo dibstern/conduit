@@ -123,7 +123,7 @@ export const makeCodexProviderRuntime = (
 					}),
 				{
 					driverKind: "codex",
-					legacyPrepareTurnEffect: driver.prepareTurnEffect,
+					prepareStoredTurnEffect: driver.prepareTurnEffect,
 					coldUpgrade: true,
 					connect: (options) => connectRunner({ ...options, markServer }),
 					settingsDeferredCode: "codex_settings_deferred",

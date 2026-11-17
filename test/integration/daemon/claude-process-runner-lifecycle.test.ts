@@ -22,7 +22,6 @@ import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runn
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
-	runnerIdleFailure,
 	runnerSinkId,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import { makeRunnerProviderInstance } from "../../../src/lib/provider/runner/runner-provider-instance.js";
@@ -215,6 +214,7 @@ describe("Claude runner admission socket probes", () => {
 				runnerId,
 				sessionId,
 				pid,
+				sendAnswers: [],
 			});
 		let pending:
 			| Extract<
@@ -256,9 +256,9 @@ describe("Claude runner admission socket probes", () => {
 							peer.write({ type: "idle-exit" });
 							if (pending)
 								peer.write({
-									type: "command-reply",
+									type: "command-refused",
 									commandId: pending.commandId,
-									failure: runnerIdleFailure(),
+									reason: "exiting",
 								});
 						}
 						// A real runner's socket closes when its process exits.
@@ -594,7 +594,7 @@ describe("Claude runner admission socket probes", () => {
 					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(false);
 					// CONTRACT 6.3: end-session is requestStop(EndSession), not a native command.
 					expect(fixture.commands).toEqual(["send-turn", "shutdown"]);
-					// CONTRACT 4.5: the idle reply is Refused{exiting}, handed back to the
+					// CONTRACT 4.5: the idle refusal is Refused{exiting}, handed back to the
 					// direct caller, and the EndSession starts no replacement. The probe
 					// has no feeder, so F32's Covered path is not exercised here.
 					expect(
@@ -604,7 +604,7 @@ describe("Claude runner admission socket probes", () => {
 						),
 					).toMatchObject({
 						cause: {
-							code: "runner_idle_exit",
+							code: "runner_command_refused",
 							delivery: { _tag: "Refused", reason: "exiting" },
 						},
 					});
@@ -982,7 +982,15 @@ describe("built-dist Claude runner lifecycle", () => {
 		await browser.preWarmSession(sessionId);
 		await harness.waitForMark((mark) => mark.kind === "runner-started");
 		const runner = started(harness);
-		const query = harness.marks.find((mark) => mark.kind === "query");
+		// Startup's usage probe is a daemon query, not the runner's.
+		const query = harness.marks.find(
+			(mark) =>
+				mark.kind === "query" &&
+				!harness.marks.some(
+					(probe) =>
+						probe.kind === "usage-probe" && probe.queryId === mark.queryId,
+				),
+		);
 		if (query?.kind !== "query")
 			throw new Error("Missing pre-warm query proof");
 		expect(query.pid).toBe(runner.pid);
@@ -1530,7 +1538,17 @@ describe("built-dist Claude runner lifecycle", () => {
 				/protocol.*mismatch.*999/i,
 			);
 		});
-		expect(harness.marks.some((mark) => mark.kind === "query")).toBe(false);
+		// Startup's usage probe is a daemon query; the refused runner makes none.
+		expect(
+			harness.marks.some(
+				(mark) =>
+					mark.kind === "query" &&
+					!harness.marks.some(
+						(probe) =>
+							probe.kind === "usage-probe" && probe.queryId === mark.queryId,
+					),
+			),
+		).toBe(false);
 	});
 
 	it.each([

@@ -1,6 +1,6 @@
-// Two-build upgrade (82tn.32.14; CONTRACT.md 7.4, SEND-SCOPE-5 S9.6): a daemon built from
-// main holds a turn mid-flight, is SIGKILLed, and the current build restarts on its store.
-// The old build writes its own legacy rows; nothing is seeded.
+// Two-build upgrade (82tn.32.14, 32.47; CONTRACT.md 7.4, SEND-SCOPE-5 S9.6): a daemon built from
+// the ledger build holds a turn mid-flight with a steer, is SIGKILLed, and the current build
+// restarts on its store. The old build writes its own rows; nothing is seeded.
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,8 +11,8 @@ import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
 import { historicalRunnerBundle } from "../../helpers/historical-runner-bundle.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
-// main's merge-base for the Run Ledger branch.
-const MAIN_COMMIT = "020678548921ff6419796274482a1a9ecc5dfc69";
+// The Run Ledger build as it landed on main (82tn.32, 4b2fe6ee).
+const LEDGER_COMMIT = "4b2fe6eee9b9d44974e82471857196c8afeee830";
 const TIMEOUT = 120_000;
 const CURRENT_DIST = process.env["CONDUIT_TEST_DIST"] ?? "dist";
 
@@ -29,15 +29,15 @@ const query = <T>(
 	}
 };
 
-describe("two-build upgrade from main", () => {
+describe("two-build upgrade from the ledger build", () => {
 	const harnesses: ProcessHarness[] = [];
 	afterEach(async () => {
 		for (const harness of harnesses.splice(0)) await harness.dispose();
 	});
 
-	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
-	it("keeps a Claude turn main held through SIGKILL and an upgrade, with main's resume marker and steer", async (context) => {
-		const historical = await historicalRunnerBundle(MAIN_COMMIT);
+	// test-waits-allow timeout-override: a cold cache builds the ledger build's tree before the test runs.
+	it("adopts the ledger build's runner mid-turn through SIGKILL and an upgrade, finishing its turn and steer once", async (context) => {
+		const historical = await historicalRunnerBundle(LEDGER_COMMIT);
 		if (!historical.available) context.skip(historical.reason);
 		if (!historical.available) return;
 		const harness = ProcessHarness.create({
@@ -49,8 +49,6 @@ describe("two-build upgrade from main", () => {
 			startupTimeoutMs: TIMEOUT,
 			runnerStartupTimeoutMs: TIMEOUT,
 		});
-		// main's session detail feed fails this build's schema (82tn.51 dropped its rewind row),
-		// so the browser leaves main's session unviewed and the store shows each turn.
 		const browser = await harness.connect(
 			undefined,
 			undefined,
@@ -63,12 +61,16 @@ describe("two-build upgrade from main", () => {
 			"claude",
 			{ view: false },
 		);
-		const submit = (text: string, delivery: "queue" | "steer" = "queue") =>
+		const submit = (
+			inputId: string,
+			text: string,
+			delivery: "queue" | "steer" = "queue",
+		) =>
 			Effect.runPromise(
 				browser.rpc["input.submit"]({
 					sessionId,
 					originId: browser.originId,
-					inputId: randomUUID(),
+					inputId,
 					delivery,
 					text,
 				}),
@@ -79,57 +81,27 @@ describe("two-build upgrade from main", () => {
 				"SELECT state FROM turns WHERE session_id = ?",
 				sessionId,
 			).map(({ state }) => state);
-		await submit("Say hello");
-		// test-waits-allow polling: an unviewed session's turn end reaches only the store.
-		await vi.waitFor(() => expect(turnStates()).toEqual(["completed"]), {
-			timeout: TIMEOUT,
-		});
-		// A fresh runner resumes the native session; main falls back from the refusal and
-		// marks its command with the old resume marker.
-		writeFileSync(
-			join(harness.root, "claude", "conduit-test-resume-drops-turn"),
-			"",
-		);
-		for (const pid of harness.runnerPids())
-			expect(harness.signalOwnedRunner(pid, "SIGKILL")).toBe(true);
-		// test-waits-allow polling: a killed runner reports only through the process table.
-		await vi.waitFor(() => expect(harness.remainingRunnerPids()).toEqual([]), {
-			timeout: TIMEOUT,
-		});
 		const prompt = "upgrade-long-turn";
-		await submit(prompt);
+		const promptId = randomUUID();
+		await submit(promptId, prompt);
 		await harness.waitForMark(
 			(mark) => mark.kind === "assistant-held" && mark.prompt.endsWith(prompt),
 		);
+		const [runner] = harness.runnerPids();
 		const steerId = randomUUID();
-		await Effect.runPromise(
-			browser.rpc["input.submit"]({
-				sessionId,
-				originId: browser.originId,
-				inputId: steerId,
-				delivery: "steer",
-				text: "Use the steered instruction",
-			}),
-		);
-		// test-waits-allow polling: main's steer row reaches only the store.
+		await submit(steerId, "Use the steered instruction", "steer");
+		// test-waits-allow polling: the ledger build's steer hold reaches only the store.
 		await vi.waitFor(
 			() =>
 				expect(
 					query(
 						harness,
-						"SELECT state FROM pending_inputs WHERE session_id = ? AND state <> 'removed'",
+						"SELECT 1 FROM provider_command_outbox WHERE session_id = ? AND status = 'running'",
 						sessionId,
 					),
-				).toEqual([{ state: "steering" }]),
+				).toHaveLength(2),
 			{ timeout: TIMEOUT },
 		);
-		expect(
-			query(
-				harness,
-				"SELECT json_extract(payload_json, '$.nativeResumeFallback') AS marker FROM provider_command_outbox WHERE session_id = ? AND status = 'running'",
-				sessionId,
-			),
-		).toContainEqual({ marker: 1 });
 		await harness.kill();
 		await harness.restart({
 			dist: CURRENT_DIST,
@@ -137,24 +109,25 @@ describe("two-build upgrade from main", () => {
 			runnerStartupTimeoutMs: TIMEOUT,
 		});
 		await (await harness.connect()).followSession(sessionId);
-		// main's runner speaks an older protocol, so the current build retires it: its send is
-		// settled and never re-sent (CONTRACT.md 2695, 3051, F39), and main's steer goes back to
-		// the inbox front, paused, as main's requeue leaves it (CONTRACT.md 217, row 206).
-		// test-waits-allow polling: the retired runner's settle reaches only the store.
+		// The ledger build's runner speaks this build's protocol: this build adopts it, and the
+		// held turn and its steer finish there, never re-sent.
+		expect(harness.remainingRunnerPids()).toContain(runner);
+		writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
+		// test-waits-allow polling: an unviewed session's turn ends reach only the store.
 		await vi.waitFor(
-			() => expect(turnStates()).toEqual(["completed", "error"]),
-			{ timeout: TIMEOUT },
-		);
-		// test-waits-allow polling: the requeued steer reaches only the store's inbox.
-		await vi.waitFor(
-			() =>
+			() => {
+				expect(turnStates()).not.toEqual([]);
+				expect(turnStates().every((state) => state === "completed")).toBe(true);
 				expect(
-					query(
+					query<{ inputId: string }>(
 						harness,
-						"SELECT input_id, state FROM pending_inputs WHERE session_id = ? AND state <> 'removed'",
+						"SELECT input_id AS inputId FROM messages WHERE session_id = ? AND role = 'user' AND input_id IS NOT NULL",
 						sessionId,
-					),
-				).toEqual([{ input_id: steerId, state: "queued" }]),
+					)
+						.map(({ inputId }) => inputId)
+						.sort(),
+				).toEqual([promptId, steerId].sort());
+			},
 			{ timeout: TIMEOUT },
 		);
 		expect(
@@ -174,6 +147,7 @@ describe("two-build upgrade from main", () => {
 			"two-build/claude",
 			harness.daemonStorePath(),
 			sessionId,
+			[promptId, steerId],
 		);
 	}, 900_000);
 });

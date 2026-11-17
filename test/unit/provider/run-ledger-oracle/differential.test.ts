@@ -60,7 +60,11 @@ const units = [
 	"src/lib/domain/project-services/Services/provider-turn-service.ts",
 ] as const;
 
-/** A unit's R2 source, with the paths 82tn.86 renamed after R2 pointed at their new names. */
+/**
+ * A unit's R2 source, with the paths 82tn.86 renamed after R2 pointed at their new names. R2's
+ * reactor asks LegacySendKey whether a main-built runner sent the row; 32.47 deleted the key, as
+ * the ledger build refuses every main-built runner, so the answer is always none.
+ */
 const sourceAtR2 = (unit: string): string =>
 	execFileSync("git", [
 		"-C",
@@ -70,7 +74,11 @@ const sourceAtR2 = (unit: string): string =>
 	])
 		.toString("utf8")
 		.replaceAll("domain/relay/", "domain/project-services/")
-		.replaceAll("./relay-event-sink.js", "./project-event-sink.js");
+		.replaceAll("./relay-event-sink.js", "./project-event-sink.js")
+		.replace(
+			"const legacy = yield* LegacySendKey.prove(this.options.sql, row);",
+			"const legacy = undefined;",
+		);
 
 interface Difference {
 	readonly fact: number;
@@ -258,6 +266,7 @@ beforeAll(async () => {
 	symlinkSync(join(repo, "node_modules"), join(scratch, "node_modules"));
 	for (const unit of units)
 		writeFileSync(join(scratch, unit), sourceAtR2(unit));
+	expect(sourceAtR2(units[0])).not.toContain("LegacySendKey.prove");
 	// R2's reactor names a Stop's runs in its control context, which R2's runner read
 	// (6c9ff950 runner-provider-instance.ts 1306); the current runner reads them from runIds alone.
 	const runner = join(

@@ -806,13 +806,7 @@ export const runSessionRunner = (
 											: { released: binding.released === true }),
 									})),
 									pendingOutputs: spool.pendingOutputs,
-									completedCommands: [...completedCommands.values()],
-									...(sendJournal?.canAnswerRetainedSends
-										? {
-												sendJournalAnswers: true,
-												sendAnswers: sendJournal.answers,
-											}
-										: {}),
+									sendAnswers: sendJournal?.answers ?? [],
 									sendTokens: sendJournal?.tokens ?? [],
 									upgradeState: upgradeState(),
 									...launch.capabilities,

@@ -29,7 +29,6 @@ import {
 	viewLedger,
 } from "../run-ledger/run-ledger-decider.js";
 import type { TurnResult } from "../types.js";
-import { legacyRunnerRunQuery } from "./runner-legacy-classification.js";
 import { runnerFailure, runnerSinkId } from "./runner-protocol.js";
 import type { RunnerRecoveryDependencies } from "./runner-provider-instance.js";
 import { retrySettlementWrite } from "./send-settlement.js";
@@ -234,14 +233,17 @@ export const settleUnclaimedRunnerCommands = <E>(
 			};
 			const [requested] = yield* sql<{
 				joined_into: string | null;
-			}>`SELECT run.joined_into
+				legacy_claim: number;
+			}>`SELECT run.joined_into, run.legacy_claim
 				FROM provider_command_outbox command JOIN provider_runs run
 					ON run.id = command.run_id AND run.session_id = command.session_id
 				WHERE command.request_sequence = ${row.request_sequence} AND command.project_key = ${row.project_key}`;
+			// Migration 0097: an older build's unstarted claim may have executed. It ends
+			// its turn below as runner_stopped, never requeued.
 			if (
 				row.run_id &&
 				requested?.joined_into === null &&
-				!(yield* legacyRunnerRunQuery(sql, row.session_id, row.run_id))
+				requested.legacy_claim === 0
 			) {
 				const projector = yield* Effect.serviceOption(
 					ProjectionRunnerEffectTag,
@@ -288,14 +290,6 @@ export const settleUnclaimedRunnerCommands = <E>(
 										row.session_id,
 										evidence.send.runId,
 									))
-								)
-									return;
-								if (
-									yield* legacyRunnerRunQuery(
-										sql,
-										row.session_id,
-										evidence.send.runId,
-									)
 								)
 									return;
 								// CONTRACT 667-672, 682-691 (D50): a send its Run's ledger holds Launched with no

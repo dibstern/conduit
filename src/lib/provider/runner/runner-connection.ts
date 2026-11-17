@@ -8,7 +8,6 @@ import * as Failure from "../../effect/failure-classification.js";
 import { isRecord } from "../../utils.js";
 import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type { ProcessStart } from "./process-table.js";
-import { isLegacyRunner } from "./runner-legacy-classification.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
 	type RunnerMessage,
@@ -255,7 +254,6 @@ export const connectRunner = (options: {
 												reaper: message.reaper,
 												driverKind:
 													message.driverKind ?? options.driverKind ?? "claude",
-												journalsBeforeExecution: !isLegacyRunner(message),
 											})
 											.pipe(
 												Effect.mapError((cause) =>

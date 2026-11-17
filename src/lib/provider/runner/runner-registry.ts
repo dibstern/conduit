@@ -54,62 +54,6 @@ export interface RunnerProcessTable {
 	) => ReadonlyMap<number, ReturnType<RunnerProcessTable["inspect"]>>;
 }
 
-/** Legacy role ranking is used only by the one-time cursor backfill. Delete with 32.13. */
-export function legacyRunnerRanking(configDir: string): ReadonlyMap<
-	string,
-	{
-		readonly role?: "candidate" | "retiring";
-		readonly registeredAt: number;
-		readonly sessionId?: string;
-	}
-> {
-	const ranking = new Map<
-		string,
-		{
-			readonly role?: "candidate" | "retiring";
-			readonly registeredAt: number;
-			readonly sessionId?: string;
-		}
-	>();
-	const root = join(resolve(configDir), "r");
-	let directories: string[];
-	try {
-		directories = readdirSync(root);
-	} catch {
-		return ranking;
-	}
-	for (const directory of directories) {
-		if (!/^[0-9a-f]{12}$/.test(directory)) continue;
-		try {
-			for (const filename of readdirSync(join(root, directory))) {
-				if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
-				try {
-					const path = join(root, directory, filename);
-					const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-					if (!isRecord(value)) continue;
-					ranking.set(filename.slice(0, -5), {
-						...(value["role"] === "candidate" || value["role"] === "retiring"
-							? { role: value["role"] }
-							: {}),
-						...(typeof value["sessionId"] === "string"
-							? { sessionId: value["sessionId"] }
-							: {}),
-						registeredAt:
-							typeof value["registeredAt"] === "number"
-								? value["registeredAt"]
-								: lstatSync(path).mtimeMs,
-					});
-				} catch {
-					// A missing or malformed legacy registry gives the cursor sequence precedence.
-				}
-			}
-		} catch {
-			// A removed legacy directory is equivalent to no registry entry.
-		}
-	}
-	return ranking;
-}
-
 export const runnerProcessTable: RunnerProcessTable = {
 	inspectMany: (pids) => {
 		const observed = new Map<

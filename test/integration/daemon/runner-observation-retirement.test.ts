@@ -71,6 +71,7 @@ it("retries an unperformed prompt retirement and caches a successful zero result
 						sessionId,
 						pid: process.pid,
 						bindings: [],
+						sendAnswers: [],
 					});
 				} else if (message.type === "replay") {
 					peer.write({
