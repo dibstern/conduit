@@ -2612,6 +2612,55 @@ it.effect(
 		),
 );
 
+// 32.47: the ledger build (4b2fe6ee) omits every journal answer when one retained file is
+// unreadable, though it still answers command-status. Its held send is never left held.
+it.effect(
+	"a ledger-build runner whose hello omits its journal answers is refused, never left held",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				const matches = vi
+					.spyOn(runnerRegistry, "runnerPidMatchesRegistration")
+					.mockReturnValue(true);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => matches.mockRestore()),
+				);
+				// The live host exits only when it is signalled.
+				Object.assign(f.processTable, {
+					signal: (pid: number) => f.processes.delete(pid),
+				});
+				yield* f.seed("incomplete", 1, 1, "held");
+				yield* f.hello(({ sendAnswers: _omitted, ...hello }) => ({
+					...hello,
+					drainsConnections: true,
+					sendTokens: [sendToken("hold", "incomplete", 1)],
+				}));
+				const connect = vi.mocked(f.driver.connect).getMockImplementation();
+				if (!connect) return yield* Effect.die("missing fixture connection");
+				vi.mocked(f.driver.connect).mockImplementation((options) =>
+					connect({
+						...options,
+						onHello: (hello, connection, replay) =>
+							options.onHello(
+								hello,
+								Object.assign(connection, {
+									commandStatusEffect: () => Effect.succeed("failed" as const),
+								}),
+								replay,
+							),
+					}),
+				);
+				yield* f.recover;
+				yield* TestClock.adjust("10 seconds");
+				expect(f.commands.filter((c) => c.type === "send-turn")).toEqual([]);
+				expect(
+					yield* f.sql`SELECT status, error_code FROM provider_command_outbox`,
+				).toEqual([{ status: "failed", error_code: "delivery_indeterminate" }]);
+			}),
+		),
+);
+
 // CONTRACT 4.9, 6.7: a send that meets a refused runner during its failure
 // stop must not retire it again as an interrupted adoption; Settle still
 // reads the refusal's code for the runs it owned.

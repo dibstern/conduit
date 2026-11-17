@@ -941,6 +941,17 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 					onHello: (rawHello, connection, replay) =>
 						Effect.gen(function* () {
 							const hello = rawHello;
+							// The ledger build (4b2fe6ee) omits every answer when one retained journal
+							// file is unreadable. Refused as an older build, it retires and settles its
+							// held sends delivery_indeterminate, never re-sent (CONTRACT 7.3).
+							if (entry.recoveringCommands && hello.sendAnswers === undefined)
+								return yield* Effect.fail({
+									...runnerFailure(
+										"runner hello",
+										`Runner journal cannot answer its retained sends (peer build ${hello.buildId})`,
+									),
+									code: "runner_incompatible",
+								});
 							recoveredHello = hello;
 							// A joined steer's hold is its own run's while its owner's Run is open (CONTRACT 2021-2025).
 							if (sql && !identityOnly) {

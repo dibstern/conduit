@@ -11,6 +11,9 @@ or malformed registry already meant, so sequence order decides. Pre-ledger (main
 unsupported: their cursors with an empty session id are no longer backfilled, so a store whose main
 runner still lives fails with "Runner session changed". Where that runner is gone, a run migration
 0097 marked `legacy_claim` may already have executed, so the feeder never sends it and nothing claims
-it as fed: orphan recovery ends its turn `runner_stopped`, never re-sent. The two-build tests now upgrade from the ledger build 4b2fe6ee to the
+it as fed: orphan recovery ends its turn `runner_stopped`, never re-sent. A ledger-build (4b2fe6ee)
+host whose hello omits `sendAnswers` (one retained journal file unreadable) is refused at recovery
+as `runner_incompatible`, so retirement settles its held sends `delivery_indeterminate` (7.3), never
+re-sent; a readable failure among them loses its exact error. The two-build tests now upgrade from the ledger build 4b2fe6ee to the
 current build. Crash-matrix F49 (holderless dispatched run) and F53 (`runner_idle_exit`) are not
 applicable, since only main-built hosts produced them.
