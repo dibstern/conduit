@@ -116,7 +116,7 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 	{
 		path: "src/lib/provider/runner/process-table.ts",
 		snippetPattern:
-			/throw new Error\(\s*(?:["`](?:sysctl |unexpected kinfo_proc|localtime_r failed|native start-time self-check failed)|process\.execArgv\.includes\("--no-experimental-ffi"\))/,
+			/throw new Error\(\s*(?:["`](?:sysctl |unexpected kinfo_proc|localtime_r failed|native start-time self-check failed|proc boot_id is invalid|proc btime is invalid|proc self-check failed: incompatible stat or USER_HZ)|process\.execArgv\.includes\("--no-experimental-ffi"\))/,
 		reason:
 			"native process-table failures never leave the module: reads become unknown, setup falls back to ps with one warning",
 	},

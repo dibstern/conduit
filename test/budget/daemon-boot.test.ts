@@ -14,8 +14,7 @@ const runnerRead = (args: readonly string[]) =>
 		),
 	);
 
-// Ticket .2 currently provides a native production adapter only on Darwin.
-it.skipIf(process.platform !== "darwin")(
+it.skipIf(!["darwin", "linux"].includes(process.platform))(
 	"boots over live runners and retired receipts without discovery or registration ps",
 	async () => {
 		const harness = ProcessHarness.create({ dist: "", logLevel: "warn" });

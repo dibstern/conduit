@@ -1,4 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import { Brand, Effect, Scheduler, Schema } from "effect";
 
 export const StartTime = Schema.NonEmptyString.pipe(Schema.brand("StartTime"));
@@ -538,12 +540,173 @@ export function makeDarwinProcessAdapter(): ProcessAdapter & {
 	};
 }
 
+export function makeLinuxProcessAdapter(proc = "/proc"): ProcessAdapter & {
+	selfCheck(): void;
+} {
+	const bootId = readFileSync(
+		`${proc}/sys/kernel/random/boot_id`,
+		"utf8",
+	).trim();
+	if (!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/.test(bootId))
+		throw new Error("proc boot_id is invalid");
+	function bootTime(stat: string): number {
+		const value = /^btime (\d+)$/m.exec(stat)?.[1];
+		if (value === undefined || !Number.isSafeInteger(Number(value)))
+			throw new Error("proc btime is invalid");
+		return Number(value);
+	}
+	function observed(pid: number, stat: string, boot: number) {
+		// comm may contain whitespace, newlines and ')', so only the last ')' ends it.
+		const end = stat.lastIndexOf(")");
+		if (end < 0 || !stat.startsWith(`${pid} (`)) return undefined;
+		const fields = stat
+			.slice(end + 1)
+			.trim()
+			.split(/\s+/);
+		const state = fields[0];
+		const ppid = Number(fields[1]);
+		const pgid = Number(fields[2]);
+		const ticks = fields[19]; // stat field 22, after pid and comm.
+		if (
+			!state ||
+			!/^[RSDZTWtXxKWPIN]$/.test(state) ||
+			!Number.isSafeInteger(ppid) ||
+			ppid < 0 ||
+			!Number.isSafeInteger(pgid) ||
+			pgid < 0 ||
+			!ticks ||
+			!/^\d+$/.test(ticks)
+		)
+			return undefined;
+		// procps truncates the tick fraction before adding btime (USER_HZ = 100).
+		const seconds = boot + Number(BigInt(ticks) / 100n);
+		const date = new Date(seconds * 1000);
+		if (!Number.isFinite(date.getTime())) return undefined;
+		const [day, month, dateNumber, year, clock] = date.toString().split(" ");
+		return {
+			ppid,
+			seen: {
+				state:
+					state === "Z" || state === "X" || state === "x"
+						? "zombie"
+						: "running",
+				pgid,
+				startTime: startTime(
+					`${day} ${month} ${String(Number(dateNumber)).padStart(2, " ")} ${clock} ${year}`,
+				),
+				startKey: `l:${bootId}:${ticks}`,
+			} satisfies Observed,
+			seconds,
+		};
+	}
+	function readError(error: unknown): Observed {
+		return {
+			state:
+				error instanceof Error &&
+				"code" in error &&
+				(error.code === "ENOENT" || error.code === "ESRCH")
+					? "gone"
+					: "unknown",
+		};
+	}
+	return {
+		selfCheck() {
+			const own = observed(
+				process.pid,
+				readFileSync(`${proc}/${process.pid}/stat`, "utf8"),
+				bootTime(readFileSync(`${proc}/stat`, "utf8")),
+			);
+			if (
+				!own ||
+				own.ppid !== process.ppid ||
+				Math.abs(own.seconds - (Date.now() / 1000 - process.uptime())) > 5 ||
+				own.seen.pgid !==
+					Number(
+						/^NSpgid:\s+([\d\t ]+)$/m
+							.exec(readFileSync(`${proc}/self/status`, "utf8"))?.[1]
+							?.trim()
+							.split(/\s+/)
+							.at(-1),
+					)
+			)
+				throw new Error("proc self-check failed: incompatible stat or USER_HZ");
+		},
+		read(pids) {
+			// btime follows wall-clock corrections; only the boot-ID/tick key is stable.
+			const boot = bootTime(readFileSync(`${proc}/stat`, "utf8"));
+			return new Map<number, Observed>(
+				pids.map((pid) => {
+					try {
+						return [
+							pid,
+							observed(pid, readFileSync(`${proc}/${pid}/stat`, "utf8"), boot)
+								?.seen ?? { state: "unknown" },
+						];
+					} catch (error) {
+						return [pid, readError(error)];
+					}
+				}),
+			);
+		},
+		group: (pgid) =>
+			Effect.gen(function* () {
+				const entries = yield* Effect.tryPromise(() => readdir(proc));
+				const boot = bootTime(
+					yield* Effect.tryPromise(() => readFile(`${proc}/stat`, "utf8")),
+				);
+				const pids = entries.filter((entry) => /^\d+$/.test(entry)).map(Number);
+				const result = new Map<number, Observed>();
+				for (let offset = 0; offset < pids.length; offset += 32) {
+					const slice = yield* Effect.forEach(
+						pids.slice(offset, offset + 32),
+						(pid) =>
+							Effect.tryPromise(() =>
+								readFile(`${proc}/${pid}/stat`, "utf8"),
+							).pipe(
+								Effect.map(
+									(stat): Observed =>
+										observed(pid, stat, boot)?.seen ?? { state: "unknown" },
+								),
+								Effect.catch((error) => Effect.succeed(readError(error.cause))),
+								Effect.map((seen) => ({ pid, seen })),
+							),
+						{ concurrency: 16 },
+					);
+					for (const { pid, seen } of slice) {
+						if (seen.state === "unknown") return undefined;
+						if (
+							(seen.state === "running" || seen.state === "zombie") &&
+							seen.pgid === pgid
+						)
+							result.set(pid, seen);
+					}
+					yield* Effect.yieldNow;
+				}
+				return result;
+			}).pipe(
+				Effect.catch(() => Effect.succeed(undefined)),
+				Effect.catchDefect(() => Effect.succeed(undefined)),
+			),
+		signal: (target, signal) => {
+			process.kill(target, signal);
+		},
+		argv(pid) {
+			const bytes = readFileSync(`${proc}/${pid}/cmdline`, "utf8");
+			if (!bytes.length || !bytes.endsWith("\0")) return undefined;
+			return bytes.slice(0, -1).split("\0");
+		},
+	};
+}
+
 export function makeProductionProcessTable(
 	warn: (message: string) => void = console.warn,
 ): ProcessTable {
-	if (process.platform === "darwin") {
+	if (process.platform === "darwin" || process.platform === "linux") {
 		try {
-			const adapter = makeDarwinProcessAdapter();
+			const adapter =
+				process.platform === "linux"
+					? makeLinuxProcessAdapter()
+					: makeDarwinProcessAdapter();
 			adapter.selfCheck();
 			// Exercise the formatter and its FFI binding as part of the one-time check.
 			if (adapter.read([process.pid]).get(process.pid)?.state !== "running")

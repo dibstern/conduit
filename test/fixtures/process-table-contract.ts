@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import childProcess, { execFileSync, spawn } from "node:child_process";
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { once } from "node:events";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Schema } from "effect";
 import {
 	makeDarwinProcessAdapter,
+	makeLinuxProcessAdapter,
 	makeMemoryProcessAdapter,
 	makeProcessTable,
 	makeProductionProcessTable,
@@ -15,7 +27,27 @@ import {
 } from "../../src/lib/provider/runner/process-table.js";
 
 const warnings: string[] = [];
+const psCalls: unknown[] = [];
+let measuring = false;
+const onSpawn = (message: unknown) => {
+	if (!measuring || !message || typeof message !== "object") return;
+	if (!("process" in message)) return;
+	const child = message.process;
+	if (child && typeof child === "object" && "spawnargs" in child)
+		psCalls.push(child.spawnargs);
+};
+subscribe("tracing:child_process.spawn:start", onSpawn);
+const originalExecFileSync = childProcess.execFileSync;
+childProcess.execFileSync = new Proxy(originalExecFileSync, {
+	apply(target, receiver, args) {
+		if (measuring) psCalls.push(args[0]);
+		return Reflect.apply(target, receiver, args);
+	},
+});
+syncBuiltinESMExports();
+measuring = true;
 const table = makeProductionProcessTable((message) => warnings.push(message));
+measuring = false;
 let worstIdentifyMs = 0;
 let worstGroupMs = 0;
 let worstObserveMs = 0;
@@ -24,19 +56,68 @@ let identifyCalls = 0;
 const identify = table.identify.bind(table);
 table.identify = (pids) => {
 	const begin = performance.now();
+	const previous = measuring;
+	measuring = true;
 	try {
 		return identify(pids);
 	} finally {
+		measuring = previous;
 		worstIdentifyMs = Math.max(worstIdentifyMs, performance.now() - begin);
 		identifyCalls++;
 	}
 };
 const ps = makeProcessTable(makePsProcessAdapter());
 const native =
-	process.platform === "darwin" &&
-	!process.execArgv.includes("--no-experimental-ffi");
+	process.platform === "linux" ||
+	(process.platform === "darwin" &&
+		!process.execArgv.includes("--no-experimental-ffi"));
 assert.equal(warnings.length, process.platform === "darwin" && !native ? 1 : 0);
 if (warnings.length) assert.match(warnings[0] ?? "", /ffi.*disabled/i);
+
+// Compare synthetic tick fractions to a real procps start in the same second.
+const roundingSamples: unknown[] = [];
+if (process.platform === "linux") {
+	const root = mkdtempSync(join(tmpdir(), "conduit-procps-rounding-"));
+	try {
+		mkdirSync(join(root, "sys/kernel/random"), { recursive: true });
+		mkdirSync(join(root, String(process.pid)));
+		writeFileSync(
+			join(root, "sys/kernel/random/boot_id"),
+			readFileSync("/proc/sys/kernel/random/boot_id"),
+		);
+		writeFileSync(join(root, "stat"), readFileSync("/proc/stat"));
+		const stat = readFileSync(`/proc/${process.pid}/stat`, "utf8");
+		const end = stat.lastIndexOf(")");
+		const fields = stat
+			.slice(end + 2)
+			.trim()
+			.split(/\s+/);
+		const ticks = BigInt(fields[19] ?? "");
+		const expected = execFileSync(
+			"ps",
+			["-o", "lstart=", "-p", String(process.pid)],
+			{ encoding: "utf8", env: { ...process.env, LC_ALL: "C" } },
+		).trim();
+		const roundingTable = makeProcessTable(makeLinuxProcessAdapter(root));
+		for (const fraction of [0n, 49n, 50n, 99n]) {
+			fields[19] = String((ticks / 100n) * 100n + fraction);
+			writeFileSync(
+				join(root, String(process.pid), "stat"),
+				`${stat.slice(0, end + 1)} ${fields.join(" ")}\n`,
+			);
+			const seen = roundingTable.identify([process.pid]).get(process.pid);
+			assert.ok(seen && "startTime" in seen);
+			assert.equal(seen.startTime, expected);
+			roundingSamples.push({
+				ticks: fields[19],
+				expected,
+				actual: seen.startTime,
+			});
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+}
 
 const start = Schema.decodeUnknownSync(ProcessStart)({
 	startTime: "Mon Nov 17 14:03:22 2026",
@@ -134,22 +215,31 @@ try {
 	const child = pids["ignoresTerm"];
 	assert.ok(pgid && child);
 	const begin = performance.now();
+	measuring = true;
 	const observed = await Effect.runPromise(
 		table.observe({ pgid, pids: targets }),
 	);
+	measuring = false;
 	worstObserveMs = performance.now() - begin;
-	const groupAdapter = native
-		? makeDarwinProcessAdapter()
-		: makePsProcessAdapter();
+	const groupAdapter =
+		process.platform === "linux"
+			? makeLinuxProcessAdapter()
+			: native
+				? makeDarwinProcessAdapter()
+				: makePsProcessAdapter();
 	// Warm Effect's execution boundary before timing the native group query.
 	await Effect.runPromise(groupAdapter.group(pgid));
 	for (let i = 0; i < 100; i++) {
 		const started = performance.now();
-		if (native) Effect.runSync(groupAdapter.group(pgid));
+		measuring = true;
+		if (native && process.platform === "darwin")
+			Effect.runSync(groupAdapter.group(pgid));
 		else await Effect.runPromise(groupAdapter.group(pgid));
+		measuring = false;
 		worstGroupMs = Math.max(worstGroupMs, performance.now() - started);
 	}
-	if (native) assert.ok(worstGroupMs < 1, `group worst ${worstGroupMs}ms`);
+	if (native && process.platform === "darwin")
+		assert.ok(worstGroupMs < 1, `group worst ${worstGroupMs}ms`);
 	const wrongStart = Schema.decodeUnknownSync(ProcessStart)({
 		startTime: "Mon Jan  1 00:00:00 1900",
 	});
@@ -212,7 +302,11 @@ try {
 		assert.ok(seen && "startTime" in seen);
 		assert.equal(seen.pgid, row.pgid);
 		assert.equal(seen.startTime, row.startTime);
-		if (native) assert.match(seen.startKey ?? "", /^d:\d+\.\d+$/);
+		if (native)
+			assert.match(
+				seen.startKey ?? "",
+				process.platform === "linux" ? /^l:[\da-f-]+:\d+$/ : /^d:\d+\.\d+$/,
+			);
 		else assert.equal(seen.startKey, undefined);
 	}
 	const originalTZ = process.env["TZ"];
@@ -241,7 +335,9 @@ try {
 	}
 	for (const pid of [pids["leader"], pids["ignoresTerm"], pids["escapee"]]) {
 		assert.ok(pid);
+		measuring = true;
 		const args = table.argv(pid);
+		measuring = false;
 		assert.ok(args);
 		const command = execFileSync(
 			"ps",
@@ -308,6 +404,8 @@ try {
 	assert.equal(table.argv(-1), undefined);
 	if (native)
 		assert.ok(worstIdentifyMs < 1, `identify worst ${worstIdentifyMs}ms`);
+	if (process.platform === "linux")
+		assert.deepEqual(psCalls, [], "Linux process reads must not spawn ps");
 } catch (error) {
 	failure = error;
 } finally {
@@ -329,6 +427,9 @@ try {
 	}
 }
 process.emitWarning("unrelated warning", "ExperimentalWarning");
+unsubscribe("tracing:child_process.spawn:start", onSpawn);
+childProcess.execFileSync = originalExecFileSync;
+syncBuiltinESMExports();
 process.emitWarning(
 	"FFI is an experimental feature and might change at any time",
 	"Warning",
@@ -344,6 +445,8 @@ console.log(
 		worstObserveMs,
 		signalCases,
 		identifyCalls,
+		psCalls,
+		roundingSamples,
 		pids,
 		samples,
 		identityCases: 10,
