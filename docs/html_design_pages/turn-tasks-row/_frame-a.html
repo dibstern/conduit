@@ -1,0 +1,145 @@
+<!doctype html><html><head><meta charset="utf-8"><script>(()=>{let t;try{t=parent!==window&&parent.document.documentElement.dataset.designTheme}catch(e){}t=t||localStorage.getItem('tsp-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');const h=document.documentElement;h.dataset.theme=t;h.style.setProperty('color-scheme',t,'important')})()</script><style>body{margin:0}html:not([data-theme=dark]) [data-theme-only=dark],html[data-theme=dark] [data-theme-only=light]{display:none!important}</style><meta name="viewport" content="width=780">
+<style>
+:root{
+  --bg: light-dark(#fafafa,#111113);
+  --card: light-dark(#ffffff,#18181b);
+  --card2: light-dark(#f5f5f7,#1f1f23);
+  --chip: light-dark(#ececef,#28282d);
+  --border: light-dark(#e4e4e7,#2b2b30);
+  --text: light-dark(#18181b,#ececee);
+  --muted: light-dark(#52525b,#a1a1aa);
+  --dim: light-dark(#8a8a94,#71717a);
+  --accent: light-dark(#5b5bd6,#8b8cf8);
+  --tool: light-dark(#0284c7,#38bdf8);
+  --agent: light-dark(#7c3aed,#a78bfa);
+  --shell: light-dark(#0f766e,#2dd4bf);
+  --ok: light-dark(#15803d,#4ade80);
+  --fail: light-dark(#dc2626,#f87171);
+  --sky: light-dark(#0369a1,#7dd3fc);
+  --amber: light-dark(#b45309,#fbbf24);
+  --mono: "JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:20px 22px 24px;background:var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+.turn{border:1px solid var(--border);background:var(--card);border-radius:12px;overflow:hidden;max-width:760px;padding:2px 12px 12px}
+.ic{display:inline-flex;flex:none;align-items:center;justify-content:center}
+.dim{color:var(--dim)} .muted{color:var(--muted)}
+.run{width:14px;height:14px;border-radius:4px;background:light-dark(#e3e3f7,#26263a);position:relative;flex:none}
+.run::after{content:"";position:absolute;inset:3px;border:2px solid var(--accent);border-right-color:transparent;border-radius:50%;animation:spin 1s linear infinite}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--c,var(--accent));flex:none;display:inline-block}
+.pulse{animation:pulse 1.8s ease-out infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c,var(--accent)) 55%,transparent)}100%{box-shadow:0 0 0 6px transparent}}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.gh{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;padding:10px 6px 5px;white-space:nowrap}
+.gh .m{font:11px var(--mono);color:var(--dim);font-weight:400}
+.gh .r{margin-left:auto}
+.lnk{font-size:11.5px;font-weight:500;color:var(--accent);display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+.go{height:24px;border-radius:999px;padding:0 9px 0 10px;font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:5px;background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);white-space:nowrap;flex:none}
+.go.solid{background:var(--accent);color:light-dark(#fff,#111)}
+.go.ico{width:22px;height:22px;padding:0;justify-content:center}
+.stopb{width:22px;height:22px;border-radius:999px;display:inline-grid;place-items:center;color:var(--fail);background:var(--chip);flex:none}
+.btn{height:24px;border-radius:999px;padding:0 10px;font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:5px;background:var(--chip);color:var(--text);white-space:nowrap;flex:none}
+.btn.stop{color:var(--fail)}
+.btn.sm{height:22px;padding:0 8px;font-size:11.5px;font-family:Inter,ui-sans-serif,system-ui,sans-serif}
+/* rows */
+.ir{display:grid;grid-template-columns:16px minmax(0,1fr) 50px auto;gap:10px;align-items:center;min-height:34px;padding:0 10px;font-size:12.5px;border-radius:8px}
+.ir .main{display:flex;align-items:center;gap:7px;min-width:0;white-space:nowrap}
+.ir .now{font:11.5px var(--mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+.ir .e{font:11px var(--mono);color:var(--dim);text-align:right}
+.ir .a{display:flex;gap:6px}
+.two{display:flex;flex-direction:column;gap:1px;min-width:0;padding:5px 0}
+.two .s{font-size:11.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.two .s b{font-weight:500;color:var(--agent)}
+.two .s code{font:11px var(--mono);color:var(--muted)}
+.open{border:1px solid color-mix(in srgb,var(--agent) 50%,transparent);border-radius:10px;overflow:hidden;margin:2px 0}
+.open>.ir{background:color-mix(in srgb,var(--agent) 9%,transparent);border-radius:0}
+.ob{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:20px;padding:6px 12px 12px 36px}
+.kv{display:flex;gap:18px;margin:4px 0 8px;flex-wrap:wrap}
+.kv div{display:flex;flex-direction:column;gap:1px}
+.kv span{font:10px var(--mono);color:var(--dim)}
+.kv b{font:500 12px var(--mono)}
+.lbl{font:10.5px var(--mono);color:var(--dim);margin:8px 0 3px;display:flex;align-items:center;gap:8px;min-height:22px}
+.lbl .pa{margin-left:auto;display:inline-flex;gap:6px}
+.st{display:flex;gap:7px;align-items:center;font-size:12px;height:23px;white-space:nowrap;min-width:0}
+.st .p{font:11.5px var(--mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+.st .e{margin-left:auto;font:10.5px var(--mono);color:var(--dim);flex:none}
+.acts{display:flex;gap:8px;align-items:center;margin-top:10px}
+/* prompt */
+.pr{border-left:2px solid var(--border);padding:2px 0 2px 9px;font-size:12.5px;color:var(--muted);border-radius:0 6px 6px 0;cursor:pointer}
+.pr.fold .tx{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pr.hv{background:var(--card2);border-left-color:var(--agent)}
+.pr.full{border-left-color:var(--agent);cursor:auto;padding-right:0}
+.pr .tx p{margin:0 0 6px}
+.pr .tx p:last-child{margin:0}
+/* Capped at 8 lines plus two paragraph gaps. Each fade grows with the distance
+   left to scroll on its side, so it shrinks to nothing as that edge arrives. */
+@property --ft{syntax:"<length>";inherits:false;initial-value:0px}
+@property --fb{syntax:"<length>";inherits:false;initial-value:0px}
+.sc{max-height:calc(8 * 1.45em + 12px);overflow-y:auto;overscroll-behavior:contain;padding-right:10px;
+  --g:linear-gradient(to bottom,transparent,#000 var(--ft),#000 calc(100% - var(--fb)),transparent);
+  -webkit-mask-image:var(--g);mask-image:var(--g)}
+</style>
+<script>
+const ICONS={
+  "chev-d":'<path d="m6 9 6 6 6-6"/>',
+  "chev-r":'<path d="m9 18 6-6-6-6"/>',
+  "chev-u":'<path d="m18 15-6-6-6 6"/>',
+  bot:'<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  arrow:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  stop:'<rect width="12" height="12" x="6" y="6" rx="2"/>',
+  file:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  copy:'<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'
+};
+const svg=(n,s=14)=>`<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
+const PROMPT=[
+  "Review the router refactor in src/lib/server for behaviour changes. Compare it with main and focus on route guards, the RPC dispatch table and WebSocket upgrade handling.",
+  "Run the unit tests and report anything that regressed, with file and line. Don't edit files; this is review only.",
+  "Pay particular attention to the order guards run in. The old router checked project access before parsing the RPC body. If the refactor moved parsing earlier, a malformed body from a client without access could now reach the schema decoder.",
+  "Also check that every route registered in routes.ts still has a matching handler, and that the WebSocket upgrade path still rejects requests without a session cookie.",
+  "Keep the report under 300 words and list findings by severity: P1 for anything that changes who can reach what, P2 for behaviour changes, P3 for the rest."
+];
+const KV=`<div class="kv"><div><span>model</span><b>sonnet-4.5</b></div><div><span>running</span><b>52s</b></div><div><span>steps</span><b>6</b></div><div><span>tokens</span><b>18.2k</b></div><div><span>cost</span><b>$0.09</b></div></div>`;
+const STEPS=`<div class="lbl">Now</div><div class="st"><span class="run"></span>Running<span class="p">pnpm test:unit</span><span class="e">380/412 · 30s</span></div><div class="lbl">Recent</div><div class="st"><span class="ic" style="color:var(--tool)">${svg("file",12)}</span>Read<span class="p">src/lib/server/router.ts</span><span class="e">2s</span></div><div class="st"><span class="ic" style="color:var(--tool)">${svg("search",12)}</span>Grep<span class="p">"routeGuard" src/lib</span><span class="e">1s</span></div>`;
+const ACTS=`<div class="acts"><span class="go solid" title="Open subagent session">Open session ${svg("arrow",12)}</span><span class="btn stop"><span class="ic">${svg("stop",11)}</span>Stop</span></div>`;
+const FOLDED=hover=>`<div class="lbl">Prompt</div><div class="pr fold${hover?" hv":""}"><div class="tx">${PROMPT.join(" ")}</div></div>`;
+const FULL=at=>`<div class="lbl">Prompt<span class="pa"><span class="btn sm"><span class="ic">${svg("copy",11)}</span>Copy</span><span class="btn sm">Show less <span class="ic">${svg("chev-u",11)}</span></span></span></div><div class="pr full"><div class="tx sc" data-at="${at}">${PROMPT.map(p=>`<p>${p}</p>`).join("")}</div></div>`;
+const OPEN_HEAD=`<div class="ir"><i class="dot pulse" style="--c:var(--agent)"></i><span class="two"><span class="trunc" style="font-weight:500">Review the router refactor</span><span class="s"><b>code-reviewer agent</b> · waiting on its shell</span></span><span class="e">52s</span><span class="ic dim">${svg("chev-d",13)}</span></div>`;
+const openRow=mode=>`<div class="open">${OPEN_HEAD}<div class="ob"><div>${KV}${mode==="fold"?FOLDED(true):mode==="plain"?FOLDED(false):FULL(mode)}${ACTS}</div><div>${STEPS}</div></div></div>`;
+const FADE=24;
+const fade=sc=>{
+  const below=Math.max(0,sc.scrollHeight-sc.clientHeight-sc.scrollTop);
+  sc.style.setProperty("--ft",Math.min(FADE,sc.scrollTop)+"px");
+  sc.style.setProperty("--fb",Math.min(FADE,below)+"px");
+};
+addEventListener("DOMContentLoaded",()=>{
+  document.querySelectorAll("[data-gh]").forEach(e=>{
+    e.outerHTML=`<div class="gh"><span class="ic" style="color:var(--agent)">${svg("bot")}</span>Subagents<span class="m">2 running · $0.12</span><span class="r lnk">1 finished ${svg("chev-r",12)}</span></div>`;
+  });
+  document.querySelectorAll("[data-openrow]").forEach(e=>{e.outerHTML=openRow(e.dataset.openrow)});
+  document.querySelectorAll("[data-body]").forEach(e=>{
+    e.outerHTML=`<div class="ob"><div>${KV}${FOLDED(false)}${ACTS}</div><div>${STEPS}</div></div>`;
+  });
+  document.querySelectorAll("[data-tail]").forEach(e=>{
+    const open="open" in e.dataset;
+    e.outerHTML=open
+      ?`<span class="e">52s</span><span class="ic dim">${svg("chev-d",13)}</span>`
+      :`<span class="e">1m 48s</span><span class="a"><span class="go ico" title="Open subagent session">${svg("arrow",12)}</span><span class="stopb" title="Stop">${svg("stop",10)}</span></span>`;
+  });
+  document.querySelectorAll("[data-i]").forEach(e=>{e.classList.add("ic");e.innerHTML=svg(e.dataset.i,e.dataset.s||14)});
+  document.querySelectorAll(".sc").forEach(sc=>{
+    const max=sc.scrollHeight-sc.clientHeight;
+    sc.scrollTop=sc.dataset.at==="end"?max:sc.dataset.at==="middle"?max/2:0;
+    fade(sc);
+    sc.addEventListener("scroll",()=>fade(sc),{passive:true});
+  });
+});
+</script>
+</head><body>
+<div class="turn">
+  <div data-gh></div>
+  <div class="ir"><i class="dot pulse" style="--c:var(--agent)"></i><span class="two"><span class="trunc">Find route guard call sites</span><span class="s"><b>Explore agent</b> · <code>Read src/lib/server/ws.ts</code></span></span><span data-tail></span></div>
+  <div data-openrow="fold"></div>
+</div>
+</body></html>
