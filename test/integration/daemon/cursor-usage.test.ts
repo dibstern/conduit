@@ -515,12 +515,13 @@ describe("Cursor plan usage through the built daemon", () => {
 			await refresh(fixture, accountId);
 			expect(keychain().reads).toBe(2);
 			let reading: UsageReading | undefined;
+			// The Keychain answers after 2s; the next scheduled read is 30s away.
 			await vi.waitFor(
 				async () => {
 					reading = await refresh(fixture, accountId);
 					expect(reading?.status).toBe("available");
 				},
-				{ timeout: 45_000, interval: 300 },
+				{ timeout: 10_000, interval: 300 },
 			);
 			expect(keychain().reads).toBe(2);
 			diagnostics = {

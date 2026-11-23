@@ -85,6 +85,8 @@ export const makeCursorUsage = (options: {
 	readonly saveBinding: (
 		binding: CursorUsageBinding | undefined,
 	) => Effect.Effect<void, unknown>;
+	/** Reads the account again once a Keychain read that a read stopped waiting for lands. */
+	readonly reread?: (accountId: string) => Effect.Effect<unknown>;
 	readonly env?: Readonly<Record<string, string | undefined>>;
 }) => {
 	const env = options.env ?? process.env;
@@ -147,10 +149,28 @@ export const makeCursorUsage = (options: {
 			const result = Option.isSome(memory)
 				? { credential: memory.value }
 				: yield* startKeychainRead.pipe(
-						Effect.flatMap((done) => Deferred.await(done)),
-						Effect.timeoutOption("250 millis"),
-						Effect.map((result) =>
-							Option.isSome(result) ? result.value : { waiting: true },
+						Effect.flatMap((done) =>
+							Deferred.await(done).pipe(
+								Effect.timeoutOption("250 millis"),
+								Effect.flatMap(
+									(
+										result,
+									): Effect.Effect<CursorKeychainRead | { waiting: true }> =>
+										Option.isSome(result)
+											? Effect.succeed(result.value)
+											: // The waiting reading would otherwise stand until the next scheduled read.
+												// A renewal after a rejected token does not re-read, or a rejected Keychain token would loop.
+												Deferred.await(done).pipe(
+													Effect.flatMap(({ credential }) =>
+														credential && !refresh && options.reread
+															? options.reread(accountId)
+															: Effect.void,
+													),
+													Effect.forkDetach,
+													Effect.as({ waiting: true }),
+												),
+								),
+							),
 						),
 					);
 			if ("credential" in result && result.credential) {

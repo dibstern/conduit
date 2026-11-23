@@ -22,48 +22,52 @@ import {
 	UsageHistorySnapshotSchema,
 } from "../Services/usage.js";
 
-export const makeConfiguredCursorUsage = Effect.gen(function* () {
-	const config = yield* Effect.serviceOption(DaemonConfigRefTag);
-	const persistence = yield* Effect.serviceOption(ConfigPersistenceTag);
-	let binding = Option.isSome(config)
-		? (yield* Ref.get(config.value)).cursorUsageBinding
-		: undefined;
-	return makeCursorUsage({
-		getBinding: () => binding,
-		saveBinding: (next) =>
-			Effect.gen(function* () {
-				if (Option.isNone(config) || Option.isNone(persistence))
-					return yield* Effect.fail(
-						new Error("Cursor usage settings are unavailable"),
+export const makeConfiguredCursorUsage = (
+	reread: (accountId: string) => Effect.Effect<unknown>,
+) =>
+	Effect.gen(function* () {
+		const config = yield* Effect.serviceOption(DaemonConfigRefTag);
+		const persistence = yield* Effect.serviceOption(ConfigPersistenceTag);
+		let binding = Option.isSome(config)
+			? (yield* Ref.get(config.value)).cursorUsageBinding
+			: undefined;
+		return makeCursorUsage({
+			reread,
+			getBinding: () => binding,
+			saveBinding: (next) =>
+				Effect.gen(function* () {
+					if (Option.isNone(config) || Option.isNone(persistence))
+						return yield* Effect.fail(
+							new Error("Cursor usage settings are unavailable"),
+						);
+					const previous = yield* Ref.get(config.value);
+					yield* Ref.update(
+						config.value,
+						({ cursorUsageBinding: _binding, ...current }) => ({
+							...current,
+							...(next ? { cursorUsageBinding: next } : {}),
+						}),
 					);
-				const previous = yield* Ref.get(config.value);
-				yield* Ref.update(
-					config.value,
-					({ cursorUsageBinding: _binding, ...current }) => ({
-						...current,
-						...(next ? { cursorUsageBinding: next } : {}),
-					}),
-				);
-				yield* Effect.andThen(
-					persistence.value.requestSave,
-					persistence.value.flush,
-				).pipe(
-					Effect.onError(() =>
-						Ref.update(
-							config.value,
-							({ cursorUsageBinding: _binding, ...current }) => ({
-								...current,
-								...(previous.cursorUsageBinding
-									? { cursorUsageBinding: previous.cursorUsageBinding }
-									: {}),
-							}),
+					yield* Effect.andThen(
+						persistence.value.requestSave,
+						persistence.value.flush,
+					).pipe(
+						Effect.onError(() =>
+							Ref.update(
+								config.value,
+								({ cursorUsageBinding: _binding, ...current }) => ({
+									...current,
+									...(previous.cursorUsageBinding
+										? { cursorUsageBinding: previous.cursorUsageBinding }
+										: {}),
+								}),
+							),
 						),
-					),
-				);
-				binding = next;
-			}),
+					);
+					binding = next;
+				}),
+		});
 	});
-});
 
 /** One instance for the daemon, shared by every project's continuation module. */
 export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
@@ -84,7 +88,13 @@ export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
 				: yield* loadClaudeSdkTestModule;
 			const initial = yield* Ref.get(state);
 			const historyFile = join(initial.configDir, "usage-history.json");
-			const cursor = yield* makeConfiguredCursorUsage;
+			// A re-read only follows a read, and reads go through `usage`, so it is set by then.
+			const cursor = yield* makeConfiguredCursorUsage(
+				(accountId): Effect.Effect<unknown> =>
+					Effect.suspend(() =>
+						usage.refresh({ accountIds: [accountId], maxAge: 0, wait: 0 }),
+					),
+			);
 			const usage = yield* makeUsage({
 				history: {
 					load: Effect.tryPromise(() => readFile(historyFile, "utf8")).pipe(
