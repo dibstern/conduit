@@ -80,6 +80,7 @@ export const makeClaudeUsageReader = (
 							...launch,
 							baseEnv,
 						}),
+						maxTurns: 0,
 						persistSession: false,
 						settingSources: ["user"],
 						settings: { disableAllHooks: true },
