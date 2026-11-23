@@ -59,7 +59,7 @@ import { SessionManagerStateTag } from "../../../src/lib/domain/project-services
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { runnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
+import { prepareRunnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
 
 /** A project opened in its generation, with the context its calls run in. */
 interface Opened {
@@ -363,8 +363,10 @@ describe("daemon-owned session manager state", () => {
 		const alpha = await daemon.daemonProject("alpha");
 		await daemon.sessions(alpha, { id: "ending" });
 		// Provider cleanup for a Claude session removes its runner send journal.
+		// Prepare the folder: on a long temp path it is a /tmp symlink, and making
+		// it as a plain folder makes runner discovery refuse it as unsafe.
 		const sends = join(
-			runnerDirectory(daemon.folder("alpha"), daemon.configDir),
+			prepareRunnerDirectory(daemon.folder("alpha"), daemon.configDir),
 			"sends",
 			"ending",
 		);
