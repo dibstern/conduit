@@ -38,7 +38,12 @@ export async function openSessionPanel(page: Page): Promise<void> {
 
 /** Opens checkout details through the chip's focused Session panel row. */
 export async function openCheckoutDetails(page: Page): Promise<Locator> {
-	await openPickerRoot(page, page.getByTestId("composer-checkout"));
+	await openPickerRoot(
+		page,
+		page.locator(
+			'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+		),
+	);
 	await page.getByTestId("picker-row-checkout").click();
 	const details = page.getByTestId("checkout-details");
 	await expect(details).toBeVisible();

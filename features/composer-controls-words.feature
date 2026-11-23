@@ -1,12 +1,14 @@
 Feature: Words composer keeps desktop controls and opens the phone Session panel
 
-Scenario: phone checkout copies its branch and full commit hash
+Scenario: phone checkout icon copies its branch and full commit hash
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And the composer checkout is conduit / account-chip as worktree
   And the composer uses words controls
+  Then the phone composer checkout is one branch icon with a 44 pixel touch target
+  And the session header has no checkout
   When I open the composer checkout menu
   And I tap the checkout Branch copy control
   Then the checkout shows Branch copied and the clipboard contains account-chip
@@ -22,12 +24,12 @@ Scenario Outline: phone Settings selects Words and reload keeps the summary
   When I open settings to the General section
   And I choose Words for composer controls
   And I set effort to high
-  Then the phone Words summary reads Sonnet 5, 200K, high and ask
+  Then the phone Words summary reads Sonnet 5, high and ask with 200K context selected
   And the composer icon controls are absent
   And the words row is below the composer border
   When I reload the Words composer
   And I set effort to high
-  Then the phone Words summary reads Sonnet 5, 200K, high and ask
+  Then the phone Words summary reads Sonnet 5, high and ask with 200K context selected
   And the composer icon controls are absent
   And the composer region visually matches <baseline> at <threshold> percent
 
@@ -69,7 +71,7 @@ Scenario Outline: phone Words effort is changed through the Session panel
   Then the picker lists every effort level including xhigh
   When I set effort to high
   And I close the model picker
-  Then the phone Words summary reads Sonnet 5, 200K, high and ask
+  Then the phone Words summary reads Sonnet 5, high and ask with 200K context selected
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -97,7 +99,7 @@ Examples:
   | baseline                               | threshold |
   | composer-controls-words-approvals-phone | 98        |
 
-Scenario Outline: phone Words keeps a selected context window in the summary
+Scenario Outline: phone Words keeps a selected context window in the Session panel
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -109,8 +111,10 @@ Scenario Outline: phone Words keeps a selected context window in the summary
   And I select context window 1m in the picker
   And I set effort to high
   And I close the model picker
-  Then the phone Words summary reads Sonnet 5, 1M, high and ask
+  Then the phone Words summary reads Sonnet 5, high and ask with 1M context selected
   And the composer region visually matches <baseline> at <threshold> percent
+  When I open the phone Session panel
+  Then the phone Session panel Context row reads 1M
 
 Examples:
   | baseline                      | threshold |
@@ -127,6 +131,8 @@ Scenario Outline: phone Words keeps its checkout chip and inline Session panel w
   And the composer uses words controls
   And the mock relay reports context 42 percent
   Then the phone Words row shows checkout and keeps 42% context in its summary
+  And the phone composer checkout is one branch icon with a 44 pixel touch target
+  And the session header has no checkout
   And the phone checkout warning mark is visible
   When I open the phone Session panel
   Then the phone Session panel checkout notice reports working in conduit-hint? and offers Move and Dismiss

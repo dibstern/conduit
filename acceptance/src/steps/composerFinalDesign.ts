@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { inspectTouchTarget } from "../../../src/lib/frontend/stories/touch-target.js";
 import { DESKTOP_VIEWPORT, PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -56,6 +57,99 @@ const sessionIdOf = (page: Page): string => {
 };
 
 export const composerFinalDesignHandlers: StepHandler[] = [
+	{
+		name: "assert phone checkout icon and touch target",
+		match:
+			/^the phone composer checkout is one (branch|folder) icon with a 44 pixel touch target$/,
+		run: async ({ world, match }) => {
+			const checkout = world.page.getByTestId("composer-checkout");
+			await expect(checkout).toBeVisible();
+			await expect(
+				checkout.locator(`[data-icon="${match[1]}"] svg`),
+			).toBeVisible();
+			await expect(
+				checkout.locator('[data-part="project"], [data-part="branch"]'),
+			).toHaveCount(0);
+			const target = await checkout.evaluate(inspectTouchTarget, 44);
+			expect(target.width).toBeGreaterThanOrEqual(44);
+			expect(target.height).toBeGreaterThanOrEqual(44);
+			expect(target.missing, JSON.stringify(target.failures)).toBe(0);
+		},
+	},
+	{
+		name: "assert checkout gives way before phone model label",
+		match:
+			/^the phone checkout moves before Settle and the model name stays whole$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const composer = page.getByTestId("composer-layout");
+			await expect(composer).toHaveAttribute(
+				"data-footer-fit",
+				"checkout-hidden",
+			);
+			await expect(page.getByTestId("composer-checkout")).not.toBeVisible();
+			await expect(page.locator("#send")).toBeVisible();
+			await expect(page.locator("#stop")).toBeVisible();
+			await expect(composer.getByTestId("permission-mode-badge")).toBeVisible();
+			const checkout = page.getByTestId("session-bar-checkout");
+			await expect(checkout).toBeVisible();
+			await expect(checkout.locator('[data-icon="branch"] svg')).toBeVisible();
+			await expect(checkout.locator('[data-part="branch"]')).toHaveText(
+				"account-chip",
+			);
+			await expect(
+				page.locator(
+					'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+				),
+			).toHaveCount(1);
+			await expect(
+				page
+					.getByTestId("session-controls-pill")
+					.locator(
+						'.git-pill:has([data-testid="session-bar-checkout"]) ~ #session-bar-settle',
+					),
+			).toBeVisible();
+			await expect
+				.poll(() =>
+					page.getByTestId("session-controls-pill").evaluate((el) => {
+						const segments = Array.from(el.children).filter(
+							(child) => child.getClientRects().length > 0,
+						);
+						const checkout = segments.findIndex((child) =>
+							child.querySelector('[data-testid="session-bar-checkout"]'),
+						);
+						return (
+							checkout >= 0 &&
+							segments[checkout + 1]?.id === "session-bar-settle"
+						);
+					}),
+				)
+				.toBe(true);
+			await expect(page.getByTestId("session-controls-pill")).toHaveCSS(
+				"background-color",
+				"rgba(0, 0, 0, 0)",
+			);
+			await expect(page.getByTestId("session-controls-pill")).toHaveCSS(
+				"padding",
+				"2px",
+			);
+			const label = composer
+				.getByTestId("model-picker-trigger")
+				.locator(".model-label");
+			await expect(label).toBeVisible();
+			await expect(label).toHaveText("Sonnet 5");
+			await expect
+				.poll(() => label.evaluate((el) => el.scrollWidth <= el.clientWidth))
+				.toBe(true);
+		},
+	},
+	{
+		name: "tap moved header checkout",
+		match: /^I tap the session header checkout$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("session-bar-checkout").click();
+		},
+	},
 	{
 		name: "assert phone footer priority collapse across widths",
 		match:
@@ -202,7 +296,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 								const fit = element.getAttribute("data-footer-fit");
 								try {
 									element.style.setProperty("--composer-model-minimum", "88px");
-									element.setAttribute("data-footer-fit", "checkout-hidden");
+									element.setAttribute("data-footer-fit", "model-logo");
 									const firstAction = Math.min(
 										...actions.map(
 											(action) => action.getBoundingClientRect().left,
@@ -253,6 +347,19 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					)
 					.toEqual([]);
 				const fit = await layout.getAttribute("data-footer-fit");
+				const moved = fit !== "labels";
+				await expect(page.getByTestId("session-bar-checkout")).toHaveCount(
+					moved ? 1 : 0,
+				);
+				await expect(
+					page.locator('[data-testid="composer-checkout"]:visible'),
+				).toHaveCount(moved ? 0 : 1);
+				const modelLabel = layout
+					.getByTestId("model-picker-trigger")
+					.locator(".model-label");
+				if (fit === "labels" || fit === "checkout-hidden")
+					await expect(modelLabel).toBeVisible();
+				else await expect(modelLabel).not.toBeVisible();
 				if (initialFit === undefined) initialFit = fit ?? "";
 				else if (width === 320) expect(fit).toBe(initialFit);
 				if (width === 393 && state === "idle") {
@@ -403,7 +510,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	{
 		name: "assert phone Session panel row value",
 		match:
-			/^the phone Session panel (Account|Effort|Permissions) row reads (.+)$/,
+			/^the phone Session panel (Account|Context|Effort|Permissions) row reads (.+)$/,
 		run: async ({ world, match }) => {
 			const picker = world.page.getByTestId("model-picker");
 			const value = match[2] ?? "";
@@ -419,7 +526,9 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 				return;
 			}
 			const row = picker.getByTestId(
-				phoneRows[match[1] as "Account" | "Effort" | "Permissions"],
+				match[1] === "Context"
+					? "picker-row-context"
+					: phoneRows[match[1] as "Account" | "Effort" | "Permissions"],
 			);
 			await expect(row).toBeVisible();
 			if (match[1] === "Effort") {
@@ -439,7 +548,8 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	},
 	{
 		name: "activate inline phone footer control",
-		match: /^I (tap|hold) the phone footer (effort|checkout) control$/,
+		match:
+			/^I (tap|hold) the (?:phone footer|visible phone) (effort|checkout) control$/,
 		run: async ({ world, match }) => {
 			const page = world.page;
 			const cdp = await page.context().newCDPSession(page);
@@ -447,9 +557,12 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 				enabled: true,
 				maxTouchPoints: 1,
 			});
-			const control = page.getByTestId(
-				match[2] === "effort" ? "variant-badge" : "composer-checkout",
-			);
+			const control =
+				match[2] === "effort"
+					? page.getByTestId("variant-badge")
+					: page.locator(
+							'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+						);
 			await expect(control).toBeVisible();
 			await expect(control).toBeEnabled();
 			await expect(control).not.toHaveAttribute("aria-busy", "true");
@@ -630,7 +743,9 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		match: /^the phone checkout warning mark is (visible|hidden)$/,
 		run: async ({ world, match }) => {
 			const dot = world.page
-				.getByTestId("composer-checkout")
+				.locator(
+					'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+				)
 				.getByTestId("workspace-notice-indicator");
 			if (match[1] === "hidden") {
 				await expect(dot).toHaveCount(0);
@@ -1049,12 +1164,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		match: /^the model chip reads (.+) with a chevron$/,
 		run: async ({ world, match }) => {
 			const trigger = world.page.getByTestId("model-picker-trigger");
-			const [model, context] = (match[1] ?? "").split(" · ");
-			await expect(trigger.locator(".model-label")).toHaveText(model ?? "");
-			if (context)
-				await expect(trigger.getByTestId("picker-selected-context")).toHaveText(
-					context,
-				);
+			await expect(trigger.locator(".model-label")).toHaveText(match[1] ?? "");
 			await expect(trigger.getByTestId("harness-logo")).toBeVisible();
 			await expect(trigger.getByTestId("model-chip-chevron")).toBeVisible();
 		},

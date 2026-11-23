@@ -255,6 +255,7 @@ test.describe("phone session state chip", () => {
 		);
 		await row.click({ button: "right" });
 		await page.getByTestId("session-ctx-settle").click();
+		await page.getByTestId("confirm-modal-action").click();
 		await page.getByTestId("settled-shelf-toggle").click();
 		await shelfRow.click();
 

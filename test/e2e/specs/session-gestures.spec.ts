@@ -158,6 +158,7 @@ test("desktop: hover and Tab reach the row's commands, and the menu returns focu
 	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
 	await row.hover();
 	await row.getByTestId("session-act-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	await expect(row).toHaveCount(0);
 	await expect(settled).toHaveCount(1);
 	await page.getByTestId("toast-action").first().click();
@@ -169,6 +170,7 @@ test("desktop: hover and Tab reach the row's commands, and the menu returns focu
 	await page.keyboard.press("Tab");
 	await expect(row.getByTestId("session-act-settle")).toBeFocused();
 	await page.keyboard.press("Enter");
+	await page.getByTestId("confirm-modal-action").click();
 	await expect(row).toHaveCount(0);
 	await page.getByTestId("toast-action").first().click();
 	await expect(row).toBeVisible();
@@ -205,6 +207,7 @@ test("desktop: a settled row un-settles from the shelf by menu and by hover", as
 
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	await toggle.click();
 	await expect(shelfRow).toBeVisible();
 
@@ -219,6 +222,7 @@ test("desktop: a settled row un-settles from the shelf by menu and by hover", as
 	// The hover command flips the same way.
 	await row.hover();
 	await row.getByTestId("session-act-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	await expect(toggle).toHaveAttribute("aria-expanded", "true");
 	await shelfRow.hover();
 	await shelfRow.getByTestId("session-act-unsettle").click();
@@ -246,6 +250,7 @@ test.describe("phone", () => {
 		const action = page.getByTestId("session-swipe-action");
 
 		await drag(row, [0.3, 0.7]);
+		await page.getByTestId("confirm-modal-action").click();
 		await page.getByTestId("settled-shelf-toggle").tap();
 		await expect(shelfRow).toBeVisible();
 		await drag(shelfRow, [0.4]);
@@ -283,11 +288,12 @@ test.describe("phone", () => {
 			await row.evaluate((element) => getComputedStyle(element).touchAction),
 		).toBe("pan-y");
 
-		// Past halfway the row says what will fire, then commits on release.
+		// Past halfway the row says what will fire, then asks on release.
 		await drag(row, [0.3, 0.7], false);
 		await expect(action).toHaveAttribute("data-stage", "commit");
 		await expect(action).toContainText("Release to settle");
 		await lift(row);
+		await page.getByTestId("confirm-modal-action").click();
 		await expect(row).toHaveCount(0);
 		await expect(settled).toHaveCount(1);
 		await expect(page).toHaveURL(onList);
@@ -318,6 +324,7 @@ test.describe("phone", () => {
 		// Tapping Settle in the held tray runs it.
 		await drag(row, [0.4]);
 		await settleButton.tap();
+		await page.getByTestId("confirm-modal-action").click();
 		await expect(row).toHaveCount(0);
 		await page.getByTestId("toast-action").first().click();
 		await expect(row).toBeVisible();

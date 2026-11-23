@@ -22,6 +22,7 @@ import {
 	getSessionCommands,
 	sessionCommandActions,
 } from "../../../src/lib/frontend/components/session/session-commands.js";
+import { resolveConfirm } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 const foreign: SessionInfo = {
@@ -49,7 +50,9 @@ describe("a session from another project (all-projects view)", () => {
 	});
 
 	it("addresses a settle command by session", async () => {
-		await sessionCommandActions.settle(foreign, true);
+		const settling = sessionCommandActions.settle(foreign, true);
+		resolveConfirm(true);
+		await settling;
 		expect(rpc.rpc).toHaveBeenCalledWith(
 			"SetSessionSettled",
 			expect.objectContaining({

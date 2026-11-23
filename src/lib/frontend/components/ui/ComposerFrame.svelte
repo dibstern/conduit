@@ -41,9 +41,6 @@
 		.composer-frame[data-words="false"] { padding: 10px 8px 8px 14px; }
 		[data-words="false"] :global(.composer-text-metrics) { padding-bottom: 9px; }
 	}
-	@container composer (max-width: 440px) {
-		:global([data-testid="picker-selected-context"]) { display: none; }
-	}
 	/* The reset time drops to its clock before the model label is starved. */
 	@container composer (max-width: 360px) {
 		:global(#send [data-testid="composer-send-at-label"]) { display: none; }

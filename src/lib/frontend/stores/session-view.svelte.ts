@@ -132,6 +132,8 @@ export const sessionViewState = $state({
 
 	/** Measured only by the composer's input wrapper. */
 	composerWidth: 0,
+	/** Written by the composer fit; the phone header supplies the hidden checkout. */
+	composerCheckoutHidden: false,
 	get composerTier(): ComposerTier {
 		return composerTier;
 	},

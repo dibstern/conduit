@@ -1,7 +1,12 @@
 // Playwright lifecycle, phase execution, assertions, debug collection,
 // video capture, and screenshot helpers for media generation.
 
-import { type ChildProcess, execSync, spawn } from "node:child_process";
+import {
+	type ChildProcess,
+	execFileSync,
+	execSync,
+	spawn,
+} from "node:child_process";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
@@ -16,6 +21,7 @@ import {
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
 const MEDIA_DIR = process.env["MEDIA_DIR"] || path.join(PROJECT_ROOT, "media");
 const DEBUG_DIR = path.join(MEDIA_DIR, "_debug");
+const FRONTEND_DIR = path.join(PROJECT_ROOT, "build/media/frontend");
 
 export interface SceneConfig {
 	name: string;
@@ -30,6 +36,8 @@ export interface SceneConfig {
 	hasTouch?: boolean;
 	/** Device scale factor (default: 2 for retina) */
 	deviceScaleFactor?: number;
+	/** Render each theme, substituting {theme} in outputFile. Defaults to dark. */
+	themes?: readonly ("light" | "dark")[];
 }
 
 export interface SceneContext {
@@ -40,6 +48,7 @@ export interface SceneContext {
 	previewUrl: string;
 	mediaDir: string;
 	projectRoot: string;
+	theme: "light" | "dark";
 	/** Log a named phase with timing. Use for actions (navigate, click, etc.) */
 	phase: (name: string, fn: () => Promise<void>) => Promise<void>;
 	/** Assert a DOM condition. Fails the scene with a descriptive message if not met. */
@@ -58,7 +67,11 @@ export interface SceneDefinition {
 /** Build the frontend (vite build). */
 export function buildFrontend(): void {
 	console.log("  Building frontend...");
-	execSync("pnpm build:frontend", { cwd: PROJECT_ROOT, stdio: "pipe" });
+	execFileSync(
+		"pnpm",
+		["exec", "vite", "build", "--outDir", FRONTEND_DIR, "--emptyOutDir"],
+		{ cwd: PROJECT_ROOT, stdio: "pipe" },
+	);
 }
 
 /**
@@ -89,6 +102,8 @@ export async function startPreview(): Promise<{
 			"exec",
 			"vite",
 			"preview",
+			"--outDir",
+			FRONTEND_DIR,
 			"--host",
 			"127.0.0.1",
 			"--port",
@@ -160,16 +175,24 @@ export async function runScenes(
 	const browser = await chromium.launch();
 	let failCount = 0;
 
-	for (const scene of scenes) {
-		console.log(`\n  Generating ${scene.config.outputFile}...`);
-		const { config } = scene;
+	for (const { scene, theme } of scenes.flatMap((scene) =>
+		(scene.config.themes ?? ["dark" as const]).map((theme) => ({
+			scene,
+			theme,
+		})),
+	)) {
+		const config = {
+			...scene.config,
+			outputFile: scene.config.outputFile.replace("{theme}", theme),
+		};
+		console.log(`\n  Generating ${config.outputFile}...`);
 
 		const contextOptions: BrowserContextOptions = {
 			viewport: config.viewport,
 			deviceScaleFactor: config.deviceScaleFactor ?? 2,
 			isMobile: config.isMobile ?? false,
 			hasTouch: config.hasTouch ?? false,
-			colorScheme: "dark",
+			colorScheme: theme,
 			...(config.animated && {
 				recordVideo: {
 					dir: path.join(MEDIA_DIR, "_video_tmp"),
@@ -179,6 +202,9 @@ export async function runScenes(
 		};
 
 		const context = await browser.newContext(contextOptions);
+		await context.addInitScript((mode) => {
+			localStorage.setItem("conduit-theme", mode);
+		}, theme);
 		const page = await context.newPage();
 
 		const consoleLogs: string[] = [];
@@ -236,6 +262,7 @@ export async function runScenes(
 			previewUrl,
 			mediaDir: MEDIA_DIR,
 			projectRoot: PROJECT_ROOT,
+			theme,
 			phase,
 			assert,
 			hold,
@@ -243,6 +270,9 @@ export async function runScenes(
 
 		try {
 			await scene.run(ctx);
+			mkdirSync(path.dirname(path.join(MEDIA_DIR, config.outputFile)), {
+				recursive: true,
+			});
 
 			if (config.animated) {
 				const video = page.video();
@@ -263,7 +293,12 @@ export async function runScenes(
 				console.log(`    ✓ ${config.outputFile}`);
 			} else {
 				const outputPath = path.join(MEDIA_DIR, config.outputFile);
-				await page.screenshot({ path: outputPath, type: "png" });
+				await page.screenshot({
+					path: outputPath,
+					type: "png",
+					animations: "disabled",
+					caret: "hide",
+				});
 				await page.close();
 				console.log(`    ✓ ${config.outputFile}`);
 			}
@@ -275,7 +310,10 @@ export async function runScenes(
 
 			// Save debug screenshot
 			try {
-				const debugPath = path.join(DEBUG_DIR, `${config.name}-failure.png`);
+				const debugPath = path.join(
+					DEBUG_DIR,
+					`${config.name}-${theme}-failure.png`,
+				);
 				await page.screenshot({ path: debugPath, type: "png" });
 				console.error(`    Debug screenshot: ${debugPath}`);
 			} catch {
@@ -289,7 +327,10 @@ export async function runScenes(
 					console.error(`      ${log}`);
 				}
 				// Also write full log to file
-				const logPath = path.join(DEBUG_DIR, `${config.name}-console.log`);
+				const logPath = path.join(
+					DEBUG_DIR,
+					`${config.name}-${theme}-console.log`,
+				);
 				writeFileSync(logPath, consoleLogs.join("\n"));
 			}
 

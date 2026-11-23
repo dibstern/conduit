@@ -1,5 +1,44 @@
 Feature: The composer matches the Final desktop and phone designs
 
+Scenario Outline: an idle 390px phone keeps one checkout icon in the composer
+  Given the conduit app is served with the connected mockup
+  And the viewport is 390 pixels wide
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / <branch> as <kind>
+  Then the phone composer checkout is one <icon> icon with a 44 pixel touch target
+  And the session header has no checkout
+
+Examples:
+  | branch       | kind     | icon   |
+  | account-chip | worktree | branch |
+  | main         | branch   | branch |
+  | abc1234      | detached | branch |
+  | none         | folder   | folder |
+
+Scenario Outline: a busy 360px phone moves checkout before Settle and keeps the whole model name
+  Given the conduit app is served with the connected mockup
+  And the viewport is 360 pixels wide
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the session has a workspace hint at /workspace/conduit-hint
+  When I set effort to high
+  And I type Keep the model name into the composer
+  And the open session starts working
+  Then the phone checkout moves before Settle and the model name stays whole
+  And the phone checkout warning mark is visible
+  And the composer region visually matches <baseline> at <threshold> percent
+  When I tap the session header checkout
+  Then the checkout menu is a phone bottom sheet
+  And the composer checkout menu shows conduit and account-chip in full
+
+Examples:
+  | baseline                       | threshold |
+  | composer-final-checkout-moved  | 98        |
+
 Scenario Outline: idle phone footer restores its measured fit as the width changes
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
@@ -138,7 +177,7 @@ Scenario: holding phone footer effort and tapping checkout open their existing s
   And the picker is a phone bottom sheet
   And the phone Session panel remains open
   When I close the model picker
-  And I tap the phone footer checkout control
+  And I tap the visible phone checkout control
   Then the checkout menu is a phone bottom sheet
   And the composer checkout menu shows conduit and account-chip in full
   And the phone Session panel remains open
@@ -382,7 +421,7 @@ Scenario Outline: desktop icons keep one model chip at every width
   And the composer placeholder reads Reply to Claude…
   And the composer has no standalone agent selector
   And the desktop icons controls match Final in the <tier> tier
-  And the model chip reads Sonnet 5 · 200K with a chevron
+  And the model chip reads Sonnet 5 with a chevron
   And the checkout pill yields room before the model label and send
   And the composer checkout shows <checkout> worktree icon
   And send is a 34 pixel neutral circle
@@ -447,7 +486,7 @@ Scenario Outline: long checkout names collapse before the model label truncates
   And the harness logo is viewed in the narrow tier
   And the composer picker has the Claude catalog
   And the composer checkout is conduit-worktrees / feature/session-account-chip-redesign as worktree
-  Then the model chip reads Sonnet 5 · 200K with a chevron
+  Then the model chip reads Sonnet 5 with a chevron
   And the checkout pill yields room before the model label and send
   And the model label remains Sonnet 5 before checkout labels
   And the composer region visually matches <baseline> at <threshold> percent
@@ -494,7 +533,7 @@ Scenario Outline: desktop draft keeps two rows without a checkout
   When I set effort to high
   Then the desktop icons controls match Final in the <tier> tier
   And the icons draft has no checkout and keeps context below the composer
-  And the model chip reads Sonnet 5 · 200K with a chevron
+  And the model chip reads Sonnet 5 with a chevron
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:

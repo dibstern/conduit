@@ -1,7 +1,7 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import { isSessionSnoozed } from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
-import { showToast } from "../../stores/ui.svelte.js";
+import { confirm, showToast } from "../../stores/ui.svelte.js";
 import { toastFailure } from "../../transport/rpc-errors.js";
 import { rpc } from "../../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../types.js";
@@ -33,6 +33,48 @@ export async function runBulkChange(
 	{ eligible, selectedCount, oncomplete }: BulkSelection,
 	on: boolean,
 ): Promise<void> {
+	if (kind === "settle" && on) {
+		const serverSessions = eligible.filter(
+			(session) => session.servers?.length,
+		);
+		const servers = serverSessions.reduce(
+			(count, session) => count + (session.servers?.length ?? 0),
+			0,
+		);
+		if (
+			!(await confirm(
+				{
+					title: `Settle ${eligible.length} sessions?`,
+					itemTitles: eligible.map((session) => session.title || "New Session"),
+					consequences: [
+						{ kind: "move", text: "They move to Settled." },
+						...(servers
+							? [
+									{
+										kind: "servers" as const,
+										text: `Stops ${servers} servers in ${serverSessions.length} sessions.`,
+									},
+								]
+							: []),
+						...(eligible.some(
+							(session) =>
+								session.git?.worktree ||
+								Object.keys(session.workspace?.worktrees ?? {}).length > 0,
+						)
+							? [
+									{
+										kind: "worktree" as const,
+										text: "Their worktrees can be removed once merged and clean. Branches are kept.",
+									},
+								]
+							: []),
+					],
+				},
+				`Settle ${eligible.length}`,
+			))
+		)
+			return;
+	}
 	const skipped = selectedCount - eligible.length;
 	const input = eligible.map((session) => ({
 		sessionId: session.id,

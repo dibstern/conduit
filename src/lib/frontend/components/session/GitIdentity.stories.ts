@@ -1006,7 +1006,11 @@ async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 		),
 	);
 	await expect(
-		identity.querySelector('[data-icon="worktree"]'),
+		identity.querySelector(
+			sessionViewState.compact
+				? '[data-icon="branch"]'
+				: '[data-icon="worktree"]',
+		),
 	).toBeInTheDocument();
 	await expect(canvas.getByTestId("agent-worktree-status")).toHaveTextContent(
 		"Composer checkout · Running turn",
@@ -1118,6 +1122,26 @@ export const Phone: Story = {
 				dirty: true,
 			},
 		},
+	},
+	play: async ({ canvasElement }) => {
+		const checkout = within(canvasElement).getByTestId("composer-checkout");
+		expect(checkout.querySelector('[data-icon="branch"]')).not.toBeNull();
+		expect(checkout.querySelector('[data-part="branch"]')).toBeNull();
+		expect(checkout.querySelector('[data-part="project"]')).toBeNull();
+	},
+};
+
+export const PhoneHeaderCheckout: Story = {
+	...Phone,
+	args: { presentation: "control", placement: "header" },
+	render: (args) => ({ Component: GitIdentity, props: args }),
+	play: async ({ canvasElement }) => {
+		const checkout = within(canvasElement).getByTestId("session-bar-checkout");
+		expect(checkout.querySelector('[data-icon="branch"]')).not.toBeNull();
+		expect(checkout.querySelector('[data-part="branch"]')).toHaveTextContent(
+			"fix/draft-menus",
+		);
+		expect(within(canvasElement).queryByTestId("composer-checkout")).toBeNull();
 	},
 };
 

@@ -731,7 +731,7 @@ export const WordsDesktop: Story = {
 					...(wide ? ["composer-checkout"] : []),
 					"composer-word-context-usage",
 				].map((id) => canvas.getByTestId(id));
-		await expect(labels).toHaveLength(phone ? 5 : wide ? 7 : 6);
+		await expect(labels).toHaveLength(phone ? 4 : wide ? 7 : 6);
 		const baselines = labels.map((label) => {
 			const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
 			let text = walker.nextNode();
@@ -763,13 +763,15 @@ export const WordsDesktop: Story = {
 		if (phone) {
 			const trigger = await canvas.findByTestId("composer-words-sheet-trigger");
 			await expect(trigger).toHaveTextContent("Sonnet 5");
-			await expect(trigger).toHaveTextContent("200K");
+			await expect(trigger).not.toHaveTextContent("200K");
 			await expect(trigger).toHaveTextContent("high");
 			await expect(row).toHaveTextContent("42%");
 			await expect(row.querySelectorAll("button")).toHaveLength(2);
-			await expect(
-				row.querySelector("[data-testid='composer-checkout']"),
-			).toHaveTextContent("conduit");
+			const checkout = canvas.getByTestId("composer-checkout");
+			await expect(checkout).toBeVisible();
+			expect(checkout.querySelector('[data-icon="branch"]')).not.toBeNull();
+			expect(checkout.querySelector('[data-part="project"]')).toBeNull();
+			expect(checkout.querySelector('[data-part="branch"]')).toBeNull();
 			await expect(canvas.queryByTestId("composer-word-effort")).toBeNull();
 			await expect(
 				within(trigger).getByTestId("composer-word-context-usage"),
@@ -1732,20 +1734,15 @@ export const FinalIconsDesktop: Story = {
 			await expect(effort).toBeNull();
 		}
 		const checkoutControl = canvas.getByTestId("composer-checkout");
-		await expect(checkoutControl).toBeVisible();
+		if (!phone) await expect(checkoutControl).toBeVisible();
 		if (phone) {
 			const layout = canvas.getByTestId("composer-layout");
-			await waitFor(() =>
-				expect(layout).toHaveAttribute(
-					"data-footer-fit",
-					window.innerWidth === 320 ? "checkout-icon" : "labels",
-				),
-			);
-			// The chip fills a 44px icon slot, or sizes to the project name within its 90px slot.
 			await waitFor(() => {
-				const width = checkoutControl.getBoundingClientRect().width;
-				if (window.innerWidth === 320) expect(width).toBe(44);
-				else expect(width > 44 && width <= 90).toBe(true);
+				const shown = layout.dataset["footerFit"] === "labels";
+				expect(checkoutControl.checkVisibility()).toBe(shown);
+				expect(sessionViewState.composerCheckoutHidden).toBe(!shown);
+				if (shown)
+					expect(checkoutControl.getBoundingClientRect().width).toBe(44);
 			});
 			await expect(canvas.queryByTestId("composer-effort-label")).toBeNull();
 			const footer = canvas.getByTestId("composer-icons-left");
@@ -1756,7 +1753,7 @@ export const FinalIconsDesktop: Story = {
 				effort,
 				canvas.getByTestId("permission-mode-badge"),
 				checkoutControl,
-			];
+			].filter((control) => control?.checkVisibility());
 			const boxes = controls.map((control) => {
 				if (!control) throw new Error("Phone footer control missing");
 				expect(control).toBeVisible();
@@ -1796,7 +1793,11 @@ export const FinalIconsDesktop: Story = {
 				canvasElement.querySelector<HTMLElement>(".model-label");
 			if (!modelLabel) throw new Error("Model label missing");
 			await expect(getComputedStyle(modelLabel).textOverflow).toBe("ellipsis");
-			if (window.innerWidth === 320) {
+			if (
+				["model-logo", "effort-hidden"].includes(
+					layout.dataset["footerFit"] ?? "",
+				)
+			) {
 				await expect(modelLabel).not.toBeVisible();
 				await expect(
 					canvas.getByTestId("model-chip-chevron"),
@@ -1804,7 +1805,7 @@ export const FinalIconsDesktop: Story = {
 			} else {
 				await expect(modelLabel.clientWidth).toBeGreaterThanOrEqual(20);
 			}
-			if (window.innerWidth !== 320 && parameters["longModel"] === true) {
+			if (modelLabel.checkVisibility() && parameters["longModel"] === true) {
 				await expect(modelLabel.scrollWidth).toBeGreaterThan(
 					modelLabel.clientWidth,
 				);
@@ -1837,16 +1838,7 @@ export const FinalIconsDesktop: Story = {
 			await expect(
 				checkoutControl.querySelector('[data-part="branch"]'),
 			).toBeNull();
-			if (window.innerWidth === 320) {
-				await waitFor(() =>
-					expect(
-						checkoutControl.querySelector('[data-part="project"]'),
-					).toBeNull(),
-				);
-			} else {
-				await expect(project).toBeVisible();
-				await expect(project).toHaveTextContent("conduit");
-			}
+			await expect(project).toBeNull();
 		}
 		await expect(attach.getBoundingClientRect().width).toBe(16);
 		const rowCentre =
@@ -1885,7 +1877,7 @@ export const FinalIconsDesktop: Story = {
 		const context = document.createElement("canvas").getContext("2d");
 		if (!context) throw new Error("Text metrics are unavailable");
 		const labels = frame.querySelectorAll<HTMLElement>(
-			'.model-label, [data-testid="picker-selected-context"], [data-testid="composer-effort-label"], [data-testid="composer-checkout"] [data-part="project"], [data-testid="composer-checkout"] [data-part="branch"]',
+			'.model-label, [data-testid="composer-effort-label"], [data-testid="composer-checkout"] [data-part="project"], [data-testid="composer-checkout"] [data-part="branch"]',
 		);
 		for (const label of labels) {
 			if (!label.checkVisibility()) continue;
@@ -1934,28 +1926,28 @@ export const FinalIconsDesktop: Story = {
 			const maxWidth = canvasElement.style.maxWidth;
 			try {
 				if (window.innerWidth !== 320) {
-					for (const [width, fit] of [
-						[374, "model-logo"],
-						[350, "checkout-icon"],
-						[374, "model-logo"],
-						[393, "labels"],
-					] as const) {
+					for (const width of [374, 350, 374, 393]) {
 						canvasElement.style.maxWidth = `${width}px`;
-						await waitFor(() =>
-							expect(layout).toHaveAttribute("data-footer-fit", fit),
+						await new Promise<void>((resolve) =>
+							requestAnimationFrame(() =>
+								requestAnimationFrame(() => resolve()),
+							),
 						);
 						await waitFor(() => {
-							const width = checkoutControl.getBoundingClientRect().width;
-							if (fit === "checkout-icon") expect(width).toBe(44);
-							else expect(width > 44 && width <= 90).toBe(true);
+							const shown = layout.dataset["footerFit"] === "labels";
+							expect(checkoutControl.checkVisibility()).toBe(shown);
+							expect(sessionViewState.composerCheckoutHidden).toBe(!shown);
+							if (shown) {
+								expect(checkoutControl.getBoundingClientRect().width).toBe(44);
+								expect(modelLabel.scrollWidth).toBeLessThanOrEqual(
+									modelLabel.clientWidth,
+								);
+							}
 						});
-						await expect(modelLabel.checkVisibility()).toBe(fit === "labels");
-						await waitFor(() =>
-							expect(
-								checkoutControl
-									.querySelector('[data-part="project"]')
-									?.checkVisibility() ?? false,
-							).toBe(fit !== "checkout-icon"),
+						await expect(modelLabel.checkVisibility()).toBe(
+							["labels", "checkout-hidden"].includes(
+								layout.dataset["footerFit"] ?? "",
+							),
 						);
 						for (const control of controlsForPhone(canvasElement))
 							await expect(control).toBeVisible();
@@ -1975,7 +1967,10 @@ export const FinalIconsDesktop: Story = {
 					name: "Stop generating",
 				});
 				await waitFor(() =>
-					expect(layout).toHaveAttribute("data-footer-fit", "checkout-hidden"),
+					expect(layout).toHaveAttribute(
+						"data-footer-fit",
+						expect.stringMatching(/^(model-logo|effort-hidden)$/),
+					),
 				);
 				await expect(checkoutControl).not.toBeVisible();
 				await expect(checkoutControl.getBoundingClientRect().width).toBe(0);
@@ -2007,8 +2002,14 @@ export const FinalIconsDesktop: Story = {
 				await expect(mirror.getBoundingClientRect().width).toBe(
 					input.getBoundingClientRect().width,
 				);
-				for (const control of controlsForPhone(canvasElement))
-					await expect(control).toBeVisible();
+				for (const control of controlsForPhone(canvasElement)) {
+					if (
+						control === effort &&
+						layout.dataset["footerFit"] === "effort-hidden"
+					)
+						await expect(control).not.toBeVisible();
+					else await expect(control).toBeVisible();
+				}
 				await expect(stop.getBoundingClientRect().width).toBe(34);
 				await expect(stop.getBoundingClientRect().height).toBe(34);
 				await expect(
@@ -2017,9 +2018,9 @@ export const FinalIconsDesktop: Story = {
 				).toBe(5);
 				await expect(getComputedStyle(stop, "::before").minWidth).toBe("44px");
 				await expect(getComputedStyle(stop, "::before").minHeight).toBe("44px");
-				const targets = [...controlsForPhone(canvasElement)].map(
-					phoneTouchBounds,
-				);
+				const targets = [...controlsForPhone(canvasElement)]
+					.filter((control) => control.checkVisibility())
+					.map(phoneTouchBounds);
 				for (const [index, box] of targets.entries()) {
 					await expect(box.width).toBeGreaterThanOrEqual(44);
 					await expect(box.height).toBeGreaterThanOrEqual(44);
@@ -2140,6 +2141,53 @@ export const FinalIconsPhoneLongModel: Story = {
 		return cleanup;
 	},
 };
+
+export const PhoneCheckoutIdle390: Story = {
+	parameters: { phone: true, checkoutBusy: false },
+	beforeEach: ({ canvasElement, parameters }) => {
+		const busy = parameters["checkoutBusy"] === true;
+		const cleanup = setupWords(canvasElement, true, busy ? 360 : 390);
+		setComposerPreferences({ controls: "icons" });
+		if (busy) setSessionWorkingForSetup(testId, true);
+		return cleanup;
+	},
+	play: async ({ canvasElement, parameters }) => {
+		const busy = parameters["checkoutBusy"] === true;
+		const canvas = within(canvasElement);
+		await document.fonts.ready;
+		if (busy) {
+			await userEvent.type(
+				canvas.getByRole("textbox", { name: "Message" }),
+				"Keep the model name",
+			);
+			await expect(
+				canvas.getByRole("button", { name: "Stop generating" }),
+			).toBeVisible();
+			await expect(canvasElement.querySelector("#send")).toBeVisible();
+		}
+		const checkout = canvas.getByTestId("composer-checkout");
+		await waitFor(() => {
+			expect(checkout.checkVisibility()).toBe(!busy);
+			expect(sessionViewState.composerCheckoutHidden).toBe(busy);
+		});
+		const label = canvasElement.querySelector<HTMLElement>(".model-label");
+		if (!label) throw new Error("Model label missing");
+		await expect(label).toBeVisible();
+		expect(label.scrollWidth).toBeLessThanOrEqual(label.clientWidth);
+		if (!busy) {
+			expect(checkout.querySelector('[data-icon="branch"]')).not.toBeNull();
+			expect(checkout.querySelector('[data-part="project"]')).toBeNull();
+			expect(checkout.querySelector('[data-part="branch"]')).toBeNull();
+			expect(phoneTouchBounds(checkout).width).toBeGreaterThanOrEqual(44);
+		}
+	},
+};
+
+export const PhoneCheckoutBusy360: Story = {
+	...PhoneCheckoutIdle390,
+	parameters: { phone: true, checkoutBusy: true },
+};
+
 function setupDollarMenu(canvasElement: HTMLElement, phone = false) {
 	const cleanup = setupWords(canvasElement, phone);
 	setComposerPreferences({ controls: "icons" });
@@ -2854,10 +2902,11 @@ export const FinalIconsPhoneActions320: Story = {
 				const mirror = canvasElement.querySelector(".mirror");
 				expect(mirror?.textContent).toBe("Check the footer\nKeep both actions");
 				const layout = canvas.getByTestId("composer-layout");
+				// Exact settled states: a looser check passes before the gutter loan lands.
 				const crowded = width === 320;
 				expect(layout).toHaveAttribute(
 					"data-footer-fit",
-					crowded ? "checkout-hidden" : "checkout-icon",
+					crowded ? "model-logo" : "checkout-hidden",
 				);
 				const footer = canvasElement.querySelector('[data-slot="send"]');
 				const leading = canvasElement.querySelector('[data-slot="leading"]');
@@ -2915,31 +2964,44 @@ export const FinalIconsPhoneActions320: Story = {
 				expect(mirror.getBoundingClientRect().width).toBe(inputBounds.width);
 				expect(fieldBounds.left - frameBounds.left).toBe(14);
 				expect(frameBounds.right - fieldBounds.right).toBe(8);
-				expect(layout.style.getPropertyValue("--composer-footer-start")).toBe(
-					crowded ? "10px" : "",
-				);
-				expect(layout.style.getPropertyValue("--composer-footer-end")).toBe(
-					crowded ? "4px" : "",
-				);
-				if (crowded)
+				const startLoan =
+					Number.parseFloat(
+						layout.style.getPropertyValue("--composer-footer-start"),
+					) || 0;
+				const endLoan =
+					Number.parseFloat(
+						layout.style.getPropertyValue("--composer-footer-end"),
+					) || 0;
+				expect([startLoan, endLoan]).toEqual(crowded ? [10, 4] : [0, 0]);
+				if (startLoan + endLoan > 0)
 					expect(layout).toHaveAttribute("data-footer-gutter", "borrowed");
 				else expect(layout).not.toHaveAttribute("data-footer-gutter");
 				expect(leading.getBoundingClientRect().left - frameBounds.left).toBe(
-					crowded ? 4 : 14,
+					14 - startLoan,
 				);
-				expect(frameBounds.right - stopBounds.right).toBe(crowded ? 4 : 8);
+				expect(frameBounds.right - stopBounds.right).toBe(8 - endLoan);
 				expect(canvasElement.scrollWidth).toBeLessThanOrEqual(
 					canvasElement.clientWidth,
 				);
 				const checkout = canvas.getByTestId("composer-checkout");
-				expect(checkout.getBoundingClientRect().width).toBe(crowded ? 0 : 44);
-				if (crowded) expect(checkout).not.toBeVisible();
-				else expect(checkout).toBeVisible();
-				expect(canvasElement.querySelector(".model-label")).not.toBeVisible();
-				const required = [
-					...controlsForPhone(canvasElement),
-					...(crowded ? [] : [checkout]),
-				];
+				const checkoutShown = layout.dataset["footerFit"] === "labels";
+				expect(checkout.getBoundingClientRect().width).toBe(
+					checkoutShown ? 44 : 0,
+				);
+				expect(checkout.checkVisibility()).toBe(checkoutShown);
+				expect(sessionViewState.composerCheckoutHidden).toBe(!checkoutShown);
+				expect(
+					canvasElement
+						.querySelector<HTMLElement>(".model-label")
+						?.checkVisibility(),
+				).toBe(
+					["labels", "checkout-hidden"].includes(
+						layout.dataset["footerFit"] ?? "",
+					),
+				);
+				const required = [...controlsForPhone(canvasElement), checkout].filter(
+					(control) => control.checkVisibility(),
+				);
 				const boxes = required.map((control) => {
 					expect(control).toBeVisible();
 					return phoneTouchBounds(control);

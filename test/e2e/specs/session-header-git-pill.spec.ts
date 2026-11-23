@@ -182,11 +182,17 @@ async function openCheckout(
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
 	await page.goto(`${appBaseUrl}/s/header-session`);
-	const trigger = page.getByTestId("composer-checkout");
+	const trigger = page.locator(
+		'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+	);
 	await expect(trigger).toBeVisible();
 	if ((page.viewportSize()?.width ?? 1440) < 768) {
 		await expect(trigger.locator('[data-part="label"]')).toHaveCount(0);
-		await expect(trigger.locator('[data-icon="folder"]')).toBeVisible();
+		await expect(
+			trigger.locator(
+				options.git ? '[data-icon="branch"]' : '[data-icon="folder"]',
+			),
+		).toBeVisible();
 	}
 	const bar = page.getByTestId("session-bar");
 	await expect(bar.getByRole("button", { name: /^Checkout:/ })).toHaveCount(0);
@@ -225,14 +231,11 @@ for (const mode of [
 				},
 			});
 			await expect(trigger).toHaveAttribute("title", "conduit / main");
-			// Desktop Words names the branch; the compact phone chip names the project.
+			// Phone keeps only the icon; desktop Words names the branch.
+			await expect(trigger.locator('[data-part="project"]')).toHaveCount(0);
 			if (mode.hasTouch) {
-				await expect(trigger.locator('[data-part="project"]')).toHaveText(
-					"conduit",
-				);
 				await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
 			} else {
-				await expect(trigger.locator('[data-part="project"]')).toHaveCount(0);
 				await expect(trigger.locator('[data-part="branch"]')).toHaveText(
 					"main",
 				);
@@ -389,9 +392,7 @@ for (const mode of [
 					"title",
 					`${folder} / ${stage.git.branch}`,
 				);
-				await expect(trigger.locator('[data-part="project"]')).toHaveText(
-					mode.hasTouch ? (folder ?? "") : [],
-				);
+				await expect(trigger.locator('[data-part="project"]')).toHaveCount(0);
 				if (mode.hasTouch)
 					await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
 				else
@@ -460,7 +461,7 @@ for (const mode of [
 			const trigger = await openCheckout(page, harness.appBaseUrl, {
 				directory: "/workspace/ai-notes",
 			});
-			await expect(trigger).toHaveText("ai-notes");
+			await expect(trigger).toHaveText(mode.hasTouch ? "" : "ai-notes");
 			await expect(trigger.locator('[data-icon="folder"] svg')).toBeVisible();
 			await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
 			await expect(
@@ -615,10 +616,7 @@ for (const mode of [
 			]) {
 				await page.setViewportSize(viewport);
 				const project = trigger.locator('[data-part="project"]');
-				if (mode.hasTouch) {
-					await expect(project).toBeVisible();
-					expect((await project.boundingBox())?.width).toBeGreaterThan(10);
-				} else await expect(project).toHaveCount(0);
+				await expect(project).toHaveCount(0);
 				const branch = trigger.locator('[data-part="branch"]');
 				if (mode.hasTouch) await expect(branch).toHaveCount(0);
 				else {
@@ -635,7 +633,7 @@ for (const mode of [
 				expect(checkoutBox.x + checkoutBox.width).toBeLessThanOrEqual(
 					composerBox.x + composerBox.width,
 				);
-				for (const part of mode.hasTouch ? ["project"] : ["branch"]) {
+				for (const part of mode.hasTouch ? [] : ["branch"]) {
 					const height = await trigger
 						.locator(`[data-part="${part}"]`)
 						.evaluate((element) => ({
@@ -757,7 +755,8 @@ for (const mode of [
 					}),
 				};
 			});
-			expect(layout.labelWidth).toBeGreaterThan(10);
+			if (mode.hasTouch) expect(layout.labelWidth).toBe(0);
+			else expect(layout.labelWidth).toBeGreaterThan(10);
 			expect(layout.contained).toBe(true);
 			if (mode.hasTouch) {
 				const back = page.getByTestId("session-bar-back");
@@ -774,8 +773,7 @@ for (const mode of [
 				expect(moreBox).not.toBeNull();
 				if (!backBox || !groupBox || !moreBox)
 					throw new Error("Header control missing");
-				// Final's phone header uses a compact pill with a larger touch area
-				// (4e611586, conduit-test-aoqb.5).
+				// The outlined back circle keeps its 44px touch area.
 				const target = await back.evaluate(inspectTouchTarget, 44);
 				expect(target.width).toBeGreaterThanOrEqual(44);
 				expect(target.height).toBeGreaterThanOrEqual(44);
@@ -854,7 +852,11 @@ for (const mode of [
 					git: { branch: "main" },
 					viewActivity: true,
 				});
-				await expect(page.getByTestId("composer-checkout")).toBeVisible();
+				await expect(
+					page.locator(
+						'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+					),
+				).toBeVisible();
 				await expect(page.getByTestId("session-bar-views-button")).toHaveCount(
 					0,
 				);

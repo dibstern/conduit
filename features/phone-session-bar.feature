@@ -16,7 +16,7 @@ Scenario Outline: The island floats at the bottom of the transcript
   Then the session bar is collapsed
   And the phone header controls own separate touch areas of at least 24 pixels, using 44 where space permits
   And the session-bar region visually matches <baseline> at <threshold> percent
-  And the session header has no checkout
+  And the phone header checkout follows the composer fit
   And the session header has no account or instance control
 
 Examples:
@@ -30,13 +30,52 @@ Scenario Outline: The full bar returns when the transcript is scrolled up
   Then the jump-to-latest control is visible
   And the session bar is expanded
   And the session bar's first row reads back, session controls and the overflow menu from left to right
-  And the session header has no checkout
+  And the phone header checkout follows the composer fit
   And the session header has no account or instance control
   And the session-bar region visually matches <baseline> at <threshold> percent
 
 Examples:
   | baseline                | threshold |
   | session-bar-scrolled-up | 98        |
+
+Scenario Outline: the collapsed phone island shows moved checkout, goal and background agent marks
+  Given the conduit app is served with the long-transcript mockup
+  And the viewport is 360 pixels wide
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  When I set effort to high
+  And I type Keep the model name into the composer
+  And Claude sets the goal Finish the checkout layout
+  And the session has 2 live background tasks
+  Then the phone checkout moves before Settle and the model name stays whole
+  And the session-bar region visually matches <joined> at <threshold> percent
+  When another session needs phone attention
+  Then the phone back circle carries the attention badge
+  When I scroll the transcript up by 400 pixels
+  Then the jump-to-latest control is visible
+  When I scroll the transcript back to the bottom
+  Then the session bar is collapsed
+  And the phone island subline shows account-chip then the goal and 2 background agents
+  And the phone back circle carries the attention badge
+  And the session-bar region visually matches <island> at <threshold> percent
+  When I tap the session header checkout
+  Then the checkout menu is a phone bottom sheet
+  And the composer checkout menu shows conduit and account-chip in full
+
+Examples:
+  | joined                        | island                     | threshold |
+  | session-bar-checkout-joined   | session-bar-island-subline | 98        |
+
+Scenario: an idle collapsed phone island omits an empty subline
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the composer uses words controls
+  When I scroll the transcript up by 400 pixels
+  Then the jump-to-latest control is visible
+  When I scroll the transcript back to the bottom
+  Then the session bar is collapsed
+  And the phone island has no subline
 
 Scenario: Back returns to the session list
   Given the viewport is a phone
@@ -239,7 +278,7 @@ Scenario Outline: The bar collapses at the bottom and the chevron brings it back
   When I tap the chevron to show the bar
   Then the session bar is expanded
   And the transcript is pinned to the bottom
-  And the session header has no checkout
+  And the phone header checkout follows the composer fit
   And the session header has no account or instance control
 
 Examples:
@@ -314,8 +353,8 @@ Scenario Outline: header has no checkout
   Then the picker Checkout row reads account-chip
   When I close the phone Session panel
   Then the skills chip reads 3 skills used
-  And the Words checkout shows conduit with a folder icon and names conduit
-  And the session header has no checkout
+  And the phone composer checkout is one branch icon with a 44 pixel touch target
+  And the phone header checkout follows the composer fit
   And the session header has no account or instance control
   And the session bar is expanded
   And the session bar's first row reads back, session controls and the overflow menu from left to right

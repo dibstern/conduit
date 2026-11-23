@@ -323,7 +323,9 @@ for (const mode of [
 		const press = (target: Locator) =>
 			mode.hasTouch ? target.tap() : target.click();
 		const checkout = (page: Page) =>
-			page.getByTestId("composer-icons-left").getByTestId("composer-checkout");
+			page.locator(
+				'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+			);
 
 		test("New worktree starts on a generated branch and renders the worktree pill", async ({
 			page,
@@ -371,9 +373,11 @@ for (const mode of [
 			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
 			const pill = await checkout(page);
 			if (mode.hasTouch) {
-				await expect(pill).toContainText("app");
+				await expect(
+					pill.locator('[data-part="project"], [data-part="branch"]'),
+				).toHaveCount(0);
 				await expect(pill).toHaveAccessibleName(`Checkout: app / ${branch}`);
-				await expect(pill.locator('[data-icon="folder"]')).toBeVisible();
+				await expect(pill.locator('[data-icon="branch"]')).toBeVisible();
 			} else {
 				await expect(pill).toContainText(branch);
 				await expect(pill.locator('[data-icon="worktree"]')).toBeVisible();

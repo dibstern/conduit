@@ -68,8 +68,9 @@ export const composerWordsHandlers: StepHandler[] = [
 	},
 
 	{
-		name: "assert phone Words summary",
-		match: /^the phone Words summary reads (.+), (\w+), (\w+) and (\w+)$/,
+		name: "assert phone Words summary and stored context",
+		match:
+			/^the phone Words summary reads (.+), (\w+) and (\w+) with (\w+) context selected$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId("composer-words-row");
 			const trigger = row.getByTestId("composer-words-sheet-trigger");
@@ -77,8 +78,13 @@ export const composerWordsHandlers: StepHandler[] = [
 			await expect(
 				row.getByTestId("composer-words-left").locator("button"),
 			).toHaveCount(1);
-			for (const label of match.slice(1))
+			for (const label of match.slice(1, 4))
 				await expect(trigger).toContainText(label);
+			await expect(trigger).not.toContainText(match[4] ?? "");
+			await expect(trigger).toHaveAttribute(
+				"data-shown-context-window",
+				match[4]?.toLowerCase() ?? "",
+			);
 			await expect(trigger.locator("button, a, input")).toHaveCount(0);
 			await expect(trigger.getByTestId("harness-logo")).toBeVisible();
 			await expect
@@ -156,10 +162,10 @@ export const composerWordsHandlers: StepHandler[] = [
 			const right = row.getByTestId("composer-words-right");
 			const checkout = right.getByTestId("composer-checkout");
 			await expect(checkout).toBeVisible();
-			await expect(checkout.locator('[data-icon="folder"] svg')).toBeVisible();
-			await expect(checkout.locator('[data-part="project"]')).toContainText(
-				"conduit",
-			);
+			await expect(checkout.locator('[data-icon="branch"] svg')).toBeVisible();
+			await expect(
+				checkout.locator('[data-part="project"], [data-part="branch"]'),
+			).toHaveCount(0);
 			await expect(right.locator("button")).toHaveCount(1);
 			await expect(
 				right.getByTestId("composer-word-context-usage"),
@@ -382,7 +388,11 @@ export const composerWordsHandlers: StepHandler[] = [
 		match:
 			/^I open (?:the composer checkout menu|the Session panel from the checkout chip)$/,
 		run: async ({ world }) => {
-			await world.page.getByTestId("composer-checkout").click();
+			await world.page
+				.locator(
+					'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+				)
+				.click();
 			await expect(world.page.getByTestId("model-picker")).toBeVisible();
 			await expect(world.page.getByTestId("picker-row-checkout")).toBeFocused();
 		},

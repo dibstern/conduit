@@ -67,6 +67,7 @@ test("manual archive leaves both sidebars, requires search opt-in and restores o
 	// the existing unsettle-on-send path when it is restored.
 	await row(page, id).click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	await page.getByTestId("settled-shelf-toggle").click();
 	await row(page, id).click();
 	await row(page, id).click({ button: "right" });
@@ -195,6 +196,7 @@ test("the sweep archives old settled sessions once and leaves restored activity 
 	).trim();
 	await row(page, id).click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	await page.getByTestId("settled-shelf-toggle").click();
 	await row(page, id).click();
 	const old = Date.now() - 31 * 86_400_000;

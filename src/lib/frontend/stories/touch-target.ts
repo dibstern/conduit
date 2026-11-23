@@ -48,6 +48,8 @@ export function inspectTouchTarget(control: Element, minimum: number) {
 	// cannot both pass for the same point. Stay inside fractional CSS edges.
 	for (let x = firstX; x < firstX + minimum; x++) {
 		for (let y = firstY; y < firstY + minimum; y++) {
+			// Past the viewport edge nothing can be hit, and no other control can take the tap.
+			if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
 			const hit = document.elementFromPoint(x, y);
 			if (!control.contains(hit)) {
 				missing++;

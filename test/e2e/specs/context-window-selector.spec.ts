@@ -211,8 +211,9 @@ test.describe("Picker context selection", () => {
 			sessionId: "sess-context-001",
 			contextWindow: "1m",
 		});
-		await expect(page.getByTestId("picker-selected-context")).toHaveText(
-			/1M \(beta\)/,
+		await expect(page.getByTestId("model-picker-trigger")).toHaveAttribute(
+			"data-shown-context-window",
+			"1m",
 		);
 		await expect(page.getByTestId("picker-context-option-1m")).toHaveAttribute(
 			"aria-checked",
@@ -230,8 +231,9 @@ test.describe("Picker context selection", () => {
 		await openPicker(page);
 
 		await page.getByTestId("picker-context-option-1m").click();
-		await expect(page.getByTestId("picker-selected-context")).toHaveText(
-			/1M \(beta\)/,
+		await expect(page.getByTestId("model-picker-trigger")).toHaveAttribute(
+			"data-shown-context-window",
+			"1m",
 		);
 
 		await page.getByTestId("picker-context-option-200k").click();
@@ -241,8 +243,9 @@ test.describe("Picker context selection", () => {
 				request.tag === "SwitchContextWindow" &&
 				request.payload["contextWindow"] === "200k",
 		);
-		await expect(page.getByTestId("picker-selected-context")).toHaveText(
-			/200K/,
+		await expect(page.getByTestId("model-picker-trigger")).toHaveAttribute(
+			"data-shown-context-window",
+			"200k",
 		);
 		await expect(
 			page.getByTestId("picker-context-option-200k"),
@@ -283,8 +286,9 @@ test.describe("Picker context selection", () => {
 			"aria-checked",
 			"true",
 		);
-		await expect(page.getByTestId("picker-selected-context")).toHaveText(
-			/1M \(beta\)/,
+		await expect(page.getByTestId("model-picker-trigger")).toHaveAttribute(
+			"data-shown-context-window",
+			"1m",
 		);
 	});
 
@@ -318,8 +322,9 @@ test.describe("Picker context selection", () => {
 		await expect(
 			page.getByTestId("picker-context-option-200k"),
 		).toHaveAttribute("aria-checked", "false");
-		await expect(page.getByTestId("picker-selected-context")).toHaveText(
-			/1M \(beta\)/,
+		await expect(page.getByTestId("model-picker-trigger")).toHaveAttribute(
+			"data-shown-context-window",
+			"1m",
 		);
 	});
 });

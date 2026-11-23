@@ -445,10 +445,12 @@
 		}[kind];
 		if (bulkPending || eligible.length === 0) return;
 		bulkPending = true;
-		await runBulkChange(kind, { eligible, selectedCount: selectedSessions.length, oncomplete: () => {
+		// A cancelled Settle confirm returns without completing; clear pending anyway.
+		try {
+			await runBulkChange(kind, { eligible, selectedCount: selectedSessions.length, oncomplete: resetSelectMode }, on);
+		} finally {
 			bulkPending = false;
-			resetSelectMode();
-		} }, on);
+		}
 	}
 
 	function handleOpenBulkSnooze() {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import type { HTMLAttributes } from "svelte/elements";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 
 	let {
 		leading,
@@ -49,6 +50,7 @@
 			if (!textarea || !element.clientWidth) return;
 			let footerStart = 0;
 			let footerEnd = 0;
+			let checkoutHidden = false;
 			if (element.hasAttribute("data-phone-icons")) {
 				const leading = element.querySelector<HTMLElement>('[data-slot="leading"]');
 				const send = element.querySelector<HTMLElement>('[data-slot="send"]');
@@ -61,31 +63,47 @@
 					const permissionWidth = permission?.getBoundingClientRect().width ?? 0;
 					const fixedWidth = effortWidth + permissionWidth;
 					const available = element.clientWidth - leading.offsetWidth - send.offsetWidth - Number.parseFloat(getComputedStyle(send).marginLeft) - 2 * Number.parseFloat(getComputedStyle(element).columnGap);
-					// These budgets never include space recovered by hiding a label.
-					// Otherwise checkout collapsing would make the model name reappear.
-					const checkoutWidth = checkout ? 90 : 0;
-					let fit = available >= fixedWidth + checkoutWidth + 58 ? "labels"
-						: available >= fixedWidth + checkoutWidth + 44 ? "model-logo"
-						: checkout && available >= fixedWidth + 88 ? "checkout-icon" : "checkout-hidden";
+					// Measure the text's content even when its rendered box is truncated
+					// or hidden. Every fit uses the same budget, so moving checkout
+					// cannot make it fit again on the next measurement.
+					const label = model.querySelector<HTMLElement>(".model-label");
+					const modelStyle = getComputedStyle(model);
+					const labelStyle = getComputedStyle(label ?? model);
+					probe.style.font = labelStyle.font;
+					probe.style.letterSpacing = labelStyle.letterSpacing;
+					probe.style.whiteSpace = "pre";
+					probe.style.width = "max-content";
+					probe.textContent = label?.textContent ?? "";
+					const logo = model.querySelector<HTMLElement>('[data-testid="harness-logo"]');
+					const logoWidth = logo ? logo.offsetWidth + (Number.parseFloat(getComputedStyle(logo).marginRight) || 0) : 0;
+					const wholeModelWidth = Math.max(58, probe.getBoundingClientRect().width + logoWidth + (model.querySelector('[data-testid="model-chip-chevron"]') ? 12 : 0) + Number.parseFloat(modelStyle.paddingLeft) + Number.parseFloat(modelStyle.paddingRight));
+					// A name cut to its first letter says less than the logo alone.
+					const labelFloor = Math.min(wholeModelWidth, 100);
+					const checkoutWidth = checkout ? 44 : 0;
+					let fit = available >= fixedWidth + checkoutWidth + wholeModelWidth ? "labels"
+						: available >= fixedWidth + labelFloor ? "checkout-hidden" : "model-logo";
 					const composer = element.closest<HTMLElement>("#input-area");
-					if (fit === "checkout-hidden" && element.parentElement && composer && composer.clientWidth < 393) {
+					if (fit === "model-logo" && element.parentElement && composer && composer.clientWidth < 393) {
 						const shortage = Math.min(14, Math.max(0, fixedWidth + 44 - available));
 						const frame = getComputedStyle(element.parentElement);
 						footerStart = Math.min(shortage, Math.max(0, Number.parseFloat(frame.paddingInlineStart) - 4));
 						footerEnd = Math.min(shortage - footerStart, Math.max(0, Number.parseFloat(frame.paddingInlineEnd) - 4));
 					}
-					if (fit === "checkout-hidden" && effort && available + footerStart + footerEnd < fixedWidth + 44) {
+					if (fit === "model-logo" && effort && available + footerStart + footerEnd < fixedWidth + 44) {
 						fit = "effort-hidden";
 						footerStart = 0;
 						footerEnd = 0;
 					}
 					element.dataset["footerFit"] = fit;
-					element.style.setProperty("--composer-model-minimum", `${44 + (fit === "effort-hidden" ? 0 : effortWidth)}px`);
+					checkoutHidden = checkout !== null && fit !== "labels";
+					element.style.setProperty("--composer-model-minimum", `${(fit === "labels" || fit === "checkout-hidden" ? labelFloor : 44) + (fit === "effort-hidden" ? 0 : effortWidth)}px`);
 				}
 			} else {
 				delete element.dataset["footerFit"];
 				element.style.removeProperty("--composer-model-minimum");
 			}
+			// The folded Duo uses fixed rail slots rather than this footer fit.
+			sessionViewState.composerCheckoutHidden = checkoutHidden && element.closest("#layout")?.getAttribute("data-pose") !== "duo-folded-portrait";
 			for (const [property, loan] of [["--composer-footer-start", footerStart], ["--composer-footer-end", footerEnd]] as const) {
 				if (loan > 0) element.style.setProperty(property, `${loan}px`);
 				else element.style.removeProperty(property);
@@ -184,6 +202,7 @@
 
 		return () => {
 			disposed = true;
+			sessionViewState.composerCheckoutHidden = false;
 			mutations.disconnect();
 			resize.disconnect();
 			element.removeEventListener("input", schedule);
@@ -299,12 +318,11 @@
 	[data-phone-icons] :global(.model-btn) { gap: 0; }
 	[data-phone-icons] :global(.git-pill.compact) { min-width: 44px; }
 	[data-phone-icons] :global(button::before) { display: block; }
-	[data-phone-icons]:not([data-footer-fit="labels"]) :global(.model-btn) { width: 44px; flex: none; }
-	[data-phone-icons]:not([data-footer-fit="labels"]) :global(.model-label),
-	[data-phone-icons]:not([data-footer-fit="labels"]) :global([data-testid="model-chip-chevron"]),
-	[data-phone-icons]:not([data-footer-fit="labels"]) :global([data-testid="picker-selected-context"]) { display: none; }
-	[data-footer-fit="checkout-icon"] { --composer-checkout-width: 44px; }
+	:is([data-footer-fit="model-logo"], [data-footer-fit="effort-hidden"]) :global(.model-btn) { width: 44px; flex: none; }
+	:is([data-footer-fit="model-logo"], [data-footer-fit="effort-hidden"]) :global(.model-label),
+	:is([data-footer-fit="model-logo"], [data-footer-fit="effort-hidden"]) :global([data-testid="model-chip-chevron"]) { display: none; }
 	[data-footer-fit="checkout-hidden"] :global(.git-pill.compact),
+	[data-footer-fit="model-logo"] :global(.git-pill.compact),
 	[data-footer-fit="effort-hidden"] :global(.git-pill.compact),
 	[data-footer-fit="effort-hidden"] :global([data-testid="variant-badge"]) { display: none; }
 	[data-phone-icons] :global(button::before) { clip-path: inset(0 var(--composer-target-clip, 0px) 0 0); }
@@ -316,7 +334,6 @@
 		translate: 0 -0.8px;
 	}
 
-	.split-footer :global([data-testid="picker-selected-context"]),
 	.split-footer :global([data-testid="composer-checkout"] [data-part="project"]),
 	.split-footer :global([data-testid="composer-checkout"] [data-part="branch"]),
 	.split-footer :global([data-testid="composer-checkout"] span[aria-hidden="true"]:not(:has(svg))) {

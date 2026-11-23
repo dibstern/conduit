@@ -78,7 +78,9 @@ test("desktop hint acceptance uses the existing workspace move", async ({
 }, testInfo) => {
 	await page.setViewportSize({ width: 1440, height: 900 });
 	const { rpc, session } = await openHint(page, harness.appBaseUrl);
-	const checkout = page.getByTestId("composer-checkout");
+	const checkout = page.locator(
+		'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+	);
 	await expect(
 		checkout.getByTestId("workspace-notice-indicator"),
 	).toHaveAttribute("aria-label", "working in conduit-hint?");
@@ -114,7 +116,9 @@ test("desktop hint acceptance uses the existing workspace move", async ({
 		},
 		git: { branch: "hint", worktree: "conduit-hint" },
 	});
-	await expect(page.getByTestId("workspace-notice-indicator")).toHaveCount(0);
+	await expect(
+		page.locator('[data-testid="workspace-notice-indicator"]:visible'),
+	).toHaveCount(0);
 	await expect(checkout).toHaveAttribute("title", "conduit-hint / hint");
 });
 
@@ -125,7 +129,9 @@ test("desktop dismissal targets the current hint and follows shell row updates",
 	await page.setViewportSize({ width: 1440, height: 900 });
 	const { rpc, session } = await openHint(page, harness.appBaseUrl);
 	const changedPath = "/workspace/conduit-other";
-	const checkout = page.getByTestId("composer-checkout");
+	const checkout = page.locator(
+		'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+	);
 	const hint = checkout.getByTestId("workspace-notice-indicator");
 	await expect(hint).toHaveAttribute("aria-label", "working in conduit-hint?");
 	rpc.upsertShellRow({ ...session, workspaceHint: changedPath });
@@ -150,7 +156,9 @@ test("desktop dismissal targets the current hint and follows shell row updates",
 			},
 		]);
 	rpc.upsertShellRow({ ...session, workspaceHint: undefined });
-	await expect(page.getByTestId("workspace-notice-indicator")).toHaveCount(0);
+	await expect(
+		page.locator('[data-testid="workspace-notice-indicator"]:visible'),
+	).toHaveCount(0);
 	await expect(page.getByTestId("picker-checkout-notice-move")).toHaveCount(0);
 	await expect(page.getByTestId("picker-checkout-notice-dismiss")).toHaveCount(
 		0,
@@ -164,7 +172,9 @@ test("phone hint is an accessible chip icon with both actions in the Session pan
 }, testInfo) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	const { rpc, session } = await openHint(page, harness.appBaseUrl);
-	const checkout = page.getByTestId("composer-checkout");
+	const checkout = page.locator(
+		'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+	);
 	const hint = checkout.getByTestId("workspace-notice-indicator");
 	await expect(hint).toBeVisible();
 	await expect(hint).toHaveAttribute("aria-label", "working in conduit-hint?");

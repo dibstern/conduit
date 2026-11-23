@@ -19,6 +19,15 @@ type WorktreeConfirmChoice = {
 	onchange?: (removeWorktrees: boolean) => void;
 };
 
+type ConfirmContent = {
+	title: string;
+	itemTitles: readonly string[];
+	consequences: readonly {
+		kind: "move" | "servers" | "worktree";
+		text: string;
+	}[];
+};
+
 /** Safe localStorage.getItem that returns null in non-browser environments. */
 function safeGetItem(key: string): string | null {
 	try {
@@ -54,7 +63,10 @@ export const uiState = $state({
 
 	// Confirm dialog
 	confirmDialog: null as {
-		text: string;
+		text?: string;
+		title?: string;
+		itemTitles?: ConfirmContent["itemTitles"];
+		consequences?: ConfirmContent["consequences"];
 		actionLabel: string;
 		returnFocus?: () => HTMLElement | null;
 		worktreeChoice?: WorktreeConfirmChoice;
@@ -244,14 +256,15 @@ export function dismissToast(id: string): void {
  * or false (cancel).
  */
 export function confirm(
-	text: string,
+	text: string | ConfirmContent,
 	actionLabel = "Confirm",
 	returnFocus?: () => HTMLElement | null,
 	worktreeChoice?: WorktreeConfirmChoice,
 ): Promise<boolean> {
+	if (uiState.confirmDialog) return Promise.resolve(false);
 	return new Promise((resolve) => {
 		uiState.confirmDialog = {
-			text,
+			...(typeof text === "string" ? { text } : text),
 			actionLabel,
 			resolve,
 			...(returnFocus ? { returnFocus } : {}),

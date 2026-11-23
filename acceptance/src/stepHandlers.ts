@@ -69,6 +69,7 @@ import { sessionSheetsHandlers } from "./steps/sessionSheets.js";
 import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { settingsGeneralHandlers } from "./steps/settingsGeneral.js";
 import { settingsSurfacingHandlers } from "./steps/settingsSurfacing.js";
+import { settleConfirmHandlers } from "./steps/settleConfirm.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
 import { stuckStopHandlers } from "./steps/stuckStop.js";
 import { surfacingCardHandlers } from "./steps/surfacingCard.js";
@@ -116,6 +117,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionSheetsHandlers,
 	...sessionSheetSnoozeHandlers,
 	...sessionAutoSettleHandlers,
+	...settleConfirmHandlers,
 	...phoneToastsHandlers,
 	...duoPoseHandlers,
 	...duoUnfoldedPortraitHandlers,

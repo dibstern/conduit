@@ -136,7 +136,7 @@
 		onswitchsession?: (id: string) => void;
 		ontoggleselection?: (id: string) => void;
 		oncontextmenu?: (session: SessionInfo, anchor: HTMLElement, trigger?: "touch") => void;
-		onsettle?: (id: string, next: boolean) => void;
+		onsettle?: (id: string, next: boolean) => boolean | void | Promise<boolean | void>;
 		onmarkread?: (id: string) => void;
 		onpin?: (id: string, next: boolean) => void;
 		onsnooze?: (id: string) => void;
@@ -164,6 +164,7 @@
 	let offset = $state(0);
 	let dragging = $state(false);
 	let heldDirection = $state<"settle" | "snooze" | null>(null);
+	let confirmingSettle = $state(false);
 	let activePointer: number | null = null;
 	let startX = 0;
 	let startY = 0;
@@ -296,7 +297,7 @@
 	// listeners. A tap outside closes the tray and does nothing else.
 	$effect(() => {
 		const area = rowEl?.parentElement;
-		if (!heldDirection || !area) return;
+		if (!heldDirection || !area || confirmingSettle) return;
 		return dismiss(area, { onDismiss: () => closeHold(), consumeClick: true }).destroy;
 	});
 
@@ -372,8 +373,7 @@
 		if (!wasHorizontal) return;
 		armClickSuppression();
 		if (stage === "commit") {
-			runSwipeAction(direction, true);
-			offset = 0;
+			void runSwipeAction(direction, true);
 		} else if (stage === "reveal") {
 			heldDirection = direction;
 			offset = direction === "settle" ? (canMarkRead ? (actions.settleDisabledReason ? 74 : 148) : 88) : -88;
@@ -387,9 +387,26 @@
 		offset = 0;
 	}
 
-	function runSwipeAction(direction: "settle" | "snooze", commit: boolean) {
+	async function runSwipeAction(direction: "settle" | "snooze", commit: boolean) {
 		if (direction === "settle") {
-			if (!actions.settleDisabledReason) onsettle?.(session.id, !(settled || actions.settled));
+			if (!actions.settleDisabledReason) {
+				const next = !(settled || actions.settled);
+				if (next) {
+					if (confirmingSettle) return;
+					confirmingSettle = true;
+					heldDirection = "settle";
+					offset = canMarkRead ? 148 : 88;
+					onholdchange?.(session.id);
+					try {
+						await onsettle?.(session.id, next);
+					} finally {
+						confirmingSettle = false;
+						closeHold();
+					}
+					return;
+				}
+				void onsettle?.(session.id, next);
+			}
 		} else if (snoozed || actions.snoozed) onunsnooze?.(session.id);
 		else if (actions.snoozeVisible && !actions.snoozeDisabledReason) {
 			if (commit) oncommitsnooze?.(session.id);

@@ -773,6 +773,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		const sheet = page.getByTestId("session-bar-island-menu");
 		await trigger.click();
 		await sheet.getByTestId("session-ctx-settle").click();
+		await page.getByTestId("confirm-modal-action").click();
 		await expect(
 			page.getByRole("status").filter({ hasText: "Moved “" }),
 		).toBeVisible();
@@ -843,6 +844,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		const terminal = page.getByTestId("overflow-view-terminal");
 		const files = page.getByTestId("overflow-view-files");
 		await expect(chat).toHaveAttribute("aria-checked", "true");
+		await settleSheet(page);
 		for (const item of await items.all()) {
 			expect((await item.boundingBox())?.height).toBeGreaterThanOrEqual(44);
 		}
@@ -1138,6 +1140,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 			.first()
 			.click({ button: "right" });
 		await page.getByTestId("session-ctx-settle").click();
+		await page.getByTestId("confirm-modal-action").click();
 		const settledToggle = page.getByTestId("settled-shelf-toggle");
 		await expect(settledToggle).toBeVisible();
 		await measure("#sidebar");

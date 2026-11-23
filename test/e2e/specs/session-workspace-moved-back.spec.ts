@@ -73,8 +73,12 @@ for (const viewport of [
 		});
 		await page.goto(`${harness.appBaseUrl}/s/${session.id}`);
 		const phone = viewport.width < 768;
-		const identity = page.getByTestId("composer-checkout");
-		const notice = page.getByTestId("workspace-notice-indicator");
+		const identity = page.locator(
+			'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+		);
+		const notice = page.locator(
+			'[data-testid="workspace-notice-indicator"]:visible',
+		);
 		await expect(notice).toBeVisible();
 		await expect(notice).toHaveAttribute("role", "img");
 		await expect(notice).toHaveAttribute(

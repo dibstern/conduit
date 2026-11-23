@@ -224,7 +224,7 @@ for (const scenario of [
 			await name.fill("Rejected name");
 			await name.press("Enter");
 		}
-		if (scenario.command === "delete")
+		if (scenario.command === "delete" || scenario.command === "settle")
 			await page.getByTestId("confirm-modal-action").click();
 		await rpc.waitForRequest(({ tag }) => tag === scenario.tag);
 		const toast = page.getByTestId("toast").filter({ hasText: scenario.title });

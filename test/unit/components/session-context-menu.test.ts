@@ -11,6 +11,7 @@ import SessionContextMenu from "../../../src/lib/frontend/components/session/Ses
 import type { SessionCommand } from "../../../src/lib/frontend/components/session/session-commands.js";
 import { openSnoozePicker } from "../../../src/lib/frontend/stores/snooze-picker.svelte.js";
 import {
+	resolveConfirm,
 	showToast,
 	uiState,
 } from "../../../src/lib/frontend/stores/ui.svelte.js";
@@ -258,6 +259,12 @@ describe("session triage menu", () => {
 		);
 		expect(entries[archiveIndex + 1]?.getAttribute("role")).toBe("separator");
 		await fireEvent.click(screen.getByTestId("session-ctx-settle"));
+		// Settle asks first; its call goes out once the confirm resolves.
+		const sent = new Promise<void>((resolve) => {
+			vi.mocked(rpc).mockImplementationOnce(async () => resolve());
+		});
+		resolveConfirm(true);
+		await sent;
 		expect(rpc).toHaveBeenCalledWith(
 			"SetSessionSettled",
 			expect.objectContaining({

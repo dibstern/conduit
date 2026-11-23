@@ -459,6 +459,8 @@ export const serversHandlers: StepHandler[] = [
 				SetSessionArchived: () => ({ ok: true }),
 			});
 			await menuItem(world.page, match[1] ?? "").click();
+			if (match[1] === "settle")
+				await world.page.getByTestId("confirm-modal-action").click();
 			await rpc.waitForRequest(
 				(request) =>
 					request.tag ===
@@ -507,6 +509,12 @@ export const serversHandlers: StepHandler[] = [
 			await expect(cards).toHaveCount(labels.length);
 			for (const [i, label] of labels.entries())
 				await expect(cards.nth(i)).toHaveAttribute("aria-label", label);
+			// It grows out of its trigger; measure only once it has come to rest.
+			await expect(
+				world.page
+					.locator("[data-sheet-edge]")
+					.filter({ has: world.page.locator("[data-view-card]") }),
+			).toHaveCSS("transform", "none");
 			// Today's size is a quarter of the row less its three 8px gaps; a fifth card scrolls.
 			const sizes = await cards.evaluateAll((nodes) =>
 				nodes.map((node) => {

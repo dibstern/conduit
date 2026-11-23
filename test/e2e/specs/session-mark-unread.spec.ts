@@ -122,6 +122,7 @@ test("settling and un-settling preserve unread while the menu hides the action",
 	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	await expect(page.getByTestId("session-filter-chip-unread")).toContainText(
 		"0",
 	);

@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, within } from "storybook/test";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import ConfirmModal from "./ConfirmModal.svelte";
 
@@ -11,7 +12,13 @@ const meta = {
 		docs: { story: { inline: false, height: "300px" } },
 	},
 	beforeEach: () => {
+		const compact = sessionViewState.compact;
+		sessionViewState.compact = false;
 		uiState.confirmDialog = null;
+		return () => {
+			sessionViewState.compact = compact;
+			uiState.confirmDialog = null;
+		};
 	},
 } satisfies Meta<typeof ConfirmModal>;
 
@@ -174,5 +181,135 @@ export const WorktreeInUse: Story = {
 				name: "Remove worktrees",
 			}),
 		).toBeDisabled();
+	},
+};
+
+const singleSettle = {
+	title: "Settle this session?",
+	itemTitles: ["Add checkout confirmation"],
+	consequences: [
+		{
+			kind: "move",
+			text: "Moves to Settled, and you go back to your sessions.",
+		},
+		{ kind: "servers", text: "Stops 2 servers." },
+		{
+			kind: "worktree",
+			text: "Its worktree checkout-confirm can be removed once merged and clean. The branch is kept.",
+		},
+	],
+	actionLabel: "Settle",
+	resolve: () => {
+		uiState.confirmDialog = null;
+	},
+} satisfies NonNullable<typeof uiState.confirmDialog>;
+
+const bulkSettle = {
+	title: "Settle 5 sessions?",
+	itemTitles: [
+		"Add checkout confirmation",
+		"Migrate billing webhooks",
+		"Review the store migration",
+		"Bump Playwright",
+		"Split the router config",
+	],
+	consequences: [
+		{ kind: "move", text: "They move to Settled." },
+		{ kind: "servers", text: "Stops 3 servers in 2 sessions." },
+		{
+			kind: "worktree",
+			text: "Their worktrees can be removed once merged and clean. Branches are kept.",
+		},
+	],
+	actionLabel: "Settle 5",
+	resolve: () => {
+		uiState.confirmDialog = null;
+	},
+} satisfies NonNullable<typeof uiState.confirmDialog>;
+
+const phoneViewport = {
+	parameters: {
+		viewport: {
+			options: {
+				phone: {
+					name: "Phone",
+					styles: { width: "390px", height: "844px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	globals: { viewport: { value: "phone", isRotated: false } },
+} as const;
+
+export const Settle: Story = {
+	beforeEach: () => {
+		uiState.confirmDialog = singleSettle;
+	},
+	play: async ({ canvasElement }) => {
+		const dialog = within(canvasElement.ownerDocument.body).getByRole(
+			"dialog",
+			{ name: "Settle this session?" },
+		);
+		await expect(dialog).toHaveAttribute("data-placement", "center");
+		await expect(
+			within(dialog).getByTestId("confirm-modal-consequence-servers"),
+		).toHaveTextContent("Stops 2 servers.");
+		await expect(
+			within(dialog).getByTestId("confirm-modal-consequence-worktree"),
+		).toBeVisible();
+	},
+};
+
+export const BulkSettle: Story = {
+	beforeEach: () => {
+		uiState.confirmDialog = bulkSettle;
+	},
+	play: async ({ canvasElement }) => {
+		const dialog = within(canvasElement.ownerDocument.body).getByRole(
+			"dialog",
+			{ name: "Settle 5 sessions?" },
+		);
+		await expect(within(dialog).getByText("and 2 more")).toBeVisible();
+		await expect(
+			within(dialog).queryByText("Bump Playwright"),
+		).not.toBeInTheDocument();
+		await expect(
+			within(dialog).getByTestId("confirm-modal-action"),
+		).toHaveTextContent("Settle 5");
+	},
+};
+
+export const SettlePhone: Story = {
+	...phoneViewport,
+	beforeEach: () => {
+		sessionViewState.compact = true;
+		uiState.confirmDialog = singleSettle;
+	},
+	play: async ({ canvasElement }) => {
+		const dialog = within(canvasElement.ownerDocument.body).getByRole(
+			"dialog",
+			{ name: "Settle this session?" },
+		);
+		await expect(dialog).toHaveAttribute("data-placement", "sheet");
+		await expect(
+			within(dialog).getByTestId("confirm-modal-action"),
+		).toBeVisible();
+	},
+};
+
+export const BulkSettlePhone: Story = {
+	...phoneViewport,
+	beforeEach: () => {
+		sessionViewState.compact = true;
+		uiState.confirmDialog = bulkSettle;
+	},
+	play: async ({ canvasElement }) => {
+		const dialog = within(canvasElement.ownerDocument.body).getByRole(
+			"dialog",
+			{ name: "Settle 5 sessions?" },
+		);
+		await expect(dialog).toHaveAttribute("data-placement", "sheet");
+		await expect(within(dialog).getByText("and 2 more")).toBeVisible();
 	},
 };

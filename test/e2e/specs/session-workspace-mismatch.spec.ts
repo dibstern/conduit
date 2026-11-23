@@ -88,10 +88,12 @@ for (const viewport of [
 			const phone = viewport.width < 768;
 			if (phone) {
 				await expect(
-					page.getByTestId("workspace-notice-indicator"),
+					page.locator('[data-testid="workspace-notice-indicator"]:visible'),
 				).toBeVisible();
 			}
-			const checkout = page.getByTestId("composer-checkout");
+			const checkout = page.locator(
+				'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+			);
 			await checkout.click();
 			await expect(page.getByTestId("picker-row-checkout")).toBeFocused();
 			const mismatch = page.locator(

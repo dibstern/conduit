@@ -41,6 +41,7 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	await expect(toggle).toHaveAttribute("aria-expanded", "false");
 	await expect(toggle).toHaveText(/^\s*Settled\s+1\s*$/);
 	await expect(row).toHaveCount(0);
@@ -57,6 +58,7 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	await expect(row).toHaveCount(0);
 	await toggle.click();
 	await expect(shelf.locator(`[data-session-id="${settleId}"]`)).toBeVisible();

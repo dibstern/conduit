@@ -10,6 +10,7 @@
 import { execSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import path from "node:path";
+import { readmeScenes } from "./readme.js";
 import type { SceneDefinition } from "./scene-runner.js";
 import {
 	buildFrontend,
@@ -31,7 +32,7 @@ async function loadScenes(): Promise<SceneDefinition[]> {
 		"./scenes/sidebar.js",
 	];
 
-	const scenes: SceneDefinition[] = [];
+	const scenes: SceneDefinition[] = [...readmeScenes];
 	for (const mod of sceneModules) {
 		try {
 			const m = await import(mod);
@@ -68,7 +69,7 @@ async function main(): Promise<void> {
 	}
 
 	// Parse optional filter arg
-	const filter = process.argv[2];
+	const filter = process.argv.slice(2).find((argument) => argument !== "--");
 	const scenes = filter
 		? allScenes.filter((s) => s.config.name === filter)
 		: allScenes;

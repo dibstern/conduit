@@ -107,6 +107,7 @@ export const sessionSheetsHandlers: StepHandler[] = [
 			} else {
 				await page.keyboard.press("ControlOrMeta+Shift+s");
 			}
+			await page.getByTestId("confirm-modal-action").click();
 			const request = await requireRpcControl(page).waitForRequest(
 				(request) => request.tag === "SetSessionSettled",
 			);
@@ -173,6 +174,7 @@ export const sessionSheetsHandlers: StepHandler[] = [
 					await page.getByTestId("select-bar-settle").click();
 				}
 			}
+			await page.getByTestId("confirm-modal-action").click();
 			const request = await requireRpcControl(page).waitForRequest(
 				(request) => request.tag === "SetSessionSettled",
 			);

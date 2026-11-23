@@ -88,6 +88,7 @@ for (const mode of [
 			const messages = page.locator("#messages");
 			await messages.focus();
 			await page.keyboard.press("s");
+			await page.getByTestId("confirm-modal-action").click();
 			if (mode.name === "phone") {
 				await expect(page.getByTestId("session-bar")).toBeHidden();
 			}
@@ -123,6 +124,7 @@ for (const mode of [
 			);
 			await expect(headerCommand).toHaveAccessibleName("Settle");
 			await headerCommand.click();
+			await page.getByTestId("confirm-modal-action").click();
 			if (mode.name === "phone") {
 				await expect(page.getByTestId("session-bar")).toBeHidden();
 			} else {
@@ -200,6 +202,7 @@ for (const mode of [
 			await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 			await row.focus();
 			await page.keyboard.press("s");
+			await page.getByTestId("confirm-modal-action").click();
 			await expect(row).toHaveCount(0);
 		});
 	});

@@ -150,8 +150,12 @@ for (const viewport of [
 				folder === main ? "main" : "library",
 			);
 			const label = `worktree missing: ${names.join(", ")}`;
-			const identity = page.getByTestId("composer-checkout");
-			const notice = page.getByTestId("workspace-notice-indicator");
+			const identity = page.locator(
+				'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+			);
+			const notice = page.locator(
+				'[data-testid="workspace-notice-indicator"]:visible',
+			);
 			await expect(notice).toBeVisible();
 			await expect(notice).toHaveAttribute("aria-label", label);
 			await expect(identity).toHaveAccessibleName(new RegExp(label));
@@ -238,8 +242,12 @@ for (const viewport of [
 				page,
 				harness.appBaseUrl,
 			);
-			const identity = page.getByTestId("composer-checkout");
-			const notice = page.getByTestId("workspace-notice-indicator");
+			const identity = page.locator(
+				'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+			);
+			const notice = page.locator(
+				'[data-testid="workspace-notice-indicator"]:visible',
+			);
 			await expect(notice).toBeVisible();
 			await expect(identity).not.toHaveAccessibleName(
 				/moved back: worktree removed/,
@@ -320,7 +328,11 @@ test("a deleted branch offers only Continue in main folder", async ({
 		canRecreate: false,
 		reason: "branch-missing",
 	});
-	await page.getByTestId("composer-checkout").click();
+	await page
+		.locator(
+			'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+		)
+		.click();
 	const menu = page.getByTestId("model-picker");
 	await expect(menu.getByTestId("picker-checkout-notice-recreate")).toHaveCount(
 		0,
@@ -364,7 +376,11 @@ for (const failure of [
 				throw failure.error;
 			},
 		});
-		await page.getByTestId("composer-checkout").click();
+		await page
+			.locator(
+				'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+			)
+			.click();
 		await page
 			.getByTestId(
 				`picker-checkout-notice-${failure.tag === "RecreateSessionWorktree" ? "recreate" : "continue"}`,
@@ -374,7 +390,9 @@ for (const failure of [
 			page.getByRole("alert").getByText(failure.title, { exact: true }),
 		).toBeVisible();
 		await expect(page.getByRole("alert")).toContainText(failure.toast);
-		await expect(page.getByTestId("workspace-notice-indicator")).toBeVisible();
+		await expect(
+			page.locator('[data-testid="workspace-notice-indicator"]:visible'),
+		).toBeVisible();
 		await capture(page, testInfo, "workspace-recovery-error");
 	});
 }

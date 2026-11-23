@@ -149,7 +149,7 @@
 			onswitchsession={() => handleSwitchSession(s)}
 			{ontoggleselection}
 			{oncontextmenu}
-			onsettle={(_id, next) => { void sessionCommandActions.settle(s, next); }}
+			onsettle={(_id, next) => sessionCommandActions.settle(s, next)}
 			onmarkread={(_id) => { void toggleSessionRead(s); }}
 			onpin={(_id, next) => { void sessionCommandActions.pin(s, next); }}
 			onsnooze={() => openSnoozePicker(s, "center")}

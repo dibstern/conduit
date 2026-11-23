@@ -32,6 +32,8 @@ media/_test_output/
 /build/acceptance/bin/
 /build/acceptance/ir/
 /build/acceptance/dry/
+/build/acceptance/frontend/
+/build/media/
 /build/acceptance-mutation/
 
 # APS acceptance pipeline: generated Playwright specs and run artifacts (derived from IR)

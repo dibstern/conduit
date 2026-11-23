@@ -54,6 +54,7 @@
 	import Surface from "../ui/Surface.svelte";
 	import Popover from "../ui/Popover.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
+	import GitIdentity from "../session/GitIdentity.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
 	import BackgroundTasksRow from "../session/BackgroundTasksRow.svelte";
@@ -584,6 +585,9 @@
 					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-accent" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
+			{#if sessionViewState.compact && sessionViewState.composerCheckoutHidden && !collapsed}
+				<GitIdentity presentation="control" placement="header" />
+			{/if}
 			{#if primaryCommand}
 				<Tooltip side="bottom">
 					{#snippet trigger({ props })}<Button
@@ -621,20 +625,20 @@
 	bind:this={barEl}
 	class="relative shrink-0 {sessionViewState.compact ? 'bg-bg-surface' : 'bg-bg'} border-b border-border-subtle outline-none {goalDetails.open || tasksPanel.open || sideThreadsPanel.open ? 'z-[var(--z-sheet)]' : ''}"
 >
-	<!-- The labelled pill becomes a chevron and adjacent count in the island. -->
+	<!-- Keep the navigation name while the phone renders only its chevron. -->
 	{#if sessionViewState.compact || uiState.sidebarCollapsed}
 	<Button
 		id="session-bar-back"
-		variant={collapsed ? "ghost" : "chip"}
-		size={sessionViewState.compact ? collapsed ? "navigation-pill" : "phone-navigation" : "session-navigation"}
+		variant={sessionViewState.compact || collapsed ? "ghost" : "chip"}
+		size={sessionViewState.compact ? "phone-header-icon" : "session-navigation"}
 		touchTarget="always"
 		icon="chevron-left"
-		iconSize={sessionViewState.compact ? 14 : 16}
+		iconSize={sessionViewState.compact ? 17 : 16}
 		class="shrink-0"
 		data-testid="session-bar-back"
 		onclick={sessionViewState.compact ? backToSessions : expandSidebar}
 	>
-		<span>Sessions</span>
+		<span class:sr-only={sessionViewState.compact}>Sessions</span>
 		{#if attentionCount > 0}
 			<Badge
 				variant="ask-solid"
@@ -705,6 +709,13 @@
 		</h1>
 		</div>
 		{#if duoFolded && session}<span data-testid="session-bar-subline" class="flex min-w-0 items-center gap-[6px] text-[12px] leading-[16px] text-text-secondary"><ProjectMark accent={getProjectAccent(session)} /><span class="truncate">{project?.title ?? selection.scope?.project}</span>{#if chipsFolded && goalShown}<span data-testid="session-bar-subline-goal" class="duo-subline-mark" data-tone={goalButtonTone}><Icon name={goalIcon} size={12} /><span class="sr-only">Goal {desktopGoalLabel}</span></span>{/if}{#if chipsFolded && backgroundTasks.length > 0}<span class="duo-subline-mark"><ConduitMark size={11} variant="running" tone="inherit" /><span data-testid="session-bar-subline-tasks">{backgroundTasks.length}</span><span class="sr-only"> background {backgroundTasks.length === 1 ? "task" : "tasks"}</span></span>{/if}</span>{/if}
+		{#if collapsed && (sessionViewState.composerCheckoutHidden || goalShown || backgroundTasks.length > 0)}
+			<div data-testid="session-island-subline" class="flex min-w-0 items-center gap-[10px] whitespace-nowrap text-[12px] leading-[20px] text-text-muted">
+				{#if sessionViewState.composerCheckoutHidden}<GitIdentity presentation="control" placement="island" />{/if}
+				{#if goalShown}<span data-testid="session-island-goal" class="inline-flex shrink-0 text-success" role="img" aria-label="Goal"><Icon name="target" size={13} /></span>{/if}
+				{#if backgroundTasks.length > 0}<span data-testid="session-island-tasks" class="inline-flex shrink-0 items-center gap-[5px]"><span class="size-[7px] rounded-full bg-accent" aria-hidden="true"></span><span>{backgroundTasks.length}</span><span class="sr-only"> background {backgroundTasks.length === 1 ? "task" : "tasks"}</span></span>{/if}
+			</div>
+		{/if}
 		<!-- Collapsed, the full banner strip is hidden (style.css); this line stands in. -->
 		{#if collapsed}<BannersRow banners={appBanners()} onexpand={showControls} />{/if}
 		</div>

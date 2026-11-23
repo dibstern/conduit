@@ -116,6 +116,7 @@ test("searches recent and settled sessions, then opens one without unsettling it
 	});
 	await target.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	await expect(
 		page.locator(`#session-list [data-session-id="${id}"]`),
 	).toHaveCount(0);

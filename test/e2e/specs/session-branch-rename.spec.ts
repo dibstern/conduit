@@ -199,7 +199,9 @@ for (const mode of [
 		const press = (target: Locator) =>
 			mode.hasTouch ? target.tap() : target.click();
 		const checkout = (page: Page) =>
-			page.getByTestId("composer-icons-left").getByTestId("composer-checkout");
+			page.locator(
+				'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+			);
 		async function openRename(page: Page) {
 			await press(await checkout(page));
 			await expect(page.getByTestId("picker-row-checkout")).toBeFocused();

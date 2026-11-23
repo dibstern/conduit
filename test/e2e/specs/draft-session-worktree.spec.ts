@@ -286,9 +286,11 @@ for (const mode of [
 				sessionId: "draft-session",
 				text: "Start in docs",
 			});
-			const checkout = page.getByTestId("composer-checkout");
+			const checkout = page.locator(
+				'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+			);
 			if (mode.hasTouch) {
-				await expect(checkout).toContainText("docs-draft");
+				await expect(checkout.locator('[data-icon="branch"]')).toBeVisible();
 				await expect(checkout).toHaveAccessibleName(
 					"Checkout: docs-draft / feature/docs",
 				);

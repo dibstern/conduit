@@ -12,7 +12,7 @@ import {
 } from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
 import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
-import { showToast } from "../../stores/ui.svelte.js";
+import { confirm, showToast } from "../../stores/ui.svelte.js";
 import { toastFailure } from "../../transport/rpc-errors.js";
 import { rpc } from "../../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../types.js";
@@ -170,11 +170,48 @@ function stoppingLabel(verb: string, session: SessionInfo) {
 	return servers ? `${verb} · stops ${servers}` : verb;
 }
 
-async function settle(session: SessionInfo, settled: boolean) {
+async function settle(
+	session: SessionInfo,
+	settled: boolean,
+	returnFocus?: () => HTMLElement | null,
+): Promise<boolean> {
 	const input = rpcInput(session);
-	if (!input) return;
 	const returnToList = sessionState.currentId === session.id;
 	const servers = stoppedServers(session);
+	const worktree =
+		session.git?.worktree ??
+		Object.values(session.workspace?.worktrees ?? {})[0];
+	if (
+		settled &&
+		!(await confirm(
+			{
+				title: "Settle this session?",
+				itemTitles: [session.title || "New Session"],
+				consequences: [
+					{
+						kind: "move",
+						text: returnToList
+							? "Moves to Settled, and you go back to your sessions."
+							: "Moves to Settled.",
+					},
+					...(servers
+						? [{ kind: "servers" as const, text: `Stops ${servers}.` }]
+						: []),
+					...(worktree
+						? [
+								{
+									kind: "worktree" as const,
+									text: `Its worktree ${worktree.split("/").filter(Boolean).at(-1)} can be removed once merged and clean. The branch is kept.`,
+								},
+							]
+						: []),
+				],
+			},
+			"Settle",
+			returnFocus,
+		))
+	)
+		return false;
 	try {
 		await rpc("SetSessionSettled", { ...input, settled });
 		refreshSearch();
@@ -195,8 +232,10 @@ async function settle(session: SessionInfo, settled: boolean) {
 					},
 				},
 			);
+		return true;
 	} catch (error) {
 		toastFailure("Couldn't settle session")(error);
+		return false;
 	}
 }
 
@@ -447,8 +486,8 @@ export function getSettleCommand(
 		disabledReason: actions.settleDisabledReason,
 		detail: actions.settleDisabledReason,
 		emphasis: !actions.pinned && !actions.settled ? "primary" : undefined,
-		run: () => {
-			void settle(session, !actions.settled);
+		run: (returnFocus) => {
+			void settle(session, !actions.settled, returnFocus);
 		},
 	};
 }

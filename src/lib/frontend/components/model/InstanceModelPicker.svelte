@@ -777,7 +777,6 @@
 	{#snippet summary()}
 		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 18} spinning={selectedLogoSpinning} />{/if}
 		<span class="model-label min-w-0 truncate">{displayName}</span>
-		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 {variant === 'words' ? '' : 'font-mono text-[11.5px] text-text-muted'}">{contextLabel}</span>{/if}
 		{#if variant === "words"}
 			{@const effortWord = parameters ? parameterEffortWord : effort.current}
 			{#if effortWord}<span aria-hidden="true">·</span><span class="shrink-0">{effortWord}</span>{/if}

@@ -27,8 +27,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"876c6e84: Retry counts recovers, LiveRefresh finishes its refresh, and RetireRestore restores Ask; all finish by asserting SessionCounts, so their desktop terminal frame is identical",
 	"overlays-surfacingcategories--counts-unavailable | overlays-surfacingcategories--live-refresh | overlays-surfacingcategories--session-counts":
 		"876c6e84: successful retry and completed refresh finish at SessionCounts; RetireRestore differs on phone because its interaction scrolls to the restored category",
-	"input-inputarea--final-icons-phone | input-inputarea--phone-provider-effort-claude":
-		"conduit-test-npk3y.2 removes the phone model attention dot, so the Claude effort fixture (Sonnet, high) renders the default phone icons frame; its play() asserts the meter's levels and label, which the other provider fixtures vary",
 	"ui-sessionstatusglyph--running | ui-sessionstatusglyph--running-header":
 		"capture freezes the running packet to the same frame as the static header, while play() and flow.spec.ts assert their animation states",
 	// Verified legitimate: these interaction stories deliberately re-open the
@@ -149,13 +147,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	"layout-sessionbar--auto-settled-collapsed | layout-sessionbar--collapsed":
 		"the island hides state chips; AutoSettledCollapsed expands to assert the automatic state, then returns to the same island",
 
-	// Verified legitimate (conduit-test-dc8k.1). The composer checkout control
-	// looks the same at every tier; the phone tier only turns its menu into a
-	// sheet, and these stories end with the menu closed.
-	"session-gitidentity--moved-back | session-gitidentity--moved-back-phone":
-		"same closed control at both tiers; the phone story asserts the notice's img role in play()",
-	"session-gitidentity--worktree-missing | session-gitidentity--worktree-missing-phone":
-		"same closed control at both tiers; the phone story asserts the missing-worktree label in play()",
 	"ui-microlabelbutton--cancelled-hold | ui-microlabelbutton--default | ui-microlabelbutton--hold-and-tap | ui-microlabelbutton--hold-lifecycle":
 		"hold interactions end with the menu closed and the button at rest; the hold timing is asserted in play()",
 	"ui-microlabelbutton--default-light | ui-microlabelbutton--hold-and-tap-light":

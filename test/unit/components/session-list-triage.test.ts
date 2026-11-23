@@ -16,7 +16,10 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import {
+	resolveConfirm,
+	uiState,
+} from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { WsRpcError } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import { rpc as callRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
@@ -360,6 +363,8 @@ describe("session triage list", () => {
 		if (!row) throw new Error("Missing row");
 		await fireEvent.contextMenu(row);
 		await fireEvent.click(await screen.findByTestId(`session-ctx-${command}`));
+		// Settle asks first; pin never does, so this is a no-op there.
+		resolveConfirm(true);
 		const tag = command === "settle" ? "SetSessionSettled" : "SetSessionPinned";
 		const key = command === "settle" ? "settled" : "pinned";
 		await waitFor(() =>
@@ -402,6 +407,7 @@ describe("session triage list", () => {
 			screen.getByRole("button", { name: "More options for Idle work" }),
 		);
 		await fireEvent.click(await screen.findByTestId(`session-ctx-${command}`));
+		resolveConfirm(true);
 		expect((await screen.findByRole("alert")).textContent).toContain(
 			`Couldn't ${command} session`,
 		);
@@ -479,6 +485,7 @@ describe("session triage list", () => {
 			screen.getByRole("button", { name: "More options for New Session" }),
 		);
 		await fireEvent.click(await screen.findByTestId("session-ctx-settle"));
+		resolveConfirm(true);
 		expect((await screen.findByRole("status")).textContent).toContain(
 			"Moved “New Session” to Settled",
 		);

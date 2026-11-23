@@ -8,8 +8,13 @@
   import Button from "../ui/Button.svelte";
   import Surface from "../ui/Surface.svelte";
   import Dialog from "../ui/Dialog.svelte";
+	import SheetChrome from "../ui/SheetChrome.svelte";
+	import Icon from "../ui/Icon.svelte";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import Radio from "../ui/Radio.svelte";
 	let returnFocus = $state<(() => HTMLElement | null) | undefined>();
+	const compact = $derived(sessionViewState.compact);
+	const content = $derived(uiState.confirmDialog);
 	const worktreeChoice = $derived(uiState.confirmDialog?.worktreeChoice);
 	$effect(() => {
 		if (uiState.confirmDialog) returnFocus = uiState.confirmDialog.returnFocus;
@@ -43,22 +48,69 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
+{#snippet actions()}
+	<div class="flex gap-2 {compact ? 'px-5 pt-3' : 'justify-end'}">
+		<Button
+			variant="secondary"
+			tone="muted"
+			size="content"
+			data-testid="confirm-modal-cancel"
+			class={compact ? "flex-1 min-h-[46px] rounded-full text-base" : "rounded-lg py-1.5 px-4 text-base"}
+			onclick={handleCancel}
+		>
+			Cancel
+		</Button>
+		<Button
+			variant="primary"
+			size="content"
+			data-testid="confirm-modal-action"
+			class={compact ? "flex-1 min-h-[46px] rounded-full text-base font-medium" : "rounded-lg py-1.5 px-4 text-base font-medium"}
+			onclick={handleAction}
+		>
+			{content?.actionLabel}
+		</Button>
+	</div>
+{/snippet}
+
 <Dialog
   open={uiState.confirmDialog !== null}
   onclose={handleCancel}
+  onescape={() => false}
   {returnFocus}
+  placement={compact ? "sheet" : "center"}
   labelledBy="confirm-modal-text"
 >
   <Surface
-    variant="raised"
-    radius="lg"
-    elevation="modal"
+    variant={compact ? "bare" : "raised"}
+    radius={compact ? "none" : "lg"}
+    elevation={compact ? "none" : "modal"}
     id="confirm-modal"
-    class="modal-dialog py-5 px-6 w-[90vw] {worktreeChoice ? 'max-w-lg max-h-[85dvh] overflow-y-auto' : 'max-w-80'}"
+    class="{compact ? 'w-full' : 'modal-dialog py-5 px-6 w-[90vw]'} {compact ? '' : worktreeChoice ? 'max-w-lg max-h-[85dvh] overflow-y-auto' : content?.title ? 'max-w-sm' : 'max-w-80'}"
   >
-    <p id="confirm-modal-text" class="text-sm text-text leading-normal mb-4">
-      {uiState.confirmDialog?.text}
-    </p>
+		<SheetChrome active={compact} bodyClass="px-5 pt-3" footer={actions}>
+		{#if content?.title}
+			<h2 id="confirm-modal-text" data-testid="confirm-modal-title" class="text-lg font-semibold tracking-tight mb-1">{content.title}</h2>
+			<div class="text-sm text-text-muted leading-normal mb-4">
+				{#each content.itemTitles?.slice(0, 3) ?? [] as title}
+					<p data-testid="confirm-modal-item-title" class="break-words">{title}</p>
+				{/each}
+				{#if (content.itemTitles?.length ?? 0) > 3}
+					<p data-testid="confirm-modal-item-title">and {(content.itemTitles?.length ?? 0) - 3} more</p>
+				{/if}
+			</div>
+			<ul class="space-y-3 text-sm leading-normal mb-4">
+				{#each content.consequences ?? [] as consequence (consequence.kind)}
+					<li data-testid="confirm-modal-consequence-{consequence.kind}" data-consequence={consequence.kind} class="flex items-start gap-2.5">
+						<span class="shrink-0 text-text-muted mt-0.5" aria-hidden="true"><Icon name={consequence.kind === 'move' ? 'check' : consequence.kind === 'servers' ? 'server' : 'git-branch'} size={16} /></span>
+						<span class="min-w-0 break-words">{consequence.text}</span>
+					</li>
+				{/each}
+			</ul>
+		{:else}
+			<p id="confirm-modal-text" class="text-sm text-text leading-normal mb-4">
+				{content?.text}
+			</p>
+		{/if}
 		{#if worktreeChoice}
 			<ul aria-label="Session worktrees" class="space-y-3 mb-4 text-sm">
 				{#each worktreeChoice.worktrees as worktree}
@@ -92,26 +144,7 @@
 				<p class="text-xs text-text-muted mt-2">Worktrees still in use or with uncommitted changes will be kept.</p>
 			</fieldset>
 		{/if}
-    <div class="flex gap-2 justify-end">
-      <Button
-        variant="secondary"
-        tone="muted"
-        size="content"
-        data-testid="confirm-modal-cancel"
-        class="rounded-lg py-1.5 px-4 text-base"
-        onclick={handleCancel}
-      >
-        Cancel
-      </Button>
-      <Button
-        variant="primary"
-        size="content"
-        data-testid="confirm-modal-action"
-        class="rounded-lg py-1.5 px-4 text-base font-medium"
-        onclick={handleAction}
-      >
-        {uiState.confirmDialog?.actionLabel}
-      </Button>
-    </div>
+		{#if !compact}{@render actions()}{/if}
+		</SheetChrome>
   </Surface>
 </Dialog>

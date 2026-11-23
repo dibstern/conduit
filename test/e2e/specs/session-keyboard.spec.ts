@@ -48,6 +48,7 @@ test("j/k cross groups; Enter opens; settle, undo, pin, snooze and rename work f
 	const settledId = await neighbour.getAttribute("data-session-id");
 	if (!settledId) throw new Error("missing neighbour id");
 	await page.keyboard.press("s");
+	await page.getByTestId("confirm-modal-action").click();
 	await expect(
 		page.locator(`#session-list [data-session-id="${settledId}"]`),
 	).toHaveCount(0);

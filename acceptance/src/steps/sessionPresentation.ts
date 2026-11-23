@@ -2,13 +2,164 @@ import { expect, type Page } from "@playwright/test";
 import { inspectTouchTarget } from "../../../src/lib/frontend/stories/touch-target.js";
 import { PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRelayControl } from "./shared.js";
+import { requireRelayControl, requireRpcControl } from "./shared.js";
 
 const transcriptMessageTops = new WeakMap<Page, number>();
 const rememberedSessionViews = new WeakMap<Page, string[]>();
 const transcriptAnchors = new WeakMap<Page, { top: number; gap: number }>();
 
 export const sessionPresentationHandlers: StepHandler[] = [
+	{
+		name: "assert phone checkout follows the measured composer placement",
+		match: /^the phone header checkout follows the composer fit$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const composer = page.getByTestId("composer-layout");
+			if ((await composer.count()) === 0) {
+				await expect(page.getByTestId("session-bar-checkout")).toHaveCount(0);
+				return;
+			}
+			const fit = await composer.getAttribute("data-footer-fit");
+			const moved = fit !== null && fit !== "labels";
+			await expect(page.getByTestId("session-bar-checkout")).toHaveCount(
+				moved ? 1 : 0,
+			);
+			await expect(
+				page.locator('[data-testid="composer-checkout"]:visible'),
+			).toHaveCount(moved ? 0 : 1);
+			await expect(
+				page.locator(
+					'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+				),
+			).toHaveCount(1);
+		},
+	},
+	{
+		name: "seed attention for the phone back badge",
+		match: /^another session needs phone attention$/,
+		run: ({ world }) => {
+			requireRpcControl(world.page).upsertShellRow({
+				id: "phone-attention-session",
+				title: "Needs permission",
+				projectSlug: "myapp",
+				status: "idle",
+				pendingPermissionCount: 1,
+			});
+		},
+	},
+	{
+		name: "assert phone back circle and attention corner badge",
+		match: /^the phone back circle carries the attention badge$/,
+		run: async ({ world }) => {
+			const back = world.page.getByTestId("session-bar-back");
+			await expect(back).toHaveAccessibleName(/^Sessions/);
+			await expect(back.getByText("Sessions", { exact: true })).toHaveClass(
+				/sr-only/,
+			);
+			await expect(back.locator("svg.lucide-chevron-left")).toBeVisible();
+			await expect(back).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+			await expect
+				.poll(() =>
+					back.evaluate((el) => {
+						const box = el.getBoundingClientRect();
+						const style = getComputedStyle(el);
+						return (
+							Math.abs(box.width - 34) <= 0.5 &&
+							Math.abs(box.height - 34) <= 0.5 &&
+							Number.parseFloat(style.borderRadius) >= 17 &&
+							(style.borderTopWidth === "1px" ||
+								/inset.*1px|1px.*inset/.test(style.boxShadow))
+						);
+					}),
+				)
+				.toBe(true);
+			const badge = back.getByTestId("session-bar-attention");
+			await expect(badge).toBeVisible();
+			await expect(badge).toHaveText("1");
+			await expect
+				.poll(() =>
+					badge.evaluate((el) => {
+						const badge = el.getBoundingClientRect();
+						const circle = el.closest("button")?.getBoundingClientRect();
+						return (
+							!!circle &&
+							badge.left + badge.width / 2 >= circle.right - 10 &&
+							badge.top + badge.height / 2 <= circle.top + 10
+						);
+					}),
+				)
+				.toBe(true);
+		},
+	},
+	{
+		name: "assert collapsed island checkout and display marks",
+		match:
+			/^the phone island subline shows (.+) then the goal and (\d+) background agents$/,
+		run: async ({ world, match }) => {
+			const line = world.page.getByTestId("session-island-subline");
+			await expect(line).toBeVisible();
+			const checkout = line.getByTestId("session-bar-checkout");
+			await expect(checkout).toBeVisible();
+			await expect(checkout.locator('[data-part="branch"]')).toHaveText(
+				match[1] ?? "",
+			);
+			const goal = line.getByTestId("session-island-goal");
+			const tasks = line.getByTestId("session-island-tasks");
+			await expect(goal.locator("svg.lucide-target")).toBeVisible();
+			const goalUsesOkColour = await goal.evaluate((el) => {
+				const probe = document.createElement("span");
+				probe.style.color = "var(--color-success)";
+				el.append(probe);
+				const colour = getComputedStyle(probe).color;
+				probe.remove();
+				return getComputedStyle(el).color === colour;
+			});
+			expect(goalUsesOkColour).toBe(true);
+			await expect(tasks.locator('[aria-hidden="true"]')).toBeVisible();
+			await expect(tasks).toContainText(match[2] ?? "");
+			await expect(goal.locator("button, a")).toHaveCount(0);
+			await expect(tasks.locator("button, a")).toHaveCount(0);
+			await expect(line.locator("button")).toHaveCount(1);
+			await expect(
+				world.page.locator(
+					'[data-testid="composer-checkout"]:visible, [data-testid="session-bar-checkout"]:visible',
+				),
+			).toHaveCount(1);
+			const inOrder = await line.evaluate((el) => {
+				const checkout = el
+					.querySelector('[data-testid="session-bar-checkout"]')
+					?.getBoundingClientRect();
+				const goal = el
+					.querySelector('[data-testid="session-island-goal"]')
+					?.getBoundingClientRect();
+				const tasks = el
+					.querySelector('[data-testid="session-island-tasks"]')
+					?.getBoundingClientRect();
+				const title = document
+					.getElementById("session-bar-title")
+					?.getBoundingClientRect();
+				return (
+					!!checkout &&
+					!!goal &&
+					!!tasks &&
+					!!title &&
+					checkout.right <= goal.left + 1 &&
+					goal.right <= tasks.left + 1 &&
+					el.getBoundingClientRect().top >= title.bottom
+				);
+			});
+			expect(inOrder).toBe(true);
+		},
+	},
+	{
+		name: "assert empty phone island omits its subline",
+		match: /^the phone island has no subline$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("session-island-subline"),
+			).toHaveCount(0);
+		},
+	},
 	{
 		name: "phone header controls own their touch targets",
 		match:
@@ -558,6 +709,7 @@ export const sessionPresentationHandlers: StepHandler[] = [
 				0,
 			);
 			await expect(bar.getByTestId("composer-checkout")).toHaveCount(0);
+			await expect(bar.getByTestId("session-bar-checkout")).toHaveCount(0);
 		},
 	},
 	{
@@ -693,12 +845,18 @@ export const sessionPresentationHandlers: StepHandler[] = [
 					collapsed: el.getAttribute("data-collapsed") === "true",
 					height: el.getBoundingClientRect().height,
 					compact: matchMedia("(max-width: 767px)").matches,
+					hasSubline: !!el.querySelector(
+						'[data-testid="session-island-subline"]',
+					),
 				}));
-			// The collapsed row is 46px in the design; expanded is two bands and
-			// necessarily taller. 50 separates them with room for the border and
-			// subpixel rounding without being a second definition of the number.
-			const ok = (s: { collapsed: boolean; height: number }) =>
-				s.collapsed === want && (want ? s.height <= 50 : s.height > 50);
+			// A populated island grows to hold its second line.
+			const ok = (s: {
+				collapsed: boolean;
+				height: number;
+				hasSubline: boolean;
+			}) =>
+				s.collapsed === want &&
+				(want ? s.height <= (s.hasSubline ? 90 : 50) : s.height > 50);
 			let state = await read();
 			for (let i = 0; i < 50 && !ok(state); i++) {
 				await world.page.waitForTimeout(100);

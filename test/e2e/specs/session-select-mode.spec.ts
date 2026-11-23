@@ -79,6 +79,7 @@ test("desktop: bulk settle announces once and Undo restores only this batch", as
 	);
 	await existing.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	const shelf = page.locator("#settled-shelf-rows");
 	await page.getByTestId("settled-shelf-toggle").click();
 	await expect(
@@ -99,6 +100,7 @@ test("desktop: bulk settle announces once and Undo restores only this batch", as
 	}
 	await expect(page.getByText("2 selected")).toBeVisible();
 	await page.getByTestId("select-bar-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	await expect(shelf.locator(`[data-session-id="${firstId}"]`)).toBeVisible();
 	await expect(shelf.locator(`[data-session-id="${secondId}"]`)).toBeVisible();
 	const toast = page
@@ -272,6 +274,7 @@ test("bulk Settle skips a pinned row", async ({ page, appUrl, harness }) => {
 		"Settle 1 session",
 	);
 	await page.getByTestId("select-bar-settle").click();
+	await page.getByTestId("confirm-modal-action").click();
 	await expect(pinned).toBeVisible();
 	await expect(pinned).toHaveAccessibleName(/(?:^|, )Pinned(?:,|$)/);
 	await expect(

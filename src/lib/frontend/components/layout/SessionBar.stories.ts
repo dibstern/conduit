@@ -220,6 +220,7 @@ const meta = {
 		// the story that wants the collapse gets it.
 		sessionViewState.compact = true;
 		sessionViewState.composerWidth = 760;
+		sessionViewState.composerCheckoutHidden = false;
 		sessionViewState.barOpen = true;
 		sessionViewState.rightPaneView = "closed";
 		sessionSkillsState.sessionId = null;
@@ -241,6 +242,7 @@ const meta = {
 				: guardedFetch(input, init);
 		return () => {
 			clearDiscoveryState();
+			sessionViewState.composerCheckoutHidden = false;
 			globalThis.fetch = guardedFetch;
 			restoreSocket();
 			goalDetails.open = detailsOpen;
@@ -894,9 +896,8 @@ export const NarrowestPhone: Story = {
 
 		expect(label.clientWidth).toBeGreaterThanOrEqual(110);
 		expect(label.scrollWidth).toBeGreaterThan(label.clientWidth);
-		// Bounded first, and never shrunk: the back control still renders at its
-		// full intrinsic width at the narrowest width in support.
-		expect(back.scrollWidth).toBe(back.clientWidth);
+		// The title gives way first: the back circle keeps its size at the narrowest width.
+		expect(back.getBoundingClientRect().width).toBe(34);
 	},
 };
 
@@ -1077,7 +1078,8 @@ export const Collapsed: Story = {
 		// The word goes but the accessible name does not — this is the only way
 		// off the screen.
 		const back = canvas.getByRole("button", { name: /Sessions/ });
-		expect(back.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
+		expect(back.getBoundingClientRect().width).toBe(34);
+		expectTouchTarget(back);
 	},
 };
 
@@ -1302,18 +1304,20 @@ export const PhoneIslandBadge: Story = {
 		const canvas = within(canvasElement);
 		const bar = canvas.getByTestId("session-bar");
 		await expect(bar).toHaveAttribute("data-collapsed", "true");
-		expect(bar.getBoundingClientRect().height).toBe(46);
+		expect(bar.getBoundingClientRect().height).toBeGreaterThan(46);
 		expect(bar.getBoundingClientRect().width).toBe(369);
 		expect(getComputedStyle(bar).borderRadius).toBe("23px");
 		const badge = canvas.getByTestId("session-bar-attention");
 		await expect(badge).toHaveTextContent("2");
-		const chevron = canvas.getByTestId("session-bar-back").querySelector("svg");
-		expect(chevron).not.toBeNull();
-		if (!chevron) return;
-		expect(
-			badge.getBoundingClientRect().left -
-				chevron.getBoundingClientRect().right,
-		).toBeGreaterThanOrEqual(4);
+		const back = canvas.getByTestId("session-bar-back").getBoundingClientRect();
+		expect(back.width).toBe(34);
+		expect(back.height).toBe(34);
+		expect(badge.getBoundingClientRect().right).toBeGreaterThan(back.right);
+		expect(badge.getBoundingClientRect().top).toBeLessThan(back.top);
+		await expect(canvas.getByTestId("session-island-goal")).toBeVisible();
+		await expect(canvas.getByTestId("session-island-tasks")).toHaveTextContent(
+			"2",
+		);
 		await expect(canvas.queryByTestId("session-goal-subtitle")).toBeNull();
 		await expect(canvas.queryByTestId("background-tasks-row")).toBeNull();
 		const heading = canvas.getByRole("heading", { level: 1 });
@@ -1599,6 +1603,67 @@ export const PhoneNoCheckout: Story = {
 		expect(back.right).toBeLessThanOrEqual(more.left);
 		expect(canvas.queryByTestId("session-skills-chip")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-views-button")).toBeNull();
+	},
+};
+
+export const PhoneHeaderCheckout: Story = {
+	args: { width: 360 },
+	beforeEach: () => {
+		seedHeaderGit();
+		sessionViewState.composerCheckoutHidden = true;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const checkout = canvas.getByTestId("session-bar-checkout");
+		const settle = canvas.getByTestId("session-bar-settle");
+		await expect(checkout).toBeVisible();
+		expect(checkout).toHaveTextContent("main");
+		expect(canvas.getByTestId("session-controls-pill")).toContainElement(
+			checkout,
+		);
+		expect(
+			checkout.compareDocumentPosition(settle) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(checkout.getBoundingClientRect().right).toBeLessThanOrEqual(
+			settle.getBoundingClientRect().left,
+		);
+		await expect(
+			checkout.querySelector('[data-testid="workspace-notice-indicator"]'),
+		).toBeNull();
+	},
+};
+
+export const PhoneIslandCheckoutGoalAndAgents: Story = {
+	args: { island: true, width: 360 },
+	beforeEach: () => {
+		const cleanup = setupPhoneHeader();
+		seedHeaderGit();
+		sessionViewState.composerCheckoutHidden = true;
+		sessionViewState.barOpen = false;
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const line = canvas.getByTestId("session-island-subline");
+		const checkout = canvas.getByTestId("session-bar-checkout");
+		const goal = canvas.getByTestId("session-island-goal");
+		const tasks = canvas.getByTestId("session-island-tasks");
+		await expect(line).toBeVisible();
+		for (const item of [checkout, goal, tasks])
+			await expect(item).toBeVisible();
+		expect(line).toContainElement(checkout);
+		expect(checkout).toHaveTextContent("main");
+		expect(tasks).toHaveTextContent("2");
+		expect(
+			checkout.compareDocumentPosition(goal) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(
+			goal.compareDocumentPosition(tasks) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(
+			canvas.getByTestId("session-bar").getBoundingClientRect().height,
+		).toBeGreaterThan(46);
 	},
 };
 
