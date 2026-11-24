@@ -1591,13 +1591,12 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		expect((await harness.runCli(["stop"])).code).toBe(0);
 		await harness.waitForExit();
 		expect(existsSync(join(harness.configDir, "relay.sock"))).toBe(false);
-		// With no server, bare conduit serves in the foreground with cwd registered.
+		// With no server, bare conduit serves in the foreground and prints its URL.
 		const bare = harness;
 		await bare.restart({ cliArgs: [] });
-		await vi.waitFor(
-			() => expect(bare.logTail).toContain("Project: process-test"),
-			{ timeout: 10_000 },
-		);
+		await vi.waitFor(() => expect(bare.logTail).toContain("  URL: "), {
+			timeout: 10_000,
+		});
 		const autoServed = await sendRpcRequest(
 			join(harness.configDir, "relay.sock"),
 			{ _tag: "GetStatus" },

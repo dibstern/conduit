@@ -1,48 +1,21 @@
-import { resolve } from "node:path";
 import type { Rpc } from "effect/rpc";
-import {
-	GetProjects,
-	GetStatus,
-	SaveProject,
-} from "../lib/contracts/ws-rpc.js";
+import { GetStatus } from "../lib/contracts/ws-rpc.js";
 import { type CommandContext, handleServe } from "./cli-command-handlers.js";
 
 export async function handleDefault(ctx: CommandContext): Promise<void> {
 	const { checkDaemon } = ctx;
 
-	// No server yet: serve in the foreground with cwd registered, like `npx vite`.
+	// No server yet: serve in the foreground, like `npx vite`.
 	if (!(await checkDaemon().catch(() => false))) {
-		return handleServe(ctx, () => showProject(ctx));
+		return handleServe(ctx, () => showServerUrl(ctx));
 	}
-	return showProject(ctx);
+	return showServerUrl(ctx);
 }
 
-async function showProject(ctx: CommandContext): Promise<void> {
-	const { args, cwd, stdout, stderr, exit, rpcSend, getAddr, getTsIP, qr } =
-		ctx;
+async function showServerUrl(ctx: CommandContext): Promise<void> {
+	const { args, stdout, stderr, exit, rpcSend, getAddr, getTsIP, qr } = ctx;
 	const unavailable =
 		"Server is not running. Run conduit serve or conduit service install.\n";
-
-	let slug: string | undefined;
-	try {
-		const directory = resolve(cwd);
-		const { projects } = await rpcSend(
-			GetProjects.payloadSchema.make({ _tag: "GetProjects" }),
-		);
-		const existing = projects.find(
-			(project) => project.folders[0] === directory,
-		);
-		const registerResponse = await rpcSend(
-			SaveProject.payloadSchema.make({
-				_tag: "SaveProject",
-				...(existing ? { slug: existing.slug } : {}),
-				folders: [directory],
-			}),
-		);
-		slug = registerResponse.savedSlug;
-	} catch {
-		// The default view remains available when project registration fails.
-	}
 
 	let statusResponse: Rpc.Success<typeof GetStatus>;
 	try {
@@ -102,10 +75,6 @@ async function showProject(ctx: CommandContext): Promise<void> {
 		stdout.write(
 			"  Tip: Use conduit serve --tailscale-serve for trusted HTTPS on your tailnet.\n",
 		);
-	}
-
-	if (slug) {
-		stdout.write(`  Project: ${slug} (${cwd})\n`);
 	}
 
 	stdout.write("Tip: Set a PIN for security: conduit --pin <4-8 digits>\n");

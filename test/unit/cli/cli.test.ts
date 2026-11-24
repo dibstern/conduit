@@ -321,8 +321,8 @@ describe("Ticket 3.3 — CLI Interface", () => {
 	});
 });
 
-describe("T2: Default invocation — register and display (AC1)", () => {
-	it("serves in the foreground and registers cwd when no server is running", async () => {
+describe("T2: Default invocation — display (AC1)", () => {
+	it("serves in the foreground and prints its URL when no server is running", async () => {
 		let stop = (): void => {};
 		const cli = createMockCLI({
 			isDaemonRunning: async () => false,
@@ -334,16 +334,12 @@ describe("T2: Default invocation — register and display (AC1)", () => {
 						stop = resolve;
 					}),
 				}) as unknown as ForegroundDaemonHandle,
-			sendRPC: async (cmd) => {
-				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "GetProjects") return { projects: [] };
-				if (cmd._tag === "SaveProject")
-					return { savedSlug: "my-project", projects: [], warnings: [] };
-				return { port: 4000, tlsEnabled: false };
-			},
+			sendRPC: async () => ({ port: 4000, tlsEnabled: false }),
 		});
 		const running = run([], cli);
-		await vi.waitFor(() => expect(cli.state.output).toContain("my-project"));
+		await vi.waitFor(() =>
+			expect(cli.state.output).toContain("URL: http://192.168.1.100:4000"),
+		);
 		expect(cli.state.output).toContain("Conduit (foreground)");
 		expect(cli.state.exitCode).toBeNull();
 		stop();
@@ -351,57 +347,21 @@ describe("T2: Default invocation — register and display (AC1)", () => {
 		expect(cli.state.exitCode).toBe(0);
 	});
 
-	it("registers cwd and prints its URL without opening a menu", async () => {
+	it("prints its URL without registering the current folder", async () => {
 		const cli = createMockCLI({
 			sendRPC: async (cmd) => {
 				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "GetProjects") return { projects: [] };
-				if (cmd._tag === "SaveProject")
-					return { savedSlug: "my-project", projects: [], warnings: [] };
 				return { port: 4000, tlsEnabled: false };
 			},
 		});
 		await run([], cli);
 		expect(cli.state.output).toContain("http://192.168.1.100:4000");
-		expect(cli.state.output).toContain("my-project");
-		expect(cli.state.rpcRequests.map((cmd) => cmd._tag)).toEqual([
-			"GetProjects",
-			"SaveProject",
-			"GetStatus",
-		]);
-	});
-
-	it("registers cwd via SaveProject RPC command", async () => {
-		const cli = createMockCLI({
-			sendRPC: async (cmd) => {
-				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "GetProjects") return { projects: [] };
-				if (cmd._tag === "SaveProject") {
-					return { savedSlug: "my-project", projects: [], warnings: [] };
-				}
-				return { ok: true };
-			},
-		});
-
-		await run([], cli);
-
-		const addCmd = cli.state.rpcRequests.find((c) => c._tag === "SaveProject");
-		expect(addCmd).toBeDefined();
-		assert.exists(addCmd, "expected add command");
-		expect(addCmd.folders).toEqual(["/home/user/my-project"]);
+		expect(cli.state.output).not.toContain("Project:");
+		expect(cli.state.rpcRequests.map((cmd) => cmd._tag)).toEqual(["GetStatus"]);
 	});
 
 	it("uses localhost when no network address available", async () => {
-		const cli = createMockCLI({
-			getNetworkAddress: () => null,
-			sendRPC: async (cmd) => {
-				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "GetProjects") return { projects: [] };
-				if (cmd._tag === "SaveProject")
-					return { savedSlug: "test", projects: [], warnings: [] };
-				return { ok: true };
-			},
-		});
+		const cli = createMockCLI({ getNetworkAddress: () => null });
 
 		await run([], cli);
 
@@ -409,15 +369,7 @@ describe("T2: Default invocation — register and display (AC1)", () => {
 	});
 
 	it("shows QR code in output", async () => {
-		const cli = createMockCLI({
-			sendRPC: async (cmd) => {
-				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "GetProjects") return { projects: [] };
-				if (cmd._tag === "SaveProject")
-					return { savedSlug: "test", projects: [], warnings: [] };
-				return { ok: true };
-			},
-		});
+		const cli = createMockCLI();
 
 		await run([], cli);
 
@@ -425,37 +377,11 @@ describe("T2: Default invocation — register and display (AC1)", () => {
 	});
 
 	it("shows PIN tip", async () => {
-		const cli = createMockCLI({
-			sendRPC: async (cmd) => {
-				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "GetProjects") return { projects: [] };
-				if (cmd._tag === "SaveProject")
-					return { savedSlug: "test", projects: [], warnings: [] };
-				return { ok: true };
-			},
-		});
+		const cli = createMockCLI();
 
 		await run([], cli);
 
 		expect(cli.state.output).toContain("PIN");
-	});
-
-	it("keeps the default URL when SaveProject fails", async () => {
-		const cli = createMockCLI({
-			sendRPC: async (cmd) => {
-				cli.state.rpcRequests.push(cmd);
-				if (cmd._tag === "GetProjects") return { projects: [] };
-				if (cmd._tag === "SaveProject") throw new Error("disk full");
-				return { port: 2633, tlsEnabled: false };
-			},
-		});
-
-		await run([], cli);
-
-		// Should not crash; output should still contain the URL
-		expect(cli.state.output).toContain("192.168.1.100");
-		// But should not contain "Project:" since slug is undefined
-		expect(cli.state.output).not.toContain("Project:");
 	});
 });
 
@@ -931,9 +857,7 @@ describe("T7: --port/--oc-port passed through (AC6)", () => {
 describe("T8: Error handling (AC8)", () => {
 	it("prints guidance when the server becomes unreachable before GetStatus", async () => {
 		const cli = createMockCLI({
-			sendRPC: async (cmd) => {
-				if (cmd._tag === "SaveProject")
-					return { savedSlug: "project", projects: [], warnings: [] };
+			sendRPC: async () => {
 				throw new Error("Connection refused");
 			},
 		});

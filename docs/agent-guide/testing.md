@@ -261,8 +261,8 @@ npx vitest run test/integration/daemon/claude-process-runner-lifecycle.test.ts
 `serve-foreground.test.ts` verifies that `conduit serve` exits 0 on signal shutdown
 with independent runners, terminals and managed OpenCode
 available for the next server to re-adopt. It also verifies full `conduit stop`,
-occupied-port rejection, the hidden `--foreground` alias and bare project
-registration. Evidence and cleanup results go to
+occupied-port rejection, the hidden `--foreground` alias and bare `conduit`
+serving in the foreground. Evidence and cleanup results go to
 `test-results/85kb-16-serve.json`. Inspect `ps -axo pid,command` for processes
 started by the tests; never signal processes belonging to the user's live server.
 

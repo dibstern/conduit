@@ -64,12 +64,12 @@ Steer, queue, branch, rewind, undo. Four agents, each on your own accounts.
 ## Start
 
 ```bash
-npx conduit-code   # Node 26.10+, from any project folder
+npx conduit-code   # Node 26.10+
 ```
 
-That registers the folder as a project and prints its URL and a QR code. If no
-server is running yet, it starts one in this terminal. Run it from another
-folder to add that project to the same server; every project shares one port.
+That prints the server's URL and a QR code, starting the server in this
+terminal if none is running. Open the URL and add your projects there; every
+project shares one port.
 
 Install it globally (`npm install -g conduit-code`) to get the `conduit`
 command used below. `conduit serve` runs the server in a terminal, and
@@ -172,8 +172,8 @@ Don't expose Conduit to the public internet. For remote access, use
 ```
 Usage: conduit [command] [options]
 
-  With no command, registers the current directory and prints its server URL,
-  starting the server in this process first if none is running.
+  With no command, prints the server URL, starting the server in this process
+  first if none is running.
 
 Commands:
   serve                 Run the server in this process until stopped

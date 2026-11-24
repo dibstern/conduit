@@ -211,7 +211,7 @@ describe("serve handler", () => {
 		expect(joined).toContain("http://opencode:4096");
 	});
 
-	it("leaves project registration to the default command", async () => {
+	it("registers no project", async () => {
 		const io = createMockIO("/workspace/app");
 
 		await run(["serve"], io);
