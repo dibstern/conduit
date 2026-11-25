@@ -203,6 +203,13 @@ export const makeDaemonRpcSocketLayer = <R>(
 									Option.isSome(client)
 										? failWritesAfterClose(socket, client.value)
 										: socket,
+								).pipe(
+									// The client hung up; RpcServer turns the socket error into a defect.
+									Effect.catchDefect((defect) =>
+										Socket.isSocketError(defect)
+											? Effect.void
+											: Effect.die(defect),
+									),
 								);
 							}),
 						),
