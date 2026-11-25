@@ -3385,15 +3385,20 @@ export function replay(
 	events: readonly LedgerEvent[],
 ): SessionLedgerState {
 	if (events.length === 0) return state;
-	const draft = copyBook(bookOf(state));
-	for (const event of events) {
+	let clean = state;
+	let cleanEnd = 0;
+	let draft = copyBook(bookOf(state));
+	for (const [index, event] of events.entries()) {
 		const entry = event as unknown as Entry;
 		const ids = entry.kind === "fact" ? [...entry.ids] : [];
 		const step: Step = { newId: () => ids.shift() ?? "", effects: [] };
+		if (apply(draft, entry, step).tag === "Changed") continue;
 		// Every stored entry was recorded. One this decider no longer records may have half-applied
-		// the draft, so fold entry by entry, where evolve skips it whole.
-		if (apply(draft, entry, step).tag !== "Changed")
-			return events.reduce(evolve, state);
+		// the draft, so rebuild it from the entries before this one and skip it whole, as evolve does.
+		// Those entries all applied, so their refold takes one pass.
+		clean = replay(clean, events.slice(cleanEnd, index));
+		cleanEnd = index + 1;
+		draft = copyBook(bookOf(clean));
 	}
 	return stateOf(draft);
 }

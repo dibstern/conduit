@@ -240,8 +240,54 @@ describe("Run Ledger public model", () => {
 			ids: [],
 		} as unknown as LedgerEvent;
 		expect(evolve(folded, stale)).toBe(folded);
-		const log = [...admitted.events, stale, ...admitted.events];
+		const log = [
+			...admitted.events,
+			stale,
+			...admitted.events,
+			stale,
+			...admitted.events,
+		];
 		expect(replay(initial, log)).toEqual(log.reduce(evolve, initial));
 		expect(replay(folded, [])).toBe(folded);
+	});
+
+	// Boot replays every Open session's log in one block. One stale entry used to send
+	// the whole log through a book copy per entry: a 107k-entry log froze boot ~160s.
+	it("replays a long stored log in one pass though it holds an entry this decider no longer records", () => {
+		const policy = { settleMs: 7_000, probeMs: 10, nativeCommandMs: 30 };
+		const fact = (command: unknown) =>
+			({
+				kind: "fact",
+				command,
+				now: 100,
+				policy,
+				ids: [],
+			}) as unknown as LedgerEvent;
+		const admit = (inputId: string) =>
+			fact({
+				verb: "admit",
+				inputId,
+				delivery: "queue",
+				request: { text: "hello" },
+			});
+		const stale = fact({
+			verb: "observe",
+			observation: {
+				tag: "Unsolicited",
+				label: "host:7",
+				eventId: "snapshot",
+				kind: "tasks_snapshot",
+				tasks: [],
+			},
+		});
+		const log = [
+			admit("A"),
+			stale,
+			...Array.from({ length: 6_000 }, (_, i) => admit(`B${i}`)),
+		];
+		const started = performance.now();
+		replay(initialSessionLedgerState("session", "opencode"), log);
+		// One pass takes a few ms; a copy per entry takes seconds.
+		expect(performance.now() - started).toBeLessThan(250);
 	});
 });
