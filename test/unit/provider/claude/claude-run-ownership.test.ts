@@ -1815,4 +1815,115 @@ describe("Claude accepted run ownership", () => {
 			await Promise.allSettled(sends);
 		}
 	});
+
+	// ses_f72bd18f (2026-11-18): Stop landed while the CLI ran a task-notification
+	// wake turn and the stopped input sat in its queue. The interrupt ended the wake,
+	// the receipt listed the input as still queued, and the input then ran for 30s
+	// until the stop deadline killed the process (CONTRACT.md 1758: "else interrupted
+	// when its turn starts").
+	it("interrupts a stopped input the receipt lists as still queued when its turn starts", async () => {
+		const inputId = "66666666-6666-4666-8666-666666666666";
+		const interrupts = [
+			Effect.runSync(Deferred.make<void>()),
+			Effect.runSync(Deferred.make<void>()),
+		] as const;
+		const queued = Effect.runSync(Deferred.make<void>());
+		const terminal = Effect.runSync(Deferred.make<void>());
+		const events: ProviderRuntimeEvent[] = [];
+		const sink = createMockEventSink();
+		sink.push = (event) =>
+			Effect.sync(() => {
+				events.push(event);
+				if (
+					event.runId === "run-a" &&
+					(event.type === "turn.completed" || event.type === "turn.interrupted")
+				)
+					Effect.runSync(Deferred.succeed(terminal, undefined));
+			});
+		let interruptCount = 0;
+		const instance = makeTestClaudeProviderInstance({
+			queryFactory: ({ prompt }) => {
+				if (typeof prompt === "string")
+					throw new Error("Expected streaming input");
+				const inputs = prompt[Symbol.asyncIterator]();
+				return Object.assign(createMockQuery([]), {
+					interrupt: vi.fn(() => {
+						const next = interrupts[interruptCount++];
+						if (next) Effect.runSync(Deferred.succeed(next, undefined));
+						return Promise.resolve({ still_queued: [inputId] });
+					}),
+					[Symbol.asyncIterator]: () =>
+						(async function* () {
+							// The CLI reads the input into its queue behind a running wake turn.
+							await inputs.next();
+							Effect.runSync(Deferred.succeed(queued, undefined));
+							await Effect.runPromise(Deferred.await(interrupts[0]));
+							// The wake turn's interrupted result names no input.
+							yield makeErrorResult({
+								session_id: "stop-sdk",
+								uuid: crypto.randomUUID(),
+								user_message_uuids: [],
+							});
+							yield {
+								type: "command_lifecycle" as const,
+								command_uuid: inputId,
+								state: "started" as const,
+								session_id: "stop-sdk",
+								uuid: crypto.randomUUID(),
+							};
+							// The queued input runs to completion unless interrupted now.
+							const stopped = await Effect.runPromise(
+								Deferred.await(interrupts[1]).pipe(
+									Effect.as(true),
+									Effect.timeoutOption("1 second"),
+								),
+							);
+							yield stopped._tag === "Some"
+								? makeErrorResult({
+										session_id: "stop-sdk",
+										uuid: crypto.randomUUID(),
+										user_message_uuids: [inputId],
+									})
+								: makeSuccessResult({
+										session_id: "stop-sdk",
+										uuid: crypto.randomUUID(),
+										user_message_uuids: [inputId],
+									});
+						})(),
+				});
+			},
+		});
+		const send = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					sessionId: "stop-session",
+					inputId,
+					runId: "run-a",
+					eventSink: sink,
+					model: { providerId: "claude", modelId: "claude-fable-5" },
+				}),
+			),
+		);
+		try {
+			await Effect.runPromise(Deferred.await(queued));
+			await Effect.runPromise(
+				instance.interruptTurnEffect("stop-session", ["run-a"]),
+			);
+			await Effect.runPromise(Deferred.await(terminal));
+			expect(
+				events.flatMap((event) =>
+					event.runId === "run-a" &&
+					(event.type === "turn.completed" || event.type === "turn.interrupted")
+						? [event.type]
+						: [],
+				),
+			).toEqual(["turn.interrupted"]);
+			expect(interruptCount).toBe(2);
+		} finally {
+			for (const interrupt of interrupts)
+				Effect.runSync(Deferred.succeed(interrupt, undefined));
+			await Effect.runPromise(instance.shutdownEffect().pipe(Effect.ignore));
+			await Promise.allSettled([send]);
+		}
+	});
 });

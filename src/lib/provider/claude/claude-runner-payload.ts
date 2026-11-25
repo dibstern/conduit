@@ -2753,6 +2753,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				ctx.sessionId,
 				message.command_uuid,
 			);
+			// Stop reached this input while it waited in the CLI's queue behind another
+			// turn, so that interrupt ended the other turn. Interrupt it now that it runs
+			// (CONTRACT.md 1758); its interrupted result clears the mark.
+			if (ctx.interruptInputId === message.command_uuid)
+				yield* this.interruptQueryEffect(ctx);
 		}).pipe(
 			Effect.uninterruptible,
 			(ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1)).withPermits(1),
