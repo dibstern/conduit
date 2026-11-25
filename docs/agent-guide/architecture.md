@@ -282,11 +282,24 @@ removal terminate registered runners after the project closes. The server refuse
 an occupied configured port before acquiring runtime resources.
 
 `pnpm dev:all` rebuilds on save and restarts the running Conduit while sessions
-keep running. It drives an existing supervised service, or owns a foreground
-child when no service returns after restart. Ctrl-C stops that child and leaves
-an existing service running. Failed builds leave the current server running.
-It also runs Vite, proxied to that server, for instant UI hot reload.
-For a child server, pass options with `pnpm dev:all -- --port 2700`.
+keep running. When the server answering on its config dir is supervised, it
+asks that service to restart; otherwise it stops that server and owns a
+foreground child. Ctrl-C stops that child and leaves a service running. Failed
+builds leave the current server running. It also runs Vite, proxied to that
+server, for instant UI hot reload. For a child server, pass options with
+`pnpm dev:all -- --port 2700`.
+
+`scripts/dev.mjs` runs one cycle (build, restart, wait) at a time, and a newer
+change cuts short the running cycle's waits. A server is up once it answers
+`GetStatus` from the expected PID, so a slow boot only prints progress. Every
+stop is bounded: a signal, 10s grace, then `SIGKILL`, so a server whose event
+loop is blocked costs a cycle 10s, never a hang. A server dev:all did not start
+that does not answer within 10s is stopped and replaced. A service still running
+10s after `RestartWithConfig` gets `SIGKILL`, never `SIGTERM`: its supervisor
+respawns a killed process but leaves a clean exit stopped. A second Ctrl-C kills
+every process group dev:all started and exits 130.
+`test/integration/daemon/dev-startup.test.ts` freezes servers with `SIGSTOP` to
+cover these paths.
 
 `SIGINT` and `SIGTERM` flush config and dispose the server while preserving
 independent runners, terminals and managed OpenCode for re-adoption. The process

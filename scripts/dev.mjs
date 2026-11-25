@@ -1,3 +1,8 @@
+// dev:all: rebuild on change, then restart the server onto the new build.
+// Cycles run one at a time, and a newer change cuts the running one's waits
+// short. Every stop is bounded (stopProcess), and a server is up only once it
+// answers, so a server that cannot act on signals (a blocked event loop) costs
+// a cycle the stop grace, never a hang.
 import { spawn, spawnSync } from "node:child_process";
 import { openSync, readFileSync, statSync, watch } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,39 +17,39 @@ const serveArgs = args.includes("--log-level")
 	? args
 	: ["--log-level", "warn", ...args];
 
+/** How long a stopped process gets to exit before SIGKILL. */
+const GRACE_MS = 10_000;
+/** How long a server dev:all did not start gets to answer before it counts as wedged. */
+const ANSWER_MS = 10_000;
+
+const shutdown = new AbortController();
+const stopped = new Promise((resolve) =>
+	shutdown.signal.addEventListener("abort", resolve, { once: true }),
+);
+/** Every process group dev:all started that has not exited. */
+const groups = new Set();
 const watchers = [];
-let stopping = false;
-let pending = false;
 let timer;
-let activeBuild;
-let lastBuildId;
+let wake = () => {};
+/** The next cycle: "build" builds, then restarts; "restart" only restarts. */
+let queued = "build";
+/** Aborts the running cycle's waits; undefined between cycles. */
+let cycle;
+let running;
+let rpc;
+let mode;
 let builder;
 let child;
-let childClosed;
 let vite;
-let viteClosed;
-let mode;
-let rpc;
-let resolveStopped;
-const stopped = new Promise((resolve) => {
-	resolveStopped = resolve;
-});
+let lastBuildId;
 const log = (message) => console.log(`[dev] ${message}`);
 
 function stop() {
-	if (stopping) return;
-	stopping = true;
+	if (shutdown.signal.aborted) return;
+	shutdown.abort();
 	clearTimeout(timer);
 	for (const watcher of watchers) watcher.close();
-	// A half-finished build is useless; stop its whole process group.
-	if (builder?.exitCode === null) {
-		try {
-			process.kill(-builder.pid, "SIGTERM");
-		} catch {}
-	}
-	// Vite closes its own esbuild helper; killing the group makes that crash.
-	if (vite?.exitCode === null) vite.kill("SIGTERM");
-	resolveStopped();
+	wake();
 }
 
 function fail(error) {
@@ -58,21 +63,85 @@ function recover(error) {
 	console.error(`[dev] ${error.message ?? error}; waiting for the next change`);
 }
 
-process.on("SIGINT", stop);
-process.on("SIGTERM", stop);
+/** A second signal skips the graceful stop: everything dev:all started dies now. */
+function onSignal() {
+	if (!shutdown.signal.aborted) {
+		log("stopping (Ctrl-C again kills everything now)");
+		return stop();
+	}
+	for (const pid of groups) {
+		try {
+			process.kill(-pid, "SIGKILL");
+		} catch {}
+	}
+	process.exit(130);
+}
+
+process.on("SIGINT", onSignal);
+process.on("SIGTERM", onSignal);
 // Closing the terminal must not orphan the detached server on its port.
-process.on("SIGHUP", stop);
+process.on("SIGHUP", onSignal);
+
+/**
+ * The one way dev:all stops a process: send `signal` (none only waits), give
+ * it `graceMs` to exit, then SIGKILL it. A negative target is a process group,
+ * as with process.kill. Resolves once the target is gone.
+ */
+async function stopProcess(target, signal, graceMs = GRACE_MS) {
+	const pid = Math.abs(target);
+	const gone = () => {
+		try {
+			process.kill(target, 0);
+			return false;
+		} catch (error) {
+			// macOS answers EPERM for a group whose members are all zombies.
+			if (error.code === "ESRCH" || (error.code === "EPERM" && target < 0))
+				return true;
+			throw error;
+		}
+	};
+	if (signal) {
+		try {
+			process.kill(target, signal);
+		} catch {}
+	}
+	const deadline = Date.now() + graceMs;
+	let killed = false;
+	while (!gone()) {
+		if (!killed && Date.now() >= deadline) {
+			killed = true;
+			log(`PID ${pid} did not exit within ${graceMs / 1000}s; killing it`);
+			try {
+				process.kill(target, "SIGKILL");
+			} catch {}
+		}
+		if (killed && Date.now() >= deadline + 5_000)
+			throw new Error(`PID ${pid} survived SIGKILL`);
+		await delay(100);
+	}
+}
+
+/** Separate process groups let this script finish cleanup on terminal Ctrl-C. */
+function launch(command, commandArgs, env = process.env) {
+	const proc = spawn(command, commandArgs, {
+		stdio: "inherit",
+		detached: true,
+		env,
+	});
+	if (proc.pid) {
+		groups.add(proc.pid);
+		proc.once("exit", () => groups.delete(proc.pid));
+	}
+	return proc;
+}
 
 function build() {
 	log("building");
-	// Separate process groups let this script finish cleanup on terminal Ctrl-C.
-	builder = spawn("pnpm", ["build"], {
-		stdio: "inherit",
-		detached: true,
-	});
+	const proc = launch("pnpm", ["build"]);
+	builder = proc;
 	return new Promise((resolve, reject) => {
-		builder.once("error", reject);
-		builder.once("close", (code) => resolve(code ?? 1));
+		proc.once("error", reject);
+		proc.once("close", (code) => resolve(code ?? 1));
 	}).finally(() => {
 		builder = undefined;
 	});
@@ -80,38 +149,53 @@ function build() {
 
 async function stopChild() {
 	const server = child;
-	const closed = childClosed;
+	// Cleared first, so its exit reads as requested and is not restarted.
 	child = undefined;
-	if (server?.exitCode === null && server.signalCode === null) {
-		server.kill("SIGINT");
-	}
-	await closed;
+	if (server) await stopProcess(-server.pid, "SIGINT");
+}
+
+/** The server on this config dir: its PID, and its status if it answers within `timeoutMs`. */
+async function probe(timeoutMs) {
+	const pid = rpc.readDaemonBuild(rpc.socket)?.pid;
+	if (pid === undefined) return undefined;
+	const status = await rpc
+		.sendRpcRequest(
+			rpc.socket,
+			{ _tag: "GetStatus" },
+			{ requestTimeoutMs: timeoutMs, startupRetries: 0 },
+		)
+		.catch(() => undefined);
+	return { pid, status };
 }
 
 /**
- * A spawned server is awaited until it exits, since startup recovery on a
- * large store can run well past 10s; the service gets the fixed window.
+ * Waits until the server answering on this config dir satisfies `isUp`. A boot
+ * on a big store can take minutes, so this has no deadline: it notes progress,
+ * and a newer request or the shutdown ends it (undefined).
  */
-async function waitForServer(previousSocket, server) {
-	const deadline = Date.now() + 10_000;
-	let disconnected = previousSocket === undefined;
-	while (!stopping && (server ? child === server : Date.now() < deadline)) {
-		const running = await rpc.isDaemonRunning(rpc.DEFAULT_SOCKET_PATH);
-		if (!running) disconnected = true;
-		const inode = statSync(rpc.DEFAULT_SOCKET_PATH, {
-			throwIfNoEntry: false,
-		})?.ino;
-		if (
-			running &&
-			inode !== undefined &&
-			(disconnected || inode !== previousSocket)
-		) {
-			return true;
+async function waitUntilUp(label, isUp, signal, exited = () => false) {
+	const started = Date.now();
+	let noted = started;
+	const aborted = new Promise((resolve) =>
+		signal.addEventListener("abort", resolve, { once: true }),
+	);
+	while (!signal.aborted && !exited()) {
+		const up = await Promise.race([probe(2_000), aborted]);
+		if (up?.status && isUp(up)) return up;
+		if (Date.now() - noted >= 15_000) {
+			noted = Date.now();
+			log(`${label} still starting (${Math.round((noted - started) / 1000)}s)`);
 		}
-		await delay(100);
+		await delay(200, undefined, { signal }).catch(() => {});
 	}
-	return false;
 }
+
+const commandOf = (pid) =>
+	spawnSync("ps", ["-o", "command=", "-p", String(pid)], {
+		encoding: "utf8",
+	}).stdout?.trim() ?? "";
+const isConduitServer = (command) =>
+	/\b(cli\.[jt]s|conduit)\s+serve\b/.test(command);
 
 /** PIDs listening on the port; empty when there are none or lsof is missing. */
 function portHolders(port) {
@@ -123,56 +207,29 @@ function portHolders(port) {
 	return (stdout ?? "").split("\n").filter(Boolean).map(Number);
 }
 
-/**
- * Stops an old conduit server still holding the port (an orphaned dev:all
- * child, a wedged daemon, another config dir) so the child can bind it.
- * Returns true when a supervisor brought the service back on our socket
- * instead; killing it again would only race the respawn, so drive it.
- */
+/** Stops an old conduit server on another config dir that holds our port. */
 async function freePort(port) {
 	const holders = portHolders(port);
 	for (const pid of holders) {
-		const command = spawnSync("ps", ["-o", "command=", "-p", String(pid)], {
-			encoding: "utf8",
-		}).stdout?.trim();
-		if (!command || !/\b(cli\.[jt]s|conduit)\s+serve\b/.test(command)) {
+		const command = commandOf(pid);
+		if (!isConduitServer(command)) {
 			throw new Error(
 				`port ${port} is held by PID ${pid} (${command || "unknown"}), which is not a conduit server; stop it and re-run`,
 			);
 		}
-		log(`stopping old conduit PID ${pid} on port ${port}`);
-		try {
-			process.kill(pid, "SIGTERM");
-		} catch {}
 	}
-	const started = Date.now();
-	let forced = false;
-	while (holders.length > 0 && !stopping) {
-		const current = portHolders(port);
-		if (current.length === 0) return false;
-		if (
-			current.every((pid) => !holders.includes(pid)) &&
-			(await rpc.isDaemonRunning(rpc.DEFAULT_SOCKET_PATH))
-		) {
-			return true;
-		}
-		const elapsed = Date.now() - started;
-		if (elapsed > 15_000) {
-			throw new Error(
-				`port ${port} is still held by PID ${current.join(", ")}; is it managed by a service on another config dir?`,
-			);
-		}
-		if (elapsed > 10_000 && !forced) {
-			forced = true;
-			for (const pid of holders) {
-				try {
-					process.kill(pid, "SIGKILL");
-				} catch {}
-			}
-		}
-		await delay(200);
+	await Promise.all(
+		holders.map((pid) => {
+			log(`stopping old conduit PID ${pid} on port ${port}`);
+			return stopProcess(pid, "SIGTERM");
+		}),
+	);
+	const back = portHolders(port);
+	if (back.length > 0) {
+		throw new Error(
+			`port ${port} is held again by PID ${back.join(", ")}; is it managed by a service on another config dir?`,
+		);
 	}
-	return false;
 }
 
 /**
@@ -185,96 +242,131 @@ async function replaceOldRun(port) {
 	const lock = join(tmpdir(), `conduit-dev-all-${port}.lock`);
 	openSync(lock, "a");
 	const { stdout } = spawnSync("lsof", ["-t", lock], { encoding: "utf8" });
-	for (const pid of (stdout ?? "").split("\n").filter(Boolean).map(Number)) {
-		if (pid === process.pid) continue;
-		log(`stopping old dev:all PID ${pid} on port ${port}`);
-		try {
-			process.kill(pid, "SIGTERM");
-		} catch {}
-		// freePort stops a server that outlasts this wait.
-		const deadline = Date.now() + 15_000;
-		while (!stopping && Date.now() < deadline) {
-			try {
-				process.kill(pid, 0);
-			} catch {
-				break;
-			}
-			await delay(200);
-		}
-	}
+	const old = (stdout ?? "")
+		.split("\n")
+		.filter(Boolean)
+		.map(Number)
+		.filter((pid) => pid !== process.pid);
+	await Promise.all(
+		old.map((pid) => {
+			log(`stopping old dev:all PID ${pid} on port ${port}`);
+			// Its own stop takes up to the grace, so it gets twice that.
+			return stopProcess(pid, "SIGTERM", 2 * GRACE_MS);
+		}),
+	);
 }
 
-async function restart() {
+/** Loads what dev:all needs from the build, then replaces this port's old run. */
+async function connect() {
+	const [
+		{ DEFAULT_CONFIG_DIR, DEFAULT_PORT, DEFAULT_SOCKET_PATH, parseArgs },
+		{ loadDaemonConfigResult },
+		{ readDaemonBuild },
+		{ sendRpcRequest },
+	] = await Promise.all([
+		import("../dist/src/bin/cli-utils.js"),
+		import("../dist/src/lib/daemon/config-persistence.js"),
+		import("../dist/src/lib/daemon/daemon-utils.js"),
+		import("../dist/src/lib/daemon/daemon-rpc-client.js"),
+	]);
+	// The port `serve` will bind: flag, then persisted config, then default.
+	const parsed = parseArgs(["serve", ...args]);
+	const loaded = loadDaemonConfigResult(DEFAULT_CONFIG_DIR);
+	if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound")
+		throw loaded.failure;
+	const port = parsed.portExplicit
+		? parsed.port
+		: loaded._tag === "Success"
+			? loaded.success.port
+			: DEFAULT_PORT;
+	await replaceOldRun(port);
+	// Set last: a check that throws above is retried on the next build.
+	rpc = {
+		configDir: DEFAULT_CONFIG_DIR,
+		port,
+		socket: DEFAULT_SOCKET_PATH,
+		readDaemonBuild,
+		sendRpcRequest,
+	};
+}
+
+/**
+ * Asks the service to exit for its supervisor to respawn. One still running
+ * after the grace is SIGKILLed, which the supervisor also respawns; SIGTERM
+ * would not do, since a clean exit stays stopped.
+ */
+async function restartService(pid, signal) {
+	if (mode !== "service") log("dev:all is driving the conduit service");
+	mode = "service";
+	await rpc
+		.sendRpcRequest(
+			rpc.socket,
+			{ _tag: "RestartWithConfig" },
+			{ requestTimeoutMs: ANSWER_MS },
+		)
+		.catch((error) => log(`${error.message}; stopping PID ${pid}`));
+	await stopProcess(pid);
+	return waitUntilUp("conduit service", (up) => up.pid !== pid, signal);
+}
+
+/**
+ * Replaces the server with one on the current build and returns it once it
+ * answers. Undefined when the wait was cut short or dev:all refused to run.
+ */
+async function restart(signal) {
 	log("restarting");
-	if (mode === "child") {
-		await stopChild();
-	} else if (await rpc.isDaemonRunning(rpc.DEFAULT_SOCKET_PATH)) {
-		if (stopping) return;
-		const inode = statSync(rpc.DEFAULT_SOCKET_PATH, {
-			throwIfNoEntry: false,
-		})?.ino;
-		// A daemon busy opening projects can miss the default 10s reply window,
-		// yet still restart, so a timeout falls through to the socket check.
-		await rpc
-			.sendRpcRequest(
-				rpc.DEFAULT_SOCKET_PATH,
-				{ _tag: "RestartWithConfig" },
-				{
-					requestTimeoutMs: 60_000,
-				},
-			)
-			.catch((error) => log(`${error.message}; checking for a restart`));
-		if (await waitForServer(inode)) {
-			if (mode !== "service") {
-				log("dev:all is driving the conduit service");
-			}
-			mode = "service";
-			return;
-		}
-	}
-	if (stopping) return;
-	if (await freePort(rpc.port)) {
-		log("dev:all is driving the conduit service");
-		mode = "service";
+	await stopChild();
+	if (shutdown.signal.aborted) return;
+	const old = await probe(ANSWER_MS);
+	if (shutdown.signal.aborted) return;
+	// A config dir holds one server, so it cannot serve another port too.
+	if (old?.status && old.status.port !== rpc.port) {
+		fail(
+			new Error(
+				`conduit for ${rpc.configDir} already serves port ${old.status.port}; set CONDUIT_CONFIG_DIR to run another on port ${rpc.port}`,
+			),
+		);
 		return;
 	}
-	if (stopping) return;
+	if (old?.status?.supervised) return restartService(old.pid, signal);
+	// Unsupervised, or not answering at all: an old server in ours' way.
+	if (old && isConduitServer(commandOf(old.pid))) {
+		log(
+			`stopping old conduit PID ${old.pid}${old.status ? "" : " (not answering)"}`,
+		);
+		await stopProcess(old.pid, "SIGTERM");
+	}
+	await freePort(rpc.port);
+	if (shutdown.signal.aborted) return;
 	mode = "child";
-	const server = spawn(
+	// A server dev:all spawns is not the service, even when dev:all runs in one.
+	const server = launch(
 		process.execPath,
 		["dist/src/bin/cli.js", "serve", ...serveArgs],
-		{
-			stdio: "inherit",
-			detached: true,
-		},
+		{ ...process.env, CONDUIT_SERVICE: undefined, XPC_SERVICE_NAME: undefined },
 	);
 	child = server;
-	childClosed = new Promise((resolve) => server.once("close", resolve));
 	server.once("error", recover);
-	server.once("exit", (code, signal) => {
-		if (child !== server || stopping) return;
+	server.once("exit", (code, exitSignal) => {
+		if (child !== server) return;
 		child = undefined;
-		log(`server exited (${signal ?? code}); restarting in 2s`);
+		log(`server exited (${exitSignal ?? code}); restarting in 2s`);
 		// Paced so a server that crashes on boot does not spin.
-		delay(2_000).then(() => {
-			if (!child) runRestart();
-		});
+		setTimeout(() => request("restart"), 2_000);
 	});
-	if (!(await waitForServer(undefined, server)) && !stopping) {
-		throw new Error("server exited before it became ready");
-	}
+	return waitUntilUp(
+		"server",
+		(up) => up.pid === server.pid,
+		signal,
+		() => child !== server,
+	);
 }
 
 /** Instant UI reload on top of whichever server dev:all drives. */
-async function startVite() {
-	const { port, tlsEnabled } = await rpc.sendRpcRequest(
-		rpc.DEFAULT_SOCKET_PATH,
-		{ _tag: "GetStatus" },
-	);
-	if (stopping || pending) return;
+function startVite({ port, tlsEnabled }) {
 	const server = `${tlsEnabled ? "https" : "http"}://localhost:${port}`;
 	// Keep Conduit's startup screen visible while retaining Vite diagnostics.
-	vite = spawn(
+	const proc = launch(
 		process.execPath,
 		[
 			"node_modules/vite/bin/vite.js",
@@ -283,14 +375,10 @@ async function startVite() {
 			"--logLevel",
 			"warn",
 		],
-		{
-			stdio: "inherit",
-			detached: true,
-			env: { ...process.env, CONDUIT_DEV_SERVER: server },
-		},
+		{ ...process.env, CONDUIT_DEV_SERVER: server },
 	);
-	viteClosed = new Promise((resolve) => vite.once("close", resolve));
-	vite.once("error", fail);
+	proc.once("error", fail);
+	return proc;
 }
 
 function readBuildId() {
@@ -304,100 +392,56 @@ function readBuildId() {
 	}
 }
 
-async function rebuild() {
-	do {
-		pending = false;
+/**
+ * A newer change cuts short the cycle's waits but not its build or stops: a
+ * build always finishes, so a stream of edits still restarts the server.
+ */
+async function runCycle(kind, signal) {
+	if (kind === "build") {
 		const code = await build();
-		if (stopping) return;
-		if (code !== 0) {
-			log("build failed; waiting for the next change");
-		} else {
-			if (!rpc) {
-				const [
-					{ DEFAULT_CONFIG_DIR, DEFAULT_PORT, DEFAULT_SOCKET_PATH, parseArgs },
-					{ loadDaemonConfigResult },
-					{ isDaemonRunning },
-					{ sendRpcRequest },
-				] = await Promise.all([
-					import("../dist/src/bin/cli-utils.js"),
-					import("../dist/src/lib/daemon/config-persistence.js"),
-					import("../dist/src/lib/daemon/daemon-utils.js"),
-					import("../dist/src/lib/daemon/daemon-rpc-client.js"),
-				]);
-				// The port `serve` will bind: flag, then persisted config, then default.
-				const parsed = parseArgs(["serve", ...args]);
-				const loaded = loadDaemonConfigResult(DEFAULT_CONFIG_DIR);
-				if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound")
-					throw loaded.failure;
-				const port = parsed.portExplicit
-					? parsed.port
-					: loaded._tag === "Success"
-						? loaded.success.port
-						: DEFAULT_PORT;
-				// A config dir holds one server, so it cannot serve another port too.
-				if (await isDaemonRunning(DEFAULT_SOCKET_PATH)) {
-					const status = await sendRpcRequest(DEFAULT_SOCKET_PATH, {
-						_tag: "GetStatus",
-					});
-					if (status.port !== port) {
-						fail(
-							new Error(
-								`conduit for ${DEFAULT_CONFIG_DIR} already serves port ${status.port}; set CONDUIT_CONFIG_DIR to run another on port ${port}`,
-							),
-						);
-						return;
-					}
-				}
-				await replaceOldRun(port);
-				// Set last: a check that throws above is retried on the next build.
-				rpc = { port, DEFAULT_SOCKET_PATH, isDaemonRunning, sendRpcRequest };
-			}
-			if (stopping) return;
-			lastBuildId = readBuildId();
-			await restart();
-			if (!stopping && !pending && !vite) await startVite();
-			if (!stopping && !pending)
-				log(`ready (${mode}${child ? ` PID ${child.pid}` : ""})`);
-		}
-	} while (pending && !stopping);
-}
-
-function runBuild() {
-	if (stopping) return;
-	if (activeBuild) {
-		pending = true;
-		return activeBuild;
+		if (shutdown.signal.aborted) return;
+		if (code !== 0) return log("build failed; waiting for the next change");
 	}
-	activeBuild = rebuild()
-		.catch(recover)
-		.finally(() => {
-			activeBuild = undefined;
-		});
-	return activeBuild;
+	if (!rpc) await connect();
+	if (shutdown.signal.aborted) return;
+	lastBuildId = readBuildId();
+	const up = await restart(signal);
+	if (!up || shutdown.signal.aborted) return;
+	vite ??= startVite(up.status);
+	log(`ready (${mode} PID ${up.pid})`);
 }
 
-/** Restart onto the current dist without rebuilding. */
-function runRestart() {
-	if (stopping || activeBuild || !rpc) return;
-	activeBuild = restart()
-		.then(async () => {
-			if (stopping || pending) return;
-			if (!vite) await startVite();
-			if (!stopping && !pending)
-				log(`ready (${mode}${child ? ` PID ${child.pid}` : ""})`);
-		})
-		.catch(recover)
-		.finally(() => {
-			activeBuild = undefined;
-			if (pending && !stopping) runBuild();
+/** Queues a cycle and cuts the running one's waits short. */
+function request(kind) {
+	if (shutdown.signal.aborted) return;
+	queued = kind === "build" || queued === "build" ? "build" : "restart";
+	cycle?.abort();
+	wake();
+}
+
+async function loop() {
+	while (!shutdown.signal.aborted) {
+		if (!queued) {
+			await new Promise((resolve) => {
+				wake = resolve;
+			});
+			continue;
+		}
+		const kind = queued;
+		queued = undefined;
+		cycle = new AbortController();
+		const signal = AbortSignal.any([cycle.signal, shutdown.signal]);
+		running = runCycle(kind, signal).catch((error) => {
+			if (!signal.aborted) recover(error);
 		});
+		await running;
+		cycle = undefined;
+	}
 }
 
 function changed() {
-	if (stopping) return;
 	clearTimeout(timer);
-	if (activeBuild) pending = true;
-	else timer = setTimeout(runBuild, 300);
+	timer = setTimeout(() => request("build"), 300);
 }
 
 try {
@@ -444,23 +488,29 @@ try {
 		lastModulesStamp = stamp;
 		changed();
 	}, 1_000).unref();
-	await runBuild();
 	// Polled, not watched: an external build (a pre-commit `pnpm build`) often
 	// lands while dev:all is mid-cycle, and its one watch event was dropped,
 	// leaving the server on the old build for good. Polling catches up after.
 	setInterval(() => {
-		if (stopping || activeBuild || !rpc) return;
+		if (cycle || !rpc) return;
 		const buildId = readBuildId();
 		if (!buildId || buildId === lastBuildId) return;
 		lastBuildId = buildId;
 		log(`external build ${buildId.slice(0, 8)} detected`);
-		runRestart();
+		request("restart");
 	}, 1_000).unref();
-	await stopped;
+	await Promise.race([loop(), stopped]);
 } catch (error) {
 	fail(error);
 } finally {
 	stop();
-	await activeBuild;
-	await Promise.all([stopChild(), viteClosed]);
+	await Promise.all([
+		builder && stopProcess(-builder.pid, "SIGTERM"),
+		stopChild(),
+		// Vite closes its own esbuild helper; signalling its group makes that crash.
+		vite && stopProcess(vite.pid, "SIGTERM"),
+		running,
+	]).catch(fail);
+	// A request still in flight to a wedged server would hold the loop open.
+	process.exit();
 }

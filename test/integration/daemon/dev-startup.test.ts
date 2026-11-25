@@ -1,8 +1,10 @@
 // Failure cases: a removed config export, losing the persisted port, ignoring an
-// explicit port, starting with defaults after reading malformed config, and a
+// explicit port, starting with defaults after reading malformed config, a
 // second dev:all that leaves the first running on its port (each respawns the
-// server the other replaced) or hijacks another port's server.
-import { spawn } from "node:child_process";
+// server the other replaced) or hijacks another port's server, and a server
+// that cannot act on signals (a blocked event loop) wedging a restart, a
+// takeover or Ctrl-C.
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
 	copyFileSync,
@@ -104,10 +106,10 @@ function startDev(root: string, configDir: string, args: string[]) {
 	child.stderr.on("data", (data: Buffer) => {
 		logs += data.toString();
 	});
-	/** Settles once the run has printed `text`. */
-	const printed = (text: string) =>
+	/** Settles once the run has printed `text` at or after offset `from` of its logs. */
+	const printed = (text: string, from = 0) =>
 		new Promise<void>((resolve) => {
-			const check = () => logs.includes(text) && resolve();
+			const check = () => logs.includes(text, from) && resolve();
 			check();
 			child.stdout.on("data", check);
 			child.stderr.on("data", check);
@@ -264,4 +266,170 @@ it.each([
 		const response = await fetch(`http://127.0.0.1:${servedPort}/health`);
 		expect(response.ok).toBe(true);
 	}
+});
+
+/** Rejects once `ms` pass, so a wedged wait fails as itself, not as a test timeout. */
+function within<T>(ms: number, promise: Promise<T>): Promise<T> {
+	return Promise.race([
+		promise,
+		new Promise<never>((_resolve, reject) =>
+			// test-waits-allow real-wait: a deadline on an awaited condition, not a sleep.
+			setTimeout(() => reject(new Error(`still waiting after ${ms}ms`)), ms),
+		),
+	]);
+}
+
+const readyPid = (logs: string) =>
+	Number(
+		[...logs.matchAll(/\[dev\] ready \(child PID (\d+)\)/g)].at(-1)?.[1] ??
+			Number.NaN,
+	);
+
+const isGone = (pid: number) => {
+	try {
+		process.kill(pid, 0);
+		return false;
+	} catch {
+		return true;
+	}
+};
+
+/**
+ * One dev:all on its own port and config. `freeze` SIGSTOPs a server, which
+ * then acts on no signal but SIGKILL, as when its event loop is blocked.
+ */
+async function frozenFixture(name: string) {
+	const root = makeRoot();
+	const configDir = join(root, "config");
+	const [port = 0] = await reservePorts(1);
+	writeFileSync(
+		join(configDir, "daemon.json"),
+		JSON.stringify({ ...defaultDaemonConfig(), port }),
+	);
+	const runs: ReturnType<typeof startDev>[] = [];
+	const frozen: number[] = [];
+	const started = Date.now();
+	onTestFinished(async () => {
+		for (const pid of frozen) {
+			try {
+				process.kill(pid, "SIGKILL");
+			} catch {}
+		}
+		await Promise.all(
+			runs.map(async (run) => {
+				if (run.child.exitCode === null && run.child.signalCode === null)
+					run.child.kill("SIGINT");
+				await within(20_000, run.closed).catch(() => run.child.kill("SIGKILL"));
+			}),
+		);
+		mkdirSync("test-results/dev-startup", { recursive: true });
+		writeFileSync(
+			`test-results/dev-startup/frozen-${name}.json`,
+			JSON.stringify(
+				{
+					name,
+					port,
+					frozen,
+					seconds: (Date.now() - started) / 1000,
+					runs: runs.map((run) => run.logs()),
+				},
+				null,
+				2,
+			),
+		);
+		rmSync(root, { recursive: true, force: true });
+	});
+	return {
+		root,
+		port,
+		start: () => {
+			const run = startDev(root, configDir, []);
+			runs.push(run);
+			return run;
+		},
+		freeze: (pid: number) => {
+			frozen.push(pid);
+			process.kill(pid, "SIGSTOP");
+		},
+	};
+}
+
+it("a restart replaces a server that cannot act on signals", async () => {
+	const fixture = await frozenFixture("restart");
+	const run = fixture.start();
+	await within(10_000, run.printed("[dev] ready"));
+	const old = readyPid(run.logs());
+	const restarted = run.printed("[dev] ready", run.logs().length);
+	fixture.freeze(old);
+	writeFileSync(join(fixture.root, "src/changed.ts"), "export {};\n");
+	// The stop grace, a force-kill and a boot.
+	await within(20_000, restarted);
+	expect(readyPid(run.logs())).not.toBe(old);
+	expect(isGone(old)).toBe(true);
+	const response = await fetch(`http://127.0.0.1:${fixture.port}/health`);
+	expect(response.ok).toBe(true);
+});
+
+it.each([
+	"ready",
+	"booting",
+] as const)("a second dev:all takes over from a run whose server froze while %s", async (when) => {
+	const fixture = await frozenFixture(`takeover-${when}`);
+	const a = fixture.start();
+	let old = Number.NaN;
+	if (when === "ready") {
+		await within(10_000, a.printed("[dev] ready"));
+		old = readyPid(a.logs());
+	} else {
+		// Freeze the server as soon as it spawns, before it answers anything.
+		// test-waits-allow polling: nothing announces the spawn, and the freeze needs its PID.
+		await expect
+			.poll(
+				() => {
+					const { stdout } = spawnSync(
+						"pgrep",
+						["-P", String(a.child.pid), "-f", "cli.js serve"],
+						{ encoding: "utf8" },
+					);
+					old = Number(stdout.trim().split("\n")[0] || Number.NaN);
+					return Number.isNaN(old);
+				},
+				{ timeout: 10_000, interval: 20 },
+			)
+			.toBe(false);
+	}
+	fixture.freeze(old);
+	const b = fixture.start();
+	// The old run's stop grace, a force-kill and a boot.
+	await within(20_000, b.printed("[dev] ready"));
+	const [code] = await within(5_000, a.closed);
+	expect(code).toBe(0);
+	expect(isGone(old)).toBe(true);
+	expect(b.child.exitCode).toBeNull();
+	const response = await fetch(`http://127.0.0.1:${fixture.port}/health`);
+	expect(response.ok).toBe(true);
+});
+
+it.each([
+	{ presses: 1, bound: 15_000, exitCode: 0 },
+	{ presses: 2, bound: 3_000, exitCode: 130 },
+])("$presses Ctrl-C ends dev:all within $bound ms though its server cannot act on signals", async ({
+	presses,
+	bound,
+	exitCode,
+}) => {
+	const fixture = await frozenFixture(`ctrl-c-${presses}`);
+	const run = fixture.start();
+	await within(10_000, run.printed("[dev] ready"));
+	const old = readyPid(run.logs());
+	fixture.freeze(old);
+	run.child.kill("SIGINT");
+	if (presses === 2) {
+		// The second press lands once the first is being handled.
+		await within(5_000, run.printed("[dev] stopping ("));
+		run.child.kill("SIGINT");
+	}
+	const [code] = await within(bound, run.closed);
+	expect(code).toBe(exitCode);
+	expect(isGone(old)).toBe(true);
 });
