@@ -4,7 +4,7 @@
 // server the other replaced) or hijacks another port's server, and a server
 // that cannot act on signals (a blocked event loop) wedging a restart, a
 // takeover or Ctrl-C.
-import { spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
 	copyFileSync,
@@ -18,8 +18,12 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { expect, it, onTestFinished } from "vitest";
+import {
+	generateServiceUnit,
+	getServicePaths,
+} from "../../../src/bin/cli-service.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 
 /** A checkout with the real script and build, where `pnpm build` is a no-op. */
@@ -94,6 +98,9 @@ function startDev(root: string, configDir: string, args: string[]) {
 			...process.env,
 			HOME: join(root, "home"),
 			CONDUIT_CONFIG_DIR: configDir,
+			// The service lookup finds its unit here, never the host's.
+			XDG_CONFIG_HOME: join(root, "home", ".config"),
+			CONDUIT_SERVICE_LABEL: undefined,
 			PATH: `${join(root, "bin")}:${process.env["PATH"] ?? ""}`,
 		},
 		stdio: ["ignore", "pipe", "pipe"],
@@ -431,5 +438,112 @@ it.each([
 	}
 	const [code] = await within(bound, run.closed);
 	expect(code).toBe(exitCode);
+	expect(isGone(old)).toBe(true);
+});
+
+// Each run replaces the runs that took the lock before it. Two runs started
+// together used to take each other for the old run, wait out each other's
+// stop and kill each other, so neither was left.
+it("two dev:all started together leave exactly one running", async () => {
+	const fixture = await frozenFixture("together");
+	const runs = [fixture.start(), fixture.start()] as const;
+	const replaced = await within(
+		20_000,
+		Promise.race(
+			runs.map((run) => run.closed.then(([code]) => ({ run, code }))),
+		),
+	);
+	expect(replaced.code).toBe(0);
+	const kept = runs[replaced.run === runs[0] ? 1 : 0];
+	await within(10_000, kept.printed("[dev] ready"));
+	expect(kept.child.exitCode).toBeNull();
+	const response = await fetch(`http://127.0.0.1:${fixture.port}/health`);
+	expect(response.ok).toBe(true);
+});
+
+/**
+ * A service its supervisor runs on the config dir: `launchctl` and `systemctl`
+ * report its PID, and it is respawned whenever it dies, as KeepAlive and
+ * Restart=on-failure respawn a killed one.
+ */
+function supervise(root: string, configDir: string) {
+	const home = join(root, "home");
+	const paths = getServicePaths(
+		process.platform,
+		home,
+		configDir,
+		root,
+		join(home, ".config"),
+	);
+	mkdirSync(dirname(paths.unitFile), { recursive: true });
+	writeFileSync(
+		paths.unitFile,
+		generateServiceUnit({
+			platform: process.platform,
+			shell: "/bin/sh",
+			command: ["conduit", "serve"],
+			paths,
+		}),
+	);
+	const pidFile = join(root, "service.pid");
+	for (const [name, report] of [
+		["launchctl", "pid = %s\\n"],
+		["systemctl", "LoadState=loaded\\nMainPID=%s\\n"],
+	] as const) {
+		writeFileSync(
+			join(root, "bin", name),
+			`#!/bin/sh\nprintf '${report}' "$(cat '${pidFile}')"\n`,
+			{ mode: 0o755 },
+		);
+	}
+	const services: ChildProcess[] = [];
+	let supervising = true;
+	const respawn = () => {
+		const service = spawn(
+			process.execPath,
+			["dist/src/bin/cli.js", "serve", "--log-level", "warn"],
+			{
+				cwd: root,
+				env: {
+					...process.env,
+					HOME: home,
+					CONDUIT_CONFIG_DIR: configDir,
+					CONDUIT_SERVICE: "1",
+				},
+				stdio: ["ignore", "pipe", "ignore"],
+			},
+		);
+		services.push(service);
+		writeFileSync(pidFile, String(service.pid));
+		service.once("exit", () => supervising && respawn());
+		let output = "";
+		return new Promise<number>((resolve) =>
+			service.stdout?.on("data", (data: Buffer) => {
+				output += data.toString();
+				if (output.includes("Ready.")) resolve(Number(service.pid));
+			}),
+		);
+	};
+	onTestFinished(() => {
+		supervising = false;
+		for (const service of services) service.kill("SIGKILL");
+	});
+	return { started: respawn(), current: () => services.at(-1)?.pid };
+}
+
+// A wedged service cannot say it is supervised. Stopped like any old server, its
+// supervisor respawned it into a race with the server dev:all started in its place.
+it("dev:all restarts a wedged service through its supervisor, never racing it", async () => {
+	const fixture = await frozenFixture("service");
+	const service = supervise(fixture.root, join(fixture.root, "config"));
+	const old = await within(10_000, service.started);
+	fixture.freeze(old);
+	const run = fixture.start();
+	// No answer within 10s, a kill, and the respawned service's boot.
+	await within(20_000, run.printed("[dev] ready ("));
+	expect(run.logs()).toContain(
+		`[dev] ready (service PID ${service.current()})`,
+	);
+	expect(run.logs()).not.toContain("stopping old conduit");
 	expect(isGone(old)).toBe(true);
 });

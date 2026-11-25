@@ -4,7 +4,7 @@
 // answers, so a server that cannot act on signals (a blocked event loop) costs
 // a cycle the stop grace, never a hang.
 import { spawn, spawnSync } from "node:child_process";
-import { openSync, readFileSync, statSync, watch } from "node:fs";
+import { openSync, readFileSync, statSync, watch, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -233,20 +233,28 @@ async function freePort(port) {
 }
 
 /**
- * Takes this port's dev:all lock and stops the run that held it: the same port
- * is the same service. Stopping only its server would get that respawned (and
- * ours killed in turn), so stop its supervisor, which stops its own server.
- * The lock is an open file, so it never outlives the run holding it.
+ * Takes this port's dev:all lock and stops the runs that took it earlier: the
+ * same port is the same service. Stopping only their server would get it
+ * respawned, so stop the run, which stops its own server. Each run opens the
+ * lock, then appends its PID, so the file ranks runs by arrival and two started
+ * together cannot stop each other; a holder with no PID yet arrived later. The
+ * lock is an open file, so lsof lists only live runs.
  */
 async function replaceOldRun(port) {
 	const lock = join(tmpdir(), `conduit-dev-all-${port}.lock`);
-	openSync(lock, "a");
+	const fd = openSync(lock, "a");
+	writeSync(fd, `${process.pid}\n`);
 	const { stdout } = spawnSync("lsof", ["-t", lock], { encoding: "utf8" });
+	const lines = readFileSync(lock, "utf8").split("\n");
+	const mine = lines.lastIndexOf(String(process.pid));
 	const old = (stdout ?? "")
 		.split("\n")
 		.filter(Boolean)
 		.map(Number)
-		.filter((pid) => pid !== process.pid);
+		.filter((pid) => {
+			const arrival = lines.lastIndexOf(String(pid));
+			return arrival >= 0 && arrival < mine;
+		});
 	await Promise.all(
 		old.map((pid) => {
 			log(`stopping old dev:all PID ${pid} on port ${port}`);
@@ -260,11 +268,13 @@ async function replaceOldRun(port) {
 async function connect() {
 	const [
 		{ DEFAULT_CONFIG_DIR, DEFAULT_PORT, DEFAULT_SOCKET_PATH, parseArgs },
+		{ supervisedServicePid },
 		{ loadDaemonConfigResult },
 		{ readDaemonBuild },
 		{ sendRpcRequest },
 	] = await Promise.all([
 		import("../dist/src/bin/cli-utils.js"),
+		import("../dist/src/bin/cli-service.js"),
 		import("../dist/src/lib/daemon/config-persistence.js"),
 		import("../dist/src/lib/daemon/daemon-utils.js"),
 		import("../dist/src/lib/daemon/daemon-rpc-client.js"),
@@ -285,27 +295,35 @@ async function connect() {
 		configDir: DEFAULT_CONFIG_DIR,
 		port,
 		socket: DEFAULT_SOCKET_PATH,
+		supervisedServicePid,
 		readDaemonBuild,
 		sendRpcRequest,
 	};
 }
 
 /**
- * Asks the service to exit for its supervisor to respawn. One still running
- * after the grace is SIGKILLed, which the supervisor also respawns; SIGTERM
- * would not do, since a clean exit stays stopped.
+ * Asks an answering service to restart, or SIGKILLs an unresponsive one for its
+ * supervisor to respawn. An answering service still running after the grace
+ * also gets SIGKILL: a clean exit would stay stopped.
  */
-async function restartService(pid, signal) {
+async function restartService(pid, answered, signal) {
 	if (mode !== "service") log("dev:all is driving the conduit service");
 	mode = "service";
-	await rpc
-		.sendRpcRequest(
-			rpc.socket,
-			{ _tag: "RestartWithConfig" },
-			{ requestTimeoutMs: ANSWER_MS },
-		)
-		.catch((error) => log(`${error.message}; stopping PID ${pid}`));
-	await stopProcess(pid);
+	if (answered) {
+		await rpc
+			.sendRpcRequest(
+				rpc.socket,
+				{ _tag: "RestartWithConfig" },
+				{ requestTimeoutMs: ANSWER_MS },
+			)
+			.catch((error) => log(`${error.message}; stopping PID ${pid}`));
+		await stopProcess(pid);
+	} else {
+		log(
+			`conduit service PID ${pid} is not answering; killing it for its supervisor to respawn`,
+		);
+		await stopProcess(pid, "SIGKILL");
+	}
 	return waitUntilUp("conduit service", (up) => up.pid !== pid, signal);
 }
 
@@ -328,7 +346,14 @@ async function restart(signal) {
 		);
 		return;
 	}
-	if (old?.status?.supervised) return restartService(old.pid, signal);
+	const servicePid = old?.status
+		? old.status.supervised
+			? old.pid
+			: undefined
+		: await rpc.supervisedServicePid(rpc.configDir);
+	if (shutdown.signal.aborted) return;
+	if (servicePid !== undefined)
+		return restartService(servicePid, Boolean(old?.status), signal);
 	// Unsupervised, or not answering at all: an old server in ours' way.
 	if (old && isConduitServer(commandOf(old.pid))) {
 		log(

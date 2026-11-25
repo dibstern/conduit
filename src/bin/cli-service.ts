@@ -110,6 +110,20 @@ export function getServicePaths(
 	};
 }
 
+function currentServicePaths(
+	configDir: string,
+	workingDirectory: string,
+): ServicePaths {
+	return getServicePaths(
+		process.platform,
+		homedir(),
+		resolve(configDir),
+		resolve(workingDirectory),
+		process.env["XDG_CONFIG_HOME"],
+		process.env["CONDUIT_SERVICE_LABEL"] ?? LABEL,
+	);
+}
+
 function xml(value: string): string {
 	return value
 		.replaceAll("&", "&amp;")
@@ -267,8 +281,11 @@ async function checkedExec(
 	}
 }
 
-async function serviceState(options: ServiceOptions, runner: ServiceRunner) {
-	const { platform, paths, uid } = options;
+async function serviceUnitState(
+	options: Pick<ServiceOptions, "platform" | "paths">,
+	runner: Pick<ServiceRunner, "exists" | "readFile">,
+) {
+	const { platform, paths } = options;
 	const installed = await runner.exists(paths.unitFile);
 	let stdout = paths.stdout;
 	let stderr = paths.stderr;
@@ -296,6 +313,14 @@ async function serviceState(options: ServiceOptions, runner: ServiceRunner) {
 					?.replaceAll("%%", "%") ?? stderr;
 		}
 	}
+	return { installed, stdout, stderr };
+}
+
+async function serviceManagerState(
+	options: Pick<ServiceOptions, "platform" | "paths" | "uid">,
+	runner: Pick<ServiceRunner, "exec">,
+) {
+	const { platform, paths, uid } = options;
 	const result = await runner.exec(
 		platform === "darwin" ? "launchctl" : "systemctl",
 		platform === "darwin"
@@ -332,7 +357,36 @@ async function serviceState(options: ServiceOptions, runner: ServiceRunner) {
 		loaded = loadState === "loaded";
 		pid = Number(result.stdout.match(/^MainPID=(\d+)/m)?.[1]) || undefined;
 	}
+	return { loaded, pid };
+}
+
+async function serviceState(
+	options: Pick<ServiceOptions, "platform" | "paths" | "uid">,
+	runner: Pick<ServiceRunner, "exists" | "readFile" | "exec">,
+) {
+	const { installed, stdout, stderr } = await serviceUnitState(options, runner);
+	const { loaded, pid } = await serviceManagerState(options, runner);
 	return { installed, loaded, running: pid !== undefined, pid, stdout, stderr };
+}
+
+/** The PID launchd or systemd runs as this user's service on `configDir`, if any. */
+export async function supervisedServicePid(
+	configDir: string,
+): Promise<number | undefined> {
+	if (process.platform !== "darwin" && process.platform !== "linux")
+		return undefined;
+	const paths = currentServicePaths(configDir, process.cwd());
+	const runner = createServiceRunner(async () => false);
+	const options = {
+		platform: process.platform,
+		paths,
+		uid: process.getuid?.() ?? 0,
+	};
+	const unit = await serviceUnitState(options, runner);
+	if (!unit.installed || resolve(dirname(unit.stdout)) !== resolve(configDir))
+		return undefined;
+	const state = await serviceManagerState(options, runner);
+	return state.pid;
 }
 
 export async function runServiceCommand(
@@ -601,19 +655,13 @@ export async function handleService(
 		return;
 	}
 	try {
-		const configDir = resolve(ctx.options?.configDir ?? DEFAULT_CONFIG_DIR);
 		const homeDir = homedir();
 		const user = userInfo();
 		const shell = process.env["SHELL"] || user.shell || "/bin/sh";
 		const xdgConfigHome = process.env["XDG_CONFIG_HOME"];
-		const label = process.env["CONDUIT_SERVICE_LABEL"] ?? LABEL;
-		const paths = getServicePaths(
-			process.platform,
-			homeDir,
-			configDir,
-			resolve(ctx.cwd),
-			xdgConfigHome,
-			label,
+		const paths = currentServicePaths(
+			ctx.options?.configDir ?? DEFAULT_CONFIG_DIR,
+			ctx.cwd,
 		);
 		const output = await runServiceCommand(
 			action,

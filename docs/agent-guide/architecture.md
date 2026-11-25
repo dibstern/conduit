@@ -294,8 +294,11 @@ change cuts short the running cycle's waits. A server is up once it answers
 `GetStatus` from the expected PID, so a slow boot only prints progress. Every
 stop is bounded: a signal, 10s grace, then `SIGKILL`, so a server whose event
 loop is blocked costs a cycle 10s, never a hang. A server dev:all did not start
-that does not answer within 10s is stopped and replaced. A service still running
-10s after `RestartWithConfig` gets `SIGKILL`, never `SIGTERM`: its supervisor
+that does not answer within 10s is stopped and replaced, unless launchd/systemd
+identifies it as the service on this config dir; that service gets `SIGKILL` for
+its supervisor to respawn, never a replacement child. Concurrent dev:all runs
+on one port keep the latest arrival. A service still running 10s after
+`RestartWithConfig` gets `SIGKILL`, never `SIGTERM`: its supervisor
 respawns a killed process but leaves a clean exit stopped. A second Ctrl-C kills
 every process group dev:all started and exits 130.
 `test/integration/daemon/dev-startup.test.ts` freezes servers with `SIGSTOP` to
