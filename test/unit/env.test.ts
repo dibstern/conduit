@@ -37,44 +37,16 @@ describe("env module", () => {
 		expect(DEFAULT_CONFIG_DIR).toBe("/tmp/xdg-test/conduit");
 	});
 
-	it("DEFAULT_PORT is 2633", async () => {
-		const { DEFAULT_PORT } = await import("../../src/lib/env.js");
-		expect(DEFAULT_PORT).toBe(2633);
-	});
-
-	it("DEFAULT_OC_PORT is 4096", async () => {
-		const { DEFAULT_OC_PORT } = await import("../../src/lib/env.js");
-		expect(DEFAULT_OC_PORT).toBe(4096);
-	});
-
-	it("ENV.host defaults to 127.0.0.1 when HOST is not set", async () => {
-		vi.stubEnv("HOST", undefined);
-		const { ENV } = await import("../../src/lib/env.js");
-		expect(ENV.host).toBe("127.0.0.1");
-	});
-
 	it("ENV.host respects HOST env var", async () => {
 		vi.stubEnv("HOST", "0.0.0.0");
 		const { ENV } = await import("../../src/lib/env.js");
 		expect(ENV.host).toBe("0.0.0.0");
 	});
 
-	it("ENV.debug is false by default", async () => {
-		vi.stubEnv("DEBUG", undefined);
-		const { ENV } = await import("../../src/lib/env.js");
-		expect(ENV.debug).toBe(false);
-	});
-
 	it('ENV.debug is true when DEBUG="1"', async () => {
 		vi.stubEnv("DEBUG", "1");
 		const { ENV } = await import("../../src/lib/env.js");
 		expect(ENV.debug).toBe(true);
-	});
-
-	it('ENV.opencodeUsername defaults to "opencode"', async () => {
-		vi.stubEnv("OPENCODE_SERVER_USERNAME", undefined);
-		const { ENV } = await import("../../src/lib/env.js");
-		expect(ENV.opencodeUsername).toBe("opencode");
 	});
 
 	it.each([

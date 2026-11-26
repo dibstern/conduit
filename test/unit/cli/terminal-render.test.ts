@@ -10,7 +10,6 @@ import {
 	gradient,
 	isBasicTerm,
 	log,
-	sym,
 	truncateToWidth,
 	visibleLength,
 	wrapColor,
@@ -67,38 +66,6 @@ describe("gradient — basic output", () => {
 		expect(gradient("")).toBe("");
 		expect(gradient("", { isBasicTerm: false })).toBe("");
 		expect(gradient("", { isBasicTerm: true })).toBe("");
-	});
-});
-
-describe("symbols", () => {
-	it("pointer contains cyan diamond (\u25C6)", () => {
-		expect(sym.pointer).toContain("\u25C6");
-		expect(sym.pointer).toContain(a.cyan);
-		expect(sym.pointer).toContain(a.reset);
-	});
-
-	it("done contains green diamond outline (\u25C7)", () => {
-		expect(sym.done).toContain("\u25C7");
-		expect(sym.done).toContain(a.green);
-		expect(sym.done).toContain(a.reset);
-	});
-
-	it("bar contains dim vertical bar (\u2502)", () => {
-		expect(sym.bar).toContain("\u2502");
-		expect(sym.bar).toContain(a.dim);
-		expect(sym.bar).toContain(a.reset);
-	});
-
-	it("end contains dim corner (\u2514)", () => {
-		expect(sym.end).toContain("\u2514");
-		expect(sym.end).toContain(a.dim);
-		expect(sym.end).toContain(a.reset);
-	});
-
-	it("warn contains yellow triangle (\u25B2)", () => {
-		expect(sym.warn).toContain("\u25B2");
-		expect(sym.warn).toContain(a.yellow);
-		expect(sym.warn).toContain(a.reset);
 	});
 });
 

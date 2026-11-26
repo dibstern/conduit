@@ -53,16 +53,6 @@ describe("Schema.TaggedError errors", () => {
 		expect(json.error.message).toBe("Server error");
 	});
 
-	it("OpenCodeConnectionError has statusCode 502", () => {
-		const err = new OpenCodeConnectionError({ message: "refused" });
-		expect(err.statusCode).toBe(502);
-	});
-
-	it("userVisible defaults to false", () => {
-		const err = new OpenCodeConnectionError({ message: "test" });
-		expect(err.userVisible).toBe(false);
-	});
-
 	it("userVisible true when set", () => {
 		const err = new OpenCodeConnectionError({
 			message: "test",

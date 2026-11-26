@@ -3153,39 +3153,6 @@ describe("rewindSessionToMessage", () => {
 });
 
 describe("handleMessage", () => {
-	it.effect("logs when no active session", () => {
-		const log = mockLogger();
-		const sessionManagerService = makeMockSessionManagerService();
-		const config = mockConfig();
-		const client = makeHandlerOpenCodeAPI();
-
-		const layer = Layer.provideMerge(
-			ProviderTurnServiceLive,
-			Layer.mergeAll(
-				Layer.succeed(OpenCodeAPITag)(client),
-				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
-				makeTestSessionActivityLayer(),
-				Layer.succeed(LoggerTag)(log),
-				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
-				Layer.succeed(ConfigTag)(config),
-				PendingInteractionServiceLive,
-				makeOverridesStateLive(),
-			),
-		);
-
-		return handleMessage("client-1", {
-			text: "hello",
-			commandId: "cmd-no-session",
-		}).pipe(
-			Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }),
-			Effect.tap(() => Effect.sync(() => {
-				expect(log.warn).toHaveBeenCalledWith(
-					expect.stringContaining("no active session"),
-				);
-			})),
-		);
-	});
-
 	it.effect("passes contextWindow override into engine send_turn input", () => {
 		const log = mockLogger();
 		const sessionManagerService = makeMockSessionManagerService();

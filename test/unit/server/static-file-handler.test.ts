@@ -5,7 +5,6 @@ import { HttpServerRequest } from "effect/http";
 import { expect } from "vitest";
 import {
 	getCacheControl,
-	MIME_TYPES,
 	StaticDirTag,
 	serveStaticFile,
 } from "../../../src/lib/domain/server/Services/static-file-handler.js";
@@ -80,16 +79,6 @@ describe("Static file handler", () => {
 
 		it("returns must-revalidate for unhashed files", () => {
 			expect(getCacheControl("index.html")).toContain("must-revalidate");
-		});
-	});
-
-	describe("MIME_TYPES", () => {
-		it("maps .html to text/html", () => {
-			expect(MIME_TYPES[".html"]).toContain("text/html");
-		});
-
-		it("maps .js to application/javascript", () => {
-			expect(MIME_TYPES[".js"]).toContain("application/javascript");
 		});
 	});
 

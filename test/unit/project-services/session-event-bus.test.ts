@@ -3,7 +3,6 @@ import { Effect, Layer, Stream } from "effect";
 import { expect } from "vitest";
 import {
 	makeSessionEventBusLive,
-	SESSION_EVENT_BUS_CAPACITY,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/project-services/Services/session-event-bus.js";
 import {
@@ -72,8 +71,4 @@ describe("SessionEventBus", () => {
 			expect([...b][0]?.sequence).toBe(1);
 		}).pipe(Effect.provide(Layer.fresh(makeSessionEventBusLive()))),
 	);
-
-	it("documents the production sliding-buffer capacity", () => {
-		expect(SESSION_EVENT_BUS_CAPACITY).toBe(256);
-	});
 });

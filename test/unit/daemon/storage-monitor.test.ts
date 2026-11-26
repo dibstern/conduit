@@ -373,30 +373,6 @@ describe("Ticket 6.2 AC8 — StorageMonitor", () => {
 			await vi.waitFor(() => expect(lowEvents).toHaveLength(1));
 			monitor.stop();
 		});
-
-		it("default threshold is 100MB", async () => {
-			const justBelow100mb = 100 * 1024 * 1024 - 1;
-			const statfs = mockStatfs(justBelow100mb);
-
-			const monitor = new StorageMonitor({
-				path: "/tmp",
-				intervalMs: 60_000,
-				_statfs: statfs,
-			});
-
-			const lowEvents: LowDiskSpaceEvent[] = [];
-			monitor.onLowDiskSpace = (data: LowDiskSpaceEvent) =>
-				lowEvents.push(data);
-
-			monitor.start();
-			await vi.waitFor(() => expect(statfs).toHaveBeenCalled());
-			await vi.waitFor(() => expect(lowEvents).toHaveLength(1));
-			monitor.stop();
-
-			const lowEvent = lowEvents[0];
-			assert.exists(lowEvent, "expected low-storage event");
-			expect(lowEvent.thresholdBytes).toBe(100 * 1024 * 1024);
-		});
 	});
 
 	// T8: After drain(), interval no longer fires

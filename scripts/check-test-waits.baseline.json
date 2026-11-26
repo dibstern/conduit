@@ -1390,7 +1390,7 @@
 		"real-wait": 2
 	},
 	"test/unit/daemon/storage-monitor.test.ts": {
-		"polling": 28,
+		"polling": 26,
 		"real-wait": 1
 	},
 	"test/unit/daemon/subprocess-budget.test.ts": {

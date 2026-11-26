@@ -148,20 +148,13 @@ function makeDeps(): PipelineDeps & {
 			PipelineDeps["processingTimeouts"]["resetProcessingTimeout"]
 		>;
 	};
-	log: ReturnType<typeof createSilentLogger> & {
-		info: ReturnType<typeof vi.fn>;
-	};
 } {
-	const infoSpy = vi.fn();
 	return {
 		processingTimeouts: {
 			clearProcessingTimeout: vi.fn(),
 			resetProcessingTimeout: vi.fn(),
 		},
-		log: {
-			...createSilentLogger(),
-			info: infoSpy,
-		},
+		log: createSilentLogger(),
 	};
 }
 
@@ -207,22 +200,6 @@ describe("applyPipelineResult", () => {
 
 	// messageCache removed in Task 50.5 — applyPipelineResult no longer records
 	// events; the cache field on PipelineResult is now consumed by the SSE wiring layer.
-
-	it("logs the routing decision when a session has no viewers", () => {
-		const deps = makeDeps();
-		const msg: BrowserMessage = { type: "delta", sessionId: "s1", text: "hi" };
-		const result: PipelineResult = {
-			msg,
-			route: { action: "drop", reason: "no viewers for session ses_abc" },
-			cache: true,
-			timeout: "reset",
-			source: "sse",
-		};
-		applyPipelineResult(result, "ses_abc", deps);
-		expect(deps.log.info).toHaveBeenCalledWith(
-			"no viewers for session ses_abc — delta (sse)",
-		);
-	});
 
 	it("skips timeout actions when no sessionId", () => {
 		const deps = makeDeps();

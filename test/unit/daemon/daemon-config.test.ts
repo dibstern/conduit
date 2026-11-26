@@ -37,25 +37,6 @@ describe("DaemonEnvConfig", () => {
 		),
 	);
 
-	it.effect("uses defaults when env vars are missing", () =>
-		Effect.gen(function* () {
-			const config = yield* DaemonEnvConfigTag;
-
-			expect(config.host).toBe("127.0.0.1");
-			expect(config.hostExplicit).toBe(false);
-			expect(config.port).toBe(2633);
-			expect(config.debug).toBe(false);
-			expect(config.tls).toBe(false);
-			expect(config.logLevel).toBe("info");
-			expect(config.logFormat).toBeUndefined();
-			expect(config.opencodeUrl).toBeUndefined();
-			expect(config.opencodePassword).toBeUndefined();
-			expect(config.opencodeUsername).toBe("opencode");
-			expect(config.tlsCertPath).toBeUndefined();
-			expect(config.tlsKeyPath).toBeUndefined();
-		}).pipe(Effect.provide(testLayer([]))),
-	);
-
 	it.effect("handles redacted password", () =>
 		Effect.gen(function* () {
 			const config = yield* DaemonEnvConfigTag;

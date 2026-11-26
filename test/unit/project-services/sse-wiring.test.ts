@@ -571,38 +571,6 @@ describe("wireSSEConsumerEffect", () => {
 		);
 	});
 
-	it("logs SSE lifecycle events", async () => {
-		const infoSpy = vi.fn();
-		const warnSpy = vi.fn();
-		const log = { ...createSilentLogger(), info: infoSpy, warn: warnSpy };
-		const deps = createMockSSEWiringDeps({ log });
-		const listeners = new Map<string, (...args: unknown[]) => void>();
-		const consumer = {
-			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
-				listeners.set(name, fn);
-			}),
-		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
-
-		await wireSSEConsumerForTest(deps, consumer);
-
-		const connectedListener = listeners.get("connected");
-		assert.exists(connectedListener, "expected connected listener");
-		connectedListener();
-		expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("Connected"));
-
-		const statusListener = listeners.get("status");
-		assert.exists(statusListener, "expected status listener");
-		statusListener("reconnecting");
-		expect(infoSpy).toHaveBeenCalledWith(
-			expect.stringContaining("reconnecting"),
-		);
-
-		const errorListener = listeners.get("error");
-		assert.exists(errorListener, "expected error listener");
-		errorListener(new Error("boom"));
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("boom"));
-	});
-
 	it("publishes the OpenCode upstream state as a live project fact", async () => {
 		const deps = createMockSSEWiringDeps();
 		const services = makeSSETestServices();

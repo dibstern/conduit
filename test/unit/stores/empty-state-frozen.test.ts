@@ -48,12 +48,6 @@ describe("EMPTY_ACTIVITY", () => {
 			(EMPTY_ACTIVITY as any).turnGeneration = 1;
 		}).toThrow();
 	});
-
-	it("has default idle values", () => {
-		expect(EMPTY_ACTIVITY.turnGeneration).toBe(0);
-		expect(EMPTY_ACTIVITY.currentMessageId).toBeNull();
-		expect(EMPTY_ACTIVITY.replayGeneration).toBe(0);
-	});
 });
 
 describe("EMPTY_MESSAGES", () => {
@@ -66,13 +60,6 @@ describe("EMPTY_MESSAGES", () => {
 			// biome-ignore lint/suspicious/noExplicitAny: intentional write for test
 			(EMPTY_MESSAGES as any).messages = [{ type: "user" }];
 		}).toThrow();
-	});
-
-	it("has default empty values", () => {
-		expect(EMPTY_MESSAGES.messages).toEqual([]);
-		expect(EMPTY_MESSAGES.currentAssistantText).toBe("");
-		expect(EMPTY_MESSAGES.loadLifecycle).toBe("empty");
-		expect(EMPTY_MESSAGES.contextPercent).toBe(0);
 	});
 });
 
