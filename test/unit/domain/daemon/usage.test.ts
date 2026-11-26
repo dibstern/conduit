@@ -1414,7 +1414,7 @@ it.effect(
 			yield* Fiber.join(second);
 			expect(lines).toEqual([
 				{
-					logLevel: "Warn",
+					logLevel: "Debug",
 					message: ["Usage read settled"],
 					annotations: {
 						accountId: "account-1",
@@ -1425,6 +1425,7 @@ it.effect(
 				},
 			]);
 		}).pipe(
+			Effect.provideService(References.MinimumLogLevel, "Debug"),
 			Effect.provide(
 				Logger.layer([
 					Logger.make(({ logLevel, message, fiber }) => {

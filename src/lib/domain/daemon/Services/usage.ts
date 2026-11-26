@@ -20,6 +20,7 @@ import {
 	UsageReadingSchema,
 } from "../../../contracts/limit-recovery.js";
 import type { UsageHarness } from "../../../contracts/provider-instance.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import type {
 	UsageAccount,
 	UsageRead,
@@ -137,18 +138,27 @@ const readUsage = (
 		Effect.timeoutOrElse({
 			duration: "30 seconds",
 			orElse: () =>
-				Effect.succeed<UsageRead>({
+				Effect.logWarning("Usage read timed out", {
+					accountId: account.id,
+				}).pipe(
+					Effect.as<UsageRead>({
+						status: "unknown",
+						windows: [],
+						reason: "Usage read timed out",
+					}),
+				),
+		}),
+		Effect.catchCause((cause) =>
+			Effect.logWarning("Usage read failed", {
+				accountId: account.id,
+				cause: Failure.renderCause(cause),
+			}).pipe(
+				Effect.as<UsageRead>({
 					status: "unknown",
 					windows: [],
-					reason: "Usage read timed out",
+					reason: "Usage read failed",
 				}),
-		}),
-		Effect.catchCause(() =>
-			Effect.succeed<UsageRead>({
-				status: "unknown",
-				windows: [],
-				reason: "Usage read failed",
-			}),
+			),
 		),
 	);
 
@@ -192,7 +202,7 @@ const settleRead =
 					...freed,
 				});
 			yield* Deferred.succeed(result, reading);
-			yield* Effect.logWarning("Usage read settled").pipe(
+			yield* Effect.logDebug("Usage read settled").pipe(
 				Effect.annotateLogs({
 					accountId: account.id,
 					durationMs: readAt - startedAt,
