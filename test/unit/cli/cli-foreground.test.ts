@@ -91,6 +91,7 @@ function createMockIO(cwd = "/test/project") {
 		startForegroundDaemon: mockStartForegroundDaemon,
 		generateQR: (url: string) => `[QR:${url}]`,
 		getNetworkAddress: () => "192.168.1.100",
+		getTailscaleIP: () => null,
 	};
 }
 
@@ -131,7 +132,9 @@ describe("serve handler", () => {
 		});
 		const io = createMockIO();
 		await run(["serve", "--tailscale-serve"], io);
-		expect(io.output.join("")).toContain(`Relay:    ${url}`);
+		expect(io.output.join("")).toContain(
+			`  Local:     http://127.0.0.1:2633\n  Tailscale: ${url}\n`,
+		);
 		expect(io.output.join("")).toContain(`[QR:${url}]`);
 		expect(io.errors).toEqual([]);
 	});
@@ -150,16 +153,40 @@ describe("serve handler", () => {
 		});
 		const io = createMockIO();
 		await run(["serve", "--tailscale-serve"], io);
-		expect(io.output.join("")).toContain("http://127.0.0.1:2633");
+		expect(io.output.join("")).toContain(
+			"  Local:     http://127.0.0.1:2633\n",
+		);
+		expect(io.output.join("")).not.toContain("  Tailscale:");
 		expect(io.output.join("")).toContain("Ready.");
 		expect(io.errors.join("")).toContain(error);
 		expect(io.exit).toHaveBeenCalledWith(0);
 	});
 
-	it("suggests Serve in the foreground banner when Tailscale is detected", async () => {
+	it.each([
+		["0.0.0.0", true, true],
+		["::", false, true],
+		["100.64.1.5", false, true],
+		["127.0.0.1", false, false],
+		[undefined, false, false],
+	] as const)("suggests Serve with host=%s, TLS=%s, tailnet reachable=%s", async (host, tlsEnabled, reachable) => {
+		mockStartForegroundDaemon.mockResolvedValueOnce({
+			port: 2633,
+			stopped: Promise.resolve("stop" as const),
+			getStatus: () => ({ tlsEnabled, host }),
+		});
 		const io = { ...createMockIO(), getTailscaleIP: () => "100.64.1.5" };
-		await run(["serve"], io);
-		expect(io.output.join("")).toContain("--tailscale-serve");
+		await run(["serve", ...(host ? ["--host", host] : [])], io);
+		const joined = io.output.join("");
+		const scheme = tlsEnabled ? "https" : "http";
+		const local = host === "0.0.0.0" || host === "::" ? "localhost" : host;
+		expect(joined).toContain(
+			`  Local:     ${scheme}://${local ?? "localhost"}:2633\n`,
+		);
+		expect(joined.includes("  Tailscale:")).toBe(reachable);
+		if (reachable) {
+			expect(joined).toContain(`  Tailscale: ${scheme}://100.64.1.5:2633\n`);
+		}
+		expect(joined).toContain("--tailscale-serve");
 	});
 
 	it("starts daemon in foreground and writes expected output", async () => {
@@ -171,7 +198,7 @@ describe("serve handler", () => {
 
 		// Verify banner output
 		expect(joined).toContain("Conduit (foreground)");
-		expect(joined).toContain("https://0.0.0.0:19876");
+		expect(joined).toContain("  Local:     https://localhost:19876\n");
 		expect(joined).toContain("Ready.");
 	});
 
@@ -206,9 +233,9 @@ describe("serve handler", () => {
 			logFormat: "pretty",
 		});
 
-		// Verify output shows the env var URL
+		// The provider URL is forwarded without appearing in the banner.
 		const joined = io.output.join("");
-		expect(joined).toContain("http://opencode:4096");
+		expect(joined).not.toContain("http://opencode:4096");
 	});
 
 	it("registers no project", async () => {
@@ -220,14 +247,16 @@ describe("serve handler", () => {
 		expect(mockRegisterProject).not.toHaveBeenCalled();
 	});
 
-	it("outputs OpenCode URL and Relay URL", async () => {
+	it("outputs the local URL without provider or relay labels", async () => {
 		const io = createMockIO("/home/user/app");
 
 		await run(["serve", "--port", "2633", "--oc-port", "4096"], io);
 
 		const joined = io.output.join("");
-		expect(joined).toContain("OpenCode: http://localhost:4096");
-		expect(joined).toContain("Relay:    https://0.0.0.0:2633");
+		expect(joined).toContain("  Local:     https://localhost:2633\n");
+		expect(joined).not.toContain("OpenCode:");
+		expect(joined).not.toContain("Relay:");
+		expect(joined).not.toContain("  Tailscale:");
 	});
 
 	it.each([

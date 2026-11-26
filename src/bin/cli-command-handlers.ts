@@ -74,19 +74,27 @@ export async function handleServe(
 		const status = daemon.getStatus();
 		const scheme = status.tlsEnabled ? "https" : "http";
 		const tailscale = status.tailscaleServe;
-		const url =
+		const host = status.host ?? "localhost";
+		// TLS binds every interface unless --host was given.
+		const wildcard = host === "0.0.0.0" || host === "::";
+		const tsIP = ctx.getTsIP();
+		const tailscaleUrl =
 			tailscale && "url" in tailscale
 				? tailscale.url
-				: `${scheme}://${status.host ?? "localhost"}:${daemon.port}`;
+				: tsIP && (wildcard || host === tsIP)
+					? `${scheme}://${tsIP}:${daemon.port}`
+					: null;
 		stdout.write("\nConduit (foreground)\n");
-		stdout.write(`  OpenCode: ${opencodeUrl}\n`);
-		stdout.write(`  Relay:    ${url}\n`);
+		stdout.write(
+			`  Local:     ${scheme}://${wildcard ? "localhost" : host}:${daemon.port}\n`,
+		);
+		if (tailscaleUrl) stdout.write(`  Tailscale: ${tailscaleUrl}\n`);
 		if (tailscale && "url" in tailscale) {
 			const code = ctx.qr(tailscale.url);
 			if (code) stdout.write(`\n${code}\n`);
 		} else if (tailscale && "error" in tailscale) {
 			stderr.write(`  Tailscale Serve: ${tailscale.error}\n`);
-		} else if (ctx.getTsIP()) {
+		} else if (tsIP) {
 			stdout.write(
 				"  Tip: Use conduit serve --tailscale-serve for trusted HTTPS on your tailnet.\n",
 			);
