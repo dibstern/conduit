@@ -871,14 +871,21 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									send?.assignment._tag !== "Dispatched" ||
 									send.assignment.runnerId !== entry.runnerId
 								) {
-									if (sends.refused(entry.runnerId, output.sinkId))
-										yield* Effect.logWarning(
-											"Ignored release-sink from another runner",
+									if (sends.refused(entry.runnerId, output.sinkId)) {
+										const anotherRunner =
+											send?.assignment._tag === "Dispatched";
+										yield* (
+											anotherRunner ? Effect.logWarning : Effect.logDebug
+										)(
+											anotherRunner
+												? "Ignored release-sink from another runner"
+												: "Ignored release-sink for an already closed or unknown send",
 											{
 												runnerId: entry.runnerId,
 												sinkId: output.sinkId,
 											},
 										);
+									}
 									return {};
 								}
 								Entry.trackInteraction(entry, output);

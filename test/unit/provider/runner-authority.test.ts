@@ -183,11 +183,11 @@ it.effect(
 	"each stale runner and write kind logs once without invoking its thunk",
 	() =>
 		Effect.gen(function* () {
-			const warnings: string[] = [];
+			const logged: string[] = [];
 			const logs = Logger.layer([
 				Logger.make((options) => {
-					if (options.logLevel === "Warn")
-						warnings.push(String(options.message));
+					if (options.logLevel === "Debug")
+						logged.push(String(options.message));
 				}),
 			]);
 			yield* Effect.gen(function* () {
@@ -223,10 +223,10 @@ it.effect(
 				expect(calls).toBe(0);
 			}).pipe(
 				Effect.provide(logs),
-				Effect.provideService(References.MinimumLogLevel, "Warn"),
+				Effect.provideService(References.MinimumLogLevel, "Debug"),
 			);
-			expect(warnings).toHaveLength(3);
-			expect(new Set(warnings).size).toBe(3);
+			expect(logged).toHaveLength(3);
+			expect(new Set(logged).size).toBe(3);
 		}),
 );
 
@@ -357,7 +357,7 @@ it.effect("copied grants are refused for every write kind", () =>
 it.live(
 	"a caller cannot swallow the final stale check and report a committed write",
 	() => {
-		const warnings: string[] = [];
+		const logged: string[] = [];
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const authority = yield* makeRunnerAuthority();
@@ -392,17 +392,17 @@ it.live(
 			yield* Deferred.succeed(release, undefined);
 			expect(Option.isNone(yield* Fiber.join(old))).toBe(true);
 			expect(yield* sql`SELECT * FROM swallowed_stale_writes`).toEqual([]);
-			expect(warnings).toHaveLength(1);
+			expect(logged).toHaveLength(1);
 		}).pipe(
 			Effect.provide(
 				Logger.layer([
 					Logger.make((options) => {
-						if (options.logLevel === "Warn")
-							warnings.push(String(options.message));
+						if (options.logLevel === "Debug")
+							logged.push(String(options.message));
 					}),
 				]),
 			),
-			Effect.provideService(References.MinimumLogLevel, "Warn"),
+			Effect.provideService(References.MinimumLogLevel, "Debug"),
 			Effect.provide(testLayer),
 		);
 	},

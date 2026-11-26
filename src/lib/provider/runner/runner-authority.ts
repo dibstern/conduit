@@ -198,7 +198,12 @@ export const makeRunnerAuthority = <A>(
 				const key = `${grant.runnerId}:${write.kind}`;
 				if (dropped.has(key)) return Effect.void;
 				dropped.add(key);
-				return Effect.logWarning(
+				const state = grants.get(grant);
+				return (
+					!state || state.phase === "starting"
+						? Effect.logWarning
+						: Effect.logDebug
+				)(
 					`Dropped stale runner write: runnerId=${grant.runnerId} kind=${write.kind}`,
 				);
 			});

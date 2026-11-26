@@ -20,6 +20,7 @@ import {
 	Layer,
 	Logger,
 	Option,
+	References,
 	Scheduler,
 	Scope,
 	Stream,
@@ -2533,6 +2534,122 @@ it.effect(
 				).toHaveLength(1);
 			}),
 		),
+);
+
+it.effect(
+	"a runner retired by an upgrade swap drops its shutdown output at debug",
+	() => {
+		const warnings: string[] = [];
+		const debug: string[] = [];
+		return runRetirement(
+			Effect.gen(function* () {
+				const f = yield* sendScopeFixture();
+				const connect = vi.mocked(f.driver.connect).getMockImplementation();
+				if (!connect) return yield* Effect.die("missing connect");
+				vi.mocked(f.driver.connect).mockImplementationOnce((options) =>
+					connect({
+						...options,
+						onHello: (hello, connection, replay) =>
+							options.onHello(
+								{ ...hello, buildId: "previous-build" },
+								connection,
+								replay,
+							),
+					}),
+				);
+				yield* f.manager.recoverEffect;
+				const old = f.attachments[0];
+				if (!old?.onUpgradeState)
+					return yield* Effect.die("missing old runner");
+				old.onUpgradeState({
+					quiescent: true,
+					revision: 1,
+					snapshot: {
+						input: {
+							...f.input,
+							configDir: configuredClaudeConfigDir(f.root),
+							folderSource: "implicitDefault",
+						},
+						options: {},
+					},
+				});
+				yield* TestClock.adjust("4 seconds");
+				expect(f.attachments.length).toBeGreaterThan(1);
+				const shutdown: SessionOutput = {
+					type: "cancel-interactions",
+					sinkId: f.sinkId,
+					reason: "runner retired",
+					recoverQuestions: false,
+				};
+				yield* old.emit(shutdown, "s");
+				yield* old.emit(shutdown, "s");
+				expect(
+					warnings.filter((message) =>
+						message.startsWith("Dropped stale runner write"),
+					),
+				).toEqual([]);
+				expect(
+					debug.filter(
+						(message) =>
+							message.startsWith("Dropped stale runner write") &&
+							message.includes(`runnerId=${old.runnerId} kind=output`),
+					),
+				).toHaveLength(1);
+			}),
+		).pipe(
+			Effect.provideService(References.MinimumLogLevel, "Debug"),
+			Effect.provide(
+				Logger.layer([
+					Logger.make((options) => {
+						if (options.logLevel === "Warn")
+							warnings.push(String(options.message));
+						if (options.logLevel === "Debug")
+							debug.push(String(options.message));
+					}),
+				]),
+			),
+		);
+	},
+);
+
+it.effect(
+	"a runner repeating the release of its own closed send logs at debug",
+	() => {
+		const warnings: string[] = [];
+		const debug: string[] = [];
+		return runRetirement(
+			Effect.gen(function* () {
+				const f = yield* sendScopeFixture();
+				yield* f.instance.sendTurnEffect(f.input);
+				yield* f.terminal("turn.completed");
+				const current = f.attachments.at(-1);
+				if (!current) return yield* Effect.die("missing current runner");
+				yield* current.emit({ type: "release-sink", sinkId: f.sinkId }, "s");
+				yield* f.assertReleased();
+				yield* current.emit({ type: "release-sink", sinkId: f.sinkId }, "s");
+				yield* TestClock.adjust(0);
+				expect(f.account.released).toBe(1);
+				expect(
+					warnings.filter((message) => message.includes("release-sink")),
+				).toEqual([]);
+				expect(
+					debug.filter((message) => message.includes("release-sink")),
+				).toHaveLength(1);
+			}),
+		).pipe(
+			Effect.provideService(References.MinimumLogLevel, "Debug"),
+			Effect.provide(
+				Logger.layer([
+					Logger.make((options) => {
+						if (options.logLevel === "Warn")
+							warnings.push(String(options.message));
+						if (options.logLevel === "Debug")
+							debug.push(String(options.message));
+					}),
+				]),
+			),
+		);
+	},
 );
 
 it.effect(
