@@ -238,13 +238,21 @@ describe("Claude accepted run ownership", () => {
 					context_tokens: event.data["contextTokens"],
 				})),
 			);
-			const ends = (await harness.storedEvents(sessionId)).filter(
-				(event) => event.type === "turn.completed",
-			);
-			const terminal = ends[0];
+			const stored = await harness.storedEvents(sessionId);
+			const terminal = stored.find((event) => event.type === "turn.completed");
 			// Each background result is a reply to read, unless a queued run now
-			// owns the session.
-			const lastEnd = queuedInput ? terminal : ends.at(-1);
+			// owns the session. The store keeps a result after the run's terminal
+			// as message.completed.
+			const lastEnd = queuedInput
+				? terminal
+				: stored
+						.filter(
+							(event) =>
+								(event.type === "turn.completed" ||
+									event.type === "message.completed") &&
+								event.data.messageId === completions.at(-1)?.data["messageId"],
+						)
+						.at(-1);
 			expect(
 				await harness.query(
 					"SELECT status, completed_at FROM provider_runs WHERE id = ?",

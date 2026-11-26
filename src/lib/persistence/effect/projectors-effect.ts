@@ -2131,8 +2131,6 @@ export const makeTurnProjector = defineProjector(() => ({
 						 AND session_id = ${event.sessionId}))
 					RETURNING id, completed_at = ${event.createdAt} AS extended`;
 				woken = updated.flatMap((row) => (row.extended ? [row.id] : []));
-				if (event.type === "message.completed")
-					return { sessions: [event.sessionId], messages: woken };
 			}
 			if (!["pending", "running"].includes(run.status)) {
 				// From 32.5 a joined steer's own settlement ends its command, never its
@@ -2158,7 +2156,14 @@ export const makeTurnProjector = defineProjector(() => ({
 				// A background task finishing after its run ended wakes Claude into
 				// a new turn under the same run. Its end is new output to read,
 				// unless a newer run owns the session or it repeats a counted reply.
-				if (isEventType(event, "turn.completed"))
+				// The store keeps a Claude end after its run's terminal as a
+				// message.completed with the run's cost; other completions are mid-turn.
+				if (
+					isEventType(event, "turn.completed") ||
+					(isEventType(event, "message.completed") &&
+						event.provider === "claude" &&
+						event.data.providerCostTotalUsd !== undefined)
+				)
 					yield* sql`UPDATE sessions SET updated_at = ${event.createdAt},
 						last_turn_end_version = ${event.streamVersion}
 						WHERE id = ${event.sessionId}
@@ -2170,6 +2175,8 @@ export const makeTurnProjector = defineProjector(() => ({
 							AND m.created_at > r.completed_at)`;
 				return { sessions: [event.sessionId], messages: woken };
 			}
+			if (event.type === "message.completed")
+				return { sessions: [event.sessionId], messages: woken };
 
 			const terminal = runTerminalStatus(event, event.provider);
 			if (terminal) {
